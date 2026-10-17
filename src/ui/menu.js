@@ -480,7 +480,8 @@ export function createMenu({ root, onStart }) {
     let preview = null;
     let previewId = null;
     if (online) {
-      const code = lobby.roomCode || st().roomCode || '';
+      // The code is shown and copied cleaned to the room-code alphabet (a client gets it from the host).
+      const code = M.cleanRoomCode(lobby.roomCode || st().roomCode || '');
       const copyBtn = (label, getText, okText) => {
         const b = h('button.mw-btn.mw-btn--small', { type: 'button', onclick: async () => {
           const ok = await copyText(getText());
@@ -522,7 +523,13 @@ export function createMenu({ root, onStart }) {
             copyBtn('Copy Code', () => code, 'Code copied ✓'),
             copyBtn('Copy Invite Link', () => M.inviteLink(location.href, code), 'Link copied ✓'),
           ),
-          h('p.mw-hint', isHost ? 'Friends open the invite link, or pick Join Online Game and enter the code.' : 'Share the invite link to bring more friends into this lobby.'),
+          isHost
+            ? h('ol.mw-room-steps',
+              h('li', h('strong', 'Easiest: '), 'Copy Invite Link and send it to your friends. Opening it takes them straight into this room.'),
+              h('li', h('strong', 'Or: '), `tell them the code ${code}. They choose Join Online Game on the title screen and type it in.`),
+              h('li', 'Keep this lobby open. Joined players appear in the list; then press Start Battle.'))
+            : h('p.mw-hint', 'You are in the host\'s room. To bring more friends, send them the invite link or this code (Join Online Game → enter the code).'),
+          M.customServerNote(location.href) ? h('p.mw-hint.mw-room-server', M.customServerNote(location.href)) : null,
         ),
         h('section.mw-panel.mw-chat',
           h('div.mw-label', 'Chat'),
@@ -674,7 +681,7 @@ export function createMenu({ root, onStart }) {
       safeOn('onKicked', (why) => {
         if (!alive) return;
         alive = false;
-        go('join', { code: lobby.roomCode || st().roomCode, error: typeof why === 'string' ? why : why?.reason || 'You left the lobby.' });
+        go('join', { code: M.cleanRoomCode(lobby.roomCode || st().roomCode), error: M.cleanMessage(typeof why === 'string' ? why : why?.reason, 'You left the lobby.') });
       });
     }
 
@@ -701,7 +708,7 @@ export function createMenu({ root, onStart }) {
     );
     renderAll();
     if (online && isHost && chatLog && chatLog.children.length === 0) {
-      addChat(null, `Room ${lobby.roomCode || ''} is open. Share the code with your friends.`);
+      addChat(null, `Room ${M.cleanRoomCode(lobby.roomCode)} is open. Send your friends the invite link, or the code for Join Online Game.`);
     }
     return {
       el,
@@ -771,7 +778,7 @@ export function createMenu({ root, onStart }) {
     async function join() {
       const roomCode = M.cleanRoomCode(codeInput.value);
       if (!M.isCompleteRoomCode(roomCode)) {
-        setStatus('error', 'Enter the 5-letter room code from the host.');
+        setStatus('error', 'Enter the 5-character room code from the host.');
         sfx.play('error');
         codeInput.focus();
         return;
@@ -808,7 +815,7 @@ export function createMenu({ root, onStart }) {
     const el = h('div.mw-center-screen',
       h('section.mw-panel.mw-form-panel.mw-join',
         h('h2.mw-h2', 'Join Online Game'),
-        h('p.mw-panel-sub', 'Enter the room code your host sees in their lobby.'),
+        h('p.mw-panel-sub', 'Ask the host for the 5-character room code shown in their lobby (letters and digits).'),
         h('label.mw-field', h('span.mw-label', 'Your name'), nameInput),
         h('label.mw-field', h('span.mw-label', 'Room code'), codeInput),
         status,
@@ -886,8 +893,8 @@ export function createMenu({ root, onStart }) {
     };
     renderQ();
 
-    const toggle = (key, label, note) => {
-      const input = h('input', { type: 'checkbox', checked: !!getSettings()[key], onchange: () => saveSettings({ [key]: input.checked }) });
+    const toggle = (key, label, note, invert = false) => {
+      const input = h('input', { type: 'checkbox', checked: invert ? !getSettings()[key] : !!getSettings()[key], onchange: () => saveSettings({ [key]: invert ? !input.checked : input.checked }) });
       return h('label.mw-toggle', input, h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')), h('span.mw-toggle-text', h('span', label), note ? h('small', note) : null));
     };
     const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
@@ -901,6 +908,7 @@ export function createMenu({ root, onStart }) {
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),
+          toggle('tipsDismissed', 'Getting-started tips', 'Show the new-player checklist in your next game.', true),
         ),
         h('p.mw-hint.mw-saved-note', '✓ Settings are saved automatically in this browser.'),
       ),

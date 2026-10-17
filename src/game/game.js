@@ -16,6 +16,7 @@ import { Hud } from '../ui/hud.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
 import { tierName } from '../ui/hud-data.js';
+import { sanitizeName } from '../net/protocol.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const MAX_DT = 0.1;
@@ -347,8 +348,9 @@ export class Game {
   }
 
   playerName(i) {
+    if (!Number.isInteger(i) || i < 0) return 'A player';
     const p = this.viewState.players[i] || (this.setup && this.setup.players[i]);
-    return p ? p.name : `Player ${i + 1}`;
+    return sanitizeName(p && p.name, `Player ${i + 1}`);
   }
 
   onEvent(ev) {
@@ -441,7 +443,8 @@ export class Game {
         break;
       }
       case 'death': {
-        if (ev.o === me) {
+        // Once defeated, the whole army dies at once: no list of losses under the defeat screen.
+        if (ev.o === me && !(vs.me && vs.me.defeated)) {
           const t = ev.k === 'b' ? BUILDINGS[ev.t] : UNITS[ev.t];
           if (ev.k === 'b' && t) hud.message(`Your ${t.name} was destroyed.`, 'alert');
           else if (t && t.class === 'god') hud.message(`${t.name} has fallen! Revive them at a Temple.`, 'alert');

@@ -4,8 +4,12 @@
 // BroadcastChannel 'local' transport (two tabs, one browser profile).
 // Asserts that the client's reconstructed snapshot equals the host's at every
 // tick, including a > 64 KB chunked full snapshot and a mid-game resync.
+// Also: failed joins (broker unreachable, WebRTC that never connects) show the
+// friendly messages within ~15 s; long main-thread stalls on either side do not
+// drop the connection; a client that loses the host ends cleanly and a host
+// that loses a client keeps playing with an AI in its place.
 //
-//   node tools/net-test.mjs [--shots DIR] [--ticks N] [--units N]
+//   node tools/net-test.mjs [--shots DIR] [--ticks N] [--units N] [--http-port N] [--peer-port N]
 import { spawn } from 'node:child_process';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,13 +17,14 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const HTTP_PORT = 8104;
-const PEER_PORT = 9104;
 const args = process.argv.slice(2);
 const opt = (name, def) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : def;
 };
+const HTTP_PORT = Number(opt('http-port', 8104));
+const PEER_PORT = Number(opt('peer-port', 9104));
+const DEAD_PORT = PEER_PORT + 1; // nothing listens here: an unreachable signaling server
 const SHOTS = opt('shots', null);
 const TICKS = Number(opt('ticks', 300));
 const UNITS = Number(opt('units', 700));
@@ -78,7 +83,64 @@ async function openPage(context, query, label) {
 }
 
 /** Lobby exchange + streamed game between two pages. */
-async function playMatch(host, client, transport, { ticks, units, label, world = 'fake' }) {
+/** Joins that cannot work must fail within ~15 s with the messages the menus show. */
+async function failedJoins(browser, host) {
+  const { PEER_MESSAGES, brokerMessage } = await import('../src/net/transport.js');
+  // 1. Signaling server unreachable.
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 640 } });
+  const dead = await openPage(ctx, `peerHost=127.0.0.1&peerPort=${DEAD_PORT}&peerPath=/myapp&peerSecure=0`, 'no-broker');
+  const r1 = await dead.evaluate(() => window.netTest.failJoin({ code: 'ABCDE' }));
+  check(r1.message === brokerMessage({ peerHost: '127.0.0.1' }) && r1.ms < 16000,
+    `peer: unreachable signaling server fails in ${(r1.ms / 1000).toFixed(1)} s ("${r1.message}")`);
+  check(r1.menuText === r1.message, 'peer: the join screen shows that message unchanged');
+  if (SHOTS) {
+    mkdirSync(SHOTS, { recursive: true });
+    await dead.screenshot({ path: path.join(SHOTS, 'fail-broker.png') });
+  }
+  // 2. Broker fine, room exists, but WebRTC never connects (relay-only ICE without a TURN server,
+  // like a strict firewall that blocks UDP).
+  const code = await host.evaluate(() => window.netTest.host({ transport: 'peer', name: 'Hosty' }));
+  const blocked = await openPage(ctx, `${PEER_QS}&relay=1`, 'firewalled');
+  const r2 = await blocked.evaluate((c) => window.netTest.failJoin({ code: c }), code);
+  check(r2.message === PEER_MESSAGES.webrtc && r2.ms < 17000,
+    `peer: a WebRTC link that never connects fails in ${(r2.ms / 1000).toFixed(1)} s ("${r2.message}")`);
+  check(r2.menuText === r2.message, 'peer: the join screen shows that message unchanged');
+  const slots = await host.evaluate(() => window.netTest.lobby.state.slots.map((s) => s.kind));
+  check(slots[1] === 'open', `peer: the failed join left no ghost in the host's lobby (${slots.join(', ')})`);
+  if (SHOTS) await blocked.screenshot({ path: path.join(SHOTS, 'fail-webrtc.png') });
+  await host.evaluate(() => {
+    window.netTest.lobby.close();
+    window.netTest.lobby = null;
+  });
+  await ctx.close();
+}
+
+/**
+ * Stall each side's main thread for 6 s while the game streams, with that
+ * side's connection timeout lowered to 3 s: messages and Worker pulses pile up,
+ * and the connection must still survive (silence is counted in time the page
+ * ran, not wall-clock time).
+ */
+async function stallBothSides(host, client, label) {
+  await waitFn(client, () => window.netTest.lastTick >= 40, null, 30000);
+  const h = await host.evaluate(() => window.netTest.stallFor(6000, 3000));
+  await sleep(2600);
+  const c = await client.evaluate(() => window.netTest.stallFor(6000, 3000));
+  await sleep(2600);
+  const state = async (page) => page.evaluate(() => {
+    const s = window.netTest.session;
+    return {
+      open: s.isHost ? [...s.clients.values()].every((c) => c.conn.open) && s.leftPlayers.size === 0 : s.conn.open && !window.netTest.ended,
+      tick: window.netTest.lastTick,
+    };
+  });
+  const hs = await state(host);
+  const cs = await state(client);
+  check(h.stalledMs >= 6000 && c.stalledMs >= 6000 && hs.open && cs.open,
+    `${label}: 6 s main-thread stalls on the host and then the client (3 s timeouts) drop nothing (client at tick ${cs.tick})`);
+}
+
+async function playMatch(host, client, transport, { ticks, units, label, world = 'fake', stalls = false }) {
   const t0 = Date.now();
   const code = await host.evaluate((tr) => window.netTest.host({ transport: tr, name: 'Hosty' }), transport);
   check(/^[A-Z2-9]{5}$/.test(code), `${label}: host opened room ${code}`);
@@ -106,7 +168,10 @@ async function playMatch(host, client, transport, { ticks, units, label, world =
   const canStart = await host.evaluate(() => window.netTest.lobby.canStart());
   check(canStart, `${label}: host can start`);
   const t1 = Date.now();
-  const result = await host.evaluate((o) => window.netTest.startGame(o), { units, ticks, world });
+  const resultP = host.evaluate((o) => window.netTest.startGame(o), { units, ticks, world });
+  const stalled = stalls ? stallBothSides(host, client, label).catch((err) => check(false, `${label}: stall check (${err.message})`)) : null;
+  const result = await resultP;
+  await stalled;
   await waitFn(client, (t) => window.netTest.lastTick >= t, result.tick, 30000);
   const secs = (Date.now() - t1) / 1000;
   if (world === 'fake') check(result.fullChars > 64 * 1024, `${label}: first full snapshot is ${(result.fullChars / 1024).toFixed(1)} KB (> 64 KB)`);
@@ -193,6 +258,7 @@ async function main() {
       }
     });
     check(/not found/.test(notFound), `peer: joining an unknown room fails cleanly in ${((Date.now() - t0) / 1000).toFixed(1)} s ("${notFound}")`);
+    await failedJoins(browser, host);
     await playMatch(host, client, 'peer', { ticks: TICKS, units: UNITS, label: 'peer' });
     if (SHOTS) {
       mkdirSync(SHOTS, { recursive: true });
@@ -224,14 +290,30 @@ async function main() {
     const ctxD = await browser.newContext({ viewport: { width: 1000, height: 640 } });
     const h3 = await openPage(ctxC, PEER_QS, 'host');
     const c3 = await openPage(ctxD, PEER_QS, 'client');
-    await playMatch(h3, c3, 'peer', { ticks: 240, units: 0, label: 'real', world: 'real' });
+    await playMatch(h3, c3, 'peer', { ticks: 480, units: 0, label: 'real', world: 'real', stalls: true });
     if (SHOTS) {
       await sleep(300);
       await h3.screenshot({ path: path.join(SHOTS, 'real-host.png') });
       await c3.screenshot({ path: path.join(SHOTS, 'real-client.png') });
     }
-    await ctxC.close();
+    // The client leaves mid-game: the host keeps playing, an AI takes the client's player over.
     await ctxD.close();
+    await waitFn(h3, () => window.netTest.session.leftPlayers.has(1) && window.netTest.session.ais.has(1), null, 40000);
+    const before = await h3.evaluate(() => {
+      const s = window.netTest.session;
+      s.ticker.start();
+      return s.lastSnap.tick;
+    });
+    await sleep(1500);
+    const after = await h3.evaluate(() => ({
+      tick: window.netTest.session.lastSnap.tick,
+      takeover: [...document.querySelectorAll('#log div')].filter((d) => /takes over/.test(d.textContent)).length,
+      errors: window.netTest.errors,
+    }));
+    check(after.tick > before + 10 && after.takeover > 0 && after.errors.length === 0,
+      `real: host keeps playing after the client left (tick ${before} → ${after.tick}, AI takes over player 1)`);
+    if (SHOTS) await h3.screenshot({ path: path.join(SHOTS, 'real-host-after-client-left.png') });
+    await ctxC.close();
   } finally {
     await browser.close();
   }

@@ -328,6 +328,56 @@
 }
 .hud-chat-input:focus { border-color: var(--mw-gold); box-shadow: 0 0 0.6em rgba(227, 184, 79, 0.3); }
 
+/* ------------------------------------------------------------ getting-started tips */
+
+.hud-tips {
+  position: absolute;
+  top: 3.1em;
+  right: 0.6em;
+  width: 21.5em;
+  max-width: 40vw;
+  padding: 0.55em 0.7em 0.6em;
+  border-radius: 5px;
+  border-color: var(--mw-bronze);
+  background: linear-gradient(180deg, rgba(22, 27, 40, 0.94), rgba(10, 12, 19, 0.94));
+  animation: hud-msg-in 0.35s ease-out;
+}
+.hud-tips-head { display: flex; align-items: center; gap: 0.5em; margin-bottom: 0.35em; }
+.hud-tips-title { flex: 1; font: 600 0.88em/1.2 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold-hi); }
+.hud-tips-progress { font: 700 0.78em/1 var(--mw-font-ui); color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
+.hud-tips-close {
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid rgba(196, 146, 72, 0.45);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--mw-ink-dim);
+}
+.hud-tips-close:hover { color: #fff; border-color: var(--mw-gold); }
+.hud-tips-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3em; }
+.hud-tips-step { display: grid; grid-template-columns: 1.35em 1.35em minmax(0, 1fr); align-items: start; gap: 0.35em; font-size: 0.86em; line-height: 1.35; color: var(--mw-ink-dim); }
+.hud-tips-check {
+  display: grid;
+  place-items: center;
+  width: 1.35em;
+  height: 1.35em;
+  border-radius: 50%;
+  border: 1px solid rgba(196, 146, 72, 0.5);
+  font: 700 0.78em/1 var(--mw-font-ui);
+  color: var(--mw-ink-mute);
+}
+.hud-tips-icon { font-family: var(--mw-emoji); line-height: 1.35; text-align: center; }
+.hud-tips-text kbd { font-size: 0.8em; padding: 0 0.3em; margin: 0 0.05em; }
+.hud-tips-step.is-next { color: #fff4d8; }
+.hud-tips-step.is-next .hud-tips-check { border-color: var(--mw-gold-hi); color: var(--mw-gold-hi); box-shadow: 0 0 0.5em rgba(255, 210, 110, 0.45); }
+.hud-tips-step.is-done { color: var(--mw-ink-mute); }
+.hud-tips-step.is-done .hud-tips-text { text-decoration: line-through; text-decoration-color: rgba(143, 214, 154, 0.6); }
+.hud-tips-step.is-done .hud-tips-check { border-color: #6fcf7f; background: rgba(80, 190, 100, 0.25); color: #b8f5c0; }
+.hud-tips-foot { margin-top: 0.45em; font: italic 0.78em/1.3 var(--mw-font-body); color: var(--mw-ink-mute); }
+
 /* ------------------------------------------------------------ floating text, drag box */
 
 

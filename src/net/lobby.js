@@ -1,13 +1,18 @@
 // Pre-game lobby (DESIGN 7): the host owns the LobbyState (4 slots, map size)
 // and broadcasts it; clients join with a room code, pick their own pantheon /
 // team / color, chat, and receive the GameSetup when the host starts.
+// Both sides distrust each other's messages: the host validates and rate-limits
+// every client patch / chat / ping; a client cleans the lobby state and checks
+// the GameSetup before it uses them.
 import { MAX_PLAYERS, PLAYER_COLORS } from '../config.js';
 import { PANTHEONS, PANTHEON_LIST } from '../data/index.js';
 import { RNG, hashSeed } from '../sim/rng.js';
 import * as mapgen from '../sim/mapgen.js';
 import {
-  MSG, REASONS, PROTOCOL_VERSION, JOIN_TIMEOUT_MS, sanitizeName, sanitizeChat, versionMismatchReason,
+  MSG, REASONS, PROTOCOL_VERSION, JOIN_TIMEOUT_MS, GAME_TIMEOUT_MS, RateLimiter,
+  sanitizeName, sanitizeChat, sanitizeReason, versionMismatchReason, normalizeRoomCode,
 } from './protocol.js';
+import { validateSetup } from './sanitize.js';
 import { hostRoom, joinRoom } from './transport.js';
 
 export const SLOT_KINDS = ['host', 'human', 'ai', 'open', 'closed'];
@@ -16,8 +21,22 @@ export const PRESETS = ['coop', '1v1', '2v2', 'ffa'];
 export const MAP_SIZE_NAMES = ['small', 'medium'];
 const HELLO_TIMEOUT_MS = 10000;
 const KICK_CLOSE_DELAY_MS = 300;
+// Per-member limits on the host (token buckets: rate per second, burst).
+export const MEMBER_LIMITS = { patch: [5, 10], chat: [1, 5], ping: [4, 8] };
+const CLIENT_CHAT_LIMIT = [10, 30]; // lobby chat lines a client shows per second
+const NOTIFY_MIN_MS = 50; // a client re-renders the lobby at most this often
 
 const isPlayerKind = (k) => k === 'host' || k === 'human' || k === 'ai';
+const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+/** A valid pantheon choice: 'random' or a pantheon id (own key: never '__proto__' or 'constructor'). */
+export const isPantheonChoice = (v) => v === 'random' || hasOwn(PANTHEONS, v);
+/** Integer from a number or numeric string within [lo, hi], else null. */
+function intIn(v, lo, hi) {
+  if (typeof v !== 'number' && typeof v !== 'string') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
+}
 const aiName = (difficulty) => `AI (${difficulty[0].toUpperCase()}${difficulty.slice(1)})`;
 
 function slotOf(kind, extra = {}) {
@@ -26,6 +45,39 @@ function slotOf(kind, extra = {}) {
 
 function chatLine(from, name, text, system = false) {
   return { from, name, text, system };
+}
+
+/**
+ * Clean a LobbyState received from the host (a client never renders raw input):
+ * known slot kinds, names, pantheons, teams, colors and difficulties only,
+ * exactly MAX_PLAYERS slots. Returns null when it is not a lobby state at all.
+ */
+export function sanitizeLobbyState(state) {
+  if (!isObject(state) || !Array.isArray(state.slots)) return null;
+  const slots = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    const s = state.slots[i];
+    if (!isObject(s) || !SLOT_KINDS.includes(s.kind)) {
+      slots.push(slotOf('closed', { team: i + 1, color: i }));
+      continue;
+    }
+    slots.push(slotOf(s.kind, {
+      name: sanitizeName(s.name, ''),
+      pantheon: isPantheonChoice(s.pantheon) ? s.pantheon : 'random',
+      team: intIn(s.team, 1, MAX_PLAYERS) ?? 1,
+      color: intIn(s.color, 0, PLAYER_COLORS.length - 1) ?? 0,
+      difficulty: DIFFICULTIES.includes(s.difficulty) ? s.difficulty : 'normal',
+      peerId: typeof s.peerId === 'string' ? s.peerId.slice(0, 128) : null,
+    }));
+  }
+  return {
+    roomCode: typeof state.roomCode === 'string' ? normalizeRoomCode(state.roomCode) : null,
+    version: typeof state.version === 'string' ? state.version.slice(0, 32) : '',
+    mapSize: MAP_SIZE_NAMES.includes(state.mapSize) ? state.mapSize : 'small',
+    preset: PRESETS.includes(state.preset) ? state.preset : null,
+    started: state.started === true,
+    slots,
+  };
 }
 
 /**
@@ -161,7 +213,14 @@ export class LobbyHost {
       setTimeout(() => conn.close('kicked'), KICK_CLOSE_DELAY_MS);
       return;
     }
-    const m = { conn, peerId: conn.id, name: '', joined: false, offs: [] };
+    const m = {
+      conn, peerId: conn.id, name: '', joined: false, offs: [],
+      limits: {
+        patch: new RateLimiter(...MEMBER_LIMITS.patch),
+        chat: new RateLimiter(...MEMBER_LIMITS.chat),
+        ping: new RateLimiter(...MEMBER_LIMITS.ping),
+      },
+    };
     this.members.add(m);
     m.offs.push(conn.onMessage((msg) => this.handleMessage(m, msg)));
     m.offs.push(conn.onClose(() => this.handleLeave(m)));
@@ -196,11 +255,15 @@ export class LobbyHost {
   }
 
   handleMessage(m, msg) {
-    if (this.started) return;
+    if (this.started || this.closed || !isObject(msg) || !this.members.has(m)) return;
     if (!m.joined) {
-      if (msg.t !== MSG.HELLO) return;
+      if (msg.t !== MSG.HELLO || m.helloDone) return;
+      m.helloDone = true;
       clearTimeout(m.helloTimer);
-      if (msg.version !== this.version) return this.kickMember(m, versionMismatchReason(this.version, msg.version));
+      if (msg.version !== this.version) {
+        const theirs = typeof msg.version === 'string' ? sanitizeName(msg.version, '?') : '?';
+        return this.kickMember(m, versionMismatchReason(this.version, theirs));
+      }
       const index = this.state.slots.findIndex((s) => s.kind === 'open');
       if (index < 0) return this.kickMember(m, REASONS.FULL);
       const prev = this.state.slots[index];
@@ -215,15 +278,16 @@ export class LobbyHost {
     }
     const index = this.slotIndexOf(m.peerId);
     if (msg.t === MSG.LOBBY) {
-      if (index >= 0 && msg.patch && typeof msg.patch === 'object') {
+      if (index >= 0 && isObject(msg.patch) && m.limits.patch.take()) {
         const { pantheon, team, color } = msg.patch;
         if (this.patchSlot(index, { pantheon, team, color }, false)) this.changed();
       }
     } else if (msg.t === MSG.CHAT) {
+      if (index < 0 || !m.limits.chat.take()) return;
       const text = sanitizeChat(msg.text);
-      if (text && index >= 0) this.chat(chatLine(index, this.state.slots[index].name, text));
+      if (text) this.chat(chatLine(index, this.state.slots[index].name, text));
     } else if (msg.t === MSG.PING) {
-      m.conn.send({ t: MSG.PONG, ts: msg.ts });
+      if (m.limits.ping.take()) m.conn.send({ t: MSG.PONG, ts: Number.isFinite(msg.ts) ? msg.ts : 0 });
     }
   }
 
@@ -272,12 +336,11 @@ export class LobbyHost {
       }
     }
     const t = this.state.slots[i];
-    if (patch.pantheon !== undefined && (patch.pantheon === 'random' || PANTHEONS[patch.pantheon])) t.pantheon = patch.pantheon;
-    if (patch.team !== undefined) {
-      const team = Math.floor(Number(patch.team));
-      if (team >= 1 && team <= MAX_PLAYERS) t.team = team;
-    }
-    if (patch.color !== undefined) this.setColor(i, Math.floor(Number(patch.color)), byHost);
+    if (isPantheonChoice(patch.pantheon)) t.pantheon = patch.pantheon;
+    const team = intIn(patch.team, 1, MAX_PLAYERS);
+    if (team !== null) t.team = team;
+    const color = intIn(patch.color, 0, PLAYER_COLORS.length - 1);
+    if (color !== null) this.setColor(i, color, byHost);
     if (byHost && t.kind === 'ai' && DIFFICULTIES.includes(patch.difficulty)) {
       t.difficulty = patch.difficulty;
       t.name = aiName(t.difficulty);
@@ -430,6 +493,8 @@ export class LobbyHost {
       }
       const index = slotToPlayer.get(slot);
       conns.set(index, m.conn);
+      // In the game a client may be unable to send for many seconds (loading, building the renderer).
+      if (typeof m.conn.setTimeoutMs === 'function') m.conn.setTimeoutMs(GAME_TIMEOUT_MS);
       m.conn.send({ t: MSG.START, setup, you: index });
     }
     this.members.clear();
@@ -505,6 +570,9 @@ export class LobbyClient {
     this.startCbs = new Set();
     this.kickCbs = new Set();
     this.pending = null;
+    this.chatLimit = new RateLimiter(...CLIENT_CHAT_LIMIT);
+    this.lastNotify = -Infinity;
+    this.notifyTimer = null;
     this.offs = [
       conn.onMessage((msg) => this.handleMessage(msg)),
       conn.onClose(() => this.handleClose()),
@@ -544,25 +612,43 @@ export class LobbyClient {
   }
 
   handleMessage(msg) {
+    if (this.started || this.kicked || !isObject(msg)) return;
     if (msg.t === MSG.WELCOME) {
-      this.state = msg.lobby;
-      const slot = msg.lobby && msg.lobby.slots[msg.slot];
-      this.peerId = slot ? slot.peerId : null;
+      const state = sanitizeLobbyState(msg.lobby);
+      const index = intIn(msg.slot, 0, MAX_PLAYERS - 1);
+      if (!state || index === null || state.slots[index].kind !== 'human' || this.peerId) return;
+      this.state = state;
+      this.peerId = state.slots[index].peerId;
       if (this.pending) this.pending.resolve();
-      this.notifyChange();
+      this.notifyChange(true);
     } else if (msg.t === MSG.LOBBY) {
-      this.state = msg.lobby;
+      const state = sanitizeLobbyState(msg.lobby);
+      if (!state || !this.state) return;
+      this.state = state;
       this.notifyChange();
     } else if (msg.t === MSG.CHAT) {
-      const line = chatLine(msg.from, msg.name, msg.text, !!msg.system);
+      if (!this.chatLimit.take()) return;
+      const text = sanitizeChat(msg.text);
+      if (!text) return;
+      const system = msg.system === true;
+      const from = Number.isInteger(msg.from) && msg.from >= -1 && msg.from < MAX_PLAYERS ? msg.from : -1;
+      const line = chatLine(from, system ? '' : sanitizeName(msg.name, `Player ${from + 1}`), text, system);
       for (const cb of [...this.chatCbs]) cb(line);
     } else if (msg.t === MSG.KICK) {
-      this.kick(msg.reason || REASONS.REMOVED);
+      this.kick(sanitizeReason(msg.reason, REASONS.REMOVED));
     } else if (msg.t === MSG.START) {
+      if (!this.state) return;
+      const valid = validateSetup(msg.setup, msg.you);
+      if (!valid) {
+        this.kick('The host sent an invalid game setup. Make sure you both run the same version (reload the page).');
+        return;
+      }
       this.started = true;
       for (const off of this.offs) off();
-      this.startInfo = { setup: msg.setup, myIndex: msg.you, conn: this.conn };
-      if (this.state) this.state.started = true;
+      this.flushNotify();
+      if (typeof this.conn.setTimeoutMs === 'function') this.conn.setTimeoutMs(GAME_TIMEOUT_MS);
+      this.startInfo = { setup: valid.setup, myIndex: valid.myIndex, conn: this.conn };
+      this.state.started = true;
       for (const cb of [...this.startCbs]) cb(this.startInfo);
     }
   }
@@ -576,13 +662,34 @@ export class LobbyClient {
     if (this.kicked || this.started) return;
     this.kicked = reason;
     for (const off of this.offs) off();
+    if (this.notifyTimer) clearTimeout(this.notifyTimer);
+    this.notifyTimer = null;
     if (this.pending) this.pending.reject(new Error(reason));
     else for (const cb of [...this.kickCbs]) cb(reason);
     this.conn.close('kicked');
   }
 
-  notifyChange() {
-    for (const cb of [...this.changeCbs]) cb(this.state);
+  /**
+   * Tell listeners about a new lobby state: at once, unless the last update was
+   * less than NOTIFY_MIN_MS ago (a host flooding updates), then once at the end.
+   */
+  notifyChange(now = false) {
+    const t = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now || t - this.lastNotify >= NOTIFY_MIN_MS) {
+      if (this.notifyTimer) clearTimeout(this.notifyTimer);
+      this.notifyTimer = null;
+      this.lastNotify = t;
+      for (const cb of [...this.changeCbs]) cb(this.state);
+      return;
+    }
+    if (!this.notifyTimer) this.notifyTimer = setTimeout(() => this.flushNotify(), NOTIFY_MIN_MS - (t - this.lastNotify));
+  }
+
+  flushNotify() {
+    if (!this.notifyTimer) return;
+    clearTimeout(this.notifyTimer);
+    this.notifyTimer = null;
+    this.notifyChange(true);
   }
 
   /** @returns {() => void} unsubscribe */

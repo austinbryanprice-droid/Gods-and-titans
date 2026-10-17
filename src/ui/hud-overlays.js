@@ -4,7 +4,8 @@
 import { getSettings, saveSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PANTHEONS } from '../data/index.js';
-import { el, fmt } from './hud-dom.js';
+import { sanitizeName, sanitizeReason } from '../net/protocol.js';
+import { el, fmt, safeColor } from './hud-dom.js';
 import { formatClock } from './hud-data.js';
 
 const END_TEXT = {
@@ -112,6 +113,7 @@ export class Overlays {
 
     const bars = toggleRow('Always show health bars', 'Otherwise hold Alt to see them all.', s.showAllBars, (v) => saveSettings({ showAllBars: v }));
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
+    const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const vol = el('input', 'hud-range');
     vol.type = 'range';
     vol.min = '0';
@@ -154,6 +156,7 @@ export class Overlays {
         el('div', 'mw-label', 'Options'),
         bars.row,
         edge.row,
+        tips.row,
         el('label', 'hud-vol', el('span', null, 'Volume'), vol, volText),
       ),
       el('div', 'hud-ohint', 'Press F10 or Esc to resume.'));
@@ -193,8 +196,8 @@ export class Overlays {
     const head = el('tr', null, ...['Player', 'Pantheon', 'Gathered', 'Trained', 'Kills', 'Losses', 'Buildings'].map((h) => el('th', null, h)));
     const rows = (vs.players || []).map((p) => {
       const st = p.stats || {};
-      const name = el('td', 'hud-st-name', el('i', 'hud-st-dot'), p.name);
-      name.firstChild.style.background = p.color;
+      const name = el('td', 'hud-st-name', el('i', 'hud-st-dot'), sanitizeName(p.name, `Player ${(p.i ?? 0) + 1}`));
+      name.firstChild.style.background = safeColor(p.color);
       if (winningTeam !== null && winningTeam !== undefined && p.team === winningTeam) name.appendChild(el('span', 'hud-st-crown', ' 👑'));
       if (p.i === vs.myIndex) name.appendChild(el('span', 'hud-st-you', ' (you)'));
       const pan = PANTHEONS[p.pantheon];
@@ -240,7 +243,7 @@ export class Overlays {
 
   /** The session ended from outside (host left / quit / kicked). */
   showEnded(reason) {
-    const text = END_TEXT[reason] || (typeof reason === 'string' && reason ? reason : 'The game has ended.');
+    const text = (typeof reason === 'string' && Object.hasOwn(END_TEXT, reason) && END_TEXT[reason]) || sanitizeReason(reason, 'The game has ended.');
     const vs = this.game.viewState;
     const node = this.panel('Game Ended', text,
       vs && vs.players && vs.players.length ? this.statsTable(vs, vs.gameOver ? vs.gameOver.winningTeam : null) : null,

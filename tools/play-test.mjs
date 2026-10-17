@@ -3,11 +3,16 @@
 //
 //   node tools/play-test.mjs [--port 8202] [--out DIR] [--only sp,controls,late,online] [--size 1280x720] [--headed]
 //
-// sp:     title → Play vs AI → Start → the game view appears → click a worshipper → B, H →
-//         place a House on a valid spot → construction starts → select the Town Center → W
-//         trains → drag-select the workers → right-click the gold mine → gold is mined →
-//         F10 → Quit to Menu → start again (the first game is fully torn down) → F10 →
-//         Surrender → defeat screen → Return to Menu.
+// sp:     title → Play vs AI → Start → the game view appears with the getting-started
+//         tips → click a worshipper → B, H → place a House on a valid spot → construction
+//         starts → select the Town Center → W trains → drag-select the workers → right-click
+//         the gold mine → gold is mined, the tips tick it off → click the mine ("Miners n/2")
+//         → ✕ closes the tips (remembered) → F10 → Quit to Menu → start again (the first
+//         game is fully torn down; no tips) → F10 Options turn the tips on and off → Surrender
+//         → defeat screen → Return to Menu.
+//         Clicks go to points that really pick the intended entity and are not under a
+//         HUD panel; waits on game state poll with long timeouts (software GL frames can
+//         take seconds when the machine is busy).
 // controls: double-click / shift-click selection, shift+right-click waypoint queue, S stop,
 //         A attack-move, Tab subgroups, B/Esc, shift multi-placement, rally, W W + Esc, arrows,
 //         wheel, middle-drag, Alt bars, Space, cancelling a construction site.
@@ -15,8 +20,8 @@
 //         tooltip → Q summons a god → portrait → F1 selects it → ability hotkey + target
 //         click → cooldown → Ctrl+1 / . / 1 groups → minimap right-click move and left-click
 //         camera jump → chat → the enemy is wiped out → victory screen → Return to Menu.
-// online: two tabs over ?transport=local (BroadcastChannel): host + client both reach the
-//         game; the client selects a worker and right-clicks the ground; the host's World
+// online: two tabs over ?transport=local (BroadcastChannel): the host lobby explains the
+//         invite link and code; host + client both reach the game (both see the tips); the client selects a worker and right-clicks the ground; the host's World
 //         moves that worker.
 // Screenshots go to --out (default: <tmp>/mythicwar-play-test). Prints frame timings.
 // Exits non-zero when a check fails or a page logs an error.
@@ -135,6 +140,80 @@ async function step(page, n) {
   }, n);
 }
 
+/**
+ * Wait (polling) until fn(arg) is truthy in the page; returns its last value.
+ * Waits on game state are measured in wall time, and software-GL frames can
+ * take seconds on a loaded machine, so the default is generous.
+ */
+async function until(page, fn, arg, timeout = 30000) {
+  const h = await page.waitForFunction(fn, arg, { timeout, polling: 100 }).catch(() => null);
+  return h ? h.jsonValue() : page.evaluate(fn, arg);
+}
+
+/** Close the getting-started tips if they are showing; true when they were. */
+async function dismissTips(page) {
+  if (!(await page.$('.hud-tips'))) return false;
+  await page.click('.hud-tips-close');
+  await page.waitForSelector('.hud-tips', { state: 'detached', timeout: 5000 }).catch(() => {});
+  return true;
+}
+
+/**
+ * A screen point that picks entity `id` and is not covered by a HUD panel
+ * (units are picked before buildings, so the middle of a Town Center can be a
+ * unit standing in front of it). null when no such point is on screen.
+ */
+function pickPoint(page, id) {
+  return page.evaluate((id) => {
+    const g = window.__game;
+    const e = g.viewState.entities.get(id);
+    if (!e) return null;
+    const bottom = document.querySelector('.hud-bottom').getBoundingClientRect().top - 4;
+    const r = e.k === 'u' ? 0.25 : 0.9;
+    const hs = e.k === 'u' ? [0.45, 0.3, 0.7, 0.15] : [1.2, 0.8, 0.5, 1.6, 0.25];
+    const offs = [[0, 0], [0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [0, 0.8], [0.8, 0], [-0.8, 0], [0, -0.8]];
+    for (const h of hs) {
+      for (const [dx, dy] of offs) {
+        const p = g.renderer.worldToScreen((e.ix ?? e.x) + dx * r, (e.iy ?? e.y) + dy * r, h);
+        if (!p.onScreen || p.sy >= bottom || p.sy < 40 || p.sx < 4 || p.sx > innerWidth - 4) continue;
+        const hit = document.elementFromPoint(p.sx, p.sy);
+        if (!hit || hit.tagName !== 'CANVAS') continue;
+        if (g.renderer.pickEntity(p.sx, p.sy) === id) return { sx: p.sx, sy: p.sy };
+      }
+    }
+    return null;
+  }, id);
+}
+
+/**
+ * A grass point rMin..rMax tiles from (cx, cy), on screen and on the 3D view,
+ * with no entity under the cursor (a right-click there is a plain ground order).
+ */
+function freeGround(page, cx, cy, rMin = 3, rMax = 9) {
+  return page.evaluate(([cx, cy, rMin, rMax]) => {
+    const g = window.__game;
+    const vs = g.viewState;
+    const bottom = document.querySelector('.hud-bottom').getBoundingClientRect().top - 20;
+    for (let r = rMin; r <= rMax; r++) {
+      for (let a = 0; a < 16; a++) {
+        const x = cx + Math.cos((a / 16) * Math.PI * 2) * r;
+        const y = cy + Math.sin((a / 16) * Math.PI * 2) * r;
+        const tx = Math.floor(x);
+        const ty = Math.floor(y);
+        if (tx < 1 || ty < 1 || tx >= vs.width - 1 || ty >= vs.height - 1 || vs.map.terrain[ty * vs.width + tx] !== 0) continue;
+        const p = g.renderer.worldToScreen(x, y, 0);
+        if (!p.onScreen || p.sy > bottom || p.sy < 60 || p.sx < 40 || p.sx > innerWidth - 40) continue;
+        const hit = document.elementFromPoint(p.sx, p.sy);
+        if (!hit || hit.tagName !== 'CANVAS' || g.renderer.pickEntity(p.sx, p.sy) != null) continue;
+        const w = g.renderer.screenToWorld(p.sx, p.sy);
+        if (!w || Math.hypot(w.x - x, w.y - y) > 0.5) continue;
+        return { x, y, sx: p.sx, sy: p.sy };
+      }
+    }
+    return null;
+  }, [cx, cy, rMin, rMax]);
+}
+
 // ---------------------------------------------------------------- single player
 
 async function singlePlayer(browser) {
@@ -156,6 +235,13 @@ async function singlePlayer(browser) {
   ok('no console errors at start', errors.length === 0, errors.slice(0, 3).join(' | '));
   const hudOk = await page.evaluate(() => !!document.querySelector('.hud-top .hud-res.is-gold') && document.querySelectorAll('.hc-btn').length === 12 && !!document.querySelector('.hud-minimap-canvas'));
   ok('HUD built (resources, 12 card slots, minimap)', hudOk);
+  const tips = await page.evaluate(() => {
+    const n = document.querySelector('.hud-tips');
+    if (!n || n.hidden) return null;
+    const r = n.getBoundingClientRect();
+    return { steps: n.querySelectorAll('.hud-tips-step').length, next: n.querySelector('.is-next')?.dataset.step, inView: r.left >= 0 && r.right <= innerWidth && r.bottom < document.querySelector('.hud-bottom').getBoundingClientRect().top };
+  });
+  ok('the first game shows the getting-started tips', !!tips && tips.steps === 5 && tips.next === 'mine' && tips.inView, JSON.stringify(tips));
 
   // ---- select a worshipper by clicking it
   const bottom = await viewBottom(page);
@@ -166,7 +252,8 @@ async function singlePlayer(browser) {
     for (const e of vs.entities.values()) {
       if (e.k !== 'u' || e.o !== vs.myIndex || e.t !== 'worshipper') continue;
       const p = g.renderer.worldToScreen(e.ix ?? e.x, e.iy ?? e.y, 0.45);
-      if (p.onScreen && p.sy < bottom && p.sy > 40) out.push({ id: e.id, sx: p.sx, sy: p.sy });
+      if (!p.onScreen || p.sy >= bottom || p.sy <= 40 || document.elementFromPoint(p.sx, p.sy)?.tagName !== 'CANVAS') continue;
+      if (g.renderer.pickEntity(p.sx, p.sy) === e.id) out.push({ id: e.id, sx: p.sx, sy: p.sy });
     }
     return out;
   }, bottom);
@@ -207,6 +294,7 @@ async function singlePlayer(browser) {
         for (let y = ty - 1; y <= ty + 2 && ring; y++) for (let x = tx - 1; x <= tx + 2; x++) if (!checkPlacement(vs, vs.myIndex, 'house', x, y).valid && (x < tx || y < ty || x > tx + 1 || y > ty + 1)) { ring = false; break; }
         const p = g.renderer.worldToScreen(tx + 1, ty + 1, 0);
         if (!p.onScreen || p.sy > bottom - 30 || p.sy < 60 || p.sx < 60 || p.sx > innerWidth - 60) continue;
+        if (document.elementFromPoint(p.sx, p.sy)?.tagName !== 'CANVAS') continue;
         cands.push({ tx, ty, sx: p.sx, sy: p.sy, d: Math.hypot(dx, dy), ring });
       }
     }
@@ -246,16 +334,13 @@ async function singlePlayer(browser) {
     const tc = [...vs.entities.values()].find((e) => e.k === 'b' && e.o === vs.myIndex && e.t === 'town_center');
     return { id: tc.id, ...g.renderer.worldToScreen(tc.x, tc.y, 1.2) };
   });
+  Object.assign(tcPos, (await pickPoint(page, tcPos.id)) || {});
   await page.mouse.click(tcPos.sx, tcPos.sy);
   await wait(300);
   const selTc = await page.evaluate(() => window.__game.selection.ids);
   ok('clicking the Town Center selects it', selTc.length === 1 && selTc[0] === tcPos.id, JSON.stringify(selTc));
   await page.keyboard.press('w');
-  let queued = 0;
-  for (let i = 0; i < 20 && !queued; i++) {
-    await wait(150);
-    queued = await page.evaluate((id) => (window.__game.viewState.entities.get(id).q || []).length, tcPos.id);
-  }
+  const queued = await until(page, (id) => (window.__game.viewState.entities.get(id).q || []).length, tcPos.id);
   ok('W queues a worshipper at the Town Center', queued >= 1, `queue ${queued}`);
   await wait(300);
   await shot(page, 'tc-training');
@@ -302,6 +387,7 @@ async function singlePlayer(browser) {
     }
     return { ...best, ...g.renderer.worldToScreen(best.x, best.y, 0.8) };
   });
+  Object.assign(mine, (await pickPoint(page, mine.id)) || {});
   const gold0 = await page.evaluate(() => ({ gold: window.__game.viewState.me.gold, gathered: window.__game.viewState.me.stats.gathered }));
   await page.mouse.click(mine.sx, mine.sy, { button: 'right' });
   await wait(600);
@@ -319,7 +405,22 @@ async function singlePlayer(browser) {
   await wait(500);
   const gold1 = await page.evaluate(() => ({ gold: window.__game.viewState.me.gold, gathered: window.__game.viewState.me.stats.gathered }));
   ok('resources rise after some game time', gold1.gathered > gold0.gathered && gold1.gold > gold0.gold, `gold ${gold0.gold} → ${gold1.gold}, gathered ${gold0.gathered} → ${gold1.gathered}`);
+  const ticked = await until(page, () => !!document.querySelector('.hud-tips-step[data-step="mine"].is-done'), null, 15000);
+  ok('the tips tick off the mining step', ticked === true);
   await shot(page, 'mining');
+  // Click the mine: gold left and "Miners n/2" (at most 2 mine at once).
+  const mp = await pickPoint(page, mine.id);
+  if (mp) await page.mouse.click(mp.sx, mp.sy);
+  const minePanel = await until(page, () => {
+    const t = document.querySelector('.hud-info')?.textContent || '';
+    return /Gold left/.test(t) && /Miners\s*[0-2]\/2/.test(t) ? t : '';
+  }, null, 15000);
+  ok('selecting the gold mine shows gold left and "Miners n/2"', !!mp && !!minePanel, minePanel.replace(/\s+/g, ' ').slice(0, 120));
+  await shot(page, 'mine-selected');
+  // Close the tips with ✕: remembered in the settings.
+  await page.click('.hud-tips-close');
+  const remembered = await until(page, () => !document.querySelector('.hud-tips') && JSON.parse(localStorage.getItem('mythicwar-settings') || '{}').tipsDismissed === true, null, 10000);
+  ok('✕ closes the tips and the settings remember it', remembered === true);
 
   // ---- timing
   const timing = await page.evaluate(() => ({ game: window.__game.timing(), render: window.__game.renderer.getStats ? window.__game.renderer.getStats() : null }));
@@ -367,9 +468,18 @@ async function singlePlayer(browser) {
   await wait(500);
   const oldStill = await page.evaluate((n) => window.__oldGame.stats.frames === n, second.oldFrames);
   ok('a second game starts cleanly; the old loop is dead', second.frames > 3 && oldStill, JSON.stringify(second));
+  ok('closed tips stay closed in the next game', !(await page.$('.hud-tips')));
   await shot(page, 'second-game');
-  // Surrender through the menu: defeat screen, then back to the title.
+  // F10 Options can bring the tips back (at once) and hide them again.
   await page.keyboard.press('F10');
+  await page.waitForSelector('.hud-overlay.is-menu', { timeout: 3000 });
+  const tipsToggle = '.hud-overlay.is-menu label.hud-toggle:has-text("Getting-started tips")';
+  await page.click(tipsToggle);
+  const back = await until(page, () => !!document.querySelector('.hud-tips'), null, 5000);
+  await page.click(tipsToggle);
+  const hiddenAgain = await until(page, () => !document.querySelector('.hud-tips') && JSON.parse(localStorage.getItem('mythicwar-settings') || '{}').tipsDismissed === true, null, 5000);
+  ok('F10 Options switch the tips back on and off', back === true && hiddenAgain === true, `${back}/${hiddenAgain}`);
+  // Surrender through the menu: defeat screen, then back to the title.
   await page.click('.hud-overlay.is-menu button:text-is("Surrender")');
   await page.waitForSelector('.hud-overlay.is-confirm', { timeout: 3000 });
   await page.click('.hud-overlay.is-confirm button:text-is("Surrender")');
@@ -425,6 +535,7 @@ async function controls(browser) {
   await page.waitForSelector('.mw-lobby', { timeout: 8000 });
   await page.click('.mw-btn--start');
   await waitForGame(page);
+  await dismissTips(page);
   await page.mouse.move(VW / 2, VH / 3);
   await wait(500);
 
@@ -541,57 +652,68 @@ async function controls(browser) {
   ok('shift keeps placing; one worker queues both houses', stillPlacing === 'place' && afterShift === 'normal' && builds === 2, `${stillPlacing}/${afterShift}, build orders ${builds}, gold ${gold0}`);
 
   // Town Center: right-click sets the rally point; W W queues two; Esc cancels the last.
-  await page.mouse.click(tc.sx, tc.sy);
-  await wait(200);
-  const r = await toScreen(page, tc.x - 4, tc.y + 5, 0);
-  await page.mouse.click(r.sx, r.sy, { button: 'right' });
+  // Click a point that really picks the Town Center (a unit standing in front of it
+  // would be picked first) and rally to bare ground (a rally on a unit, mine or
+  // building follows that entity instead).
+  const tcPt = (await pickPoint(page, tc.id)) || tc;
+  await page.mouse.click(tcPt.sx, tcPt.sy);
+  const tcSel = await until(page, (id) => {
+    const ids = window.__game.selection.ids;
+    return ids.length === 1 && ids[0] === id;
+  }, tc.id, 10000);
+  ok('clicking the Town Center selects it', tcSel === true, JSON.stringify(await page.evaluate(() => window.__game.selection.ids)));
+  const rg = (await freeGround(page, tc.x, tc.y, 4, 8)) || { x: tc.x - 4, y: tc.y + 5, ...(await toScreen(page, tc.x - 4, tc.y + 5, 0)) };
+  await page.mouse.click(rg.sx, rg.sy, { button: 'right' });
   await page.keyboard.press('w');
   await page.keyboard.press('w');
-  let tcv = null;
-  for (let i = 0; i < 15; i++) {
-    await wait(150);
-    tcv = await page.evaluate((id) => {
-      const e = window.__game.viewState.entities.get(id);
-      return { q: (e.q || []).length, rp: e.rp };
-    }, tc.id);
-    if (tcv.q === 2 && tcv.rp) break;
-  }
+  const tcv = await until(page, (id) => {
+    const e = window.__game.viewState.entities.get(id);
+    const v = { q: (e.q || []).length, rp: e.rp || null };
+    return v.q === 2 && v.rp ? v : false;
+  }, tc.id) || await page.evaluate((id) => {
+    const e = window.__game.viewState.entities.get(id);
+    return { q: (e.q || []).length, rp: e.rp || null };
+  }, tc.id);
   const rp = Array.isArray(tcv.rp) ? { x: tcv.rp[0], y: tcv.rp[1] } : tcv.rp;
-  ok('right-click with a Town Center sets its rally point', !!rp && Math.hypot(rp.x - (tc.x - 4), rp.y - (tc.y + 5)) < 2, JSON.stringify(tcv.rp));
+  ok('right-click with a Town Center sets its rally point', !!rp && Math.hypot(rp.x - rg.x, rp.y - rg.y) < 1, `${JSON.stringify(tcv.rp)} vs ${rg.x.toFixed(1)},${rg.y.toFixed(1)}`);
   ok('W twice queues two worshippers', tcv.q === 2, `queue ${tcv.q}`);
   await shot(page, 'tc-queue-rally');
   await page.keyboard.press('Escape');
-  let q1 = 2;
-  for (let i = 0; i < 15 && q1 !== 1; i++) {
-    await wait(150);
-    q1 = await page.evaluate((id) => (window.__game.viewState.entities.get(id).q || []).length, tc.id);
-  }
+  const q1 = await until(page, (id) => (window.__game.viewState.entities.get(id).q || []).length === 1, tc.id)
+    ? 1 : await page.evaluate((id) => (window.__game.viewState.entities.get(id).q || []).length, tc.id);
   ok('Esc cancels the last queued unit', q1 === 1, `queue ${q1}`);
 
-  // Camera: arrows, wheel, middle-drag, Alt bars.
+  // Camera: arrows, wheel, middle-drag, Alt bars. Measured on the camera goal
+  // (where the eased view is heading), towards the side of the map with room
+  // (the goal is clamped 3 tiles inside the map, so scrolling into a near edge
+  // moves it little or not at all).
   const cam = () => page.evaluate(() => {
     const c = window.__game.renderer.camera;
-    return { x: c.target.x, y: c.target.y, d: c.goalDistance ?? c.distance };
+    const g = c.goal || c.target;
+    return { x: g.x, y: g.y, d: c.goalDistance ?? c.distance, w: window.__game.viewState.width };
   });
   const c0 = await cam();
-  await page.keyboard.down('ArrowRight');
+  const dir = c0.x < c0.w / 2 ? 1 : -1;
+  const arrow = dir > 0 ? 'ArrowRight' : 'ArrowLeft';
+  await page.keyboard.down(arrow);
   await wait(400);
   await frames(page, 6); // held across several frames, however slow they are
-  await page.keyboard.up('ArrowRight');
+  await page.keyboard.up(arrow);
   await wait(300);
   const c1 = await cam();
-  ok('arrow keys scroll the camera', c1.x - c0.x > 2, `${c0.x.toFixed(1)} → ${c1.x.toFixed(1)}`);
+  ok('arrow keys scroll the camera', (c1.x - c0.x) * dir > 2, `${arrow}: ${c0.x.toFixed(1)} → ${c1.x.toFixed(1)}`);
   await page.mouse.move(VW / 2, VH / 3);
   await page.mouse.wheel(0, 300);
   await wait(300);
   const c2 = await cam();
   ok('mouse wheel zooms', c2.d !== c1.d, `${c1.d.toFixed(1)} → ${c2.d.toFixed(1)}`);
+  // Dragging the ground the other way brings the view back toward the middle.
   await page.mouse.down({ button: 'middle' });
-  await page.mouse.move(VW / 2 - 200, VH / 3, { steps: 6 });
+  await page.mouse.move(VW / 2 + 200 * dir, VH / 3, { steps: 6 });
   await page.mouse.up({ button: 'middle' });
   await wait(200);
   const c3 = await cam();
-  ok('middle-drag pans the camera', c3.x - c2.x > 2, `${c2.x.toFixed(1)} → ${c3.x.toFixed(1)}`);
+  ok('middle-drag pans the camera', (c2.x - c3.x) * dir > 2, `${c2.x.toFixed(1)} → ${c3.x.toFixed(1)}`);
   await page.keyboard.down('Alt');
   await wait(150);
   const barsOn = await page.evaluate(() => window.__game.renderer.showAllBars);
@@ -645,19 +767,15 @@ async function controls(browser) {
       return g.renderer.worldToScreen(e.x, e.y, 0.6);
     }, site.id);
     await page.mouse.click(sp.sx, sp.sy);
-    await wait(250);
-    const siteCard = await page.evaluate(() => window.__game.hud.currentCard().filter(Boolean).map((b) => b.id).join(','));
+    const siteCard = (await until(page, () => {
+      const ids = window.__game.hud.currentCard().filter(Boolean).map((b) => b.id).join(',');
+      return /cancel-build/.test(ids) ? ids : '';
+    }, null, 10000)) || '';
     await shot(page, 'construction-site');
     const goldA = await page.evaluate(() => window.__game.viewState.me.gold);
     await page.keyboard.press('Escape');
-    let gone = false;
-    for (let i = 0; i < 30 && !gone; i++) {
-      await wait(150);
-      gone = await page.evaluate((id) => !window.__game.viewState.entities.has(id), site.id);
-    }
-    await step(page, 1);
-    await wait(300);
-    const goldB = await page.evaluate(() => window.__game.viewState.me.gold);
+    const gone = (await until(page, (id) => !window.__game.viewState.entities.has(id), site.id)) === true;
+    const goldB = (await until(page, (g0) => window.__game.viewState.me.gold > g0 && window.__game.viewState.me.gold, goldA, 10000)) || goldA;
     ok('Esc on a construction site cancels it with a refund', /cancel-build/.test(siteCard) && gone && goldB > goldA, `${siteCard} gone ${gone}, gold ${goldA} → ${goldB}`);
   } else {
     ok('a construction site to cancel exists', false);
@@ -688,6 +806,7 @@ async function lateGame(browser) {
   await page.waitForSelector('.mw-lobby', { timeout: 8000 });
   await page.click('.mw-btn--start');
   await waitForGame(page);
+  await dismissTips(page);
   await wait(500);
 
   // Setup through the host World: riches, a finished Shrine and Temple near the Town Center.
@@ -910,8 +1029,12 @@ async function online(browser) {
   await host.click('text=Host Online Game');
   await host.waitForSelector('.mw-room-code', { timeout: 8000 });
   const code = (await host.textContent('.mw-room-code')).replace(/\s+/g, '');
+  const roomHelp = await host.evaluate(() => document.querySelector('.mw-room')?.textContent || '');
+  ok('the host lobby explains the invite link and the room code', /^[A-Z0-9]{5}$/.test(code) && /Copy Invite Link/.test(roomHelp) && roomHelp.includes(`code ${code}`) && /local test mode/i.test(roomHelp), roomHelp.slice(0, 160));
+  await shot(host, 'host-lobby');
   await client.goto(`${base}?transport=local&join=${code}`);
   await client.waitForSelector('.mw-join');
+  await shot(client, 'client-join');
   await client.click('text=Join Game');
   await client.waitForSelector('.mw-lobby', { timeout: 8000 });
   await host.waitForSelector('.mw-slot.is-human', { timeout: 5000 });
@@ -919,8 +1042,24 @@ async function online(browser) {
   await wait(400);
   ok('host can start with the client joined', await host.isEnabled('.mw-btn--start'), (await host.textContent('.mw-start-reason')).trim());
   await host.click('.mw-btn--start');
-  await Promise.all([waitForGame(host), waitForGame(client)]);
+  // Two tabs start a renderer each on the shared software GL: allow more time, and
+  // say which tab was late if one never draws.
+  const state = (pg) => pg.evaluate(() => {
+    const g = window.__game;
+    return g ? { renderer: !!g.renderer, frames: g.stats.frames, ents: g.viewState ? g.viewState.entities.size : 0 } : { screen: document.querySelector('.mw-screen, [class*="mw-"]')?.className || 'none' };
+  });
+  try {
+    await Promise.all([waitForGame(host, 90000), waitForGame(client, 90000)]);
+  } catch (err) {
+    console.log(`  host ${JSON.stringify(await state(host))}, client ${JSON.stringify(await state(client))}`);
+    throw err;
+  }
   await wait(1000);
+  // Both tabs show the tips (first game in this browser profile); close them.
+  const tipsShown = await Promise.all([host, client].map((pg) => pg.evaluate(() => !!document.querySelector('.hud-tips:not([hidden])'))));
+  await dismissTips(host);
+  await dismissTips(client);
+  ok('both online players see the getting-started tips in their first game', tipsShown.every(Boolean), JSON.stringify(tipsShown));
   const info = await client.evaluate(() => ({ isHost: window.__game.session.isHost, me: window.__game.viewState.myIndex, ents: window.__game.viewState.entities.size }));
   ok('host and client both reach the game', !info.isHost && info.ents > 10, JSON.stringify(info));
   const r2 = (k, v) => (typeof v === 'number' ? Math.round(v) : v);

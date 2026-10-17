@@ -1,7 +1,7 @@
 // Construction: placement rules, build orders (cost paid up front, refunded if
 // abandoned before the site is placed), construction progress with helpers,
 // and cancelling unfinished buildings.
-import { BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DT } from '../config.js';
+import { BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT } from '../config.js';
 import { BUILDINGS } from '../data/index.js';
 import { moveToRect, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
@@ -18,18 +18,30 @@ export function requiresMessage(typeId) {
   return `Requires a ${b ? b.name : typeId}.`;
 }
 
+export const CANT_BUILD = "Can't build there.";
+export const TOO_CLOSE_TO_MINE = 'Too close to a gold mine.';
+
+/** Own building type ids only (no prototype keys such as 'constructor'). */
+export function buildingDef(typeId) {
+  return typeof typeId === 'string' && Object.hasOwn(BUILDINGS, typeId) ? BUILDINGS[typeId] : null;
+}
+
 /**
  * Footprint placement rules (DESIGN 5.3). Own units on the site are allowed
- * (they get pushed out); enemy and neutral ground units block it.
+ * (they get pushed out); enemy and neutral ground units block it. Drop-offs
+ * (Town Center, Storehouse) keep a Chebyshev gap of DROPOFF_MINE_GAP empty
+ * tiles from every gold mine.
+ * @returns {string|null} null when the site is valid, else the error message
  */
-export function canPlace(world, player, typeId, tx, ty) {
-  const def = BUILDINGS[typeId];
-  if (!def || !Number.isInteger(tx) || !Number.isInteger(ty)) return false;
+export function placementError(world, player, typeId, tx, ty) {
+  const def = buildingDef(typeId);
+  if (!def || !Number.isInteger(tx) || !Number.isInteger(ty)) return CANT_BUILD;
   const map = world.map;
   const s = def.size;
+  if (tx < 0 || ty < 0 || tx + s > map.width || ty + s > map.height) return CANT_BUILD;
   for (let y = ty; y < ty + s; y++) {
     for (let x = tx; x < tx + s; x++) {
-      if (!map.isBuildable(x, y)) return false;
+      if (!map.isBuildable(x, y)) return CANT_BUILD;
     }
   }
   const tmp = world._tmpQuery;
@@ -37,17 +49,22 @@ export function canPlace(world, player, typeId, tx, ty) {
   world.hash.query(tx + s / 2, ty + s / 2, s / 2 + world.maxRadius + 0.5, tmp);
   for (const u of tmp) {
     if (u.dead || u.air || !world.areEnemies(player, u.owner)) continue;
-    if (distPointRect(u.x, u.y, tx, ty, tx + s, ty + s) < u.radius * 0.8) return false;
+    if (distPointRect(u.x, u.y, tx, ty, tx + s, ty + s) < u.radius * 0.8) return CANT_BUILD;
   }
-  if (typeId === 'town_center') {
+  if (def.dropOff) {
     for (const m of world.mineList) {
       if (m.dead) continue;
       const gx = Math.max(m.tx - (tx + s), tx - (m.tx + m.size), 0);
       const gy = Math.max(m.ty - (ty + s), ty - (m.ty + m.size), 0);
-      if (Math.max(gx, gy) < 3) return false;
+      if (Math.max(gx, gy) < DROPOFF_MINE_GAP) return TOO_CLOSE_TO_MINE;
     }
   }
-  return true;
+  return null;
+}
+
+/** True when the building can be placed with its footprint top-left at (tx, ty). */
+export function canPlace(world, player, typeId, tx, ty) {
+  return placementError(world, player, typeId, tx, ty) === null;
 }
 
 function marginClear(world, tx, ty, s) {
@@ -68,8 +85,9 @@ function marginClear(world, tx, ty, s) {
  * @returns {{tx:number, ty:number}|null}
  */
 export function findPlacement(world, player, typeId, nearX, nearY, maxR = 20) {
-  const def = BUILDINGS[typeId];
-  if (!def) return null;
+  const def = buildingDef(typeId);
+  if (!def || !Number.isFinite(nearX) || !Number.isFinite(nearY)) return null;
+  maxR = Math.min(Number.isFinite(maxR) ? maxR : 20, Math.max(world.map.width, world.map.height));
   const s = def.size;
   const cx = Math.round(nearX - s / 2);
   const cy = Math.round(nearY - s / 2);
@@ -110,8 +128,8 @@ export function refund(world, player, cost, mult = 1) {
  * to build; other selected workers come along to help.
  */
 export function issueBuild(world, player, workers, typeId, tx, ty, queue) {
-  const def = BUILDINGS[typeId];
-  if (!def || workers.length === 0) return;
+  const def = buildingDef(typeId);
+  if (!def || workers.length === 0 || !Number.isFinite(tx) || !Number.isFinite(ty)) return;
   const p = world.players[player];
   if (def.tier > p.tier) return world.error(player, tierMessage(def.tier));
   for (const req of def.requires || []) {
@@ -121,7 +139,8 @@ export function issueBuild(world, player, workers, typeId, tx, ty, queue) {
   if (msg) return world.error(player, msg);
   tx = Math.floor(tx);
   ty = Math.floor(ty);
-  if (!canPlace(world, player, typeId, tx, ty)) return world.error(player, "Can't build there.");
+  const err = placementError(world, player, typeId, tx, ty);
+  if (err) return world.error(player, err);
   world.pay(player, def.cost);
   const cx = tx + def.size / 2;
   const cy = ty + def.size / 2;
@@ -199,7 +218,8 @@ export function updateBuild(world, u, o) {
   }
   if (d <= BUILD_REACH) {
     if (u.mv) stopMove(u);
-    if (canPlace(world, u.owner, o.b, o.tx, o.ty)) {
+    const err = placementError(world, u.owner, o.b, o.tx, o.ty);
+    if (!err) {
       const b = world.createBuilding(u.owner, o.b, o.tx, o.ty, false);
       o.site = b.id;
       o.paid = null;
@@ -208,7 +228,7 @@ export function updateBuild(world, u, o) {
     }
     refund(world, u.owner, o.paid);
     o.paid = null;
-    world.error(u.owner, "Can't build there.");
+    world.error(u.owner, err);
     return true;
   }
   u.state = 'move';
@@ -217,7 +237,7 @@ export function updateBuild(world, u, o) {
     stopMove(u);
     refund(world, u.owner, o.paid);
     o.paid = null;
-    world.error(u.owner, "Can't build there.");
+    world.error(u.owner, CANT_BUILD);
     return true;
   }
   return false;

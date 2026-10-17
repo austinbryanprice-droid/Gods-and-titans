@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { PANTHEON_LIST } from '../src/data/index.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -47,16 +48,48 @@ const SHOTS = {
   'fog-remembered': { q: 'scenario=fog&t=70', frames: [{ js: 'const e = [...harness.vs.lastSeen.values()][0]; if (e) harness.camera(e.x, e.y + 2, 30)', advance: 0.4 }] },
   creeps: { q: 'scenario=creeps&t=12', frames: [{ js: 'const u = [...harness.vs.entities.values()].find((e) => e.o === 0 && e.k === "u" && e.lv); if (u) harness.camera(u.ix, u.iy, 24)', advance: 0.2 }, { advance: 1.5 }] },
   trees: { q: 'scenario=trees&t=40&sel=workers' },
-  // status visuals: stun stars, slow and invulnerability rings
+  // status visuals on a lineup (default zoom, then close): stun stars, buff / debuff /
+  // slow / dot icons, shield bubble, slow and invulnerable rings, combinations
   status: {
-    q: 'scenario=creeps&t=4',
+    q: 'scenario=pantheon&pantheons=greek,norse&t=1',
     frames: [{
-      js: `const us = [...harness.world.entities.values()].filter((e) => e.kind === 'unit' && e.owner === 0 && !e.dead && e.def.class !== 'worker').slice(0, 6);
-        const put = (u, s) => { u.statuses.push({ acc: 0, key: 'shot', rem: 30, ...s }); };
-        us.forEach((u, i) => { const k = i % 3; if (k === 0) { put(u, { type: 'stun' }); u.stunned = true; } else if (k === 1) { put(u, { type: 'slow', pct: 0.4 }); u.slowPct = 0.4; } else { put(u, { type: 'invuln' }); u.invuln = true; } });
-        if (us[0]) harness.camera(us[0].x, us[0].y + 1, 14);`,
-      advance: 0.4,
-    }],
+      js: `const us = [...harness.vs.entities.values()].filter((e) => e.k === 'u' && e.o === 0 && e.t !== 'worshipper' && Math.hypot(e.x - harness.focus.army.x, e.y - harness.focus.army.y) < 12);
+        const sets = [['stun'], ['slow'], ['buff'], ['debuff'], ['dot'], ['shield'], ['invuln'], ['buff', 'shield'], ['debuff', 'slow', 'dot'], ['stun', 'debuff'], ['buff', 'dot'], ['shield', 'slow'], ['invuln', 'buff'], ['debuff'], ['buff', 'debuff', 'slow', 'dot', 'shield']];
+        us.forEach((u, i) => harness.forceStatus(u.id, sets[i % sets.length]));
+        harness.camera(harness.focus.army.x, harness.focus.army.y);`,
+      advance: 0.5,
+    }, { js: 'harness.camera(harness.focus.army.x, harness.focus.army.y, 13)', advance: 0.3 }],
+  },
+  // six workers on one mine: two mine at a time, the others wait at the edge facing it
+  mine: {
+    q: 'scenario=pantheon&pantheons=greek,norse&t=8',
+    frames: [
+      // waiting workers flagged `mw` (emulated from the sim until the snapshot carries it)
+      { js: 'harness.emulateMineWait(true); const m = [...harness.vs.entities.values()].find((e) => e.k === "m" && Math.hypot(e.x - harness.focus.base.x, e.y - harness.focus.base.y) < 14); harness.camera(m.x, m.y + 1.5, 13); harness.selectWhere((e) => e.k === "u" && e.o === 0 && e.st === "gather" && e.tg === m.id)', advance: 0.2 },
+      { advance: 0.8 },
+      { advance: 9, js: 'harness.renderer.camera.setDistance(10, true); harness.renderer.camera.update(0)' },
+    ],
+  },
+  // an enemy walking out of and back into vision fades instead of popping
+  fade: {
+    q: 'scenario=base&t=2',
+    frames: [{
+      js: `const tc = [...harness.vs.entities.values()].find((e) => e.t === 'town_center' && e.o === 0);
+        const m = harness.world.map;
+        let spot = null;
+        for (let r = 8; r < 30 && !spot; r += 0.5) {
+          for (let a = 0; a < 6.28 && !spot; a += 0.2) {
+            const x = tc.x + Math.cos(a) * r, y = tc.y + 3 + Math.sin(a) * r * 0.6;
+            if (!harness.vs.isVisibleAt(x, y) && harness.vs.isVisibleAt(x - Math.cos(a) * 1.5, y - Math.sin(a) * 0.9) && m.isPassable(Math.floor(x), Math.floor(y))) spot = { x, y, a };
+          }
+        }
+        window.__fadeSpot = spot;
+        const u = harness.world.spawnUnit(1, 'warrior', spot.x - Math.cos(spot.a) * 2.2, spot.y - Math.sin(spot.a) * 1.3, { silent: true });
+        harness.world.issueCommand(1, { type: 'move', units: [u.id], x: spot.x + Math.cos(spot.a) * 3, y: spot.y + Math.sin(spot.a) * 2 });
+        window.__fadeUnit = u.id;
+        harness.camera(spot.x, spot.y, 14);`,
+      advance: 0.2,
+    }, { advance: 0.1 }, { advance: 0.6 }, { advance: 0.12 }, { advance: 0.12 }],
   },
   // damaged buildings burn (one, two, three fires)
   fires: {
@@ -79,6 +112,18 @@ const SHOTS = {
     ],
   },
 };
+// every pantheon at the default camera: City town center + all buildings, construction
+// stages, and the whole roster (mortals, creatures, minions, gods, titan) with bars
+for (const pan of PANTHEON_LIST) {
+  SHOTS[`pan-${pan.id}`] = {
+    q: `scenario=pantheon&pantheons=${pan.id},${pan.id === 'greek' ? 'norse' : 'greek'}&t=3`,
+    frames: [
+      { js: 'harness.camera(harness.focus.base.x, harness.focus.base.y, 25); harness.selectWhere((e) => e.k === "b" && e.o === 0 && e.t === "town_center"); harness.renderer.setShowAllBars(true)', advance: 0.3 },
+      { js: 'const f = harness.focus.sites || harness.focus.base; harness.camera(f.x, f.y, 25); harness.selectWhere((e) => e.k === "b" && e.o === 0 && e.bp < 1)', advance: 0.3 },
+      { js: 'harness.camera(harness.focus.army.x, harness.focus.army.y, 25); harness.selectWhere((e) => e.k === "u" && e.o === 0 && e.t !== "worshipper" && Math.hypot(e.x - harness.focus.army.x, e.y - harness.focus.army.y) < 10)', advance: 0.3 },
+    ],
+  };
+}
 for (const pair of (opt('extra', '') || '').split(';').filter(Boolean)) {
   const i = pair.indexOf('=');
   SHOTS[pair.slice(0, i)] = { q: pair.slice(i + 1) };

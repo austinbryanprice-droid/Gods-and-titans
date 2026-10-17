@@ -3,16 +3,31 @@
 // into their ViewState and send commands. Both expose the same surface:
 //   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text),
 //     onChat(cb), onEnd(cb), start(), stop(), pingMs, isHost }
+// Everything that arrives over the network is untrusted: the host validates and
+// rate-limits each client's messages (sanitize.js); clients validate snapshots
+// and drop what they cannot use (a bad host can end the game, not crash it).
 import { INTERP_DELAY_MS, SNAPSHOT_EVERY_TICKS } from '../config.js';
 import { ViewState } from '../game/view-state.js';
 import * as mapgen from '../sim/mapgen.js';
 import { encode, apply } from './delta.js';
-import { MSG, REASONS, PING_INTERVAL_MS, sanitizeChat } from './protocol.js';
+import {
+  MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
+} from './protocol.js';
+import { sanitizeCommand, isValidSnapshot, sanitizeFelled } from './sanitize.js';
 import { Ticker } from './ticker.js';
 
 export const HOST_VIEW_DELAY_MS = 50;
 const END_CLOSE_DELAY_MS = 300;
 const RESYNC_RETRY_MS = 2000;
+// Per-client limits on the host (token buckets: rate per second, burst). A human
+// sends a few commands per second (a 24-unit cast spree is 24 at once).
+export const CLIENT_LIMITS = {
+  cmd: [40, 80],
+  chat: [1, 5],
+  ping: [4, 8],
+};
+export const RESYNC_MIN_INTERVAL_MS = 1000; // at most one full snapshot per client per second
+const CLIENT_CHAT_LIMIT = [10, 30]; // chat lines a client shows per second (bad host flooding)
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -88,9 +103,14 @@ export class HostSession extends SessionBase {
    * @param {boolean} [o.autoTick] run the ticker on start() (tests step manually with step())
    * @param {boolean} [o.useWorker] allow the background-proof worker metronome
    * @param {number} [o.viewDelayMs] local interpolation delay
+   * @param {number} [o.connTimeoutMs] silence after which a client counts as gone (GAME_TIMEOUT_MS)
    */
-  constructor({ setup, myIndex = 0, conns = new Map(), createWorld, createAI = null, autoTick = true, useWorker = true, viewDelayMs = HOST_VIEW_DELAY_MS }) {
+  constructor({
+    setup, myIndex = 0, conns = new Map(), createWorld, createAI = null, autoTick = true, useWorker = true, viewDelayMs = HOST_VIEW_DELAY_MS,
+    connTimeoutMs = GAME_TIMEOUT_MS,
+  }) {
     super(setup, myIndex);
+    this.connTimeoutMs = connTimeoutMs;
     if (typeof createWorld !== 'function') throw new Error('HostSession needs createWorld(setup).');
     this.isHost = true;
     this.createAI = createAI;
@@ -108,6 +128,7 @@ export class HostSession extends SessionBase {
     this.ticksSinceSnap = 0;
     this.snapshotsSent = 0;
     this.lastSnap = null;
+    this.netStats = { encodes: 0, encodeMs: 0, encodeMaxMs: 0 };
     this.takeSnapshot();
     for (const [index, conn] of conns || []) this.attach(index, conn);
     this.ticker = new Ticker({ onTick: () => this.tickOnce(), onBatch: () => this.afterTicks(), useWorker });
@@ -130,7 +151,17 @@ export class HostSession extends SessionBase {
   }
 
   attach(index, conn) {
-    const c = { index, conn, base: null, needsFull: true, rtt: null, offs: [] };
+    const c = {
+      index, conn, base: null, needsFull: true, rtt: null, offs: [],
+      lastFullAt: -Infinity, fullTimer: null, fulls: 0,
+      limits: {
+        cmd: new RateLimiter(...CLIENT_LIMITS.cmd),
+        chat: new RateLimiter(...CLIENT_LIMITS.chat),
+        ping: new RateLimiter(...CLIENT_LIMITS.ping),
+      },
+      dropped: { cmd: 0, chat: 0, ping: 0, invalid: 0, resync: 0 },
+    };
+    if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(this.connTimeoutMs);
     this.clients.set(index, c);
     c.offs.push(conn.onMessage((msg) => this.handleClientMessage(c, msg)));
     c.offs.push(conn.onClose((reason) => this.handleDisconnect(c, reason)));
@@ -143,15 +174,25 @@ export class HostSession extends SessionBase {
     return m;
   }
 
+  /** Map bounds for command sanitizing. */
+  get bounds() {
+    return { width: this.mapData.width, height: this.mapData.height };
+  }
+
   handleClientMessage(c, msg) {
-    if (this.stopped) return;
+    if (this.stopped || !msg || typeof msg !== 'object') return;
     switch (msg.t) {
       case MSG.CMD: {
-        const cmd = msg.cmd;
-        if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd) || typeof cmd.type !== 'string') return;
-        const clean = { ...cmd };
-        delete clean.player;
-        delete clean.playerIndex;
+        if (!this.started) return; // nothing to command before the game runs
+        if (!c.limits.cmd.take()) {
+          c.dropped.cmd++;
+          return;
+        }
+        const clean = sanitizeCommand(msg.cmd, this.bounds);
+        if (!clean) {
+          c.dropped.invalid++;
+          return;
+        }
         try {
           this.world.issueCommand(c.index, clean); // always the sender's own player index
         } catch (err) {
@@ -160,26 +201,53 @@ export class HostSession extends SessionBase {
         break;
       }
       case MSG.CHAT: {
+        if (!c.limits.chat.take()) {
+          c.dropped.chat++;
+          return;
+        }
         const text = sanitizeChat(msg.text);
         if (text) this.broadcastChat({ from: c.index, name: this.playerName(c.index), text, system: false });
         break;
       }
       case MSG.PING:
-        c.conn.send({ t: MSG.PONG, ts: msg.ts });
-        if (typeof msg.rtt === 'number' && Number.isFinite(msg.rtt)) c.rtt = msg.rtt;
+        if (!c.limits.ping.take()) {
+          c.dropped.ping++;
+          return;
+        }
+        c.conn.send({ t: MSG.PONG, ts: Number.isFinite(msg.ts) ? msg.ts : 0 });
+        if (Number.isFinite(msg.rtt) && msg.rtt >= 0) c.rtt = Math.min(msg.rtt, 60000);
         break;
       case MSG.RESYNC:
-        c.needsFull = true;
-        if (!this.ticker.running) this.sendSnapshot(c, this.lastSnap);
+        this.requestFull(c);
         break;
       default:
         break;
     }
   }
 
+  /** A client asked for a full snapshot: at most one per RESYNC_MIN_INTERVAL_MS (resync spam). */
+  requestFull(c) {
+    if (!this.started) return; // start() sends the first one
+    c.needsFull = true;
+    const wait = c.lastFullAt + RESYNC_MIN_INTERVAL_MS - now();
+    if (wait > 0) {
+      c.dropped.resync++;
+      if (!c.fullTimer) {
+        c.fullTimer = setTimeout(() => {
+          c.fullTimer = null;
+          if (c.needsFull && !this.stopped && this.clients.get(c.index) === c) this.sendSnapshot(c, this.lastSnap);
+        }, wait);
+      }
+      return;
+    }
+    // A running ticker sends it with the next snapshot; a paused one right now.
+    if (!this.ticker.running) this.sendSnapshot(c, this.lastSnap);
+  }
+
   handleDisconnect(c) {
     if (this.stopped || this.clients.get(c.index) !== c) return;
     for (const off of c.offs) off();
+    if (c.fullTimer) clearTimeout(c.fullTimer);
     this.clients.delete(c.index);
     this.leftPlayers.add(c.index);
     const name = this.playerName(c.index);
@@ -237,19 +305,29 @@ export class HostSession extends SessionBase {
   }
 
   broadcastSnapshot(snap) {
-    const cache = new Map(); // one encode per distinct base (normally all clients share one)
+    const cache = new Map(); // one encode + one JSON per distinct base (normally all clients share one)
+    const t = now();
     for (const c of this.clients.values()) {
       if (!c.conn.open) continue;
-      if (c.needsFull || !c.base) {
+      if (!c.base || (c.needsFull && t - c.lastFullAt >= RESYNC_MIN_INTERVAL_MS)) {
         this.sendSnapshot(c, snap);
         continue;
       }
-      let d = cache.get(c.base);
-      if (!d) {
-        d = encode(c.base, snap);
-        cache.set(c.base, d);
+      let wire = cache.get(c.base);
+      if (!wire) {
+        const t0 = now();
+        const d = encode(c.base, snap);
+        const ms = now() - t0;
+        this.netStats.encodes++;
+        this.netStats.encodeMs += ms;
+        if (ms > this.netStats.encodeMaxMs) this.netStats.encodeMaxMs = ms;
+        wire = { d, json: null };
+        cache.set(c.base, wire);
       }
-      c.conn.send({ t: MSG.DELTA, d });
+      if (typeof c.conn.sendJSON === 'function') {
+        if (wire.json === null) wire.json = JSON.stringify({ t: MSG.DELTA, d: wire.d });
+        c.conn.sendJSON(wire.json);
+      } else c.conn.send({ t: MSG.DELTA, d: wire.d });
       c.base = snap;
       this.snapshotsSent++;
     }
@@ -260,6 +338,8 @@ export class HostSession extends SessionBase {
     c.conn.send({ t: MSG.FULL, snap, felledAll: this.felledAll });
     c.base = snap;
     c.needsFull = false;
+    c.lastFullAt = now();
+    c.fulls++;
     this.snapshotsSent++;
   }
 
@@ -307,6 +387,7 @@ export class HostSession extends SessionBase {
     const why = reason || (this.lastSnap && this.lastSnap.gameOver ? 'game-over' : REASONS.HOST_QUIT);
     for (const c of this.clients.values()) {
       for (const off of c.offs) off();
+      if (c.fullTimer) clearTimeout(c.fullTimer);
       c.conn.send({ t: MSG.END, reason: why });
       setTimeout(() => c.conn.close('end'), END_CLOSE_DELAY_MS);
     }
@@ -323,8 +404,12 @@ export class ClientSession extends SessionBase {
    * @param {(opts: object) => object} [o.generateMap] map generator (src/sim/mapgen.js)
    * @param {number} [o.interpDelayMs]
    * @param {number} [o.pingIntervalMs]
+   * @param {number} [o.connTimeoutMs] silence after which the host counts as gone (GAME_TIMEOUT_MS)
    */
-  constructor({ setup, myIndex, conn, generateMap = mapgen.generateMap, interpDelayMs = INTERP_DELAY_MS, pingIntervalMs = PING_INTERVAL_MS, mapData = null }) {
+  constructor({
+    setup, myIndex, conn, generateMap = mapgen.generateMap, interpDelayMs = INTERP_DELAY_MS, pingIntervalMs = PING_INTERVAL_MS, mapData = null,
+    connTimeoutMs = GAME_TIMEOUT_MS,
+  }) {
     super(setup, myIndex);
     this.isHost = false;
     this.conn = conn;
@@ -347,6 +432,9 @@ export class ClientSession extends SessionBase {
     this.pingTimer = null;
     this.readyCbs = new Set();
     this.ready = new Promise((resolve) => this.readyCbs.add(resolve));
+    this.chatLimit = new RateLimiter(...CLIENT_CHAT_LIMIT);
+    this.badMessages = 0;
+    if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(connTimeoutMs);
     this.offs = [
       conn.onMessage((msg) => this.handleMessage(msg)),
       conn.onClose(() => {
@@ -356,21 +444,26 @@ export class ClientSession extends SessionBase {
   }
 
   handleMessage(msg) {
-    if (this.stopped) return;
+    if (this.stopped || !msg || typeof msg !== 'object') return;
     switch (msg.t) {
-      case MSG.FULL:
-        if (!msg.snap) return;
-        this.snap = msg.snap;
+      case MSG.FULL: {
+        const snap = msg.snap;
+        if (!isValidSnapshot(snap)) {
+          this.badMessage('full');
+          this.requestResync();
+          return;
+        }
+        if (!this.pushView(snap, sanitizeFelled(msg.felledAll, this.mapData.width, this.mapData.height))) return;
         this.awaitingFull = false;
-        this.viewState.pushSnapshot(msg.snap, now(), { felledAll: msg.felledAll || [] });
         if (this.readyCbs.size) {
           for (const cb of [...this.readyCbs]) cb(this);
           this.readyCbs.clear();
         }
         break;
+      }
       case MSG.DELTA: {
         const d = msg.d;
-        if (!d || !this.snap || d.b !== this.snap.tick) {
+        if (!d || typeof d !== 'object' || !this.snap || d.b !== this.snap.tick) {
           this.requestResync();
           return;
         }
@@ -382,23 +475,53 @@ export class ClientSession extends SessionBase {
           this.requestResync();
           return;
         }
-        this.snap = next;
-        this.viewState.pushSnapshot(next, now());
+        if (!isValidSnapshot(next)) {
+          this.badMessage('delta');
+          this.requestResync();
+          return;
+        }
+        this.pushView(next, null);
         break;
       }
-      case MSG.CHAT:
-        this.emitChat({ from: msg.from, name: msg.name || this.playerName(msg.from), text: String(msg.text || ''), system: !!msg.system });
+      case MSG.CHAT: {
+        if (!this.chatLimit.take()) return;
+        const text = sanitizeChat(msg.text);
+        if (!text) return;
+        const system = msg.system === true;
+        const from = Number.isInteger(msg.from) && msg.from >= -1 && msg.from < this.setup.players.length ? msg.from : -1;
+        this.emitChat({ from, name: system ? '' : sanitizeName(msg.name, this.playerName(from)), text, system });
         break;
+      }
       case MSG.PONG:
-        if (typeof msg.ts === 'number') this.pingMs = Math.max(0, Math.round(now() - msg.ts));
+        if (Number.isFinite(msg.ts) && msg.ts <= now()) this.pingMs = Math.max(0, Math.round(now() - msg.ts));
         break;
       case MSG.KICK:
       case MSG.END:
-        this.finish({ reason: msg.reason || REASONS.HOST_QUIT });
+        this.finish({ reason: sanitizeReason(msg.reason, REASONS.HOST_QUIT) });
         break;
       default:
         break;
     }
+  }
+
+  /** Accept a decoded snapshot; false (and a resync) if the view could not take it. */
+  pushView(snap, felledAll) {
+    const prev = this.snap;
+    this.snap = snap;
+    try {
+      this.viewState.pushSnapshot(snap, now(), felledAll ? { felledAll } : null);
+      return true;
+    } catch (err) {
+      this.reportError('view', err);
+      this.snap = prev;
+      this.requestResync();
+      return false;
+    }
+  }
+
+  badMessage(kind) {
+    this.badMessages++;
+    this.reportError(`bad ${kind}`, new Error('invalid snapshot from the host'));
   }
 
   /** Ask the host for a full snapshot (deltas arrived out of sequence). */

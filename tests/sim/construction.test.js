@@ -146,3 +146,63 @@ test('smart-click on own unfinished building helps build; leaving pauses', () =>
   assert.ok(site.buildProgress > bp);
   assert.equal(b.state, 'build');
 });
+
+test('Storehouse mine gap: Chebyshev distance between footprints', () => {
+  const w = makeWorld({ map: { mines: [{ tx: 13, ty: 6, amount: 12000 }, { tx: 30, ty: 20, amount: 12000 }, { tx: 38, ty: 38, amount: 12000 }] } });
+  const err = (tx, ty, type = 'storehouse') => w.placementError(0, type, tx, ty);
+  // West: footprint 25..26, gap 30 - 27 = 3 → fine; 26..27 gap 2 → too close.
+  assert.equal(err(25, 20), null);
+  assert.equal(err(26, 20), 'Too close to a gold mine.');
+  assert.equal(err(27, 21), 'Too close to a gold mine.');
+  // East: mine ends at 33; storehouse at 36 → gap 3.
+  assert.equal(err(36, 21), null);
+  assert.equal(err(35, 21), 'Too close to a gold mine.');
+  // Diagonal: corner gap max(dx, dy).
+  assert.equal(err(26, 15), null, 'gap x 2, y 3 → 3');
+  assert.equal(err(26, 16), 'Too close to a gold mine.', 'gap x 2, y 2');
+  // Overlap / forest / water stay "Can't build there.".
+  assert.equal(err(30, 20), "Can't build there.");
+  assert.equal(w.canPlaceBuilding(0, 'storehouse', 26, 20), false);
+  assert.equal(w.canPlaceBuilding(0, 'storehouse', 25, 20), true);
+  // Other buildings may hug a mine.
+  assert.equal(err(28, 20, 'house'), null);
+  assert.equal(err(28, 20, 'barracks'), "Can't build there.", 'barracks is 3×3: overlaps');
+  assert.equal(err(27, 20, 'barracks'), null);
+  // Town Center: 4×4.
+  assert.equal(err(23, 20, 'town_center'), null);
+  assert.equal(err(24, 20, 'town_center'), 'Too close to a gold mine.');
+});
+
+test('build command near a mine reports "Too close to a gold mine." and costs nothing', () => {
+  const w = makeWorld({ map: { mines: [{ tx: 13, ty: 6, amount: 12000 }, { tx: 30, ty: 20, amount: 12000 }, { tx: 38, ty: 38, amount: 12000 }] } });
+  const u = workers(w)[0];
+  w.issueCommand(0, { type: 'build', units: [u.id], building: 'storehouse', tx: 27, ty: 20 });
+  w.tick();
+  assert.deepEqual(errorsOf(w.events), ['Too close to a gold mine.']);
+  assert.equal(w.players[0].gold, 400);
+  w.events.length = 0;
+  w.issueCommand(0, { type: 'build', units: [u.id], building: 'storehouse', tx: 25, ty: 20 });
+  w.tick();
+  assert.deepEqual(errorsOf(w.events), []);
+  assert.equal(w.players[0].gold, 400 - 120);
+  // findPlacement never proposes a drop-off too close to a mine.
+  for (let i = 0; i < 20; i++) {
+    const p = w.findPlacement(0, 'storehouse', 31 + (i % 5) - 2, 21 + Math.floor(i / 5) - 2, 10);
+    assert.ok(p, 'found a spot');
+    assert.equal(w.placementError(0, 'storehouse', p.tx, p.ty), null);
+  }
+});
+
+test('placement rejects out-of-range, huge and non-integer coordinates', () => {
+  const w = makeWorld();
+  for (const [tx, ty] of [[1e308, 5], [5, 1e308], [-1e308, 5], [Infinity, 5], [NaN, 5], [5.5, 5], [47, 47], [47, 10], [10, 47], [2 ** 31, 0], [-0.5, 3]]) {
+    assert.equal(w.canPlaceBuilding(0, 'house', tx, ty), false, `${tx},${ty}`);
+    assert.equal(w.placementError(0, 'house', tx, ty), "Can't build there.");
+  }
+  for (const type of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', '', null, undefined, 3, {}]) {
+    assert.equal(w.canPlaceBuilding(0, type, 20, 20), false, String(type));
+  }
+  assert.equal(w.findPlacement(0, '__proto__', 20, 20, 10), null);
+  assert.equal(w.findPlacement(0, 'house', NaN, 20, 10), null);
+  assert.ok(w.findPlacement(0, 'house', 20, 20, 1e9), 'huge search radius is capped, not a hang');
+});

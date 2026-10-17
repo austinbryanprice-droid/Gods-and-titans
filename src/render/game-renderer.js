@@ -22,6 +22,8 @@ import { createTerrain, WATER_LEVEL } from './terrain.js';
 import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } from './overlays.js';
 import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
+import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
+import { StatusLayer } from './status-markers.js';
 
 const QUALITY = {
   low: { pixelRatio: 1, shadows: false, shadowSize: 0, antialias: false },
@@ -30,6 +32,7 @@ const QUALITY = {
 };
 
 const SUN_DIR = new THREE.Vector3(-30, 60, 40).normalize();
+const AIR_RING_LIFT = AIR_HOVER_HEIGHT - 0.14; // flyers' rings: just under the hovering body
 const DEATH_SECONDS = 1.65; // keep animating 'dead' this long (topple + sink)
 const COLLAPSE_SECONDS = 1.6; // destroyed buildings sink this long
 const EVENT_STALE = 1.5; // seconds: VFX events older than this are dropped (hidden tab)
@@ -37,6 +40,9 @@ const EVENT_STALE = 1.5; // seconds: VFX events older than this are dropped (hid
 // animate round robin (every 2nd..5th frame, accumulating dt).
 const ANIM_MS = 2.0;
 const ANIM_MIN = 60; // never fewer animations per frame than this
+// Models built per frame for units coming into sight (they fade in, so a frame or
+// two of delay is invisible): ~0.2 ms each, so a revealed army is spread out.
+const NEW_VIEW_MS = 3;
 const SHOW_SUMMON = new Set(['god', 'titan', 'creature', 'minion']);
 const FILL_FROM = new Set(['beam', 'cone', 'wave', 'projectile', 'dash', 'blink']);
 const FOLLOW_SHAPES = new Set(['buff', 'shield', 'heal']);
@@ -55,7 +61,6 @@ const TRAIN_COLOR = new THREE.Color('#58b8ff');
 
 const _v = new THREE.Vector3();
 const _n = new THREE.Vector3();
-const _n2 = new THREE.Vector3();
 const _c = new THREE.Color();
 const _ray = { origin: new THREE.Vector3(), dir: new THREE.Vector3() };
 const _vp = new THREE.Matrix4();
@@ -171,6 +176,7 @@ export class GameRenderer {
     this.blobs = new BlobLayer(this.overlayRoot);
     this.rings = new RingLayer(this.overlayRoot);
     this.stars = new StarLayer(this.overlayRoot);
+    this.status = new StatusLayer(this.overlayRoot);
     this.fires = new FireLayer(this.overlayRoot);
     this.bars = new BarLayer(this.overlayRoot);
     this.markers = new MarkerLayer(this.overlayRoot);
@@ -186,6 +192,7 @@ export class GameRenderer {
     this.buildings = new Map(); // id → BuildingView
     this.mines = new Map(); // id → MineView
     this.dying = []; // UnitViews playing their death
+    this.fadeMats = new FadeMaterials(); // see-through variants for units fading at the vision edge
     this.collapsing = []; // destroyed building views sinking
     this.deaths = new Map(); // id → time of its death event (renderer clock)
     this.castTargets = new Map(); // caster id → { target, t }
@@ -296,8 +303,21 @@ export class GameRenderer {
         const site = buildBuildingModel('barracks', pantheon, color, 1);
         site.setProgress(0.5);
         add(site, true);
+        const rel = this.vs.relation ? this.vs.relation(i) : 'enemy';
+        const fades = rel !== 'own' && rel !== 'ally' ? new Set() : null;
         for (const u of Object.values(UNITS)) {
-          if (u.visual && (!u.pantheon || u.pantheon === p.pantheon)) add(buildUnitModel(u, color));
+          if (!u.visual || (u.pantheon && u.pantheon !== p.pantheon)) continue;
+          const m = buildUnitModel(u, color);
+          add(m);
+          if (!fades) continue;
+          // the see-through variants enemy units use while fading at the vision edge
+          m.root.traverse((o) => {
+            if (!o.isMesh || fades.has(o.material)) return;
+            fades.add(o.material);
+            const f = new THREE.Mesh(o.geometry, this.fadeMats.get(o.material, FADE_LEVELS >> 1));
+            f.position.copy(o.position);
+            group.add(f);
+          });
         }
       });
       this.scene.add(group);
@@ -805,8 +825,7 @@ export class GameRenderer {
   onSnapshot() {
     const vs = this.vs;
     this.fow.setGoal(vs.visible, vs.explored, vs.revealAll);
-    this.syncBuildings();
-    this.syncMines();
+    this.syncStructures();
     if (this.pendingFell.size) {
       for (const [k, [tx, ty]] of this.pendingFell) {
         if (vs.revealAll || vs.isVisibleAt(tx + 0.5, ty + 0.5)) {
@@ -822,9 +841,10 @@ export class GameRenderer {
     this.placement.setOrders(orders);
     // forget stale bookkeeping
     if (this.frame % 4 === 0) {
-      for (const [id, t] of this.deaths) if (this.time - t > 5) this.deaths.delete(id);
-      for (const [id, c] of this.castTargets) if (this.time - c.t > 5) this.castTargets.delete(id);
-      for (const [id, t] of this.lastHit) if (this.time - t > 2) this.lastHit.delete(id);
+      const t = this.time;
+      for (const id of this.deaths.keys()) if (t - this.deaths.get(id) > 5) this.deaths.delete(id);
+      for (const id of this.castTargets.keys()) if (t - this.castTargets.get(id).t > 5) this.castTargets.delete(id);
+      for (const id of this.lastHit.keys()) if (t - this.lastHit.get(id) > 2) this.lastHit.delete(id);
     }
   }
 
@@ -838,27 +858,42 @@ export class GameRenderer {
     const camPos = this.threeCamera.position;
     let count = 0;
     const onScreen = this._onScreen || (this._onScreen = []);
+    const fadeStep = dt / FADE_SECONDS;
+    const fadeMats = this.fadeMats;
+    let createMs = 0;
     for (const e of vs.entities.values()) {
       if (e.k !== 'u') continue;
       let v = this.units.get(e.id);
       const vis = vs.isEntityVisible(e);
       if (!v) {
         if (!vis) continue;
+        // enemies and creeps coming into sight fade in (not at load, never own / allied units)
+        const rel = vs.relation(e.o);
+        const fadeIn = frame > 1 && rel !== 'own' && rel !== 'ally';
+        if (fadeIn && createMs > NEW_VIEW_MS) continue; // over budget: next frame
+        const t0 = fadeIn ? now() : 0;
         v = this.createUnitView(e);
+        if (fadeIn) createMs += now() - t0;
         if (!v) continue;
+        if (fadeIn) v.fade = 0;
       }
       v.seen = frame;
       v.e = e;
       if (v.visible !== vis) {
         v.visible = vis;
-        v.model.root.visible = vis;
-        if (vis) v.resetMotion(e);
+        if (vis && v.fade <= 0) v.resetMotion(e);
+        // out of sight: keep drawing (unpickable) while it fades out
       }
-      if (!vis) {
+      const goal = vis ? 1 : 0;
+      if (v.fade !== goal) {
+        v.fade = vis ? Math.min(1, v.fade + fadeStep) : Math.max(0, v.fade - fadeStep);
+        v.fader.apply(v.fade, fadeMats);
+      }
+      if (!vis && v.fade <= 0) {
         v.onScreen = false;
         continue;
       }
-      count++;
+      if (vis) count++;
       // position, speed
       const x = e.ix;
       const y = e.iy;
@@ -871,9 +906,16 @@ export class GameRenderer {
       if (v.moving) {
         if (v.speed < 0.15) v.moving = false;
       } else if (v.speed > 0.3) v.moving = true;
-      let gh = heightAt(this.map, x, y);
-      if (v.air && gh < WATER_LEVEL) gh = WATER_LEVEL;
-      v.gh = gh;
+      if (x !== v.gx || y !== v.gy) {
+        // terrain sample only when the unit moved (most stand still)
+        v.gx = x;
+        v.gy = y;
+        let h = heightAt(this.map, x, y);
+        if (v.air && h < WATER_LEVEL) h = WATER_LEVEL;
+        v.gh = h;
+        v.nOk = false;
+      }
+      const gh = v.gh;
       const root = v.model.root;
       root.position.set(x, gh, y);
       root.rotation.y = -(e.if ?? e.f ?? 0);
@@ -894,7 +936,10 @@ export class GameRenderer {
         _v.set(x, headY, y).applyMatrix4(_vp);
         v.hx = (_v.x * 0.5 + 0.5) * W;
         v.hy = (0.5 - _v.y * 0.5) * H;
-        const dist = Math.hypot(x - camPos.x, (footY + headY) * 0.5 - camPos.y, y - camPos.z);
+        const ddx = x - camPos.x;
+        const ddy = (footY + headY) * 0.5 - camPos.y;
+        const ddz = y - camPos.z;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
         const pxPerWorld = H / (2 * dist * tanHalf);
         v.pr = Math.max(10, (v.radius * 1.15 + 0.18) * pxPerWorld);
         onScreen.push(v);
@@ -921,10 +966,21 @@ export class GameRenderer {
       ex.speed = v.speed;
       ex.level = e.lv || 1;
       ex.carry = e.c || 0;
-      ex.gather = e.st === 'gather' ? (e.tg && (vs.entities.get(e.tg) || {}).k === 'm' ? 'g' : 'w') : undefined;
+      let st = e.st;
+      if (st === 'gather') {
+        if (e.mw) {
+          // waiting its turn at a full gold mine (`mw`, see notes/interface-requests.md
+          // [renderfix → simfix]): stand by facing the mine, no pick swing
+          st = 'idle';
+          ex.gather = undefined;
+        } else {
+          const t = e.tg ? vs.entities.get(e.tg) : undefined;
+          ex.gather = t !== undefined && t.k === 'm' ? 'g' : 'w';
+        }
+      } else ex.gather = undefined;
       ex.attackPhase = v.attackPhase(this.time);
       try {
-        v.model.animate(e.st, this.time, Math.min(dt + v.skipped, 0.1), ex);
+        v.model.animate(st, this.time, Math.min(dt + v.skipped, 0.1), ex);
       } catch (err) {
         if (!this.warnedAnim) console.error('[render] unit animation failed', e.t, err);
         this.warnedAnim = true;
@@ -939,8 +995,9 @@ export class GameRenderer {
     }
     onScreen.length = 0;
     // gone from the view state: death animation or removal
-    for (const [id, v] of this.units) {
+    for (const v of this.units.values()) {
       if (v.seen === frame) continue;
+      const id = v.id;
       this.units.delete(id);
       if (v.visible && this.deaths.has(id)) {
         v.dyingT = 0;
@@ -995,6 +1052,20 @@ export class GameRenderer {
     list.length = j;
   }
 
+  /**
+   * Building and mine views for the latest snapshot. Runs at most once per
+   * snapshot: from update(), or earlier from pickEntity() when a click comes in
+   * after a snapshot but before the next frame (a building placed this tick is
+   * clickable at once).
+   */
+  syncStructures() {
+    const n = this.vs.snapshotCount;
+    if (this.structureSnapshot === n) return;
+    this.structureSnapshot = n;
+    this.syncBuildings();
+    this.syncMines();
+  }
+
   syncBuildings() {
     const vs = this.vs;
     const tag = (this.buildingTag = (this.buildingTag || 0) + 1);
@@ -1011,8 +1082,9 @@ export class GameRenderer {
         this.touchBuilding(cur, ls, tag);
       }
     }
-    for (const [id, b] of this.buildings) {
+    for (const b of this.buildings.values()) {
       if (b.tag === tag) continue;
+      const id = b.id;
       this.buildings.delete(id);
       if (this.deaths.has(id) && this.visibleAt(b.x, b.y)) {
         b.collapseT = 0;
@@ -1117,14 +1189,27 @@ export class GameRenderer {
         m.model.setAmountFraction((e.amt || 0) / m.initial);
       }
     }
-    for (const [id, m] of this.mines) {
+    for (const m of this.mines.values()) {
       if (m.tag === tag) continue;
-      this.mines.delete(id);
+      this.mines.delete(m.id);
       m.model.dispose();
     }
   }
 
   // ------------------------------------------------------------------ overlays
+
+  /** Ground normal under a unit, cached until it moves (see syncUnits). Returns the shared _n. */
+  unitNormal(v) {
+    if (!v.nOk) {
+      this.groundNormal(v.x, v.y, _n);
+      v.nx = _n.x;
+      v.ny = _n.y;
+      v.nz = _n.z;
+      v.nOk = true;
+      return _n;
+    }
+    return _n.set(v.nx, v.ny, v.nz);
+  }
 
   groundNormal(x, y, out) {
     const hx = heightAt(this.map, x + 0.35, y) - heightAt(this.map, x - 0.35, y);
@@ -1149,6 +1234,7 @@ export class GameRenderer {
     bars.begin();
     blobs.begin();
     stars.begin();
+    this.status.begin(this.time);
     const fires = this.fires;
     fires.begin(this.time);
     const sel = this.selection;
@@ -1158,26 +1244,36 @@ export class GameRenderer {
 
     // units
     for (const v of this.units.values()) {
-      if (!v.visible) continue;
+      const fade = v.fade;
+      if (!v.visible) {
+        // fading out of sight: its blob shadow fades with it, nothing else
+        if (fade > 0 && v.onScreen && !v.air) {
+          const br = v.radius * 1.35 + 0.16;
+          blobs.add(v.x, v.gh + 0.03, v.y, this.unitNormal(v), br, br * 0.92, 0, blobAlpha * fade);
+        }
+        continue;
+      }
       entities++;
       const e = v.e;
       const selected = sel.has(e.id);
       const hovered = hover === e.id;
       if (!v.onScreen) continue;
-      if (!v.air) {
-        const n = this.groundNormal(v.x, v.y, _n);
+      // one ground normal per unit and frame (shared _n, consumed at once by each layer)
+      const n = v.air ? null : this.unitNormal(v);
+      if (n) {
         const br = v.radius * 1.35 + 0.16;
-        blobs.add(v.x, v.gh + 0.03, v.y, n, br, br * 0.92, 0, blobAlpha);
+        blobs.add(v.x, v.gh + 0.03, v.y, n, br, br * 0.92, 0, blobAlpha * fade);
       }
       const fx = e.fx;
-      if (fx && fx.length) this.statusOverlay(v, fx);
+      if (fx && fx.length) this.statusOverlay(v, fx, fade, zk, n);
       if (selected || hovered) {
         const col = RELATION_COLORS[v.relation] || RELATION_COLORS.neutral;
         const r = v.radius * 1.22 + 0.14;
-        const n = this.groundNormal(v.x, v.y, _n);
-        const ry = (v.air ? Math.max(v.gh, WATER_LEVEL) : v.gh) + 0.05 + r * 0.12 * (1 - n.y) * 4;
-        if (selected) rings.add(v.x, ry, v.y, n, r, col, 0.95, 0.075 * Math.max(1, r * 0.6));
-        if (hovered && !selected) rings.add(v.x, ry, v.y, n, r, col, 0.55, 0.05 * Math.max(1, r * 0.6), 0.6);
+        // flyers: a level ring at their flying height, right under the body
+        // (on the ground it reads as an empty circle far below the unit)
+        const ry = v.air ? v.gh + AIR_RING_LIFT : v.gh + 0.05 + r * 0.12 * (1 - n.y) * 4;
+        if (selected) rings.add(v.x, ry, v.y, n, r, col, 0.95 * fade, 0.075 * Math.max(1, r * 0.6));
+        if (hovered && !selected) rings.add(v.x, ry, v.y, n, r, col, 0.55 * fade, 0.05 * Math.max(1, r * 0.6), 0.6);
       }
       const mhp = e.mhp || 1;
       const damaged = e.hp < mhp;
@@ -1186,7 +1282,7 @@ export class GameRenderer {
         const h = (v.def.class === 'god' || v.def.class === 'titan' ? 0.13 : 0.105) * zk;
         const y = v.gh + v.height + 0.22 * zk;
         const frac = e.hp / mhp;
-        bars.add(v.x, y, v.y, w, h, frac, (e.sh || 0) / mhp, healthColor(frac, _c), 0, 1);
+        bars.add(v.x, y, v.y, w, h, frac, (e.sh || 0) / mhp, healthColor(frac, _c), 0, fade);
       }
     }
 
@@ -1246,13 +1342,14 @@ export class GameRenderer {
       if (v.air || !v.onScreen) continue;
       const k = 1 - v.dyingT / DEATH_SECONDS;
       const br = v.radius * 1.35 + 0.16;
-      blobs.add(v.x, v.gh + 0.03, v.y, this.groundNormal(v.x, v.y, _n), br, br * 0.92, 0, blobAlpha * k);
+      blobs.add(v.x, v.gh + 0.03, v.y, this.unitNormal(v), br, br * 0.92, 0, blobAlpha * k);
     }
 
     rings.end();
     bars.end();
     blobs.end();
     stars.end();
+    this.status.end();
     fires.end();
     this.stats.entities = entities;
 
@@ -1274,13 +1371,17 @@ export class GameRenderer {
     this.placement.update(dt);
   }
 
-  /** Status visuals: stun stars over the head, a frosty ring when slowed, a golden one when invulnerable. */
-  statusOverlay(v, fx) {
+  /**
+   * Status visuals: stun stars over the head; icons above the health bar for
+   * buff / debuff / slow / damage over time; a bubble around shielded units;
+   * a frosty ground ring when slowed and a golden one when invulnerable.
+   */
+  statusOverlay(v, fx, fade = 1, zk = 1, normal = undefined) {
     let n = null;
     let groundY;
-    if (v.air) groundY = Math.max(v.gh, WATER_LEVEL) + 0.06;
+    if (v.air) groundY = v.gh + AIR_RING_LIFT + 0.02;
     else {
-      n = this.groundNormal(v.x, v.y, _n2);
+      n = normal || this.unitNormal(v);
       groundY = v.gh + 0.06 + (v.radius + 0.2) * 0.5 * (1 - n.y);
     }
     for (let i = 0; i < fx.length; i++) {
@@ -1291,15 +1392,24 @@ export class GameRenderer {
           break;
         }
         case 'slow':
-          this.rings.add(v.x, groundY, v.y, n, v.radius * 0.95 + 0.1, STATUS_SLOW, 0.75, 0.06, 0.3);
+          this.rings.add(v.x, groundY, v.y, n, v.radius * 0.95 + 0.1, STATUS_SLOW, 0.75 * fade, 0.06, 0.3);
           break;
         case 'invuln':
-          this.rings.add(v.x, groundY, v.y, n, v.radius * 1.4 + 0.2, STATUS_INVULN, 0.85, 0.09, 1);
+          this.rings.add(v.x, groundY, v.y, n, v.radius * 1.4 + 0.2, STATUS_INVULN, 0.85 * fade, 0.09, 1);
+          this.rings.add(v.x, groundY + 0.02, v.y, n, v.radius * 1.4 + 0.42, STATUS_INVULN, 0.45 * fade, 0.05, 1);
           break;
+        case 'shield': {
+          const lo = v.air ? AIR_HOVER_HEIGHT : 0;
+          const body = Math.max(0.5, v.height - lo);
+          const r = Math.max(body * 0.62, v.radius * 1.3 + 0.2);
+          this.status.addBubble(v.x, v.gh + lo + body * 0.5, v.y, r, fade, v.id * 0.7);
+          break;
+        }
         default:
           break;
       }
     }
+    this.status.addIcons(v.x, v.gh + v.height + 0.6 * zk, v.y, fx, 0.42 * zk, fade, v.id * 0.37);
   }
 
   updateShadowCamera() {
@@ -1312,7 +1422,11 @@ export class GameRenderer {
       cy += p.y / 4;
     }
     let r = 0;
-    for (const p of quad) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
+    for (const p of quad) {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      r = Math.max(r, Math.sqrt(dx * dx + dy * dy));
+    }
     r = Math.ceil(Math.min(r * 1.05 + 3, 70) / 4) * 4; // quantized: texel size changes only in steps
     const cam = this.sun.shadow.camera;
     if (r !== this.shadowR) {
@@ -1414,6 +1528,8 @@ export class GameRenderer {
    * @returns {number|null}
    */
   pickEntity(sx, sy) {
+    if (this.disposed) return null;
+    this.syncStructures();
     let best = null;
     let bestScore = Infinity;
     for (const v of this.units.values()) {
@@ -1493,6 +1609,7 @@ export class GameRenderer {
     this.placement.dispose();
     this.blobs.dispose();
     this.stars.dispose();
+    this.status.dispose();
     this.fires.dispose();
     this.rings.dispose();
     this.bars.dispose();
@@ -1500,6 +1617,7 @@ export class GameRenderer {
     this.texts.dispose();
     this.flags.dispose();
     this.vfx.dispose();
+    this.fadeMats.dispose();
     this.forest.dispose();
     this.decor.dispose();
     if (this.rockDecor) this.rockDecor.dispose();
@@ -1549,6 +1667,14 @@ class UnitView {
     this.moving = false;
     this.cx = this.cy = this.fx = this.fy = this.hx = this.hy = 0;
     this.pr = 10;
+    this.ndcX = this.ndcY = 0;
+    // last terrain sample (syncUnits) and the cached ground normal there
+    this.gx = this.gy = NaN;
+    this.nx = this.nz = 0;
+    this.ny = 1;
+    this.nOk = false;
+    this.fade = 1; // 0 hidden … 1 fully drawn (vision-edge fade)
+    this.fader = new UnitFader(model.root);
   }
 
   resetMotion(e) {
@@ -1578,6 +1704,7 @@ class UnitView {
     this.model.root.traverse((o) => {
       if (o.isMesh && o.name !== 'shadow' && o.name !== 'aura') o.castShadow = on;
     });
+    this.fader.syncShadows();
   }
 
   dispose() {

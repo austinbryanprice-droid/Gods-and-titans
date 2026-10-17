@@ -199,6 +199,26 @@ export function moveToUnit(world, u, t) {
   return m;
 }
 
+/**
+ * Steer straight at a point that may change every tick (no pathfinding: the
+ * caller makes sure the way is clear). Used for the last few tiles of a melee
+ * approach to an attack spot around a moving target.
+ */
+export function steerToPoint(world, u, x, y) {
+  const map = world.map;
+  let m = u.mv;
+  if (!m || m.kind !== 'steer') {
+    m = newMv(world, u, 'steer');
+    u.mv = m;
+  }
+  m.gx = m.ox = clamp(x, 0.3, map.width - 0.3);
+  m.gy = m.oy = clamp(y, 0.3, map.height - 0.3);
+  m.direct = true;
+  m.arrived = false;
+  m.failed = false;
+  return m;
+}
+
 /** Move next to any entity: units are chased, footprints approached. */
 export function moveToEntity(world, u, e) {
   if (e.kind === 'unit') return moveToUnit(world, u, e);
@@ -414,8 +434,8 @@ function stepUnit(world, u) {
   u.y += diry * mvStep;
   u.moving = true;
   u.facing = turnToward(u.facing, Math.atan2(diry, dirx), TURN_RATE * DT);
-  // Stuck detection.
-  if (world.tickCount - mv.checkT >= STUCK_INTERVAL) {
+  // Stuck detection (steering callers track their own progress).
+  if (mv.kind !== 'steer' && world.tickCount - mv.checkT >= STUCK_INTERVAL) {
     const moved = hyp(u.x - mv.checkX, u.y - mv.checkY);
     const expect = speed * STUCK_INTERVAL * DT;
     if (moved < expect * 0.25) {

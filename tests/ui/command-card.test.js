@@ -280,8 +280,8 @@ test('god card: abilities Q W R in the bottom row with level locks and cooldowns
   assert.equal(q.state, 'ready');
   assert.deepEqual(q.action, { kind: 'target', order: 'cast', ability: 'greek_zeus_thunderbolt', target: 'point', unitType: 'greek_zeus' });
   assert.equal(w.state, 'locked');
-  assert.equal(w.reason, 'That god is not unlocked yet.');
-  assert.match(w.description, /Unlocks at level 2/);
+  assert.equal(w.reason, 'Unlocks at level 2.');
+  assert.doesNotMatch(w.description, /Unlocks at level/, 'the red reason line says it');
   assert.equal(r.level, 4);
 
   // Cast Q: the button shows a cooldown sweep.
@@ -295,6 +295,8 @@ test('god card: abilities Q W R in the bottom row with level locks and cooldowns
   assert.ok(card[8].cooldown > 0.5 && card[8].cooldown < 1, `fraction ${card[8].cooldown}`);
   assert.ok(card[8].cooldownLeft > 5);
   assert.equal(card[9].state, 'ready', 'level 2 unlocks W');
+  assert.doesNotMatch(card[9].description, /Unlocks at level/, 'already unlocked: no unlock note');
+  assert.match(card[9].description, /At level 2 \(\+10%\): 121 chain damage\./);
   assert.equal(card[11].state, 'locked');
 });
 

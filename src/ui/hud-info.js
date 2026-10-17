@@ -2,9 +2,10 @@
 // selection, or a grid of icons with health bars for a group. Building queues
 // (click an item to cancel it), construction progress, prayer counts, god
 // level / xp, status effects and carried resources.
-import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE } from '../config.js';
+import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE, MINE_SLOTS, MINE_TIME, CARRY_AMOUNT } from '../config.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
-import { el, setText, setStyle, setHidden, fmt, pct, hpColor } from './hud-dom.js';
+import { sanitizeName } from '../net/protocol.js';
+import { el, setText, setStyle, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import { defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName } from './hud-data.js';
 
 const STATUS = {
@@ -27,16 +28,54 @@ const CLASS_TEXT = {
   creature: 'Mythical Creature', god: 'God', titan: 'Titan', minion: 'Summoned',
 };
 
+function playerOf(vs, owner) {
+  if (!Number.isInteger(owner) || owner < 0) return null;
+  return vs.players[owner] || (vs.setup && vs.setup.players[owner]) || null;
+}
+
 function teamColor(vs, owner) {
   if (owner < 0) return '#8a7a5a';
-  const p = vs.players[owner] || (vs.setup && vs.setup.players[owner]);
-  return (p && p.color) || '#888';
+  const p = playerOf(vs, owner);
+  return safeColor(p && p.color, '#888888');
 }
 
 function ownerName(vs, owner) {
   if (owner < 0) return 'Neutral';
-  const p = vs.players[owner] || (vs.setup && vs.setup.players[owner]);
-  return p ? p.name : `Player ${owner + 1}`;
+  const p = playerOf(vs, owner);
+  return sanitizeName(p && p.name, `Player ${owner + 1}`);
+}
+
+/** Text for the attack range stat: melee attacks have no projectile (the sim's rule). */
+export function rangeText(attack) {
+  if (!attack) return '';
+  return attack.projectile ? String(attack.range) : 'Melee';
+}
+
+/** Own workers gathering at a gold mine (walking to it, waiting their turn or mining). */
+function ownMinersAt(vs, mineId) {
+  let n = 0;
+  for (const e of vs.entities.values()) {
+    if (e.k === 'u' && e.o === vs.myIndex && e.st === 'gather' && e.tg === mineId) n++;
+  }
+  return n;
+}
+
+/** "Miners 1/2": workers mining the mine right now (the snapshot's `mn`) out of MINE_SLOTS. */
+export function minersText(mine) {
+  const n = mine && Number.isFinite(mine.mn) ? Math.max(0, Math.min(MINE_SLOTS, mine.mn)) : 0;
+  return `${n}/${MINE_SLOTS}`;
+}
+
+/** The selected unit's state line ("Gathering gold · Carrying gold"); only expiry for others' units. */
+export function unitStateText(e, def, myIndex) {
+  if (e.o !== myIndex) return e.ex ? `Vanishes in ${Math.ceil(e.ex)}s` : '';
+  let st = STATE_TEXT[e.st] || '';
+  // `mw` (requested from the sim, see notes/interface-requests.md): waiting for one of the mining spots.
+  if (e.st === 'gather' && def && def.class === 'worker') st = e.tg ? (e.mw ? 'Waiting its turn at the gold mine' : 'Gathering gold') : 'Chopping wood';
+  if (e.c) st += `${st ? ' · ' : ''}Carrying ${e.c === 'g' ? 'gold' : 'wood'}`;
+  if (e.bo && BUILDINGS[e.bo.b]) st = `On the way to build a ${BUILDINGS[e.bo.b].name}`;
+  if (e.ex) st += `${st ? ' · ' : ''}Vanishes in ${Math.ceil(e.ex)}s`;
+  return st;
 }
 
 /** Shape of an entity that needs a panel rebuild when it changes. */
@@ -150,6 +189,9 @@ export class InfoView {
       if (def.popProvided && e.o === vs.myIndex) s.parts.popp = stat('🏠', 'Housing');
     } else if (e.k === 'm') {
       s.parts.gold = stat('🪙', 'Gold left', 'is-wide');
+      s.parts.miners = stat('⛏️', 'Miners', 'is-wide');
+      s.parts.mineNote = el('div', 'hi-note');
+      extra.append(s.parts.mineNote, el('div', 'hi-note is-dim', `Up to ${MINE_SLOTS} Worshippers mine at once, ${MINE_TIME} s per ${CARRY_AMOUNT} gold; the others wait their turn.`));
     }
 
     // Extra block by kind.
@@ -223,7 +265,7 @@ export class InfoView {
     } else if (e.t === 'storehouse' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', 'Gold and wood can be delivered here.'));
     } else if (e.t === 'house' && e.o === vs.myIndex) {
-      extra.appendChild(el('div', 'hi-note is-dim', 'Provides housing for 8 population.'));
+      extra.appendChild(el('div', 'hi-note is-dim', `Provides housing for ${def.popProvided} population.`));
     }
   }
 
@@ -253,7 +295,7 @@ export class InfoView {
       if (p.dmg) {
         const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1);
         setText(p.dmg, `${Math.round(dmg)}${def.attack.splash ? ' (splash)' : ''}`);
-        setText(p.range, def.attack.range <= 1 ? 'Melee' : String(def.attack.range));
+        setText(p.range, rangeText(def.attack));
       }
       const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0);
       setText(p.armor, String(Math.round(armor * 10) / 10));
@@ -269,14 +311,7 @@ export class InfoView {
           setText(p.xpText, `Level ${lv} · XP ${fmt(e.xp || 0)} / ${fmt(hi)}`);
         }
       }
-      // state line
-      let st = STATE_TEXT[e.st] || '';
-      if (e.st === 'gather' && def.class === 'worker') st = e.tg ? 'Mining gold' : 'Chopping wood';
-      if (e.c) st += `${st ? ' · ' : ''}Carrying ${e.c === 'g' ? 'gold' : 'wood'}`;
-      if (e.bo && BUILDINGS[e.bo.b]) st = `On the way to build a ${BUILDINGS[e.bo.b].name}`;
-      if (e.ex) st += `${st ? ' · ' : ''}Vanishes in ${Math.ceil(e.ex)}s`;
-      if (e.o !== vs.myIndex) st = e.ex ? `Vanishes in ${Math.ceil(e.ex)}s` : '';
-      setText(p.state, st);
+      setText(p.state, unitStateText(e, def, vs.myIndex));
       const fx = e.fx || [];
       const sig = fx.join(',') + (e.c || '');
       if (sig !== p.statusSig) {
@@ -308,6 +343,9 @@ export class InfoView {
       }
     } else if (e.k === 'm') {
       setText(p.gold, fmt(e.amt));
+      setText(p.miners, minersText(e));
+      const mine = ownMinersAt(vs, e.id);
+      setText(p.mineNote, mine ? `${mine} of your Worshippers ${mine === 1 ? 'works' : 'work'} here.` : '');
     }
     // Name can change (town center tier).
     setText(s.nameEl, nameOf(e));

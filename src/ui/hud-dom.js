@@ -60,6 +60,17 @@ export function pct(v) {
   return `${Math.max(0, Math.min(100, v * 100)).toFixed(1)}%`;
 }
 
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/**
+ * A CSS colour that is safe to put into a style (player colours come from the
+ * host's snapshots): only #rgb / #rrggbb, anything else gives the fallback, so
+ * a hostile value can never smuggle url(…) or other CSS into the page.
+ */
+export function safeColor(c, fallback = '#888888') {
+  return typeof c === 'string' && HEX_COLOR.test(c) ? c : fallback;
+}
+
 /** Colour for an hp fraction: green → yellow → red. */
 export function hpColor(f) {
   if (f > 0.6) return '#4fd65a';

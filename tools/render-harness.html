@@ -8,7 +8,10 @@
     Visual check page for src/render/game-renderer.js: runs a real local game
     (createWorld + ViewState, no HUD, no AI) with scripted commands and a free
     camera. URL params:
-      scenario=base|battle|fog|construction|creeps|trees|perf   (default base)
+      scenario=base|battle|fog|construction|creeps|trees|perf|pantheon   (default base)
+                    pantheon: every unit (mortals, creatures, minions, gods, titan) and
+                    building (City town center, titan gate, construction stages) of the
+                    first pantheon; harness.focus.base / .army / .sites are camera spots
       seed=12345  size=small|medium  my=0 (-1 = spectator, sees all)
       pantheons=greek,norse,...  players=2      quality=low|medium|high
       t=20          simulate this many seconds before showing
@@ -55,7 +58,7 @@
     import { UNITS, PANTHEONS, PANTHEON_LIST, BUILDINGS } from '../src/data/index.js';
 
     const Q = new URLSearchParams(location.search);
-    const SCENARIOS = ['base', 'battle', 'fog', 'construction', 'creeps', 'trees', 'perf'];
+    const SCENARIOS = ['base', 'battle', 'fog', 'construction', 'creeps', 'trees', 'perf', 'pantheon'];
     const scenario = SCENARIOS.includes(Q.get('scenario')) ? Q.get('scenario') : 'base';
     const manual = Q.get('manual') === '1';
     const quality = Q.get('quality') || 'medium';
@@ -68,6 +71,7 @@
       creeps: { size: 'small', players: 2, pantheons: 'mesopotamian,west_african' },
       trees: { size: 'small', players: 2, pantheons: 'norse,greek' },
       perf: { size: 'medium', players: 4, pantheons: 'greek,norse,egyptian,japanese' },
+      pantheon: { size: 'small', players: 2, pantheons: 'greek,norse' },
     }[scenario];
     const nPlayers = Number(Q.get('players') || defaults.players);
     const pantheons = (Q.get('pantheons') || defaults.pantheons).split(',');
@@ -163,7 +167,106 @@
       });
     }
 
+    /** Top-left tile of the free w × h rectangle of passable, building-free ground nearest (x, y). */
+    function openArea(w, h, x, y, maxR = 30) {
+      const m = world.map;
+      const W = m.width;
+      const H = m.height;
+      // prefix sums of blocked tiles (impassable, or under a building / mine)
+      const blocked = new Uint8Array(W * H);
+      for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) if (!m.isPassable(tx, ty)) blocked[ty * W + tx] = 1;
+      for (const e of world.entities.values()) {
+        if (e.kind === 'unit' || e.dead) continue;
+        for (let j = -1; j <= e.size; j++) for (let i = -1; i <= e.size; i++) {
+          const tx = e.tx + i;
+          const ty = e.ty + j;
+          if (tx >= 0 && ty >= 0 && tx < W && ty < H) blocked[ty * W + tx] = 1;
+        }
+      }
+      const S = new Int32Array((W + 1) * (H + 1));
+      for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+        S[(ty + 1) * (W + 1) + tx + 1] = blocked[ty * W + tx] + S[ty * (W + 1) + tx + 1] + S[(ty + 1) * (W + 1) + tx] - S[ty * (W + 1) + tx];
+      }
+      const sum = (tx, ty) => S[(ty + h) * (W + 1) + tx + w] - S[ty * (W + 1) + tx + w] - S[(ty + h) * (W + 1) + tx] + S[ty * (W + 1) + tx];
+      let best = null;
+      let bd = Infinity;
+      for (let ty = Math.max(1, Math.floor(y - maxR)); ty <= Math.min(H - h - 1, y + maxR); ty++) {
+        for (let tx = Math.max(1, Math.floor(x - maxR)); tx <= Math.min(W - w - 1, x + maxR); tx++) {
+          const d = Math.hypot(tx + w / 2 - x, ty + h / 2 - y);
+          if (d < bd && sum(tx, ty) === 0) { bd = d; best = { tx, ty, w, h }; }
+        }
+      }
+      return best;
+    }
+    const focus = {};
+
     const setupScenario = {
+      pantheon() {
+        // player 0: the whole pantheon at the default camera; a few workers mine (2 at
+        // a time, the rest wait their turn at the mine edge) and chop
+        const p = 0;
+        const pan = PANTHEONS[world.players[p].pantheon];
+        const tc = tcOf(p);
+        tc.tier = 3;
+        world.players[p].tier = 3;
+        const ws = unitsOf(p, 'worker');
+        const mine = mineOf(p);
+        if (mine) cmd(p, { type: 'gather', units: ws.slice(0, 4).map((u) => u.id), target: mine.id });
+        const tree = world.map.nearestForest(tc.x, tc.y, 20, true);
+        if (tree) cmd(p, { type: 'gather', units: ws.slice(4).map((u) => u.id), tx: tree.tx, ty: tree.ty });
+        for (let i = 0; i < 2; i++) {
+          const w = world.spawnUnit(p, 'worshipper', tc.x + 2, tc.y + 3, { silent: true });
+          if (w && mine) cmd(p, { type: 'gather', units: [w.id], target: mine.id });
+        }
+        const placed = {};
+        const put = (type, dx, dy, bp = 1) => {
+          const spot = world.findPlacement(p, type, tc.x + dx, tc.y + dy, 12);
+          if (!spot) return null;
+          const b = world.createBuilding(p, type, spot.tx, spot.ty, bp >= 1, true);
+          if (bp < 1) { b.buildProgress = bp; b.hp = b.maxHp * (0.1 + 0.9 * bp); }
+          (placed[type] = placed[type] || []).push(b);
+          return b;
+        };
+        put('house', -6, -1);
+        put('house', -6, 2.5);
+        put('barracks', 6.5, -1);
+        put('shrine', -6.5, 6);
+        put('temple', 6.5, 4.5);
+        put('tower', 1, 8);
+        put('storehouse', -2.5, 8);
+        put('titan_gate', 6, 10);
+        const sites = [put('house', -9, 12, 0.1), put('barracks', -4, 13, 0.45), put('temple', 1.5, 13.5, 0.8)].filter(Boolean);
+        focus.base = { x: tc.x + 0.5, y: tc.y + 3.5 };
+        if (sites.length) focus.sites = { x: sites.reduce((a, b) => a + b.x, 0) / sites.length, y: sites.reduce((a, b) => a + b.y, 0) / sites.length + 1 };
+        // the army: mortals, creatures + minions, gods + titan in rows on open ground
+        const rows = [
+          ['worshipper', 'warrior', 'archer', 'priest', 'battering_ram'],
+          [...pan.creatures.map((c) => c.id), ...(pan.minions || []).map((m) => m.id)],
+          [...pan.gods.map((g) => g.id), pan.titan.id],
+        ];
+        const area = openArea(20, 13, tc.x, tc.y + 22, 40) || openArea(16, 11, tc.x, tc.y + 22, 48) || { tx: Math.floor(tc.x - 8), ty: Math.floor(tc.y + 16), w: 16, h: 11 };
+        const cx = area.tx + area.w / 2;
+        const gap = 1.1;
+        let y = area.ty + 1;
+        for (const row of rows) {
+          const defs = row.map((t) => UNITS[t]).filter(Boolean);
+          const width = defs.reduce((a, d) => a + d.radius * 2 + gap, 0);
+          let x = cx - width / 2;
+          let rowR = 0;
+          for (const d of defs) rowR = Math.max(rowR, d.radius);
+          y += rowR + 0.4;
+          for (const d of defs) {
+            x += d.radius + gap / 2;
+            const u = world.spawnUnit(p, d.id, x, y, { silent: true, facing: Math.PI / 2 - 0.45 });
+            if (u && u.def.class === 'god') world.gainXp(u, 2000);
+            if (u) cmd(p, { type: 'hold', units: [u.id] });
+            x += d.radius + gap / 2;
+          }
+          y += rowR + 1.6;
+        }
+        focus.army = { x: cx, y: area.ty + area.h / 2 };
+        focus.placed = placed;
+      },
       base() {
         for (let p = 0; p < nPlayers; p++) economy(p);
       },
@@ -252,11 +355,27 @@
     let tickN = 0;
     let simAcc = 0;
     let paused = false;
+    const forcedFx = new Map(); // unit id → status codes shown regardless of the sim (status shots)
+    let emulateMw = false; // harness.emulateMineWait(true): fill `mw` from the sim (mine shot)
     function simTick() {
       for (const s of scripts) s(tickN);
       world.tick();
       tickN++;
       vs.pushSnapshot(world.getSnapshot(), vnow);
+      for (const [id, fx] of forcedFx) {
+        const e = vs.entities.get(id);
+        if (e) e.fx = fx;
+      }
+      // stand-in for the requested unit key `mw` (waiting for a gold-mine slot;
+      // notes/interface-requests.md [renderfix → simfix]) until the sim sends it
+      if (emulateMw) {
+        for (const u of world.entities.values()) {
+          const o = u.order;
+          if (u.kind !== 'unit' || !o || o.type !== 'gather' || !o.mine) continue;
+          const e = vs.entities.get(u.id);
+          if (e && !('mw' in e) && o.phase === 'wait') e.mw = 1;
+        }
+      }
     }
     const perf = { n: 0, sum: 0, max: 0, hist: [] };
     function frame(dtMs) {
@@ -448,6 +567,10 @@
       selectWhere(fn) { select([...vs.entities.values()].filter(fn).map((e) => e.id)); },
       camera(x, y, d) { renderer.camera.centerOn(x, y); if (d) renderer.camera.setDistance(d, true); renderer.camera.update(0); },
       showGhost,
+      focus,
+      /** Show these status codes on a unit (every snapshot), e.g. ['buff', 'shield']; null clears. */
+      forceStatus(id, fx) { if (fx) forcedFx.set(id, fx); else forcedFx.delete(id); },
+      emulateMineWait(on) { emulateMw = !!on; },
       perf() {
         const h = perf.hist;
         const sorted = [...h].sort((a, b) => a - b);

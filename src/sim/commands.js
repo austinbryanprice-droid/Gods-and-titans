@@ -8,6 +8,65 @@ import { issueTrain, cancelTrain, issueTierUp, setRally } from './production.js'
 import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility } from './abilities.js';
 import { hyp } from './common.js';
 
+// ---- Input normalization (commands are untrusted: network, AI, HUD) ----
+
+export const MAX_COMMAND_UNITS = 512; // ids kept per command
+const MAX_UNITS_SCAN = 4096; // array elements looked at per command
+export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
+const MAX_NAME = 64;
+
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender']);
+
+const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+const clampTo = (v, hi) => (v === undefined ? undefined : v < 0 ? 0 : v > hi ? hi : v);
+/** A type id (short string) or an entity id (positive integer): 'building' and 'unit' are both, by command. */
+const nameOrId = (v) => (typeof v === 'string' ? (v.length <= MAX_NAME ? v : undefined) : idOf(v) || undefined);
+
+function unitIds(v) {
+  const out = [];
+  if (!Array.isArray(v)) return out;
+  const n = Math.min(v.length, MAX_UNITS_SCAN);
+  for (let i = 0; i < n && out.length < MAX_COMMAND_UNITS; i++) {
+    const id = idOf(v[i]);
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * A clean copy of a command (DESIGN 6.2) with every field of a known type:
+ * units an id array, ids positive integers (0 = none), x / y finite and
+ * clamped to the map, tx / ty finite (validated where used), names short
+ * strings. Unknown command types, non-objects and objects whose fields throw
+ * on access give null. Copying also keeps a caller from changing a queued
+ * command before the tick applies it.
+ */
+export function normalizeCommand(cmd, map) {
+  if (cmd === null || typeof cmd !== 'object' || Array.isArray(cmd)) return null;
+  try {
+    const type = cmd.type;
+    if (typeof type !== 'string' || !COMMAND_TYPES.has(type)) return null;
+    const ability = cmd.ability;
+    return {
+      type,
+      units: unitIds(cmd.units),
+      target: idOf(cmd.target),
+      x: clampTo(num(cmd.x), map.width),
+      y: clampTo(num(cmd.y), map.height),
+      tx: num(cmd.tx),
+      ty: num(cmd.ty),
+      building: nameOrId(cmd.building),
+      unit: nameOrId(cmd.unit),
+      ability: typeof ability === 'string' && ability.length <= MAX_NAME ? ability : undefined,
+      index: Number.isSafeInteger(cmd.index) ? cmd.index : undefined,
+      queue: !!cmd.queue,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Own, living units from a list of ids (duplicates and foreign ids dropped). */
 export function ownUnits(world, player, ids) {
   const out = [];
@@ -59,7 +118,7 @@ export function groupOrder(world, units, x, y, type, queue) {
 }
 
 function gatherOrderFor(world, u, mine, tree) {
-  if (mine) return { type: 'gather', mine: mine.id, phase: 'go', timer: 0 };
+  if (mine) return { type: 'gather', mine: mine.id, phase: 'go', timer: 0, spot: -1, slot: -1, startT: 0, badSpots: 0 };
   return { type: 'gather', tree: { tx: tree.tx, ty: tree.ty }, phase: 'go', timer: 0 };
 }
 
@@ -222,7 +281,7 @@ export function applyCommand(world, player, cmd) {
         break;
       }
       let tree = treeAt(world, cmd, null);
-      if (!tree && Number.isFinite(cmd.tx) && Number.isFinite(cmd.ty)) {
+      if (!tree && Number.isFinite(cmd.tx) && Number.isFinite(cmd.ty) && world.map.inBounds(Math.floor(cmd.tx), Math.floor(cmd.ty))) {
         tree = world.map.spiralNearest(cmd.tx + 0.5, cmd.ty + 0.5, 4, (x, y) => world.map.isTreeAccessible(x, y));
       }
       if (tree) for (const u of workers) giveGather(world, u, null, tree, queue);

@@ -43,6 +43,7 @@ import { HostSession, ClientSession } from '../src/net/session.js';
 import { fakeWorldFactory, makeFakeMap } from '../src/net/fake-world.js';
 import { generateMap, mapHash } from '../src/sim/mapgen.js';
 import { PLAYER_COLORS, TERRAIN } from '../src/config.js';
+import { GAME_TIMEOUT_MS } from '../src/net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 const logEl = $('log');
@@ -207,7 +208,9 @@ T.startGame = async ({ world = 'fake', units = 600, ticks = 300 } = {}) => {
     };
   }
   const createWorld = world === 'real' ? (await import('../src/sim/world.js')).createWorld : fakeWorldFactory({ units, buildings: 10, churn: 2 });
-  const s = new HostSession({ setup, myIndex, conns, createWorld, createAI: () => ({ tick() {} }) });
+  // The real simulation gets the real AI, so a player who leaves is taken over by one that plays.
+  const createAI = world === 'real' ? (await import('../src/ai/ai.js')).createAI : () => ({ tick() {} });
+  const s = new HostSession({ setup, myIndex, conns, createWorld, createAI });
   T.session = s;
   return new Promise((resolve) => {
     s.viewState.on('snapshot', (snap) => {
@@ -276,12 +279,49 @@ T.join = async ({ transport = 'peer', code, name = 'Guest', resyncAt = -1, world
         }
       }
     });
-    s.onEnd((e) => T.log(`session ended: ${e.reason}`, 'err'));
+    s.onEnd((e) => {
+      T.ended = e.reason;
+      T.log(`session ended: ${e.reason}`, 'err');
+    });
     s.start();
     T.setStatus('playing');
     T.log(`game started as player ${myIndex}${s.mapMismatch ? ' (MAP MISMATCH)' : ''}`, s.mapMismatch ? 'err' : 'ok');
   });
   return T.client.mySlot;
+};
+
+/**
+ * Block this page's main thread for `ms` (a long GC, a shader compile, a
+ * background tab), with this side's connections set to time out after
+ * `timeoutMs` of silence. Messages and Worker pulses queue up meanwhile; the
+ * connections must survive it (silence is measured in time the page ran). The
+ * normal game timeout is restored 2 s after the stall.
+ */
+T.stallFor = (ms, timeoutMs) => {
+  const conns = T.role === 'host' ? [...T.session.clients.values()].map((c) => c.conn) : [T.session.conn];
+  for (const c of conns) c.setTimeoutMs(timeoutMs);
+  T.log(`stalling the main thread for ${ms} ms (connection timeout ${timeoutMs} ms)`);
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) { /* busy */ }
+  setTimeout(() => {
+    for (const c of conns) if (c.open) c.setTimeoutMs(GAME_TIMEOUT_MS);
+    T.log(`stall over; connections ${conns.every((c) => c.open) ? 'still open' : 'CLOSED'}`, conns.every((c) => c.open) ? 'ok' : 'err');
+  }, 2000);
+  return { stalledMs: Math.round(performance.now() - t0), conns: conns.length };
+};
+
+/** A join that is expected to fail: resolves with { message, ms, menuText }. */
+T.failJoin = async ({ code = 'ABCDE', name = 'Lost' } = {}) => {
+  const { friendlyJoinError } = await import('../src/ui/menu-model.js');
+  const t0 = performance.now();
+  try {
+    await LobbyClient.join({ transport: 'peer', roomCode: code, name });
+    return { message: 'joined?!', ms: Math.round(performance.now() - t0) };
+  } catch (err) {
+    const ms = Math.round(performance.now() - t0);
+    T.log(`join failed after ${ms} ms: ${err.message}`, 'err');
+    return { message: err.message, ms, menuText: friendlyJoinError(err, code) };
+  }
 };
 
 const q = new URLSearchParams(location.search);

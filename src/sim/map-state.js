@@ -96,34 +96,64 @@ export class MapState {
     return this.spiralNearest(x, y, maxR, (tx, ty) => grid[ty * w + tx] === 1);
   }
 
-  /** Generic ring search returning the tile (by euclidean distance from tile centre to (x, y)) matching pred. */
+  /**
+   * Generic ring search returning the tile (by euclidean distance from tile
+   * centre to (x, y)) matching pred. Exact ties go to the tile nearer the map
+   * centre, then to the one counter-clockwise of the line from (x, y) to the
+   * centre, so rotationally symmetric starts get symmetric answers (scan order
+   * would favour the top-left). Non-finite input, or a point farther than maxR
+   * from the map, returns null.
+   */
   spiralNearest(x, y, maxR, pred) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const W = this.width;
+    const H = this.height;
+    const R = Math.min(Number.isFinite(maxR) ? Math.floor(maxR) : 0, W + H);
     const cx = Math.floor(x);
     const cy = Math.floor(y);
+    if (cx + R < 0 || cy + R < 0 || cx - R >= W || cy - R >= H) return null;
     let best = null;
     let bestD = Infinity;
-    for (let r = 0; r <= maxR; r++) {
+    for (let r = 0; r <= R; r++) {
       if (best && (r - 1) * (r - 1) > bestD) break;
-      const y0 = cy - r;
-      const y1 = cy + r;
+      const y0 = Math.max(0, cy - r);
+      const y1 = Math.min(H - 1, cy + r);
       for (let ty = y0; ty <= y1; ty++) {
-        if (ty < 0 || ty >= this.height) continue;
-        const edgeRow = ty === y0 || ty === y1;
-        const step = edgeRow ? 1 : 2 * r;
-        for (let tx = cx - r; tx <= cx + r; tx += step || 1) {
-          if (tx < 0 || tx >= this.width) continue;
+        const edgeRow = ty === cy - r || ty === cy + r;
+        const step = edgeRow ? 1 : 2 * r || 1;
+        for (let tx = cx - r; tx <= cx + r; tx += step) {
+          if (tx < 0 || tx >= W) continue;
           if (!pred(tx, ty)) continue;
           const dx = tx + 0.5 - x;
           const dy = ty + 0.5 - y;
           const d = dx * dx + dy * dy;
-          if (d < bestD) {
-            bestD = d;
-            best = { tx, ty };
-          }
+          if (d > bestD + 1e-9) continue;
+          if (d >= bestD - 1e-9 && !this._tieBefore(tx, ty, best.tx, best.ty, x, y)) continue;
+          bestD = Math.min(d, bestD);
+          best = { tx, ty };
         }
       }
     }
     return best;
+  }
+
+  /** Symmetric tie-break for spiralNearest: does tile a come before tile b? */
+  _tieBefore(ax, ay, bx, by, x, y) {
+    const mx = this.width / 2;
+    const my = this.height / 2;
+    const pax = ax + 0.5;
+    const pay = ay + 0.5;
+    const pbx = bx + 0.5;
+    const pby = by + 0.5;
+    const da = (pax - mx) * (pax - mx) + (pay - my) * (pay - my);
+    const db = (pbx - mx) * (pbx - mx) + (pby - my) * (pby - my);
+    if (da < db - 1e-9) return true;
+    if (da > db + 1e-9) return false;
+    const vx = mx - x;
+    const vy = my - y;
+    const ca = vx * (pay - y) - vy * (pax - x);
+    const cb = vx * (pby - y) - vy * (pbx - x);
+    return ca > cb + 1e-9;
   }
 
   /** Mark a footprint as occupied by entity id (0 clears). */

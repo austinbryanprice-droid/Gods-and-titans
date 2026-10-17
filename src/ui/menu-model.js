@@ -1,5 +1,6 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
 import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.js';
+import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
 export const PANTHEON_EMBLEMS = {
@@ -20,7 +21,7 @@ export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 const DIFF_LABEL = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 
 /** Network params carried over into invite links (so test servers / TURN keep working). */
-const NET_PARAMS = ['transport', 'peerHost', 'peerPort', 'peerPath', 'peerSecure', 'turn', 'turnUser', 'turnPass'];
+const NET_PARAMS = ['transport', 'net', 'peerHost', 'peerPort', 'peerPath', 'peerSecure', 'turn', 'turnUser', 'turnPass', 'relay'];
 
 /** Clean a typed or pasted room code (also accepts an invite link). '' when nothing usable. */
 export function cleanRoomCode(input) {
@@ -46,13 +47,15 @@ export function isCompleteRoomCode(code) {
 
 /**
  * Invite link for a room: the page URL with only `?join=CODE` plus network override params.
+ * The code is cleaned to the room-code alphabet, and only http(s) pages make links.
  * @param {string} href current location.href
  * @param {string} code
  */
 export function inviteLink(href, code) {
   const url = new URL(href);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
   const keep = new URLSearchParams();
-  keep.set('join', code);
+  keep.set('join', cleanRoomCode(code));
   for (const k of NET_PARAMS) {
     const v = url.searchParams.get(k);
     if (v !== null && v !== '') keep.set(k, v);
@@ -60,6 +63,28 @@ export function inviteLink(href, code) {
   url.search = `?${keep.toString()}`;
   url.hash = '';
   return url.toString();
+}
+
+/**
+ * A plain-words note when the page runs on a non-default network setup (from URL
+ * params), else null: friends then need the invite link, which carries the setup.
+ * @param {string} href current location.href
+ */
+export function customServerNote(href) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  const p = url.searchParams;
+  if (p.get('transport') === 'local' || p.get('net') === 'local') {
+    return 'Local test mode: only other tabs of this browser can join.';
+  }
+  const host = sanitizeReason(p.get('peerHost') || '', '').slice(0, 60);
+  if (host) return `Custom matchmaking server (${host}): send the invite link, since the code alone will not find this room.`;
+  if (p.get('turn') || p.get('relay') === '1') return 'Custom relay settings are on: send the invite link so friends use them too.';
+  return null;
 }
 
 /** True when a slot holds a player (host, connected human or AI). */
@@ -218,14 +243,39 @@ export function matchupSummary(state) {
  * `{ from: slotIndex, name, text, system }`, `{ from: name, text }` or `(from, text)`.
  */
 export function normalizeChat(a, b) {
+  // Names and text come from other players through the host: clean them the same
+  // way the network layer does (single line, no control / bidi characters, bounded).
+  const name = (v) => sanitizeName(typeof v === 'number' ? '' : v, 'Player');
   if (a && typeof a === 'object') {
     const system = !!a.system || a.from === null || a.from === undefined && !a.name || a.from === -1 || a.from === 'system';
     const from = a.name || (typeof a.from === 'string' && a.from !== 'system' ? a.from : '') || (system ? null : 'Player');
-    return { from: system ? null : from, text: String(a.text ?? ''), system };
+    return { from: system ? null : name(from), text: sanitizeChat(String(a.text ?? '')), system };
   }
-  if (b === undefined) return { from: null, text: String(a ?? ''), system: true };
+  if (b === undefined) return { from: null, text: sanitizeChat(String(a ?? '')), system: true };
   const system = a === null || a === undefined || a === 'system' || a === -1;
-  return { from: system ? null : String(a), text: String(b ?? ''), system };
+  return { from: system ? null : name(String(a)), text: sanitizeChat(String(b ?? '')), system };
+}
+
+/**
+ * A URL that is safe for href / src: relative, http(s) or mailto. Returns '' for
+ * anything else (javascript:, data:, vbscript:, …), also when the scheme is
+ * disguised with whitespace or control characters, which browsers ignore.
+ */
+export function safeUrl(value) {
+  if (typeof value !== 'string' && !(value instanceof URL)) return '';
+  const s = String(value).trim();
+  if (!s) return '';
+  // Browsers drop tabs / newlines inside URLs and ignore leading control characters.
+  // eslint-disable-next-line no-control-regex
+  const probe = s.replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
+  const m = /^([a-z][a-z0-9+.-]*):/.exec(probe);
+  if (!m) return s; // relative (or protocol-relative, i.e. http/https)
+  return ['http', 'https', 'mailto'].includes(m[1]) ? s : '';
+}
+
+/** A message from the other side (kick reason, join error): plain single-line text, at most 300 characters. */
+export function cleanMessage(text, fallback = '') {
+  return sanitizeReason(typeof text === 'string' ? text : String(text ?? ''), fallback);
 }
 
 /** First sentence (or clause) of a description, at most maxLen characters. */
@@ -309,8 +359,12 @@ export const SLOT_COUNT = MAX_PLAYERS;
 
 /** Friendly text for a join / lobby error. */
 export function friendlyJoinError(err, code) {
-  const msg = String((err && (err.message || err.reason)) || err || '').trim();
+  const msg = cleanMessage((err && (err.message || err.reason)) || err || '');
+  code = cleanRoomCode(code);
   if (!msg) return 'Could not join the game. Please try again.';
+  // The network layer's own explanations (src/net/transport.js PEER_MESSAGES) are
+  // already plain; a custom server name inside them must not trip the rules below.
+  if (/^Couldn't (reach the matchmaking server|connect to the host)\b/.test(msg)) return msg;
   if (/not found|peer-unavailable|could not connect to peer/i.test(msg)) return `Room not found: no game is waiting with code ${code || 'that code'}. Check the code and make sure the host is still in the lobby.`;
   if (/version/i.test(msg)) return msg.startsWith('Version mismatch') ? msg : `Version mismatch: ${msg}`;
   if (/full/i.test(msg)) return 'That game is full.';

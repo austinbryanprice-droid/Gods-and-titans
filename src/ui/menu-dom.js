@@ -1,4 +1,11 @@
-// Tiny DOM helpers for the menu screens.
+// Tiny DOM helpers for the menu screens. Text always goes in as text nodes;
+// h() never sets HTML, inline event-handler attributes or unsafe URLs, so a
+// player name or a host's message can never become markup or script.
+import { safeUrl } from './menu-model.js';
+
+// Properties / attributes that would parse HTML or run code from a string.
+const BLOCKED_KEYS = new Set(['innerHTML', 'outerHTML', 'srcdoc', 'insertAdjacentHTML']);
+const URL_KEYS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href', 'poster', 'data', 'background', 'ping']);
 
 /**
  * Create an element: h('div.card.big', { onclick, title, dataset: {...}, style: {...} }, ...children).
@@ -16,6 +23,17 @@ export function h(spec, attrs, ...children) {
   if (attrs) {
     for (const [k, v] of Object.entries(attrs)) {
       if (v === undefined || v === null || v === false) continue;
+      if (BLOCKED_KEYS.has(k)) continue;
+      if (k.startsWith('on')) {
+        // Only real listeners; a string would become an inline script attribute.
+        if (typeof v === 'function') el.addEventListener(k.slice(2), v);
+        continue;
+      }
+      if (URL_KEYS.has(k.toLowerCase())) {
+        const url = safeUrl(v);
+        if (url) el.setAttribute(k, url);
+        continue;
+      }
       if (k === 'class') el.className = el.className ? `${el.className} ${v}` : v;
       else if (k === 'style' && typeof v === 'object') {
         for (const [p, pv] of Object.entries(v)) {
@@ -24,7 +42,6 @@ export function h(spec, attrs, ...children) {
         }
       }
       else if (k === 'dataset') Object.assign(el.dataset, v);
-      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
       else if (k === 'text') el.textContent = v;
       else if (k in el && typeof v !== 'string') el[k] = v;
       else el.setAttribute(k, v === true ? '' : String(v));

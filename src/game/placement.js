@@ -3,11 +3,17 @@
 // the local player knows: the map with felled trees, explored tiles, gold mines,
 // own / allied buildings, enemy buildings that are visible or remembered, and
 // visible enemy / neutral ground units. Pure: runs in Node tests.
-import { TERRAIN } from '../config.js';
+import { TERRAIN, DROPOFF_MINE_GAP } from '../config.js';
 import { BUILDINGS, UNITS, GOLD_MINE } from '../data/index.js';
 
-/** Minimum Chebyshev gap (empty tiles) between a Town Center and a gold mine. */
-export const TC_MINE_GAP = 3;
+/** Minimum Chebyshev gap (empty tiles) between a drop-off (Town Center, Storehouse) and a gold mine. */
+export const MINE_GAP = DROPOFF_MINE_GAP;
+/** @deprecated same as MINE_GAP (it applies to every drop-off now). */
+export const TC_MINE_GAP = DROPOFF_MINE_GAP;
+
+/** Error texts, identical to the sim's. */
+export const CANT_BUILD = "Can't build there.";
+export const TOO_CLOSE_TO_MINE = 'Too close to a gold mine.';
 
 const WALKABLE = new Set([TERRAIN.GRASS, TERRAIN.DIRT, TERRAIN.SAND]);
 
@@ -46,11 +52,13 @@ function knownFootprints(vs) {
  * @param {string} buildingTypeId
  * @param {number} tx
  * @param {number} ty
- * @returns {{ valid: boolean, tiles: boolean[], size: number }} tiles: size×size row-major, true = this tile is fine
+ * @returns {{ valid: boolean, tiles: boolean[], size: number, message: string|null }} tiles: size×size
+ *   row-major, true = this tile is fine; message: null when valid, TOO_CLOSE_TO_MINE when the mine gap
+ *   is the only problem (the sim reports the same text), else CANT_BUILD
  */
 export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
-  const def = BUILDINGS[buildingTypeId];
-  if (!def || !Number.isFinite(tx) || !Number.isFinite(ty)) return { valid: false, tiles: [], size: 0 };
+  const def = typeof buildingTypeId === 'string' && Object.hasOwn(BUILDINGS, buildingTypeId) ? BUILDINGS[buildingTypeId] : null;
+  if (!def || !Number.isFinite(tx) || !Number.isFinite(ty)) return { valid: false, tiles: [], size: 0, message: CANT_BUILD };
   tx = Math.floor(tx);
   ty = Math.floor(ty);
   const s = def.size;
@@ -74,12 +82,14 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
     }
   }
 
-  // Buildings and mines.
-  const isTC = buildingTypeId === 'town_center';
+  // Buildings and mines (drop-offs also keep MINE_GAP empty tiles from every mine).
+  const gapped = !!def.dropOff;
+  let otherProblem = tiles.some((ok) => !ok);
+  let mineProblem = false;
   for (const f of knownFootprints(vs)) {
     const fx1 = f.tx + f.size;
     const fy1 = f.ty + f.size;
-    const reach = isTC && f.mine ? TC_MINE_GAP : 0;
+    const reach = gapped && f.mine ? MINE_GAP : 0;
     if (f.tx - reach >= tx + s || fx1 + reach <= tx || f.ty - reach >= ty + s || fy1 + reach <= ty) continue;
     for (let dy = 0; dy < s; dy++) {
       for (let dx = 0; dx < s; dx++) {
@@ -89,6 +99,8 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
         const gx = Math.max(f.tx - (x + 1), x - fx1, 0);
         const gy = Math.max(f.ty - (y + 1), y - fy1, 0);
         const inside = x >= f.tx && x < fx1 && y >= f.ty && y < fy1;
+        if (inside) otherProblem = true;
+        else if (reach > 0 && Math.max(gx, gy) < reach) mineProblem = true;
         if (inside || (reach > 0 && Math.max(gx, gy) < reach)) tiles[dy * s + dx] = false;
       }
     }
@@ -103,6 +115,7 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
     if (!vs.isEntityVisible(e)) continue;
     const r = (ud.radius || 0.4) * 0.8;
     if (distPointRect(e.x, e.y, tx, ty, tx + s, ty + s) >= r) continue;
+    otherProblem = true;
     for (let dy = 0; dy < s; dy++) {
       for (let dx = 0; dx < s; dx++) {
         if (distPointRect(e.x, e.y, tx + dx, ty + dy, tx + dx + 1, ty + dy + 1) < r) tiles[dy * s + dx] = false;
@@ -110,7 +123,8 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
     }
   }
 
-  return { valid: tiles.every(Boolean), tiles, size: s };
+  const valid = tiles.every(Boolean);
+  return { valid, tiles, size: s, message: valid ? null : mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD };
 }
 
 /**

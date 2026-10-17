@@ -1,5 +1,6 @@
 // ViewSnapshot builder (DESIGN 6.3): compact, rounded views of the world.
 import { statusCodes } from './status.js';
+import { activeMiners } from './economy.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -51,12 +52,13 @@ function buildingView(b) {
   return v;
 }
 
-function mineView(m) {
+function mineView(world, m) {
   return {
     id: m.id, k: 'm', t: m.type, o: m.owner,
     x: r2(m.x), y: r2(m.y), f: 0,
     hp: m.hp, mhp: m.maxHp, sh: 0, st: 'idle', tg: 0,
     tx: m.tx, ty: m.ty, amt: m.amount,
+    mn: activeMiners(world, m),
   };
 }
 
@@ -74,7 +76,7 @@ export function buildSnapshot(world) {
       }
       entities.push(unitView(e));
     } else if (e.kind === 'building') entities.push(buildingView(e));
-    else entities.push(mineView(e));
+    else entities.push(mineView(world, e));
   }
   const players = world.players.map((p, i) => {
     const fallen = {};

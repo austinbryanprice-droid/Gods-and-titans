@@ -187,3 +187,81 @@ test("'none' transport hosts without a room code; joining needs a code", async (
   await assert.rejects(joinRoom({ transport: 'loopback', roomCode: '' }), /room code/);
   await assert.rejects(joinRoom({ transport: 'none', roomCode: 'ABCDE' }), /Cannot join/);
 });
+
+// ---------------------------------------------------------------- liveness vs main-thread stalls
+
+test('liveness counts only time the page ran: a long stall does not close a link with queued messages', () => {
+  const sent = [];
+  const c = new FramedConn({ id: 'stall', rawSend: (f) => sent.push(f), heartbeatMs: 2000, timeoutMs: 30000, autoPulse: false });
+  const got = [];
+  c.onMessage((m) => got.push(m.t));
+  let t = c.lastBeat;
+  const pulse = (ms) => {
+    t += ms;
+    c._heartbeat(t);
+  };
+  for (let i = 0; i < 20; i++) pulse(500); // 10 s of normal pulses, nothing received
+  assert.equal(c.open, true);
+  assert.ok(c.silentMs >= 9999 && c.silentMs <= 10001);
+  pulse(60000); // the main thread was blocked for a minute (renderer build, frozen tab)…
+  assert.equal(c.open, true, 'a stalled pulse adds at most MAX_PULSE_GAP_MS of silence');
+  assert.ok(c.silentMs <= 11001);
+  for (let i = 0; i < 40; i++) pulse(0); // …the pulses queued during the stall fire back to back
+  assert.equal(c.open, true);
+  assert.ok(sent.includes('h'), 'heartbeats go out again right after the stall');
+  // …and the frames that queued up meanwhile are delivered: silence starts over.
+  for (const f of encodeFrames({ t: 'delta' }, 1)) c._receive(f);
+  assert.equal(c.silentMs, 0);
+  // A link that is really dead still times out after timeoutMs of running time.
+  for (let i = 0; i < 59; i++) pulse(500);
+  assert.equal(c.open, true, '29.5 s of silence');
+  pulse(500);
+  pulse(500);
+  assert.equal(c.open, false);
+  assert.equal(c.closeReason, 'timeout');
+  assert.equal(sent.at(-1), 'b', 'says goodbye when giving up');
+});
+
+test('liveness: a real event-loop stall with frames still queued does not time out (Node event loop)', async () => {
+  // The bug: after a long blocking task the heartbeat timer ran before the
+  // already-queued frames were dispatched, and closed a healthy link. In Node,
+  // timers run before setImmediate callbacks (the loopback delivery), which
+  // reproduces that order: frames are queued, the stall ends, the pulse fires first.
+  // (Scaled down: pulses every 20 ms, a late pulse adds ≤ 100 ms, timeout 300 ms, stall 900 ms.)
+  const [a, b] = createLoopbackPair({ heartbeatMs: 40, timeoutMs: 300, maxPulseGapMs: 100 });
+  const got = [];
+  b.onMessage((m) => got.push(m.i));
+  let closed = null;
+  b.onClose((r) => (closed = r));
+  await sleep(100);
+  await new Promise((resolve) => setImmediate(() => {
+    for (let i = 0; i < 5; i++) a.send({ t: 'n', i }); // delivered by setImmediate…
+    const until = Date.now() + 900; // …but this tab is busy for 3× the timeout first
+    while (Date.now() < until) { /* stall */ }
+    resolve();
+  }));
+  await sleep(150);
+  assert.equal(closed, null, 'no false timeout after the stall');
+  assert.deepEqual(got, [0, 1, 2, 3, 4]);
+  await sleep(400);
+  assert.equal(closed, null, 'heartbeats keep it alive afterwards');
+  a.close();
+  await waitFor(() => closed !== null);
+  assert.equal(closed, 'remote-closed');
+});
+
+test('game connections tolerate long silences: sessions raise the timeout to GAME_TIMEOUT_MS', async () => {
+  const { GAME_TIMEOUT_MS, TIMEOUT_MS } = await import('../../src/net/protocol.js');
+  const { HostSession, ClientSession } = await import('../../src/net/session.js');
+  const { fakeWorldFactory, makeFakeMap } = await import('../../src/net/fake-world.js');
+  assert.ok(GAME_TIMEOUT_MS >= 20000 && GAME_TIMEOUT_MS > TIMEOUT_MS);
+  const [hostSide, clientSide] = createLoopbackPair();
+  assert.equal(hostSide.timeoutMs, TIMEOUT_MS);
+  const setup = { version: '0.1.0', seed: 5, mapSize: 'small', players: [0, 1].map((i) => ({ index: i, name: `P${i}`, team: i + 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null })) };
+  const host = new HostSession({ setup, conns: new Map([[1, hostSide]]), createWorld: fakeWorldFactory({ units: 5 }), autoTick: false });
+  const client = new ClientSession({ setup, myIndex: 1, conn: clientSide, generateMap: () => makeFakeMap(48, 48) });
+  assert.equal(hostSide.timeoutMs, GAME_TIMEOUT_MS);
+  assert.equal(clientSide.timeoutMs, GAME_TIMEOUT_MS);
+  client.stop();
+  host.stop();
+});

@@ -5,6 +5,7 @@ import { ARMOR_FACTOR, PROJECTILE_SPEED, SPELL_VS_BUILDING, DT } from '../config
 import { hyp, edgeDist, distToEntity } from './common.js';
 import { absorbShield, addStatus } from './status.js';
 import { moveToEntity, stopMove } from './movement.js';
+import { isMelee, approachSpot, holdSpot, hasFreeSpot, spotCost, SURROUND_DIST } from './surround.js';
 
 /** Damage multiplier for an armor value (WC3). */
 export function armorMultiplier(armor) {
@@ -39,38 +40,51 @@ export function acquisitionRange(u) {
   return Math.max(u.def.sight * 0.75, (atk ? atk.range : 0) + 1);
 }
 
+/** Target category for acquisition priority: 0 armed unit, 1 other unit, 2 building. */
+export function targetCategory(t) {
+  if (t.kind !== 'unit') return 2;
+  return t.def.attack && !t.ghost ? 0 : 1;
+}
+
 /**
  * Best target for u within range (edge distance). Priority: closest enemy unit
  * that can attack, then other units, then buildings.
- * @param {object} [opts] { unitsOnly, fromX, fromY } measure from another point
+ * @param {object} [opts] { unitsOnly, fromX, fromY (measure from another point),
+ *   exclude (entity id to skip), maxCat (skip categories above this),
+ *   spots (melee: the target with the shortest walk to a free attack spot,
+ *   skipping surrounded ones; null when every enemy in range is surrounded) }
  */
 export function findTarget(world, u, range, opts = {}) {
   const tmp = world._tmpTarget;
   tmp.length = 0;
   const px = opts.fromX ?? u.x;
   const py = opts.fromY ?? u.y;
+  const exclude = opts.exclude || 0;
+  const maxCat = opts.maxCat ?? 9;
   const self = u.kind === 'unit' ? u.radius : 0;
   world.hash.query(px, py, range + self + world.maxRadius, tmp);
+  if (opts.spots) return findTargetWithRoom(world, u, range, tmp, px, py, self, exclude, maxCat, !!opts.unitsOnly);
   let best = null;
   let bestCat = 9;
   let bestD = Infinity;
   for (let i = 0; i < tmp.length; i++) {
     const t = tmp[i];
-    if (t.dead || t === u || !canTarget(world, u, t)) continue;
+    if (t.dead || t === u || t.id === exclude || !canTarget(world, u, t)) continue;
     const d = hyp(t.x - px, t.y - py) - t.radius - self;
     if (d > range) continue;
     const cat = t.def.attack && !t.ghost ? 0 : 1;
+    if (cat > maxCat) continue;
     if (cat < bestCat || (cat === bestCat && d < bestD)) {
       best = t;
       bestCat = cat;
       bestD = d;
     }
   }
-  if (bestCat <= 1 || opts.unitsOnly) return best;
+  if (bestCat <= 1 || opts.unitsOnly || maxCat < 2) return best;
   const bl = world.buildingList;
   for (let i = 0; i < bl.length; i++) {
     const b = bl[i];
-    if (b.dead || !canTarget(world, u, b)) continue;
+    if (b.dead || b.id === exclude || !canTarget(world, u, b)) continue;
     const d = distToEntity(px, py, b) - self;
     if (d > range) continue;
     if (d < bestD) {
@@ -79,6 +93,114 @@ export function findTarget(world, u, range, opts = {}) {
     }
   }
   return best;
+}
+
+// Candidate pool for melee acquisition (parallel arrays, reused: no garbage per scan).
+const roomT = [];
+const roomD = [];
+const roomC = [];
+const roomUsed = [];
+
+/**
+ * Melee acquisition: in priority order (armed units, other units, buildings),
+ * the enemy among the 4 closest of a category whose nearest free attack spot
+ * is the shortest walk, so a crowd spreads over several targets instead of
+ * piling onto one; surrounded enemies are skipped (null when all are).
+ */
+function findTargetWithRoom(world, u, range, tmp, px, py, self, exclude, maxCat, unitsOnly) {
+  let n = 0;
+  let bi = -1;
+  for (let i = 0; i < tmp.length; i++) {
+    const t = tmp[i];
+    if (t.dead || t === u || t.id === exclude || !canTarget(world, u, t)) continue;
+    const d = hyp(t.x - px, t.y - py) - t.radius - self;
+    if (d > range) continue;
+    const cat = t.def.attack && !t.ghost ? 0 : 1;
+    if (cat > maxCat) continue;
+    roomT[n] = t;
+    roomD[n] = d;
+    roomC[n] = cat;
+    if (bi < 0 || cat < roomC[bi] || (cat === roomC[bi] && (d < roomD[bi] || (d === roomD[bi] && t.id < roomT[bi].id)))) bi = n;
+    n++;
+  }
+  if (!unitsOnly && maxCat >= 2 && (bi < 0 || roomC[bi] === 2 || n < 64)) {
+    const bl = world.buildingList;
+    for (let i = 0; i < bl.length; i++) {
+      const b = bl[i];
+      if (b.dead || b.id === exclude || !canTarget(world, u, b)) continue;
+      const d = distToEntity(px, py, b) - self;
+      if (d > range) continue;
+      roomT[n] = b;
+      roomD[n] = d;
+      roomC[n] = 2;
+      if (bi < 0) bi = n;
+      n++;
+    }
+  }
+  if (bi < 0) return null;
+  const reach = u.def.attack.range;
+  // Common case: the best target is in reach or has a free spot straight ahead.
+  const t0 = roomT[bi];
+  if (roomD[bi] <= reach) {
+    roomT.fill(null, 0, n);
+    return t0;
+  }
+  const c0 = spotCost(world, u, t0);
+  if (c0 <= roomD[bi] + 0.6) {
+    roomT.fill(null, 0, n);
+    return t0;
+  }
+  for (let i = 0; i < n; i++) roomUsed[i] = 0;
+  for (let cat = roomC[bi]; cat <= 2; cat++) {
+    let best = null;
+    let bestC = Infinity;
+    // The 4 closest of this category (selection, closest first).
+    for (let k = 0; k < 4; k++) {
+      let j = -1;
+      for (let i = 0; i < n; i++) {
+        if (roomUsed[i] || roomC[i] !== cat) continue;
+        if (j < 0 || roomD[i] < roomD[j] || (roomD[i] === roomD[j] && roomT[i].id < roomT[j].id)) j = i;
+      }
+      if (j < 0) break;
+      roomUsed[j] = 1;
+      const c = roomT[j] === t0 ? c0 : roomD[j] <= reach ? 0 : spotCost(world, u, roomT[j]);
+      if (c < bestC - 1e-6) {
+        bestC = c;
+        best = roomT[j];
+      }
+    }
+    if (best) {
+      roomT.fill(null, 0, n);
+      return best;
+    }
+  }
+  roomT.fill(null, 0, n);
+  return null;
+}
+
+const reachCand = [];
+
+/**
+ * Nearest enemy within range that u can actually get at: in attack range now,
+ * or (melee) with a free attack spot around it. Skips `exclude`.
+ */
+export function findReachableTarget(world, u, range, exclude) {
+  const atk = u.def.attack;
+  if (!atk) return null;
+  const list = world.queryRadius(u.x, u.y, range + u.radius, (e) => e !== exclude && e !== u && canTarget(world, u, e));
+  reachCand.length = 0;
+  for (const e of list) {
+    const d = edgeDist(u, e);
+    if (d > range) continue;
+    reachCand.push({ e, d, cat: targetCategory(e) });
+  }
+  reachCand.sort((a, b) => a.cat - b.cat || a.d - b.d || a.e.id - b.e.id);
+  const melee = isMelee(u);
+  for (let i = 0; i < reachCand.length && i < 6; i++) {
+    const c = reachCand[i];
+    if (c.d <= atk.range + 0.25 || !melee || hasFreeSpot(world, u, c.e)) return c.e;
+  }
+  return null;
 }
 
 export function heal(u, amount) {
@@ -198,19 +320,35 @@ export function updateProjectiles(world) {
   list.length = w;
 }
 
+const PROGRESS_TICKS = 10;
+
 /**
- * Fight a target: attack when in range, otherwise chase (if allowed).
- * @returns {'hit'|'approach'|'lost'|'unreachable'}
+ * Fight a target: attack when in range, otherwise chase (if allowed). Melee
+ * units close to their target walk to a free attack spot around it (see
+ * surround.js). Tracks u.engT (ticks spent approaching this target) and
+ * u.blockedT (ticks without a free spot or without getting closer).
+ * @returns {'hit'|'approach'|'blocked'|'lost'|'unreachable'} 'blocked': still
+ *   trying (no free spot / no progress); callers keep the target or re-target
  */
 export function engage(world, u, t, chase = true) {
   if (!canTarget(world, u, t)) return 'lost';
   const atk = u.def.attack;
   const d = edgeDist(u, t);
+  if (u.engId !== t.id) {
+    u.engId = t.id;
+    u.engT = 0;
+    u.blockedT = 0;
+    u.engD = d;
+    u.engCk = world.tickCount;
+  }
   const tol = u.state === 'attack' && u.target === t.id ? 0.35 : 0.02;
   if (d <= atk.range + tol) {
     if (u.mv) stopMove(u);
     u.state = 'attack';
     u.target = t.id;
+    u.engT = 0;
+    u.blockedT = 0;
+    if (u.atk !== null) holdSpot(u, t);
     if (u.attackCd <= 0) performAttack(world, u, t);
     else u.facing = Math.atan2(t.y - u.y, t.x - u.x);
     return 'hit';
@@ -218,10 +356,22 @@ export function engage(world, u, t, chase = true) {
   if (!chase) return 'lost';
   u.state = 'move';
   u.target = t.id;
+  u.engT++;
+  if (d < SURROUND_DIST && isMelee(u)) {
+    const r = approachSpot(world, u, t);
+    if (r) return r;
+  }
   const mv = moveToEntity(world, u, t);
   if (mv.failed) {
     stopMove(u);
     return 'unreachable';
+  }
+  // Not getting any closer (crowd, target running at our speed): count as blocked.
+  if (world.tickCount - u.engCk >= PROGRESS_TICKS) {
+    if (u.engD - d < 0.15) u.blockedT += PROGRESS_TICKS;
+    else u.blockedT = 0;
+    u.engD = d;
+    u.engCk = world.tickCount;
   }
   return 'approach';
 }

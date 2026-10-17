@@ -50,10 +50,25 @@ test('readNetParams / peerOptions honour URL overrides and TURN', () => {
   const turn = ice.find((s) => [].concat(s.urls).some((u) => u.startsWith('turn:')));
   assert.deepEqual(turn, { urls: ['turn:t.example.com:3478'], username: 'u', credential: 'p' });
 
+  // No URL params: the public PeerJS cloud broker, spelled out, plus its TURN relays.
   const def = peerOptions(readNetParams(''));
-  assert.equal(def.host, undefined, 'default broker when not overridden');
-  assert.equal(def.port, undefined);
-  assert.equal(iceServers({}).length, 2);
+  assert.equal(def.host, '0.peerjs.com');
+  assert.equal(def.port, 443);
+  assert.equal(def.path, '/');
+  assert.equal(def.secure, true);
+  assert.equal(def.config.iceTransportPolicy, undefined);
+  const defIce = def.config.iceServers;
+  assert.ok(defIce.some((s) => [].concat(s.urls).includes('stun:stun.l.google.com:19302')));
+  assert.ok(defIce.some((s) => [].concat(s.urls).includes('stun:stun.cloudflare.com:3478')));
+  const cloudTurn = defIce.find((s) => [].concat(s.urls).some((u) => u.startsWith('turn:')));
+  assert.ok(cloudTurn && cloudTurn.username && cloudTurn.credential && cloudTurn.urls.every((u) => u.includes('turn.peerjs.com')));
+  assert.equal(iceServers({}).length, 3);
+  assert.equal(iceServers({ peerHost: 'localhost' }).length, 2, 'a self-hosted broker does not get the PeerJS cloud TURN');
+  // A TURN server from the link is added to the cloud defaults; ?relay=1 forces relaying.
+  const withTurn = peerOptions(readNetParams('?turn=turn:a.example:3478,turns:a.example:5349&turnUser=u&turnPass=p&relay=1'));
+  assert.equal(withTurn.host, '0.peerjs.com');
+  assert.equal(withTurn.config.iceTransportPolicy, 'relay');
+  assert.deepEqual(withTurn.config.iceServers.at(-1), { urls: ['turn:a.example:3478', 'turns:a.example:5349'], username: 'u', credential: 'p' });
   assert.equal(readNetParams('?peerSecure=1').peerSecure, true);
   assert.equal(readNetParams('?net=local').transport, 'local');
   assert.equal(readNetParams('?transport=local').transport, 'local');

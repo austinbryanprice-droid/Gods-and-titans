@@ -667,7 +667,7 @@ export class InputController {
     const { tx, ty } = footprintAt(m.building, p.x, p.y);
     const chk = checkPlacement(this.vs, this.vs.myIndex, m.building, tx, ty);
     if (!chk.valid) {
-      this.error("Can't build there.");
+      this.error(chk.message || "Can't build there.");
       return;
     }
     const bc = buildCheck(this.vs, m.building);

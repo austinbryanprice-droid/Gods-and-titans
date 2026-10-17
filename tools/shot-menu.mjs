@@ -2,7 +2,7 @@
 // Screenshots of the menu screens, plus an end-to-end check of the lobby flows.
 //
 //   node tools/shot-menu.mjs [--port 8105] [--out DIR] [--sizes 1280x720,1920x1080] [--only title,lobby-sp,...]
-//   node tools/shot-menu.mjs --flow      # real src/net/lobby.js: Play vs AI → Start, and a two-tab
+//   node tools/shot-menu.mjs --flow      # real src/net/lobby.js: Play vs AI → Start → game → Quit, and a two-tab
 //                                        # online game over ?transport=local (host, join, chat, start)
 //
 // Screens (with ?mockLobby=1 so no network is needed): title, lobby-sp (Play vs AI), picker
@@ -228,9 +228,13 @@ async function flows(browser, errors) {
     const hidden = await page.evaluate(() => document.getElementById('menu-root').hidden);
     ok('sp: menu hidden after start', hidden);
     await page.screenshot({ path: join(out, 'flow', 'sp-started.png') });
-    await page.click('text=Back to Menu');
-    await page.waitForSelector('.mw-title-screen');
-    ok('sp: Back returns to the title', true);
+    // The real game starts (src/game/game.js); F10 → Quit to Menu → Quit returns to the title.
+    await page.waitForFunction(() => window.__game && window.__game.stats.frames > 1, null, { timeout: 60000, polling: 200 });
+    await page.keyboard.press('F10');
+    await page.click('.hud-overlay.is-menu button:text-is("Quit to Menu")');
+    await page.click('.hud-overlay.is-confirm button:text-is("Quit")');
+    await page.waitForSelector('.mw-title-screen', { timeout: 10000 });
+    ok('sp: the game starts and Quit to Menu returns to the title', true);
     await ctx.close();
   }
 

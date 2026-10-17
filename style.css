@@ -657,6 +657,10 @@ kbd {
 }
 .mw-room-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 0.5em; }
 .mw-room .mw-hint { margin-top: 0.8em; }
+.mw-room-steps { margin: 0.9em 0 0; padding: 0 0 0 1.3em; text-align: left; font-size: 0.82em; line-height: 1.45; color: var(--mw-ink-dim); }
+.mw-room-steps li + li { margin-top: 0.3em; }
+.mw-room-steps strong { color: var(--mw-gold-hi); font-weight: 600; }
+.mw-room-server { color: #ffd59a; }
 .mw-chat { flex: 1; display: flex; flex-direction: column; min-height: 12em; }
 .mw-chat-log {
   flex: 1 1 0;

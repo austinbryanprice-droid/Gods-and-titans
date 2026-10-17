@@ -7,12 +7,15 @@
 // Only the panels take pointer events; everything else falls through to the canvas.
 import { UNITS } from '../data/index.js';
 import { getCommandCard } from './command-card.js';
-import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor } from './hud-dom.js';
+import { sanitizeName, sanitizeChat } from '../net/protocol.js';
+import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import { formatClock, tierName, nameOf } from './hud-data.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
+import { TipsView } from './hud-tips.js';
+import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -22,6 +25,7 @@ const CHAT_MS = 14000;
 const ERROR_MS = 2600;
 const BANNER_MS = 4200;
 const MAX_MESSAGES = 7;
+const MAX_MESSAGE_CHARS = 240;
 
 export class Hud {
   /**
@@ -164,6 +168,33 @@ export class Hud {
       getCamera: () => (game.renderer ? game.renderer.camera : null),
       onPointer: (info) => game.input && game.input.onMinimap(info),
     });
+
+    // New players get the "getting started" checklist until they close or finish it.
+    this.tips = null;
+    if (!getSettings().tipsDismissed) this.showTips();
+    this.offs.push(onSettingsChange((st, changed) => {
+      if (!changed.includes('tipsDismissed')) return;
+      if (st.tipsDismissed) this.hideTips();
+      else this.showTips();
+    }));
+  }
+
+  showTips() {
+    if (this.tips) return;
+    this.tips = new TipsView(this.root, {
+      viewState: this.vs,
+      onDismiss: () => {
+        this.tips = null;
+        if (!getSettings().tipsDismissed) saveSettings({ tipsDismissed: true });
+      },
+    });
+  }
+
+  hideTips() {
+    if (!this.tips) return;
+    const t = this.tips;
+    this.tips = null;
+    t.dispose();
   }
 
   // ---------------------------------------------------------------- per frame
@@ -211,6 +242,7 @@ export class Hud {
       this.cardView.render(this.card);
     }
     this.minimap.update(now);
+    if (this.tips) this.tips.update(now);
   }
 
   /** Current command card (input.js reads it for hotkeys). */
@@ -310,7 +342,10 @@ export class Hud {
    * @returns {HTMLElement|null}
    */
   message(text, kind = 'info') {
-    if (!text) return null;
+    if (text === null || text === undefined || text === '') return null;
+    // Error texts arrive in snapshots from the host: keep them short, plain text.
+    text = String(text);
+    if (text.length > MAX_MESSAGE_CHARS) text = `${text.slice(0, MAX_MESSAGE_CHARS - 1)}…`;
     if (kind === 'error') {
       this.errorEl.textContent = text;
       this.errorEl.classList.remove('is-on');
@@ -336,15 +371,20 @@ export class Hud {
 
   /** A chat line { from, name, text, system }. */
   chat(line) {
-    if (!line || !line.text) return;
+    if (!line || typeof line !== 'object') return;
+    // Lines come from the network: clean them again before they reach the page
+    // (text nodes only, single line, no control / bidi characters, bounded).
+    const text = sanitizeChat(line.text);
+    if (!text) return;
     if (line.system) {
-      this.pushLine(el('div', 'hud-msg is-system', line.text), CHAT_MS);
+      this.pushLine(el('div', 'hud-msg is-system', text), CHAT_MS);
       return;
     }
-    const p = this.vs.players[line.from] || (this.vs.setup && this.vs.setup.players[line.from]);
-    const who = el('b', 'hud-chat-from', `${line.name || (p && p.name) || 'Player'}:`);
-    if (p && p.color) who.style.color = p.color;
-    this.pushLine(el('div', 'hud-msg is-chat', who, ' ', el('span', null, line.text)), CHAT_MS);
+    const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
+    const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
+    const who = el('b', 'hud-chat-from', `${sanitizeName(line.name || (p && p.name), 'Player')}:`);
+    if (p) who.style.color = safeColor(p.color, '#f1e8d4');
+    this.pushLine(el('div', 'hud-msg is-chat', who, ' ', el('span', null, text)), CHAT_MS);
   }
 
   /** Big centred announcement under the top bar. */
@@ -394,6 +434,7 @@ export class Hud {
     clearTimeout(this.bannerTimer);
     for (const line of this.msgs.children) clearTimeout(line._timer);
     this.minimap.dispose();
+    this.hideTips();
     this.overlays.hide();
     for (const off of this.offs.splice(0)) off();
     this.root.textContent = '';

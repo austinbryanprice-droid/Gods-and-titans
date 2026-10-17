@@ -19,7 +19,10 @@
 //   autocast, level,    // ability extras (unlock level)
 //   action,             // what input.js does: { kind: 'move' | 'stop' | … }
 // }
-import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT } from '../config.js';
+import {
+  MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
+  MINE_SLOTS, MINE_TIME, CARRY_AMOUNT, DROPOFF_MINE_GAP,
+} from '../config.js';
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt } from '../data/index.js';
 import { selectionIds, subgroups, isComplete, ownBuildings, tierName } from './hud-data.js';
 
@@ -34,6 +37,13 @@ const PASSIVE_ICONS = {
 };
 const TARGET_TEXT = { none: 'No target', point: 'Targets an area', unit: 'Targets a unit', ally: 'Targets an ally', enemy: 'Targets an enemy' };
 
+/** The description without a sentence the red reason line already says ("Requires City."). */
+function withoutReason(description, reason) {
+  const d = description || '';
+  if (!reason || !d.includes(reason)) return d;
+  return d.replace(reason, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 function button(slot, o) {
   return {
     slot,
@@ -42,7 +52,7 @@ function button(slot, o) {
     keyLabel: o.key === 'Escape' ? 'Esc' : o.key || '',
     icon: o.icon || '❔',
     title: o.title || '',
-    description: o.description || '',
+    description: withoutReason(o.description, o.reason),
     enabled: o.state === 'ready' || o.state === 'active' || o.state === undefined,
     state: o.state || 'ready',
     reason: o.reason || null,
@@ -236,6 +246,88 @@ export function describePassive(p) {
   }
 }
 
+const GATHER_TEXT = `Mine gold from a gold mine or chop wood from a forest. Up to ${MINE_SLOTS} Worshippers mine one gold mine at a time (${MINE_TIME} s per ${CARRY_AMOUNT} gold); the others wait their turn, so about 5–6 per mine is plenty.`;
+
+/** "Shrine 0.5/s, Temple 0.7/s per worshipper, 5 at a time" from the building data. */
+function prayText() {
+  const parts = ['shrine', 'temple'].map((id) => BUILDINGS[id]).filter((b) => b && b.faithRate > 0)
+    .map((b) => `${b.name} ${b.faithRate}/s`);
+  const slots = [...new Set(['shrine', 'temple'].map((id) => BUILDINGS[id] && BUILDINGS[id].prayerSlots).filter((n) => n > 0))];
+  return `Kneel at a Shrine or Temple to earn Faith (${parts.join(', ')} per worshipper, ${slots.join(' or ')} at a time).`;
+}
+const PRAY_TEXT = prayText();
+
+const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th'];
+const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth'];
+/** "2nd needs Town, 3rd needs City" from GOD_SLOT_TIER. */
+const GOD_SLOT_TEXT = GOD_SLOT_TIER.slice(0, MAX_GODS).map((t, i) => (t > 1 ? `${ORDINALS[i]} needs ${tierName(t)}` : null)).filter(Boolean).join(', ') || 'no tier needed';
+
+function costShare(mult) {
+  if (Math.abs(mult - 0.5) < 1e-9) return 'half';
+  return `${Math.round(mult * 100)}% of`;
+}
+
+/** Building tooltip text: the data description plus the placement rule for drop-offs. */
+export function buildingDescription(typeId) {
+  const b = BUILDINGS[typeId];
+  if (!b) return '';
+  let text = b.description || '';
+  if (b.dropOff) text += ` Must stay ${DROPOFF_MINE_GAP} tiles away from gold mines.`;
+  return text;
+}
+
+/** What growing to `tier` unlocks, from the data (units, creatures, buildings, god slots). */
+export function tierUnlocks(tier, pantheon = null) {
+  const parts = [];
+  const mortals = Object.values(UNITS).filter((u) => !u.pantheon && u.producedAt && u.tier === tier).map((u) => `${u.name}s`);
+  if (mortals.length) parts.push(mortals.join(' and '));
+  const blds = Object.values(BUILDINGS).filter((b) => b.tier === tier).map((b) => `the ${b.name}`);
+  if (blds.length) parts.push(blds.join(' and '));
+  const creatures = pantheon ? producibleAt('shrine', pantheon).map((id) => UNITS[id]).filter((u) => u && u.tier === tier) : [];
+  if (creatures.length) parts.push(creatures.map((u) => `the ${u.name}`).join(' and '));
+  else parts.push(`tier-${tier} creatures`);
+  const slot = GOD_SLOT_TIER.slice(0, MAX_GODS).findIndex((t) => t === tier);
+  if (slot >= 0) parts.push(`a ${ORDINAL_WORDS[slot] || ORDINALS[slot]} god`);
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+// Effect amounts that grow with a god's level (sim/abilities.js multiplies these by abilityScale).
+const SCALED = {
+  damage: (e, k) => `${r0(e.amount * k)} damage`,
+  heal: (e, k) => `${r0(e.amount * k)} healing`,
+  dot: (e, k) => `${r0((e.dps || 0) * k)} damage/s`,
+  field: (e, k) => [e.dps ? `${r0(e.dps * k)} damage/s` : null, e.hps ? `${r0(e.hps * k)} healing/s` : null].filter(Boolean).join(', '),
+  chain: (e, k) => `${r0(e.amount * k)} chain damage`,
+  line: (e, k) => `${r0(e.amount * k)} damage`,
+  dash: (e, k) => (e.amount ? `${r0(e.amount * k)} dash damage` : ''),
+  shield: (e, k) => `${r0((e.amount || 0) * k)} shield`,
+};
+function r0(v) {
+  return String(Math.round(v));
+}
+
+/**
+ * "At level 3 (+20%): 132 damage, 1 stun …" — the ability's level-scaled amounts as
+ * the sim applies them (× (1 + ABILITY_LEVEL_SCALE × (level − 1))), or '' when nothing scales.
+ */
+export function abilityLevelText(ab, level) {
+  if (!ab || !(level > 1)) return '';
+  const k = 1 + ABILITY_LEVEL_SCALE * (level - 1);
+  const seen = new Set();
+  const parts = [];
+  for (const e of ab.effects || []) {
+    const f = SCALED[e.type];
+    const t = f ? f(e, k) : '';
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      parts.push(t);
+    }
+  }
+  if (!parts.length) return '';
+  return `At level ${level} (+${Math.round((k - 1) * 100)}%): ${parts.join(', ')}.`;
+}
+
 const PASSIVE_TITLES = {
   aura: 'Aura', regen: 'Regeneration', lifesteal: 'Lifesteal', cleave: 'Cleave', thorns: 'Thorns', evasion: 'Evasion',
   critical: 'Critical Strike', onHitSlow: 'Crippling Blows', onHitDot: 'Venomous Blows',
@@ -258,7 +350,7 @@ function unitCard(card, vs, group, ownIds, mode) {
         key: b.hotkey,
         icon: b.icon,
         title: `Build ${b.name}`,
-        description: b.description,
+        description: buildingDescription(typeId),
         state: chk.state,
         reason: chk.reason,
         cost: chk.cost,
@@ -282,7 +374,7 @@ function unitCard(card, vs, group, ownIds, mode) {
 
   if (isWorker) {
     const workers = units.filter((u) => UNITS[u.t] && UNITS[u.t].class === 'worker');
-    card[4] = button(4, { id: 'gather', key: 'G', icon: '⛏️', title: 'Gather', description: 'Mine gold from a gold mine or chop wood from a forest.', action: { kind: 'target', order: 'gather', target: 'resource' } });
+    card[4] = button(4, { id: 'gather', key: 'G', icon: '⛏️', title: 'Gather', description: GATHER_TEXT, action: { kind: 'target', order: 'gather', target: 'resource' } });
     const carrying = workers.some((u) => u.c);
     card[5] = button(5, {
       id: 'return', key: 'C', icon: '📥', title: 'Return Resources', description: 'Bring the carried gold or wood to the nearest Town Center or Storehouse.',
@@ -290,7 +382,7 @@ function unitCard(card, vs, group, ownIds, mode) {
     });
     const canPray = hasCompleted(vs, 'shrine') || hasCompleted(vs, 'temple');
     card[6] = button(6, {
-      id: 'pray', key: 'P', icon: '🙏', title: 'Pray', description: 'Kneel at a Shrine or Temple to earn Faith (Shrine 0.5/s, Temple 0.7/s per worshipper, 5 at a time).',
+      id: 'pray', key: 'P', icon: '🙏', title: 'Pray', description: PRAY_TEXT,
       state: canPray ? 'ready' : 'locked', reason: canPray ? null : 'Requires a Shrine.', action: { kind: 'target', order: 'pray', target: 'prayer' },
     });
     card[8] = button(8, { id: 'build', key: 'B', icon: '🔨', title: 'Build', description: 'Open the list of buildings this worshipper can raise.', action: { kind: 'submenu', menu: 'build' } });
@@ -311,18 +403,22 @@ function unitCard(card, vs, group, ownIds, mode) {
       let reason = null;
       if (!unlockedUnits.length) {
         state = 'locked';
-        reason = 'That god is not unlocked yet.';
+        reason = def.class === 'god' && (ab.unlockLevel || 1) > 1 ? `Unlocks at level ${ab.unlockLevel}.` : 'Not unlocked yet.';
       } else if (left > 0) {
         state = 'cooldown';
         reason = 'That ability is not ready.';
       }
-      const lockText = def.class === 'god' && (ab.unlockLevel || 1) > 1 ? ` Unlocks at level ${ab.unlockLevel}.` : '';
+      // A selected god that already has the ability does not need its unlock level repeated.
+      const lockText = def.class === 'god' && (ab.unlockLevel || 1) > 1 && unlockedUnits.length < activeUnits.length && unlockedUnits.length
+        ? ` Unlocks at level ${ab.unlockLevel}.` : '';
+      const lv = def.class === 'god' ? Math.max(1, ...activeUnits.map((u) => u.lv || 1)) : 1;
+      const levelText = lv > 1 ? abilityLevelText(ab, lv) : '';
       card[slot] = button(slot, {
         id: `ability:${ab.id}`,
         key: ab.key,
         icon: ab.icon,
         title: ab.name,
-        description: `${ab.description}${lockText}`,
+        description: `${ab.description}${lockText}${levelText ? ` ${levelText}` : ''}`,
         state,
         reason,
         cooldown: left > 0 ? Math.min(1, left / ab.cooldown) : 0,
@@ -358,8 +454,8 @@ function trainButton(slot, key, vs, unitId, buildings, verb) {
   const revive = chk.revive !== null;
   const title = revive ? `Revive ${def.name} (level ${chk.revive})` : `${verb} ${def.name}`;
   let description = describeUnit(def);
-  if (def.class === 'god' && !revive) description += ` Gods: ${godCount(vs)}/${MAX_GODS} (2nd needs Town, 3rd needs City).`;
-  if (revive) description = `${def.name} fell in battle. Revive at half cost, keeping level ${chk.revive}. ${description}`;
+  if (def.class === 'god' && !revive) description += ` Gods: ${godCount(vs)}/${MAX_GODS} (${GOD_SLOT_TEXT}).`;
+  if (revive) description = `${def.name} fell in battle. Revive for ${costShare(REVIVE_COST_MULT)} the cost and time, keeping level ${chk.revive}. ${description}`;
   return button(slot, {
     id: `train:${unitId}`,
     key,
@@ -382,7 +478,7 @@ function buildingCard(card, vs, group) {
   if (!buildings.some(isComplete)) {
     card[11] = button(11, {
       id: 'cancel-build', key: 'Escape', icon: '✖', title: 'Cancel Construction',
-      description: 'Tear down this unfinished building and get back 75% of its cost.',
+      description: `Tear down this unfinished building and get back ${Math.round(CANCEL_BUILD_REFUND * 100)}% of its cost.`,
       action: { kind: 'cancelBuild' },
     });
     return card;
@@ -398,7 +494,7 @@ function buildingCard(card, vs, group) {
         const next = chk.up.toTier;
         card[1] = button(1, {
           id: 'tier', key: 'U', icon: chk.up.icon || '⬆️', title: chk.up.name,
-          description: `Your ${tierName(next - 1)} grows into a ${tierName(next)}, unlocking ${next === 2 ? 'Town buildings, units, creatures and a second god' : 'the Titan Gate, City creatures and a third god'}.${(chk.up.requires || []).length ? ' ' + chk.up.requires.map(requiresText).join(' ') : ''}`,
+          description: `Your ${tierName(next - 1)} grows into a ${tierName(next)}, unlocking ${tierUnlocks(next, pantheon)}.${(chk.up.requires || []).length ? ' ' + chk.up.requires.map(requiresText).join(' ') : ''}`,
           state: chk.state, reason: chk.reason, cost: chk.cost, action: { kind: 'tier' },
         });
       }

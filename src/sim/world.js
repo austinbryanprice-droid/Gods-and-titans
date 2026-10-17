@@ -2,7 +2,7 @@
 // Node and the browser; deterministic for a given setup and command stream.
 import {
   DT, START_RESOURCES, START_WORKERS, POP_MAX, GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_HP, GOD_LEVEL_DAMAGE,
-  GOD_LEVEL_ARMOR, XP_RANGE, UNDER_ATTACK_COOLDOWN, NEUTRAL, PLAYER_COLORS,
+  GOD_LEVEL_ARMOR, XP_RANGE, UNDER_ATTACK_COOLDOWN, NEUTRAL, PLAYER_COLORS, MINE_SLOTS,
 } from '../config.js';
 import { BUILDINGS, GOLD_MINE, PANTHEONS, PANTHEON_LIST, getUnitType, xpValue } from '../data/index.js';
 import { RNG, hashSeed } from './rng.js';
@@ -14,12 +14,12 @@ import { updateMovement } from './movement.js';
 import { computeDerived, tickStatuses, updateAuras } from './status.js';
 import { dealDamage, updateProjectiles, updateTower } from './combat.js';
 import { updateDelayed, updateFields } from './abilities.js';
-import { computePrayerSpots } from './economy.js';
-import { canPlace, findPlacement, updateConstruction } from './construction.js';
+import { computePrayerSpots, mineSpots } from './economy.js';
+import { canPlace, placementError, findPlacement, updateConstruction } from './construction.js';
 import { updateProduction } from './production.js';
 import { spawnCreeps } from './creeps.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
-import { applyCommand } from './commands.js';
+import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
 import { hyp, distPointRect } from './common.js';
 
@@ -61,14 +61,15 @@ export class World {
     this._tmpQuery = [];
     this._tmpTarget = [];
     this._tmpSteer = [];
+    this._tmpSurround = [];
     this.gameOver = null;
     this.winningTeam = null;
-    this.perf = { lastTickMs: 0 };
+    this.perf = { lastTickMs: 0, commandErrors: 0, lastCommandError: '' };
 
     const pickRng = this.rng.fork('pantheons');
     this.players = setup.players.map((sp, i) => {
       let pantheon = sp.pantheon;
-      if (!PANTHEONS[pantheon]) pantheon = pickRng.pick(PANTHEON_LIST).id;
+      if (typeof pantheon !== 'string' || !Object.hasOwn(PANTHEONS, pantheon)) pantheon = pickRng.pick(PANTHEON_LIST).id;
       return {
         index: i,
         name: sp.name || `Player ${i + 1}`,
@@ -91,6 +92,7 @@ export class World {
       };
     });
     this.multiTeam = new Set(this.players.map((p) => p.team)).size >= 2;
+    this.cmdCounts = new Array(this.players.length).fill(0); // commands queued this tick, per player
 
     for (const m of mapData.mines || []) this.createMine(m.tx, m.ty, m.amount);
     const starts = mapData.starts || [];
@@ -134,7 +136,10 @@ export class World {
       hp: GOLD_MINE.hp, maxHp: GOLD_MINE.hp, armor: 0, amount, initialAmount: amount,
       state: 'idle', order: null, target: 0, facing: 0, dead: false, constructed: true, buildProgress: 1, queue: [],
       carry: 0, level: 0, xp: 0, cooldowns: {},
+      // Mining: MINE_SLOTS workers mine at once, the rest wait in FIFO order at their own spot on the edge.
+      miners: new Array(MINE_SLOTS).fill(0), waiting: [], spots: mineSpots(tx, ty, GOLD_MINE.size), spotHolders: null,
     };
+    m.spotHolders = new Array(m.spots.length).fill(0);
     this.entities.set(id, m);
     this.mineList.push(m);
     this.map.setOccupied(tx, ty, m.size, id);
@@ -154,7 +159,7 @@ export class World {
       prayers: def.prayerSlots > 0 ? new Array(def.prayerSlots).fill(0) : [], praySpots: null, prayingCount: 0,
       attackCd: 0, target: 0, state: 'idle', order: null, facing: Math.PI / 2, dead: false,
       baseDamage: def.attack ? def.attack.damage : 0, dmgMult: 1, atkSpeedMult: 1,
-      carry: 0, level: 0, xp: 0, cooldowns: {}, amount: 0,
+      carry: 0, level: 0, xp: 0, cooldowns: {}, amount: 0, claimers: null,
     };
     this.entities.set(id, b);
     this.buildingList.push(b);
@@ -215,6 +220,9 @@ export class World {
       stunned: false, invuln: false, slowPct: 0,
       dead: false, constructed: true, buildProgress: 1, queue: null, size: 0, amount: 0,
       lastGather: null, camp: null,
+      // Engagement bookkeeping (combat.js / surround.js): current target id, ticks approaching it,
+      // ticks blocked, last progress check, the melee attack spot, and attackers claiming spots on us.
+      engId: 0, engT: 0, blockedT: 0, engD: 0, engCk: 0, atk: null, claimers: null,
     };
     this.applyLevelStats(u, true);
     computeDerived(u);
@@ -310,6 +318,11 @@ export class World {
     return canPlace(this, i, typeId, tx, ty);
   }
 
+  /** Why player i cannot place typeId at (tx, ty): null when it can, else the error text (DESIGN 6.2). */
+  placementError(i, typeId, tx, ty) {
+    return placementError(this, i, typeId, tx, ty);
+  }
+
   findPlacement(i, typeId, nearX, nearY, maxR = 20) {
     return findPlacement(this, i, typeId, nearX, nearY, maxR);
   }
@@ -350,9 +363,17 @@ export class World {
   // ------------------------------------------------------------- commands
 
   /** Queue a command; it is applied at the start of the next tick. */
+  /**
+   * Queue a command for the next tick. Untrusted input: anything that is not a
+   * well-formed command is dropped (never throws); see normalizeCommand.
+   */
   issueCommand(playerIndex, cmd) {
-    if (!Number.isInteger(playerIndex) || !this.players[playerIndex] || !cmd) return;
-    this.cmdQueue.push([playerIndex, cmd]);
+    if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= this.players.length) return;
+    if (this.cmdCounts[playerIndex] >= MAX_COMMANDS_PER_TICK) return;
+    const clean = normalizeCommand(cmd, this.map);
+    if (!clean) return;
+    this.cmdCounts[playerIndex]++;
+    this.cmdQueue.push([playerIndex, clean]);
   }
 
   setOrder(u, o, queue = false) {
@@ -544,7 +565,16 @@ export class World {
   tick() {
     const cmds = this.cmdQueue;
     this.cmdQueue = [];
-    for (const [p, cmd] of cmds) applyCommand(this, p, cmd);
+    this.cmdCounts.fill(0);
+    for (const [p, cmd] of cmds) {
+      try {
+        applyCommand(this, p, cmd);
+      } catch (err) {
+        // A command must never take the game down; count it so tests notice.
+        this.perf.commandErrors++;
+        this.perf.lastCommandError = String((err && err.message) || err);
+      }
+    }
 
     if (this.tickCount % 10 === 0) updateAuras(this);
     const units = this.unitList;

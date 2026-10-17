@@ -1,7 +1,10 @@
 // How to Play: the rules (DESIGN 5) and controls (DESIGN 9) in friendly words.
 import { h } from './menu-dom.js';
 import { BUILDINGS } from '../data/index.js';
-import { MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS } from '../config.js';
+import {
+  MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
+  GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING,
+} from '../config.js';
 
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
 const kbd = (...k) => k.map((x, i) => [i ? h('span.mw-plus', '+') : null, h('kbd', x)]);
@@ -41,11 +44,23 @@ const HOTKEYS = [
     [kbd('1–9'), 'Select a group (tap twice to jump to it)'],
     [kbd('F1–F3'), 'Select your gods'],
     [kbd('Space'), 'Center on selection or the last alert'],
+    [kbd('Tab'), 'Next unit type in a mixed selection'],
+    [kbd('.'), 'Next idle worshipper (Shift: all of them)'],
+    [kbd('Backspace'), 'Jump to your Town Center'],
     [kbd('Alt'), 'Show every health bar'],
     [kbd('Enter'), 'Chat'],
+    [kbd('F10'), 'Game menu (pauses a game against the AI)'],
     [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera; mouse wheel zooms'],
   ]],
 ];
+
+const TIER_WORDS = ['the Village', 'a Town', 'a City'];
+const NTH = ['first', 'second', 'third', 'fourth'];
+
+/** "the first in the Village, the second once you are a Town, …" from GOD_SLOT_TIER. */
+function godSlots() {
+  return GOD_SLOT_TIER.slice(0, MAX_GODS).map((t, i) => (t <= 1 ? `the ${NTH[i]} in the Village` : `the ${NTH[i]} once you are ${TIER_WORDS[t - 1]}`)).join(', ');
+}
 
 function step(num, icon, title, ...body) {
   return h('section.mw-howto-step',
@@ -62,18 +77,19 @@ export function renderHowToContent() {
   const rules = h('div.mw-howto-rules',
     h('p.mw-lead', 'Lead a people devoted to their gods. Your worshippers gather, build and pray; your prayers call down creatures, gods and a colossal titan. Destroy every building of the enemy to win.'),
     step(1, '⛏️', 'Gather gold and wood',
-      `You start with a Town Center, ${START_WORKERS} Worshippers, ${START_RESOURCES.gold} gold and ${START_RESOURCES.wood} wood. Select worshippers and right-click a gold mine or the forest. They carry 10 at a time back to the Town Center or a Storehouse.`),
+      `You start with a Town Center, ${START_WORKERS} Worshippers, ${START_RESOURCES.gold} gold and ${START_RESOURCES.wood} wood. Select worshippers (drag a box around them) and right-click a gold mine or the forest. They carry ${CARRY_AMOUNT} at a time back to the Town Center or a Storehouse.`,
+      `Only ${MINE_SLOTS} worshippers can dig in a gold mine at once (${MINE_TIME} seconds per trip); the others wait their turn, so 5–6 on one mine is plenty. Send the rest to the forest or to pray. Town Centers and Storehouses must be built at least ${DROPOFF_MINE_GAP} tiles away from a gold mine.`),
     step(2, '🙏', 'Pray for Faith',
       `Build a Shrine, then right-click it with worshippers (or press P). Every kneeling worshipper earns Faith each second (Shrine ${faithRate('shrine')}/s, Temple ${faithRate('temple')}/s) until you give them another order. Faith is what summons the divine.`),
     step(3, '🏛️', 'Grow from Village to Town to City',
       `Houses raise your population limit (up to ${POP_MAX}). Barracks train Warriors, Archers, Priests and Battering Rams. Grow your Town Center (U) to unlock stronger creatures, more gods and finally the Titan Gate.`),
     step(4, '✨', 'Summon creatures, gods and a Titan',
       'Shrines summon your pantheon\'s mythical creatures: one per tier, Village, Town and City. Temples summon gods: heroes who level up and cast spells.',
-      `You may lead ${MAX_GODS} gods at once: the first in the Village, the second once you are a Town, the third as a City. In the City, raise a Titan Gate and summon one colossal Titan.`),
+      `You may lead ${MAX_GODS} gods at once: ${godSlots()}. In the City, raise a Titan Gate and summon one colossal Titan.`),
     step(5, '⚡', 'Level up your gods',
-      'Gods gain experience when enemies fall nearby and rise to level 6. Their first ability (Q) is ready at once, the second (W) at level 2 and the ultimate (R) at level 4. A fallen god can be revived at the Temple for half the price, keeping its level.'),
+      `Gods gain experience when enemies fall nearby and rise to level ${GOD_MAX_LEVEL}. Their first ability (Q) is ready at once, the second (W) at level 2 and the ultimate (R) at level 4. A fallen god can be revived at the Temple for ${REVIVE_COST_MULT === 0.5 ? 'half' : `${Math.round(REVIVE_COST_MULT * 100)}% of`} the price and time, keeping its level.`),
     step(6, '⚔️', 'Wage war',
-      'Armor softens blows; arrows and spells never miss. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.'),
+      `Armor softens blows; arrows and spells never miss. Spells ignore armor but deal only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.`),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
   );
   const controls = h('div.mw-howto-controls',

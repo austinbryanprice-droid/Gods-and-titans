@@ -129,8 +129,8 @@ test('delta round-trips a long randomized snapshot sequence exactly', () => {
     const next = nextSnapshot(r, prev, nextId);
     const d = encode(prev, next);
     if (d.o) usedOrder++;
-    if (d.c && d.c.some((c) => c[2])) usedRemovedKeys++;
-    if (d.m) usedMove++;
+    if (d.cr) usedRemovedKeys++;
+    if (d.m || d.mf) usedMove++;
     deepFreeze(prev);
     const out = apply(prev, d);
     assert.deepStrictEqual(out, next, `step ${i}`);
@@ -166,7 +166,8 @@ test('delta carries events, felled and gameOver; unchanged entities stay shared'
   const b = { ...a, tick: 1, entities: a.entities.slice(), events: [{ type: 'treeFelled', tx: 1, ty: 2 }], felled: [[1, 2]], gameOver: { winningTeam: 1 } };
   b.entities[2] = { ...b.entities[2], hp: 1 };
   const d = encode(a, b);
-  assert.deepEqual(d.e, b.events);
+  assert.ok(Array.isArray(d.e[0]) && d.e[0].length === 3, 'known event shapes are packed as arrays');
+  assert.deepEqual(apply(a, json(d)).events, b.events);
   assert.deepEqual(d.fl, [[1, 2]]);
   assert.deepEqual(d.x, { gameOver: { winningTeam: 1 } });
   const out = apply(a, d);
@@ -228,4 +229,168 @@ test('delta round-trips real World snapshots', async () => {
     prev = next;
   }
   assert.ok(deltaChars / 300 < 4000, `average delta ${Math.round(deltaChars / 300)} chars`);
+});
+
+// ---- edge cases of the compact format (notes/decisions.md [netfix]) ----
+
+/** Encode → JSON wire → apply, against a frozen base; returns the delta. */
+function roundTrip(prev, next, what) {
+  const base = deepFreeze(json(prev));
+  const d = encode(base, next);
+  const out = apply(base, JSON.parse(JSON.stringify(d)));
+  assert.deepStrictEqual(json(out), json(next), what);
+  return d;
+}
+
+const ent = (id, extra = {}) => ({ id, k: 'u', t: 'warrior', o: 0, x: 10, y: 10, f: 0, hp: 100, ...extra });
+const snapOf = (tick, entities, players = [{ i: 0, gold: 1 }], extra = {}) => ({ tick, time: tick / 20, players, entities, events: [], felled: [], ...extra });
+
+test('delta: keys the path syntax cannot express fall back to whole values (cx)', () => {
+  const weird = JSON.parse('{"a.b":1,"+x":2,"~0":3,"__proto__":{"p":1},"n":{"c.d":1}}');
+  const a = snapOf(1, [ent(1, weird), ent(2)]);
+  const bw = JSON.parse('{"a.b":5,"+x":2,"~0":4,"__proto__":{"p":2},"n":{"c.d":2}}');
+  const b = snapOf(2, [ent(1, bw), ent(2, { hp: 50 })]);
+  const d = roundTrip(a, b, 'weird keys changed');
+  assert.ok(d.cx && d.cx.length === 1 && d.cx[0][0] === 1, 'entity 1 sent as cx');
+  assert.ok(d.c && d.c.hp, 'entity 2 still uses columns');
+  const out = apply(json(a), d);
+  assert.ok(Object.prototype.hasOwnProperty.call(out.entities[0], '__proto__'), '__proto__ stays an own key');
+  assert.equal(Object.getPrototypeOf(out.entities[0]), Object.prototype, 'and never becomes a prototype');
+  // Removing weird keys, adding them to a plain entity.
+  const c = snapOf(3, [ent(1), ent(2, JSON.parse('{"x.y":1,"__proto__":null}'))]);
+  roundTrip(b, c, 'weird keys removed / added');
+});
+
+test('delta: nested objects that reorder keys, change shape or type are replaced exactly', () => {
+  const a = snapOf(1, [ent(1, { cd: { bolt: 2, aura: 5 }, q: [{ u: 'w', p: 0.1 }], fx: ['stun'], bo: { b: 'house', tx: 1, ty: 2 } })]);
+  const steps = [
+    { cd: { aura: 5, bolt: 1 } }, // same keys, other order
+    { cd: { aura: 4, bolt: 1 } }, // '~i' positional path
+    { cd: { aura: 4 } }, // key removed
+    { cd: [] }, // object → array
+    { cd: null }, // → null
+    { cd: { deep: { deeper: { deepest: { bottom: 1 } } } } }, // beyond MAX_DEPTH
+    { cd: { deep: { deeper: { deepest: { bottom: 2 } } } } },
+    { q: [{ u: 'w', p: 0.2 }, { u: 'x', p: 0 }] }, // array grows
+    { q: [{ u: 'w', p: 0.3 }] },
+    { q: [{ u: 'w', p: 0.3, extra: undefined }] }, // undefined value = absent
+    { fx: 'stun' },
+    { bo: { b: 'house', tx: 1.5, ty: -0 } },
+  ];
+  let prev = a;
+  for (let i = 0; i < steps.length; i++) {
+    const next = snapOf(i + 2, [{ ...prev.entities[0], ...steps[i] }]);
+    roundTrip(prev, next, `step ${i} ${JSON.stringify(steps[i])}`);
+    prev = json(next);
+  }
+});
+
+test('delta: odd ids, coordinates and values stay exact', () => {
+  const a = snapOf(1, [ent(1), ent(2.5), ent(-3), ent(2 ** 53 + 2), ent(7, { x: 1 / 3, y: 1e-7, f: -0 })]);
+  const b = snapOf(2, [ent(1, { x: 10.01, y: 9.99 }), ent(2.5, { x: 11 }), ent(-3, { hp: 1 }), ent(2 ** 53 + 2, { y: 0.5 }), ent(7, { x: 2 / 3, y: 1e21, f: 0.1 + 0.2 })]);
+  roundTrip(a, b, 'odd ids and floats');
+  const c = snapOf(3, [ent(7, { x: 1e300, y: -1e-300, f: 3 }), ent(1, { x: 0.07, y: 0.29 })]);
+  const d = roundTrip(b, c, 'removed + reordered');
+  assert.ok(d.r && d.o, 'removals and a new order');
+  roundTrip(c, snapOf(4, [ent(7, { x: 1e300, y: -1e-300, f: 3, hp: 'many', st: { odd: [1, { z: 2 }] } })]), 'non-number fields');
+});
+
+test('delta: events of unknown or odd shapes, players with odd keys, top-level extras', () => {
+  const players = JSON.parse('[{"i":0,"gold":1,"stats":{"k":1}},{"i":1,"a.b":2,"__proto__":{"x":1}}]');
+  const a = snapOf(1, [ent(1)], players, { fields: [], gameOver: null });
+  const events = [
+    { type: 'hit', dst: 1, amount: 2, src: 3 }, // known shape
+    { amount: 2, type: 'hit', src: 3, dst: 1 }, // known keys, other order
+    { type: 'hit', dst: 1, amount: 2 }, // missing key
+    { type: 'hit', dst: 1, amount: 2, src: 3, crit: true }, // extra key
+    { type: 'hit', dst: 1, amount: undefined, src: 3 }, // undefined value
+    { type: 'mystery', payload: [1, { a: 2 }] }, // unknown type
+    5, null, 'str', [1, 2], [-1, 'looks packed'], // not objects
+  ];
+  const p2 = JSON.parse('[{"i":0,"gold":2,"stats":{"k":2}},{"i":1,"a.b":3,"__proto__":{"x":2}},{"i":2}]');
+  const b = snapOf(2, [ent(1)], p2, { events, gameOver: { winningTeam: 1 }, newKey: [1] });
+  const d = roundTrip(a, b, 'events, players, extras');
+  assert.ok(d.P, 'player count changed: full players');
+  const p3 = JSON.parse('[{"i":0,"gold":3,"stats":{"k":2}},{"i":1,"a.b":4,"__proto__":{"x":2}},{"i":2,"gold":1}]');
+  const c = snapOf(3, [ent(1)], p3, { gameOver: { winningTeam: 1 } });
+  const d2 = roundTrip(b, c, 'player patches');
+  assert.ok(d2.p && d2.pw, 'plain players patched, odd ones replaced whole');
+  assert.deepEqual(d2.xr, ['newKey']);
+});
+
+test('delta: a randomized fuzz over odd keys and values round-trips exactly', () => {
+  const r = new RNG(1234);
+  const KEYS = ['hp', 'x', 'y', 'f', 'cd', 'q', 'st', 'a.b', '+x', '~1', '__proto__', 'longkey', 'zz'];
+  const value = (depth) => {
+    const roll = r.next();
+    if (depth > 4 || roll < 0.35) return r.pick([0, -0, 1, 1.5, 0.07, 1 / 3, -2, 'a', '', true, false, null, 1e21, 123.45]);
+    if (roll < 0.6) return Array.from({ length: r.int(0, 3) }, () => value(depth + 1));
+    const o = {};
+    for (let i = r.int(0, 3); i > 0; i--) setOwn(o, r.pick(KEYS), value(depth + 1));
+    return o;
+  };
+  function setOwn(o, k, v) {
+    Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+  }
+  const entity = (id) => {
+    const e = ent(id, { x: r.int(0, 9000) / 100, y: r.int(0, 9000) / 100 });
+    for (let i = r.int(0, 3); i > 0; i--) setOwn(e, r.pick(KEYS.slice(4)), value(1));
+    return e;
+  };
+  let nextId = 1;
+  let prev = snapOf(0, Array.from({ length: 30 }, () => entity(nextId++)));
+  for (let tick = 1; tick <= 400; tick++) {
+    const entities = [];
+    for (const pe of prev.entities) {
+      if (r.chance(0.03)) continue;
+      if (!r.chance(0.5)) { entities.push(pe); continue; }
+      const e = { ...pe };
+      for (let i = r.int(1, 3); i > 0; i--) {
+        const k = r.pick(KEYS);
+        if (k === 'x' || k === 'y' || k === 'f') e[k] = r.chance(0.8) ? r.int(-500, 9000) / 100 : r.next() * 90;
+        else if (r.chance(0.2)) delete e[k];
+        else setOwn(e, k, value(1));
+      }
+      entities.push(e);
+    }
+    for (let i = r.int(0, 2); i > 0; i--) entities.push(entity(nextId++));
+    const next = snapOf(tick, r.chance(0.05) ? r.shuffle(entities) : entities, [{ i: 0, gold: tick, x: value(1) }], {
+      events: r.chance(0.5) ? [value(1), { type: 'death', id: 1, t: 'w', o: 0, x: 1, y: 2, k: 'u' }] : [],
+    });
+    roundTrip(prev, next, `fuzz tick ${tick}`);
+    prev = json(next);
+  }
+});
+
+test('delta: a hostile delta throws or stays contained; it never pollutes prototypes', () => {
+  const base = deepFreeze(json(snapOf(1, [ent(1, { cd: { bolt: 1 } }), ent(2)], [{ i: 0, gold: 1 }])));
+  const hostile = [
+    { c: { '__proto__.polluted': [1, 1] } },
+    { c: { 'cd.__proto__.polluted': [1, 1] } },
+    { c: { 'constructor.prototype.polluted': [1, 1] } },
+    { c: { '+__proto__': [1, 1] } },
+    { c: { 'cd.~9': [1, 1] } },
+    { c: { hp: [99, 1] } },
+    { p: [['__proto__', { polluted: 1 }]] },
+    { p: [[0, { '__proto__.polluted': 1 }]] },
+    { pw: [[7, { polluted: 1 }]] },
+    { m: [5, 1, 1] },
+    { e: [[999, 1, 2]] },
+  ];
+  for (const extra of hostile) {
+    const d = JSON.parse(JSON.stringify({ b: 1, time: 0.1, ...extra }));
+    try {
+      apply(base, d);
+    } catch {
+      // throwing is fine: the client asks for a full snapshot
+    }
+    assert.equal({}.polluted, undefined, JSON.stringify(extra));
+    assert.equal([].polluted, undefined, JSON.stringify(extra));
+  }
+  // Own '__proto__' keys from JSON stay plain data.
+  const out = apply(base, JSON.parse('{"b":1,"time":0.1,"x":{"__proto__":{"polluted":1}},"cx":[[1,{"__proto__":{"polluted":1}}]]}'));
+  assert.equal({}.polluted, undefined);
+  assert.equal(Object.getPrototypeOf(out), Object.prototype);
+  assert.equal(Object.getPrototypeOf(out.entities[0]), Object.prototype);
+  assert.deepEqual(Object.keys(base.entities[0]).includes('__proto__'), false, 'base untouched');
 });

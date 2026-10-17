@@ -66,7 +66,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, tipsDismissed: false });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -82,4 +82,16 @@ test('works without storage at all, and when storage throws', () => {
   assert.equal(getSettings().volume, 0.7);
   assert.equal(saveSettings({ volume: 0.4 }).volume, 0.4);
   assert.ok(defaultSettings().name.startsWith('Player'));
+});
+
+test('tipsDismissed: false by default, only booleans accepted, remembered across reloads', () => {
+  assert.equal(getSettings().tipsDismissed, false);
+  assert.equal(saveSettings({ tipsDismissed: 'yes' }).tipsDismissed, false);
+  const seen = [];
+  onSettingsChange((s, changed) => seen.push(changed));
+  assert.equal(saveSettings({ tipsDismissed: true }).tipsDismissed, true);
+  assert.deepEqual(seen, [['tipsDismissed']]);
+  _resetSettingsForTests();
+  assert.equal(getSettings().tipsDismissed, true);
+  assert.equal(saveSettings({ tipsDismissed: false }).tipsDismissed, false);
 });

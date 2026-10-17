@@ -3,14 +3,20 @@
 // Messages are JSON objects; larger ones are split into ordered chunks
 // (protocol.js framing) because WebRTC data channels limit message sizes.
 // Idle connections exchange heartbeats so a vanished peer (closed tab, lost
-// network) is detected within TIMEOUT_MS even when no close event arrives.
+// network) is detected within TIMEOUT_MS (GAME_TIMEOUT_MS once a game runs)
+// even when no close event arrives. Silence is measured in time this page was
+// actually running (see MAX_PULSE_GAP_MS), so a long main-thread stall here
+// never closes a link whose messages are merely waiting to be dispatched.
+// Incoming frames are untrusted: size limits, malformed-frame budget (see
+// FrameDecoder); a connection that keeps sending garbage is closed.
 //   peer     — PeerJS (WebRTC) through a signaling server, room code → host peer id
 //   local    — BroadcastChannel `mythicwar-<code>`: tabs of one browser (testing)
 //   loopback — in-memory, for Node tests
 //   none     — no network (single player)
 import {
-  CHUNK_SIZE, HEARTBEAT_MS, TIMEOUT_MS, JOIN_TIMEOUT_MS, FRAME_HEARTBEAT, FRAME_BYE,
-  encodeFrames, FrameDecoder, makeRoomCode, normalizeRoomCode, peerIdFor, readNetParams, peerOptions,
+  CHUNK_SIZE, HEARTBEAT_MS, TIMEOUT_MS, JOIN_TIMEOUT_MS, CONNECT_TIMEOUT_MS, FRAME_HEARTBEAT, FRAME_BYE,
+  MAX_PULSE_GAP_MS, MAX_HOST_MESSAGE_CHARS, MAX_CLIENT_MESSAGE_CHARS, MAX_FRAME_ERRORS, ERROR_WINDOW_MS,
+  encodeFrames, FrameDecoder, makeRoomCode, normalizeRoomCode, peerIdFor, readNetParams, peerOptions, PEER_CLOUD,
 } from './protocol.js';
 import { createPulse } from './ticker.js';
 
@@ -72,8 +78,15 @@ export class FramedConn {
    * @param {number} [o.chunkSize]
    * @param {number} [o.heartbeatMs] 0 disables heartbeats and the timeout
    * @param {number} [o.timeoutMs]
+   * @param {number} [o.maxMessageChars] largest incoming message accepted
+   * @param {number} [o.maxFrameErrors] malformed frames tolerated per ERROR_WINDOW_MS (0 = any number)
+   * @param {boolean} [o.autoPulse] false: nobody calls _heartbeat (tests drive it with their own clock)
+   * @param {number} [o.maxPulseGapMs] most silence one late pulse can add (MAX_PULSE_GAP_MS)
    */
-  constructor({ id, rawSend, rawClose = () => {}, chunkSize = CHUNK_SIZE, heartbeatMs = HEARTBEAT_MS, timeoutMs = TIMEOUT_MS, transport = '' }) {
+  constructor({
+    id, rawSend, rawClose = () => {}, chunkSize = CHUNK_SIZE, heartbeatMs = HEARTBEAT_MS, timeoutMs = TIMEOUT_MS, transport = '',
+    maxMessageChars = MAX_HOST_MESSAGE_CHARS, maxFrameErrors = MAX_FRAME_ERRORS, autoPulse = true, maxPulseGapMs = MAX_PULSE_GAP_MS,
+  }) {
     this.id = id || `conn-${++connSeq}`;
     this.transport = transport;
     this.rawSend = rawSend;
@@ -81,7 +94,11 @@ export class FramedConn {
     this.chunkSize = chunkSize;
     this.heartbeatMs = heartbeatMs;
     this.timeoutMs = timeoutMs;
-    this.decoder = new FrameDecoder();
+    this.decoder = new FrameDecoder({ maxChars: maxMessageChars });
+    this.maxFrameErrors = maxFrameErrors;
+    this.maxPulseGapMs = maxPulseGapMs;
+    this.errorWindowStart = 0;
+    this.errorsAtWindowStart = 0;
     this.seq = 0;
     this.listeners = [];
     this.closeListeners = [];
@@ -91,8 +108,21 @@ export class FramedConn {
     this.closeReason = null;
     this.lastRx = now();
     this.lastTx = this.lastRx;
-    this.stats = { sentMsgs: 0, sentChars: 0, recvMsgs: 0, recvChars: 0 };
-    if (heartbeatMs > 0) trackConn(this);
+    this.lastBeat = this.lastRx; // when the liveness pulse last ran for this connection
+    this.silentMs = 0; // running time without a frame from the other side
+    this.stats = { sentMsgs: 0, sentChars: 0, recvMsgs: 0, recvChars: 0, badFrames: 0 };
+    if (heartbeatMs > 0 && autoPulse) trackConn(this);
+  }
+
+  /** Change how long the other side may stay silent (e.g. GAME_TIMEOUT_MS once a game starts). */
+  setTimeoutMs(ms) {
+    if (Number.isFinite(ms) && ms >= 0) this.timeoutMs = ms;
+  }
+
+  /** Accept incoming messages of at most `chars` characters (reassembled). */
+  limitIncoming(chars) {
+    this.decoder.maxChars = chars;
+    this.decoder.maxChunks = Math.max(16, Math.ceil(chars / 1000));
   }
 
   /**
@@ -108,6 +138,21 @@ export class FramedConn {
       console.error('[net] could not serialize message', msg && msg.t, err);
       return false;
     }
+    return this.sendFrames(frames);
+  }
+
+  /**
+   * Send a message that is already JSON (one serialization shared by several
+   * connections, e.g. the same delta for every client).
+   * @param {string} json JSON.stringify of a message object
+   */
+  sendJSON(json) {
+    if (!this.open) return false;
+    if (typeof json !== 'string' || json[0] !== '{') return false;
+    return this.sendFrames(encodeFrames(null, ++this.seq, this.chunkSize, json));
+  }
+
+  sendFrames(frames) {
     try {
       for (const f of frames) {
         this.rawSend(f);
@@ -168,21 +213,43 @@ export class FramedConn {
   }
 
   _receive(frame) {
-    if (!this.open || typeof frame !== 'string') return;
+    if (!this.open) return;
     this.lastRx = now();
+    this.silentMs = 0;
+    if (typeof frame !== 'string') {
+      this.badFrame();
+      return;
+    }
     this.stats.recvChars += frame.length;
     if (frame === FRAME_HEARTBEAT) return;
     if (frame === FRAME_BYE) {
       this._closed('remote-closed');
       return;
     }
+    const errors = this.decoder.errors;
     const msg = this.decoder.push(frame);
+    if (this.decoder.errors !== errors) this.badFrame();
     if (!msg) return;
     this.stats.recvMsgs++;
     if (this.listeners.length && !this.backlog.length && !this.flushing) this.dispatch(msg);
     else {
       this.backlog.push(msg);
       if (this.listeners.length) this.scheduleFlush();
+    }
+  }
+
+  /** Count a malformed frame; too many in a short time close the connection. */
+  badFrame() {
+    this.stats.badFrames++;
+    if (!(this.maxFrameErrors > 0)) return;
+    const t = now();
+    if (t - this.errorWindowStart > ERROR_WINDOW_MS) {
+      this.errorWindowStart = t;
+      this.errorsAtWindowStart = this.stats.badFrames - 1;
+    }
+    if (this.stats.badFrames - this.errorsAtWindowStart > this.maxFrameErrors) {
+      console.warn(`[net] connection ${this.id} sent too many malformed frames; closing it`);
+      this.close('protocol-error');
     }
   }
 
@@ -208,7 +275,13 @@ export class FramedConn {
 
   _heartbeat(t) {
     if (!this.open) return;
-    if (this.timeoutMs > 0 && t - this.lastRx > this.timeoutMs) {
+    // Silence counts only time this page ran: a pulse that comes late (our main
+    // thread was stalled, the tab was frozen) adds at most MAX_PULSE_GAP_MS, so
+    // frames that queued up meanwhile are dispatched before the link is judged.
+    const gap = t - this.lastBeat;
+    this.lastBeat = t;
+    this.silentMs += Math.max(0, Math.min(gap, this.maxPulseGapMs));
+    if (this.timeoutMs > 0 && this.silentMs > this.timeoutMs) {
       console.warn(`[net] connection ${this.id} timed out`);
       try {
         this.rawSend(FRAME_BYE);
@@ -283,6 +356,8 @@ class HostEndpoint {
       conn.close('closed');
       return;
     }
+    // Everything a client sends is small; refuse huge frames from untrusted peers.
+    if (typeof conn.limitIncoming === 'function') conn.limitIncoming(MAX_CLIENT_MESSAGE_CHARS);
     this.conns.add(conn);
     conn.onClose(() => this.conns.delete(conn));
     if (!this.handlers.length) this.pending.push(conn);
@@ -472,15 +547,29 @@ export function loadPeerJS() {
   return peerJsPromise;
 }
 
-function friendlyPeerError(err, code) {
+/** What the join / host screens show for a failed online connection. */
+export const PEER_MESSAGES = {
+  broker: 'Couldn\'t reach the matchmaking server (0.peerjs.com). Check your internet connection and try again.',
+  webrtc: 'Couldn\'t connect to the host. You may be behind a strict firewall; try another network.',
+  incompatible: 'This browser does not support WebRTC, which online play needs.',
+  idTaken: 'That room code is already in use.',
+};
+
+/** PEER_MESSAGES.broker naming the signaling server actually used (?peerHost= or the public one). */
+export function brokerMessage(params) {
+  const host = params && params.peerHost ? String(params.peerHost).slice(0, 80) : PEER_CLOUD.host;
+  return PEER_MESSAGES.broker.replace(PEER_CLOUD.host, host);
+}
+
+function friendlyPeerError(err, code, params) {
   const type = err && err.type;
   let message;
   if (type === 'peer-unavailable') message = `Room ${code} was not found. Check the code and that the host is still in the lobby.`;
-  else if (type === 'browser-incompatible') message = 'This browser does not support WebRTC, which online play needs.';
-  else if (type === 'unavailable-id') message = 'That room code is already in use.';
-  else if (type === 'network' || type === 'server-error' || type === 'socket-error' || type === 'socket-closed') {
-    message = 'Could not reach the matchmaking server. Check your internet connection and try again.';
-  } else if (type === 'webrtc' || type === 'negotiation-failed') message = 'Could not open a direct connection to the other player (WebRTC failed). A TURN server may be needed on this network.';
+  else if (type === 'browser-incompatible') message = PEER_MESSAGES.incompatible;
+  else if (type === 'unavailable-id') message = PEER_MESSAGES.idTaken;
+  else if (type === 'network' || type === 'server-error' || type === 'socket-error' || type === 'socket-closed' || type === 'disconnected') {
+    message = brokerMessage(params);
+  } else if (type === 'webrtc' || type === 'negotiation-failed' || type === 'connection-closed') message = PEER_MESSAGES.webrtc;
   else message = (err && err.message) || 'Network error.';
   const e = new Error(message);
   e.type = type || 'unknown';
@@ -553,7 +642,7 @@ async function hostPeer(ep, opts) {
       peer.destroy();
       lastErr = err;
       if (err && err.type === 'unavailable-id') continue;
-      throw friendlyPeerError(err, code);
+      throw friendlyPeerError(err, code, params);
     }
     ep.roomCode = code;
     ep.peer = peer;
@@ -578,40 +667,46 @@ async function hostPeer(ep, opts) {
     ep.cleanup.push(() => setTimeout(() => peer.destroy(), 100));
     return;
   }
-  throw friendlyPeerError(lastErr, '');
+  throw friendlyPeerError(lastErr, '', params);
 }
 
 async function joinPeer(code, opts) {
   const Peer = await loadPeerJS();
   const params = opts.params || readNetParams();
-  const timeoutMs = opts.timeoutMs ?? JOIN_TIMEOUT_MS;
+  // 1. Signaling server (broker): unreachable → PEER_MESSAGES.broker.
   const peer = new Peer(peerOptions(params));
   try {
-    await waitPeerOpen(peer, timeoutMs);
+    await waitPeerOpen(peer, opts.timeoutMs ?? JOIN_TIMEOUT_MS);
   } catch (err) {
     peer.destroy();
-    throw friendlyPeerError(err, code);
+    throw friendlyPeerError(err, code, params);
   }
+  // 2. The direct WebRTC link to the host. Unknown room → 'peer-unavailable' at once;
+  // ICE that never connects (strict NAT / firewall, no TURN) → PEER_MESSAGES.webrtc
+  // after CONNECT_TIMEOUT_MS at the latest.
   const dc = peer.connect(peerIdFor(code), { reliable: true, serialization: 'raw' });
+  const connectMs = opts.connectTimeoutMs ?? opts.timeoutMs ?? CONNECT_TIMEOUT_MS;
   try {
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { type: 'webrtc' })), timeoutMs);
+      const fail = (err) => {
+        clearTimeout(timer);
+        reject(err);
+      };
+      const timer = setTimeout(() => fail(Object.assign(new Error('webrtc'), { type: 'webrtc' })), connectMs);
       dc.on('open', () => {
         clearTimeout(timer);
         resolve();
       });
-      dc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
+      dc.on('error', (err) => fail(err && err.type ? err : Object.assign(new Error('webrtc'), { type: 'webrtc', cause: err })));
+      dc.on('close', () => fail(Object.assign(new Error('webrtc'), { type: 'connection-closed' })));
+      dc.on('iceStateChanged', (state) => {
+        if (state === 'failed') fail(Object.assign(new Error('webrtc'), { type: 'webrtc' }));
       });
-      peer.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
+      peer.on('error', fail);
     });
   } catch (err) {
     peer.destroy();
-    throw friendlyPeerError(err, code);
+    throw friendlyPeerError(err, code, params);
   }
   const conn = wrapDataConnection(dc);
   peer.on('error', (err) => console.warn('[net] peer error', err.type, err.message));

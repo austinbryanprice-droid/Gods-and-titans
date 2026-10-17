@@ -18,9 +18,12 @@ function cleanName(name) {
   return [...s].slice(0, MAX_NAME_LENGTH).join('');
 }
 
-/** Defaults; the name gets 3 random digits once and is then saved. */
+/**
+ * Defaults; the name gets 3 random digits once and is then saved. `tipsDismissed`
+ * becomes true once the player closes (or finishes) the in-game "getting started" tips.
+ */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', edgeScroll: true, showAllBars: false };
+  return { name: randomName(), volume: 0.7, quality: 'medium', edgeScroll: true, showAllBars: false, tipsDismissed: false };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -32,6 +35,7 @@ function sanitize(raw, base) {
   if (QUALITIES.includes(raw.quality)) out.quality = raw.quality;
   if (typeof raw.edgeScroll === 'boolean') out.edgeScroll = raw.edgeScroll;
   if (typeof raw.showAllBars === 'boolean') out.showAllBars = raw.showAllBars;
+  if (typeof raw.tipsDismissed === 'boolean') out.tipsDismissed = raw.tipsDismissed;
   return out;
 }
 
@@ -73,7 +77,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high', edgeScroll: boolean, showAllBars: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean }}
  */
 export function getSettings() {
   return load();

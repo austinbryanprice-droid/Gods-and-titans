@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
-import { checkPlacement, footprintAt } from '../../src/game/placement.js';
+import { checkPlacement, footprintAt, MINE_GAP, CANT_BUILD, TOO_CLOSE_TO_MINE } from '../../src/game/placement.js';
 import { makeWorld, spawn, place, clearUnits, run } from '../sim/helpers.js';
 
 /** A ViewState for player `me` fed one real snapshot from the world. */
@@ -63,15 +63,19 @@ test('buildings and mines block their footprint tiles only', () => {
   assert.deepEqual(m.tiles, [true, true, true, false]);
 });
 
-test('Town Center keeps a 3-tile gap from gold mines', () => {
+test('drop-offs (Town Center, Storehouse) keep a 3-tile gap from gold mines', () => {
   const world = makeWorld({ map: { width: 64, height: 64, starts: [{ x: 6, y: 6 }, { x: 50, y: 50 }], mines: [{ tx: 13, ty: 6, amount: 12000 }, { tx: 30, ty: 30, amount: 12000 }] } });
   const vs = viewOf(world, 0, { seeAll: true });
+  assert.equal(MINE_GAP, 3);
   // Mine footprint 30..32. A 4×4 TC at tx 23 spans 23..26: gap 30 - 27 = 3 → fine.
-  assert.equal(checkPlacement(vs, 0, 'town_center', 23, 30).valid, true);
+  const ok = checkPlacement(vs, 0, 'town_center', 23, 30);
+  assert.equal(ok.valid, true);
+  assert.equal(ok.message, null);
   assert.equal(world.canPlaceBuilding(0, 'town_center', 23, 30), true);
   const close = checkPlacement(vs, 0, 'town_center', 24, 30);
   assert.equal(close.valid, false);
-  assert.equal(world.canPlaceBuilding(0, 'town_center', 24, 30), false);
+  assert.equal(close.message, TOO_CLOSE_TO_MINE);
+  assert.equal(world.placementError(0, 'town_center', 24, 30), TOO_CLOSE_TO_MINE);
   // Only the column of tiles within 2 tiles of the mine is red.
   for (let dy = 0; dy < 4; dy++) {
     assert.deepEqual(close.tiles.slice(dy * 4, dy * 4 + 4), [true, true, true, false]);
@@ -79,8 +83,20 @@ test('Town Center keeps a 3-tile gap from gold mines', () => {
   // Diagonal gap uses Chebyshev distance: corner to corner gap of 2 is too close.
   assert.equal(checkPlacement(vs, 0, 'town_center', 24, 24).valid, false);
   assert.equal(checkPlacement(vs, 0, 'town_center', 23, 23).valid, true);
+  // Storehouse (2×2) too: 26..27 leaves a gap of 2, 25..26 a gap of 3.
+  const sh = checkPlacement(vs, 0, 'storehouse', 26, 30);
+  assert.equal(sh.valid, false);
+  assert.equal(sh.message, TOO_CLOSE_TO_MINE);
+  assert.deepEqual(sh.tiles, [true, false, true, false]);
+  assert.equal(world.placementError(0, 'storehouse', 26, 30), TOO_CLOSE_TO_MINE);
+  assert.equal(checkPlacement(vs, 0, 'storehouse', 25, 30).valid, true);
+  assert.equal(checkPlacement(vs, 0, 'storehouse', 34, 33).valid, false, 'gap 1 east, diagonal');
+  assert.equal(checkPlacement(vs, 0, 'storehouse', 36, 35).valid, true, 'gap 3 east and south');
   // Other buildings may hug a mine.
   assert.equal(checkPlacement(vs, 0, 'house', 28, 30).valid, true);
+  // A footprint overlapping the mine (or other trouble) is "Can't build there." even near a mine.
+  assert.equal(checkPlacement(vs, 0, 'storehouse', 29, 30).message, CANT_BUILD);
+  assert.equal(checkPlacement(vs, 0, 'house', 29, 30).message, CANT_BUILD);
 });
 
 test('unexplored tiles are not buildable; explored but fogged ones are', () => {
@@ -160,12 +176,14 @@ test('agrees with the sim on a whole-map sweep when everything is visible', () =
   run(world, 0.1);
   const vs = viewOf(world, 0, { seeAll: true });
   let checked = 0;
-  for (const type of ['house', 'barracks', 'town_center']) {
+  for (const type of ['house', 'barracks', 'town_center', 'storehouse']) {
     for (let ty = -2; ty < 40; ty += 1) {
       for (let tx = -2; tx < 40; tx += 1) {
-        const a = checkPlacement(vs, 0, type, tx, ty).valid;
+        const c = checkPlacement(vs, 0, type, tx, ty);
+        const a = c.valid;
         const b = world.canPlaceBuilding(0, type, tx, ty);
         assert.equal(a, b, `${type} at ${tx},${ty}: client ${a} sim ${b}`);
+        assert.equal(c.message, world.placementError(0, type, tx, ty), `${type} at ${tx},${ty}: message`);
         checked++;
       }
     }

@@ -1,15 +1,19 @@
 // Per-unit order state machines: move, attack-move, attack, follow, hold,
 // economy and construction orders, casts, idle auto-acquire and fight-back.
 import { moveToPoint, moveToUnit, stopMove } from './movement.js';
-import { engage, findTarget, acquisitionRange, canTarget } from './combat.js';
+import { engage, findTarget, findReachableTarget, targetCategory, acquisitionRange, canTarget } from './combat.js';
 import { updateGather, updateReturn, updatePray, releasePrayerSlot } from './economy.js';
 import { updateBuild, refund } from './construction.js';
 import { updateCastOrder, tryAutocast } from './abilities.js';
 import { updateCreep, aggroCamp } from './creeps.js';
+import { isMelee } from './surround.js';
 import { hyp, edgeDist } from './common.js';
 
 const SCAN_EVERY = 4; // ticks between target scans for attack-move / idle units
 const AUTOCAST_EVERY = 6;
+const RETARGET_TICKS = 20; // ~1 s approaching / blocked before attack-move and auto-acquire look for a closer target
+const SKIP_TICKS = 40; // an unreachable target is not re-acquired for this long
+const SPOT_OPTS = { spots: true };
 
 /** Undo side effects of an order that will never run (refund builds, free prayer slots). */
 export function discardOrder(world, u, o) {
@@ -44,13 +48,32 @@ export function nextOrder(world, u) {
   u.target = 0;
 }
 
+function scanTick(world, u) {
+  return (world.tickCount + u.id) % SCAN_EVERY === 0;
+}
+
+/**
+ * Attack-move / auto-acquire re-targeting (WC3): after ~1 s of approaching,
+ * switch to an enemy in attack range right now (same or better priority than
+ * the current target); after ~1 s blocked (no free attack spot, no progress),
+ * switch to the nearest enemy u can actually reach.
+ */
+function retarget(world, u, t) {
+  const blocked = u.blockedT >= RETARGET_TICKS;
+  if (!blocked && u.engT < RETARGET_TICKS) return null;
+  const atk = u.def.attack;
+  const inReach = findTarget(world, u, atk.range + 0.02, { exclude: t.id, maxCat: blocked ? 9 : targetCategory(t) });
+  if (inReach) return inReach;
+  return blocked ? findReachableTarget(world, u, acquisitionRange(u), t) : null;
+}
+
 function idle(world, u) {
   u.state = 'idle';
   u.target = 0;
   if (u.mv) stopMove(u);
   if (!u.def.attack || u.def.class === 'worker') return;
-  if ((world.tickCount + u.id) % SCAN_EVERY !== 0) return;
-  const t = findTarget(world, u, acquisitionRange(u));
+  if (!scanTick(world, u)) return;
+  const t = findTarget(world, u, acquisitionRange(u), isMelee(u) ? SPOT_OPTS : undefined);
   if (t) {
     u.order = { type: 'attack', target: t.id, auto: true, ox: u.x, oy: u.y };
     engage(world, u, t, true);
@@ -68,15 +91,29 @@ function runAttackMove(world, u, o) {
       const leash = acquisitionRange(u) + 3;
       if (u.state === 'attack' || edgeDist(u, t) <= leash) {
         const r = engage(world, u, t, true);
-        if (r === 'hit' || r === 'approach') return false;
+        if (r === 'hit') return false;
+        if (r === 'approach' || r === 'blocked') {
+          const alt = scanTick(world, u) ? retarget(world, u, t) : null;
+          if (alt) {
+            o.target = alt.id;
+            u.mv = null;
+            engage(world, u, alt, true);
+          }
+          return false;
+        }
+        if (r === 'unreachable') {
+          o.skip = t.id;
+          o.skipUntil = world.tickCount + SKIP_TICKS;
+        }
       }
     }
     o.target = 0;
     u.mv = null;
   }
-  if ((world.tickCount + u.id) % SCAN_EVERY === 0 || o.rescan) {
+  if (scanTick(world, u) || o.rescan) {
     o.rescan = false;
-    const t = findTarget(world, u, acquisitionRange(u));
+    const skip = o.skip && world.tickCount < o.skipUntil ? o.skip : 0;
+    const t = findTarget(world, u, acquisitionRange(u), { exclude: skip, spots: isMelee(u) });
     if (t) {
       o.target = t.id;
       u.mv = null;
@@ -113,6 +150,18 @@ function runAttack(world, u, o) {
     }
   }
   const r = engage(world, u, t, true);
+  if (o.auto) {
+    // Auto-acquired fights switch to an enemy in reach when this one is blocked or unreachable.
+    let alt = null;
+    if (r === 'unreachable') alt = findReachableTarget(world, u, acquisitionRange(u), t);
+    else if ((r === 'approach' || r === 'blocked') && scanTick(world, u)) alt = retarget(world, u, t);
+    if (alt) {
+      o.target = alt.id;
+      u.mv = null;
+      return false;
+    }
+  }
+  // Explicit attack orders keep their target (engage keeps trying other attack spots).
   return r === 'lost' || r === 'unreachable';
 }
 

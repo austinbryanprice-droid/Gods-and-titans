@@ -1,10 +1,13 @@
-// Worker economy: gold mining, wood chopping, returning cargo to drop-offs,
-// and praying at shrines/temples for faith (with prayer slots).
+// Worker economy: gold mining (MINE_SLOTS miners per mine, the rest wait their
+// turn in FIFO order at their own spot on the mine's edge), wood chopping,
+// returning cargo to drop-offs, and praying at shrines/temples for faith
+// (with prayer slots).
 import { MINE_TIME, CARRY_AMOUNT, CHOP_INTERVAL, DT } from '../config.js';
 import { moveToRect, moveToPoint, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
 
 const REACH = 0.5; // edge distance to work at a mine / tree / drop-off
+const SPOT_OFFSET = 0.42; // mining spots stand this far outside the mine's edge
 
 function reachRect(u, tx, ty, size) {
   return distPointRect(u.x, u.y, tx, ty, tx + size, ty + size) - u.radius <= REACH;
@@ -17,6 +20,21 @@ export function nearestDropOff(world, u) {
   for (const b of world.buildingList) {
     if (b.dead || b.owner !== u.owner || !b.constructed || !b.def.dropOff) continue;
     const d = distPointRect(u.x, u.y, b.tx, b.ty, b.tx + b.size, b.ty + b.size);
+    if (d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+/** Nearest completed drop-off of a player to a point. */
+export function nearestDropOffTo(world, owner, x, y) {
+  let best = null;
+  let bestD = Infinity;
+  for (const b of world.buildingList) {
+    if (b.dead || b.owner !== owner || !b.constructed || !b.def.dropOff) continue;
+    const d = distPointRect(x, y, b.tx, b.ty, b.tx + b.size, b.ty + b.size);
     if (d < bestD) {
       bestD = d;
       best = b;
@@ -103,9 +121,153 @@ export function updateGather(world, u, o) {
   return gatherWood(world, u, o);
 }
 
+// ---- Gold mining ----
+
+/**
+ * Standing spots around a mine footprint: one per tile touching it (edges and
+ * corners), just outside the edge, ordered row by row. Passability is checked
+ * when a spot is claimed.
+ */
+export function mineSpots(tx, ty, size) {
+  const spots = [];
+  for (let y = ty - 1; y <= ty + size; y++) {
+    for (let x = tx - 1; x <= tx + size; x++) {
+      if (x >= tx && x < tx + size && y >= ty && y < ty + size) continue;
+      const cx = Math.max(tx, Math.min(tx + size, x + 0.5));
+      const cy = Math.max(ty, Math.min(ty + size, y + 0.5));
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      const d = hyp(dx, dy);
+      spots.push({ x: cx + (dx / d) * SPOT_OFFSET, y: cy + (dy / d) * SPOT_OFFSET, tx: x, ty: y });
+    }
+  }
+  return spots;
+}
+
+function holdsSpot(world, m, i) {
+  const id = m.spotHolders[i];
+  if (!id) return false;
+  const u = world.entities.get(id);
+  const o = u && !u.dead ? u.order : null;
+  return !!(o && o.type === 'gather' && o.mine === m.id && o.spot === i);
+}
+
+/**
+ * The worker's own spot on the mine edge, claiming the free one closest to its
+ * owner's nearest drop-off (so the first workers stand on the near side and
+ * later ones spread around the mine). null when every usable spot is taken.
+ */
+function claimSpot(world, m, u, o) {
+  const map = world.map;
+  if (o.spot >= 0 && m.spotHolders[o.spot] === u.id) {
+    const s = m.spots[o.spot];
+    if (map.isPassable(s.tx, s.ty)) return s;
+    m.spotHolders[o.spot] = 0;
+  }
+  o.spot = -1;
+  const drop = nearestDropOffTo(world, u.owner, m.x, m.y);
+  let best = -1;
+  let bestC = Infinity;
+  for (let i = 0; i < m.spots.length; i++) {
+    if ((o.badSpots || 0) & (1 << i)) continue;
+    const s = m.spots[i];
+    if (!map.isPassable(s.tx, s.ty) || holdsSpot(world, m, i)) continue;
+    const toWorker = hyp(s.x - u.x, s.y - u.y);
+    const c = (drop ? distPointRect(s.x, s.y, drop.tx, drop.ty, drop.tx + drop.size, drop.ty + drop.size) : toWorker) + toWorker * 0.01;
+    if (c < bestC - 1e-9) {
+      bestC = c;
+      best = i;
+    }
+  }
+  if (best < 0) return null;
+  m.spotHolders[best] = u.id;
+  o.spot = best;
+  return m.spots[best];
+}
+
+function minerValid(world, m, i) {
+  const id = m.miners[i];
+  if (!id) return false;
+  const u = world.entities.get(id);
+  const o = u && !u.dead ? u.order : null;
+  return !!(o && o.type === 'gather' && o.mine === m.id && o.phase === 'work' && o.slot === i);
+}
+
+function waiterValid(world, m, id) {
+  const u = world.entities.get(id);
+  const o = u && !u.dead ? u.order : null;
+  return !!(o && o.type === 'gather' && o.mine === m.id && o.phase === 'wait');
+}
+
+function freeSlot(world, m) {
+  for (let i = 0; i < m.miners.length; i++) {
+    if (!minerValid(world, m, i)) {
+      m.miners[i] = 0;
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** Workers mining a mine right now (0..MINE_SLOTS). */
+export function activeMiners(world, m) {
+  if (!m.miners) return 0;
+  let n = 0;
+  for (let i = 0; i < m.miners.length; i++) if (minerValid(world, m, i)) n++;
+  return n;
+}
+
+/**
+ * Start a trip in `slot`. The timer runs from the next tick on, so a slot is
+ * busy exactly MINE_TIME per trip whether the worker took it during its own
+ * update or was handed it during the previous miner's (and it pauses while
+ * the worker is stunned, like every other order).
+ */
+function beginMining(world, m, u, o, slot) {
+  m.miners[slot] = u.id;
+  o.slot = slot;
+  o.phase = 'work';
+  o.timer = MINE_TIME;
+  o.startT = world.tickCount;
+}
+
+/** Give a free slot to the first valid waiter (FIFO). */
+function handOff(world, m) {
+  const q = m.waiting;
+  while (q.length) {
+    const slot = freeSlot(world, m);
+    if (slot < 0) return;
+    const id = q.shift();
+    if (!waiterValid(world, m, id)) continue;
+    const w = world.entities.get(id);
+    beginMining(world, m, w, w.order, slot);
+    return;
+  }
+}
+
+/** A waiting worker takes a slot when one is free and nobody waited longer. */
+function tryStartMining(world, m, u, o) {
+  const q = m.waiting;
+  while (q.length && !waiterValid(world, m, q[0])) q.shift();
+  if (!q.includes(u.id)) q.push(u.id);
+  if (q[0] !== u.id) return false;
+  const slot = freeSlot(world, m);
+  if (slot < 0) return false;
+  q.shift();
+  beginMining(world, m, u, o, slot);
+  return true;
+}
+
+function resetMineState(o) {
+  o.phase = 'go';
+  o.spot = -1;
+  o.slot = -1;
+  o.badSpots = 0;
+}
+
 function gatherGold(world, u, o) {
   let mine = world.entities.get(o.mine);
-  if (!mine || mine.dead) {
+  if (!mine || mine.dead || mine.kind !== 'mine') {
     const repl = nearestMine(world, o.lastX ?? u.x, o.lastY ?? u.y, 16);
     if (!repl) {
       if (u.carryAmount > 0) {
@@ -116,36 +278,71 @@ function gatherGold(world, u, o) {
     }
     o.mine = repl.id;
     mine = repl;
-    o.phase = 'go';
+    resetMineState(o);
   }
   o.lastX = mine.x;
   o.lastY = mine.y;
   u.state = 'gather';
   u.target = mine.id;
   if (o.phase === 'go') {
-    if (reachRect(u, mine.tx, mine.ty, mine.size)) {
-      if (u.mv) stopMove(u);
-      o.phase = 'work';
-      o.timer = MINE_TIME;
+    const spot = claimSpot(world, mine, u, o);
+    let there = false;
+    if (spot) {
+      if (hyp(spot.x - u.x, spot.y - u.y) <= 0.1) there = true;
+      else {
+        const mv = moveToPoint(world, u, spot.x, spot.y);
+        if (mv.arrived || mv.failed) {
+          if (reachRect(u, mine.tx, mine.ty, mine.size)) there = true;
+          else {
+            // Spot not reachable from here: never try it again on this order.
+            mine.spotHolders[o.spot] = 0;
+            o.badSpots = (o.badSpots || 0) | (1 << o.spot);
+            o.spot = -1;
+            stopMove(u);
+            return false;
+          }
+        }
+      }
+    } else if (reachRect(u, mine.tx, mine.ty, mine.size)) {
+      there = true;
     } else {
       const mv = moveToRect(world, u, mine.tx, mine.ty, mine.size, `e${mine.id}`);
       if (mv.failed) {
         stopMove(u);
         return true;
       }
+    }
+    if (!there) return false;
+    if (u.mv) stopMove(u);
+    o.phase = 'wait';
+  }
+  u.facing = Math.atan2(mine.y - u.y, mine.x - u.x);
+  if (o.phase === 'wait') {
+    if (!reachRect(u, mine.tx, mine.ty, mine.size)) {
+      o.phase = 'go'; // pushed away (knockback): walk back to the spot
       return false;
     }
+    if (!tryStartMining(world, mine, u, o)) return false;
   }
   if (o.phase === 'work') {
-    u.facing = Math.atan2(mine.y - u.y, mine.x - u.x);
-    o.timer -= DT;
+    if (mine.miners[o.slot] !== u.id || !reachRect(u, mine.tx, mine.ty, mine.size)) {
+      if (mine.miners[o.slot] === u.id) mine.miners[o.slot] = 0;
+      o.slot = -1;
+      o.phase = 'go';
+      handOff(world, mine);
+      return false;
+    }
+    if (world.tickCount > o.startT) o.timer -= DT;
     if (o.timer <= 1e-9) {
       const take = Math.min(CARRY_AMOUNT, mine.amount);
       mine.amount -= take;
       u.carry = 'g';
       u.carryAmount = take;
-      if (mine.amount <= 0) world.depleteMine(mine);
+      mine.miners[o.slot] = 0;
+      o.slot = -1;
       o.phase = 'return';
+      if (mine.amount <= 0) world.depleteMine(mine);
+      else handOff(world, mine);
     }
   }
   return false;

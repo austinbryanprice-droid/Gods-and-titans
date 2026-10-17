@@ -247,9 +247,14 @@ tiles away. Population cap = sum of `popProvided` of completed buildings, max 15
 Pop used = pop of living units + pop of everything queued in production.
 
 ### 5.2 Economy
-- **Gold:** Worshipper walks to a mine, mines `MINE_TIME` (2 s) adjacent to it, carries
-  `CARRY_AMOUNT` (10) to the nearest completed drop-off (Town Center or Storehouse), repeats.
-  Many workers may mine at once. A mine at 0 is removed (`resourceDepleted` event).
+- **Gold:** Worshipper walks to its own spot on the mine edge (one per tile around the
+  footprint, the free one nearest its drop-off, kept for the whole order), mines `MINE_TIME`
+  (1.5 s), carries `CARRY_AMOUNT` (10) to the nearest completed drop-off (Town Center or
+  Storehouse), repeats. At most `MINE_SLOTS` (2) workers mine a mine at once (any owner);
+  the others wait at their spot (state `gather`) and take a freed slot first come, first
+  served. One mine therefore yields at most `MINE_SLOTS × 10 / MINE_TIME` ≈ 13.3 gold/s:
+  about 3 gold/s per worker at a start mine, saturated by 5–6 workers. A mine at 0 is
+  removed (`resourceDepleted` event); its workers move to the nearest mine within 16 tiles.
 - **Wood:** each forest tile holds `TREE_WOOD` (50). A worker stands next to a tree and chops
   1 wood per `CHOP_INTERVAL` (0.6 s) up to 10, returns it, comes back to the same tree or the
   nearest other tree. A depleted tree tile becomes grass (`treeFelled` event) and is passable.
@@ -268,8 +273,12 @@ Pop used = pop of living units + pop of everything queued in production.
   proportionally to max hp. Leaving pauses construction; a worker smart-clicking an
   unfinished own building resumes/helps.
 - Placement: all footprint tiles in bounds, ground-passable (not forest/water/rock), no
-  building/mine footprint overlap, no enemy units on it (own units are pushed out), and a
-  Town Center footprint must be ≥ 3 tiles from any gold mine footprint.
+  building/mine footprint overlap, no enemy units on it (own units are pushed out), and every
+  drop-off (Town Center, Storehouse) keeps a gap of ≥ `DROPOFF_MINE_GAP` (3) empty tiles
+  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. Error: `Too close to a gold
+  mine.` when the gap is the only problem, else `Can't build there.`;
+  `world.placementError(i, typeId, tx, ty)` returns that text (null = valid) and
+  src/game/placement.js `checkPlacement(...).message` gives the same on the client.
 - `cancelBuild` on an unfinished building: removes it, refunds `CANCEL_BUILD_REFUND` (75%).
 
 ### 5.4 Production
@@ -407,6 +416,7 @@ EntityView = {
   rp,             // rally [x, y] or null
   // mines:
   amt,            // gold remaining
+  mn,             // workers mining it right now (0..MINE_SLOTS)
 }
 ```
 ### 6.4 Events
