@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VFX Gallery — Mythic War</title>
+  <!--
+    Visual check page for src/render/vfx.js on a small hilly ground plane seen
+    from the in-game camera angle. Effects respawn in a loop.
+    URL params:
+      mode=shapes|projectiles|api|stress   what to show (default shapes; ?shape= implies one shape)
+      shape=strike,nova                    shapes to show (schema VFX_SHAPES plus gallery variants
+                                           wave-ring, buff-area, heal-area, shield-area, beam-sky)
+      el=fire,ice                          elements (default: a few per shape, or all with el=all)
+      film=0.1,0.3,0.6                     film strip: one column per effect age (seconds), rows = shape × element
+      period=3                             loop period in seconds
+      manual=1                             no animation loop: simulate to ?t= (or the film ages) at 60 Hz,
+                                           render once and set window.galleryReady; window.vfxStep(sec) advances
+      t=0.5                                with manual=1: seconds to simulate after the first spawn
+      zoom=1.3  pitch=56  fov=35           camera
+      stress=60                            stress test: random effects per second + archer volleys
+      quality=low|medium|high              VFXSystem quality
+      shake=0                              ignore camera shake
+      labels=0                             hide labels
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #26301f; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; }
+    #labels { position: absolute; inset: 0; pointer-events: none; }
+    .lbl { position: absolute; transform: translate(-50%, 0); color: #fff; font-size: 12px; white-space: nowrap;
+      text-shadow: 0 1px 2px #000, 0 0 3px #000; padding: 0 2px; }
+    .lbl .el { font-weight: 600; }
+    .col { position: absolute; transform: translate(-50%, -100%); color: #ffe9a8; font: 600 13px system-ui; text-shadow: 0 1px 3px #000; }
+    #panel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); color: #eee; font-size: 12px; padding: 6px 8px; border-radius: 6px; }
+    #panel select, #panel input, #panel button { font-size: 12px; }
+    #stats { position: absolute; top: 6px; right: 8px; color: #fff; font: 12px monospace; text-shadow: 0 1px 2px #000; text-align: right; white-space: pre; }
+  </style>
+</head>
+<body>
+  <div id="labels"></div>
+  <div id="panel">
+    mode <select id="mode"></select>
+    shape <select id="shape"></select>
+    el <select id="el"></select>
+    <button id="all">all elements</button>
+  </div>
+  <div id="stats"></div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { VFXSystem } from '../src/render/vfx.js';
+    import { VFX_SHAPES, PROJECTILES, ELEMENTS } from '../src/data/schema.js';
+    import { PLAYER_COLORS } from '../src/config.js';
+
+    const Q = new URLSearchParams(location.search);
+    const list = (k) => (Q.get(k) || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const VARIANTS = ['wave-ring', 'buff-area', 'heal-area', 'shield-area', 'beam-sky'];
+    let mode = Q.get('mode') || 'shapes';
+    let shapes = list('shape');
+    if (shapes.includes('all')) shapes = [...VFX_SHAPES, ...VARIANTS];
+    let els = list('el');
+    if (els.includes('all')) els = [...ELEMENTS];
+    const film = Q.has('film') ? list('film').map(Number).filter((x) => Number.isFinite(x)) : null;
+    const period = Number(Q.get('period') || 3);
+    const manual = Q.get('manual') === '1';
+    const tAt = Number(Q.get('t') || 0.5);
+    const zoom = Number(Q.get('zoom') || 1);
+    const pitchDeg = Number(Q.get('pitch') || 56);
+    const fov = Number(Q.get('fov') || 35);
+    const stress = Number(Q.get('stress') || 0);
+    const useShake = Q.get('shake') !== '0' && !manual;
+    const showLabels = Q.get('labels') !== '0';
+    if (stress) mode = 'stress';
+
+    // ---- panel
+    const ui = { mode: document.getElementById('mode'), shape: document.getElementById('shape'), el: document.getElementById('el') };
+    for (const m of ['shapes', 'projectiles', 'api', 'stress']) ui.mode.add(new Option(m, m, false, m === mode));
+    ui.shape.add(new Option('(overview)', ''));
+    for (const s of [...VFX_SHAPES, ...VARIANTS]) ui.shape.add(new Option(s, s, false, shapes.length === 1 && shapes[0] === s));
+    ui.el.add(new Option('(default)', ''));
+    for (const e of ELEMENTS) ui.el.add(new Option(e, e, false, els.length === 1 && els[0] === e));
+    const go = (patch) => {
+      const p = new URLSearchParams(location.search);
+      for (const [k, v] of Object.entries(patch)) (v ? p.set(k, v) : p.delete(k));
+      location.search = p.toString();
+    };
+    ui.mode.onchange = () => go({ mode: ui.mode.value, shape: '', stress: ui.mode.value === 'stress' ? '60' : '' });
+    ui.shape.onchange = () => go({ mode: 'shapes', shape: ui.shape.value });
+    ui.el.onchange = () => go({ el: ui.el.value });
+    document.getElementById('all').onclick = () => go({ el: 'all' });
+    if (Q.get('panel') === '0') document.getElementById('panel').style.display = 'none';
+
+    // ---- terrain: gentle hills so decals have to conform
+    const groundH = (x, y) => 0.32 * Math.sin(x * 0.31 + 1.3) * Math.cos(y * 0.27 - 0.4) + 0.14 * Math.sin(x * 0.83 + y * 0.61) + 0.25;
+
+    // ---- what to show: a list of cells { x, y, label, spawn(vfx, x, y) }
+    const DEFAULT_ELS = {
+      strike: ['lightning', 'holy', 'fire', 'shadow'],
+      nova: ['arcane', 'fire', 'death', 'water'],
+      beam: ['sun', 'fire', 'moon', 'war'],
+      cone: ['fire', 'ice', 'poison', 'wind'],
+      wave: ['water', 'fire', 'wind', 'earth'],
+      field: ['fire', 'poison', 'holy', 'lightning'],
+      buff: ['war', 'holy', 'nature', 'arcane'],
+      summon: ['holy', 'shadow', 'fire', 'nature'],
+      blink: ['arcane', 'shadow', 'wind', 'chaos'],
+      projectile: ['nature', 'poison', 'arcane', 'fire'],
+      meteor: ['fire', 'holy', 'ice', 'chaos'],
+      heal: ['holy', 'nature', 'water', 'moon'],
+      chain: ['lightning', 'holy', 'arcane', 'chaos'],
+      quake: ['earth', 'sand', 'war', 'water'],
+      storm: ['lightning', 'wind', 'water', 'fire'],
+      shield: ['holy', 'wind', 'water', 'arcane'],
+      dash: ['war', 'water', 'sun', 'chaos'],
+      'wave-ring': ['water', 'death', 'arcane', 'fire'],
+      'buff-area': ['war', 'holy', 'sun', 'nature'],
+      'heal-area': ['holy', 'nature', 'water', 'moon'],
+      'shield-area': ['holy', 'wind', 'arcane', 'water'],
+      'beam-sky': ['sun', 'holy', 'moon', 'arcane'],
+    };
+    const DURATION = { field: 5, storm: 5, shield: 3, 'shield-area': 3, beam: 1.2, 'beam-sky': 1.2, dash: 0.65 };
+
+    /** Spawn one shape (or gallery variant) centred on (x, y). */
+    function spawnShape(vfx, shape, el, x, y) {
+      const d = DURATION[shape];
+      switch (shape) {
+        case 'strike': return vfx.spawnEffect({ el, shape, x, y, r: 1.6, duration: 1.5 });
+        case 'nova': return vfx.spawnEffect({ el, shape, x, y, r: 2.6, duration: 1 });
+        case 'beam': return vfx.spawnEffect({ el, shape, x: x + 2.2, y: y - 1.2, fx: x - 2.8, fy: y + 1.4, r: 0.6, duration: d });
+        case 'beam-sky': return vfx.spawnEffect({ el, shape: 'beam', x, y, r: 1, duration: d });
+        case 'cone': return vfx.spawnEffect({ el, shape, x: x + 2, y: y - 0.8, fx: x - 2.6, fy: y + 1.2, r: 1.6, duration: 1 });
+        case 'wave': return vfx.spawnEffect({ el, shape, x: x + 3, y: y - 1.2, fx: x - 3, fy: y + 1.2, r: 1.5, duration: 1 });
+        case 'wave-ring': return vfx.spawnEffect({ el, shape: 'wave', x, y, r: 2.8, duration: 1 });
+        case 'field': return vfx.spawnEffect({ el, shape, x, y, r: 2.3, duration: d });
+        case 'buff': return vfx.spawnEffect({ el, shape, x, y, r: 0, duration: 8 });
+        case 'buff-area': return vfx.spawnEffect({ el, shape: 'buff', x, y, r: 3, duration: 8 });
+        case 'summon': return vfx.spawnEffect({ el, shape, x, y, r: 2, duration: 30 });
+        case 'blink': return vfx.spawnEffect({ el, shape, x: x + 2.2, y: y - 0.8, fx: x - 2.4, fy: y + 1, r: 0.5, duration: 0.5 });
+        case 'projectile': return vfx.spawnEffect({ el, shape, x: x + 2.5, y: y - 1, fx: x - 3.2, fy: y + 1.2, r: 1.5, duration: 1 });
+        case 'meteor': return vfx.spawnEffect({ el, shape, x, y, r: 2.2, duration: 1, delay: 0.8 });
+        case 'heal': return vfx.spawnEffect({ el, shape, x, y, r: 0, duration: 1 });
+        case 'heal-area': return vfx.spawnEffect({ el, shape: 'heal', x, y, r: 2.6, duration: 1 });
+        case 'chain': return vfx.spawnEffect({ el, shape, x: x - 1.8, y: y + 0.6, fx: x - 3.4, fy: y - 0.6, r: 0, duration: 0.5,
+          points: [[x - 1.8, y + 0.6], [x - 0.4, y - 1.1], [x + 1.1, y + 1], [x + 2.6, y - 0.6], [x + 3.2, y + 1.4]] });
+        case 'quake': return vfx.spawnEffect({ el, shape, x, y, r: 2.6, duration: 1.5 });
+        case 'storm': return vfx.spawnEffect({ el, shape, x, y, r: 2.4, duration: d });
+        case 'shield': return vfx.spawnEffect({ el, shape, x, y, r: 0, duration: d });
+        case 'shield-area': return vfx.spawnEffect({ el, shape: 'shield', x, y, r: 2.6, duration: d });
+        case 'dash': return vfx.spawnEffect({ el, shape, x: x + 3, y: y - 1, fx: x - 3, fy: y + 1, r: 0.6, duration: d });
+        default: return vfx.spawnEffect({ el, shape, x, y, r: 2 });
+      }
+    }
+
+    // unit-ish markers where something stands (for scale)
+    const MARKERS = {
+      beam: [[-2.8, 1.4], [2.2, -1.2]], cone: [[-2.6, 1.2]], wave: [[-3, 1.2]], blink: [[2.2, -0.8]], projectile: [[-3.2, 1.2], [2.5, -1]],
+      buff: [[0, 0]], heal: [[0, 0]], shield: [[0, 0]], chain: [[-3.4, -0.6], [-1.8, 0.6], [-0.4, -1.1], [1.1, 1], [2.6, -0.6], [3.2, 1.4]],
+      dash: [[3, -1]], strike: [[0.4, 0.3]], 'beam-sky': [[0, 0]], 'buff-area': [[0, 0], [1.2, 0.8], [-1, 1]], 'heal-area': [[0, 0], [1.3, -0.6]], 'shield-area': [[0, 0], [1, 0.9], [-1.1, 0.5]],
+    };
+
+    const PROJ_ELS = { arrow: 'physical', spear: 'war', orb: 'holy', bolt: 'lightning', rock: 'earth', fireball: 'fire', feather: 'wind', wave: 'water', skull: 'death', sunray: 'sun', moonbeam: 'moon', leaf: 'nature', ice: 'ice' };
+
+    const cells = [];
+    const colLabels = [];
+    let W = 0;
+    let D = 0;
+    if (mode === 'shapes') {
+      const shapeList = shapes.length ? shapes : [...VFX_SHAPES];
+      const overview = !shapes.length;
+      const CW = 8.5;
+      const CD = 7.5;
+      if (film) {
+        // rows: shape × element, columns: ages
+        let row = 0;
+        for (const s of shapeList) {
+          const elList = els.length ? els : (DEFAULT_ELS[s] || ['arcane']).slice(0, overview ? 1 : 4);
+          for (const el of elList) {
+            film.forEach((age, c) => cells.push({ x: c * CW + CW / 2, y: row * CD + CD / 2, shape: s, el, age, label: `${s} · ${el}` }));
+            row++;
+          }
+        }
+        film.forEach((age, c) => colLabels.push({ x: c * CW + CW / 2, y: 0.3, text: `t = ${age}s` }));
+        W = film.length * CW;
+        D = row * CD;
+      } else {
+        const items = [];
+        for (const s of shapeList) {
+          const elList = els.length ? els : overview ? [null] : (DEFAULT_ELS[s] || ['arcane']);
+          for (const el of elList) items.push({ s, el });
+        }
+        const cols = Math.min(items.length, overview ? 6 : Math.ceil(Math.sqrt(items.length * 1.6)));
+        items.forEach((it, i) => {
+          const c = i % cols;
+          const r = Math.floor(i / cols);
+          cells.push({ x: c * CW + CW / 2, y: r * CD + CD / 2, shape: it.s, el: it.el, label: it.el ? `${it.s} · ${it.el}` : it.s, cycle: !it.el });
+        });
+        W = cols * CW;
+        D = Math.ceil(items.length / cols) * CD;
+      }
+    } else if (mode === 'projectiles') {
+      const kinds = shapes.length ? shapes : PROJECTILES.filter(Boolean);
+      const RD = 2.1;
+      kinds.forEach((k, i) => cells.push({ x: 4.5, y: i * RD + RD / 2, kind: k, el: els[0] || PROJ_ELS[k] || 'arcane', label: `${k} · ${els[0] || PROJ_ELS[k]}` }));
+      W = 18;
+      D = kinds.length * RD;
+    } else if (mode === 'api') {
+      const API = ['hit', 'death', 'death-building', 'levelup', 'summon-god', 'summon-titan', 'summon-creature', 'dust', 'dust-small'];
+      const CW = 9;
+      const CD = 8;
+      API.forEach((a, i) => cells.push({ x: (i % 3) * CW + CW / 2, y: Math.floor(i / 3) * CD + CD / 2, api: a, label: a }));
+      W = 3 * CW;
+      D = 3 * CD;
+    } else {
+      W = 40;
+      D = 30;
+    }
+
+    // ---- scene
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.prepend(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#9db4c8');
+    scene.fog = new THREE.Fog('#9db4c8', 60, 160);
+    scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x4a5a32, 1.2));
+    const sun = new THREE.DirectionalLight(0xfff0d8, 2.2);
+    sun.position.set(-30, 60, 40);
+    scene.add(sun);
+
+    const PAD = 4;
+    const gw = Math.ceil(W + PAD * 2);
+    const gd = Math.ceil(D + PAD * 2);
+    const ground = new THREE.PlaneGeometry(gw, gd, gw * 2, gd * 2);
+    ground.rotateX(-Math.PI / 2);
+    ground.translate(W / 2, 0, D / 2);
+    {
+      const pos = ground.getAttribute('position');
+      const col = new Float32Array(pos.count * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        pos.setY(i, groundH(x, z));
+        const n = Math.sin(x * 1.7 + z * 0.9) * 0.5 + Math.sin(x * 0.5 - z * 1.3) * 0.5;
+        c.setHSL(0.26 + 0.03 * n, 0.42, 0.3 + 0.05 * n);
+        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+      }
+      ground.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      ground.computeVertexNormals();
+    }
+    scene.add(new THREE.Mesh(ground, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+
+    // simple low-poly figures for scale (≈ a mortal warrior, 1.1 tiles tall)
+    const figGeo = new THREE.CylinderGeometry(0.18, 0.28, 0.75, 6).translate(0, 0.38, 0);
+    const headGeo = new THREE.IcosahedronGeometry(0.17, 0).translate(0, 0.92, 0);
+    const figMats = PLAYER_COLORS.map((c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
+    const skinMat = new THREE.MeshLambertMaterial({ color: '#d8a880', flatShading: true });
+    function figure(x, y, team) {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(figGeo, figMats[team % figMats.length]));
+      g.add(new THREE.Mesh(headGeo, skinMat));
+      g.position.set(x, groundH(x, y), y);
+      scene.add(g);
+    }
+    for (const c of cells) {
+      if (c.shape) for (const [dx, dy] of MARKERS[c.shape] || []) figure(c.x + dx, c.y + dy, dx < 0 ? 0 : 1);
+      if (c.kind) { figure(c.x, c.y, 0); figure(c.x + 11, c.y - 0.3, 1); }
+      if (c.api && c.api.startsWith('hit')) figure(c.x, c.y, 1);
+    }
+
+    // ---- camera: in-game angle, south of the target looking north
+    const camera = new THREE.PerspectiveCamera(fov, innerWidth / innerHeight, 0.1, 500);
+    const pitch = (pitchDeg * Math.PI) / 180;
+    const target = new THREE.Vector3(W / 2, 0.3, D / 2 + (mode === 'projectiles' ? 0 : -0.6));
+    let dist;
+    {
+      const aspect = innerWidth / innerHeight;
+      const fv = (fov * Math.PI) / 180;
+      const needW = (W + 1) / (2 * Math.tan(fv / 2) * aspect);
+      const needD = (D * Math.sin(pitch) + 3) / (2 * Math.tan(fv / 2));
+      dist = Math.max(needW, needD, 12) / zoom;
+    }
+    const camBase = new THREE.Vector3(target.x, target.y + dist * Math.sin(pitch), target.z + dist * Math.cos(pitch));
+    camera.position.copy(camBase);
+    camera.lookAt(target);
+    camera.updateMatrixWorld();
+
+    // ---- labels
+    const labelsEl = document.getElementById('labels');
+    const tmp = new THREE.Vector3();
+    function placeLabels() {
+      labelsEl.innerHTML = '';
+      if (!showLabels) return;
+      const add = (x, h, y, html, cls) => {
+        tmp.set(x, h, y).project(camera);
+        const el = document.createElement('div');
+        el.className = cls;
+        el.innerHTML = html;
+        el.style.left = `${((tmp.x + 1) / 2) * innerWidth}px`;
+        el.style.top = `${((1 - tmp.y) / 2) * innerHeight}px`;
+        labelsEl.appendChild(el);
+        return el;
+      };
+      for (const c of cells) {
+        const ly = c.kind ? c.y : c.api ? c.y + 3.7 : c.y + 2.9;
+        const lx = c.kind ? c.x - 2.4 : c.x;
+        c.dom = add(lx, groundH(lx, ly), ly, c.label, 'lbl');
+      }
+      for (const c of colLabels) add(c.x, 0, c.y, c.text, 'col');
+    }
+
+    // ---- VFX
+    const vfx = new VFXSystem(scene, groundH, { quality: Q.get('quality') || 'high' });
+    vfx.setFocus(target.x, target.z);
+    window.vfx = vfx;
+    const cycleIdx = new Map();
+
+    function spawnCell(c) {
+      if (c.shape) {
+        let el = c.el;
+        if (!el) {
+          const list = DEFAULT_ELS[c.shape] || ['arcane'];
+          const k = cycleIdx.get(c) || 0;
+          el = list[k % list.length];
+          cycleIdx.set(c, k + 1);
+          if (c.dom) c.dom.textContent = `${c.shape} · ${el}`;
+        }
+        spawnShape(vfx, c.shape, el, c.x, c.y);
+      } else if (c.kind) {
+        vfx.spawnProjectile({ kind: c.kind, el: c.el, from: { x: c.x + 0.4, y: c.y, h: 1.0 }, to: { x: c.x + 11, y: c.y - 0.3, h: 0.7 } });
+      } else if (c.api) {
+        const { x, y } = c;
+        switch (c.api) {
+          case 'hit':
+            for (let i = 0; i < 4; i++) setTimeoutSim(i * 0.35, () => vfx.spawnHit({ x, y, h: 0.7, el: ['physical', 'fire', 'lightning', 'holy'][i] }));
+            break;
+          case 'death': vfx.spawnDeath({ x, y, scale: 1 }); break;
+          case 'death-building': vfx.spawnDeath({ x, y, scale: 4 }); break;
+          case 'levelup': vfx.spawnLevelUp({ x, y }); break;
+          case 'summon-god': vfx.spawnSummon({ x, y, scale: 1.7, el: 'lightning' }); break;
+          case 'summon-titan': vfx.spawnSummon({ x, y, scale: 4, el: 'fire' }); break;
+          case 'summon-creature': vfx.spawnSummon({ x, y, scale: 1, el: 'nature' }); break;
+          case 'dust': vfx.spawnDust({ x, y, size: 3 }); break;
+          case 'dust-small': vfx.spawnDust({ x, y, size: 0.8 }); break;
+        }
+      }
+    }
+
+    // simulated-time scheduler (works in manual and real-time mode)
+    let simTime = 0;
+    const timers = [];
+    function setTimeoutSim(delay, fn) { timers.push({ at: simTime + delay, fn }); }
+    function runTimers() {
+      for (let i = timers.length - 1; i >= 0; i--) if (timers[i].at <= simTime) { const f = timers[i].fn; timers.splice(i, 1); f(); }
+    }
+
+    const STEP = 1 / 60;
+    function simStep(dt) {
+      simTime += dt;
+      runTimers();
+      vfx.update(dt);
+    }
+
+    // stress: random effects and archer volleys
+    const rand = (a, b) => a + Math.random() * (b - a);
+    function stressTick(dt) {
+      const n = stress * dt;
+      let k = Math.floor(n) + (Math.random() < n - Math.floor(n) ? 1 : 0);
+      while (k-- > 0) {
+        const s = VFX_SHAPES[Math.floor(Math.random() * VFX_SHAPES.length)];
+        const el = ELEMENTS[Math.floor(Math.random() * ELEMENTS.length)];
+        spawnShape(vfx, s, el, rand(5, W - 5), rand(5, D - 5));
+      }
+      const a = Math.floor(stress * dt * 4 + Math.random());
+      for (let i = 0; i < a; i++) {
+        const x = rand(2, W - 2);
+        const y = rand(2, D - 2);
+        const kinds = PROJECTILES.filter(Boolean);
+        const kind = Math.random() < 0.6 ? 'arrow' : kinds[Math.floor(Math.random() * kinds.length)];
+        vfx.spawnProjectile({ kind, el: PROJ_ELS[kind], from: { x, y, h: 1 }, to: { x: x + rand(-6, 6), y: y + rand(-6, 6), h: 0.7 } });
+        vfx.spawnHit({ x: x + rand(-6, 6), y: y + rand(-6, 6), h: 0.7, el: ELEMENTS[Math.floor(Math.random() * ELEMENTS.length)] });
+      }
+    }
+
+    const statsEl = document.getElementById('stats');
+    let fpsAcc = 0;
+    let fpsN = 0;
+    let fps = 0;
+    let worst = 0;
+    function showStats(frameMs) {
+      const s = vfx.stats();
+      statsEl.textContent = `${fps.toFixed(0)} fps  worst ${worst.toFixed(1)} ms  vfx.update ${frameMs.toFixed(2)} ms\n` +
+        `particles ${s.particles}/${s.particleCap}  budget ${s.budget.toFixed(2)}\n` +
+        `effects ${s.effects}  projectiles ${s.projectiles}  glows ${s.glows}\n` +
+        `decals ${s.decals}  ribbons ${s.ribbons}  flares ${s.flares}  pillars ${s.pillars}  domes ${s.domes}\n` +
+        `draw calls ${renderer.info.render.calls}  tris ${renderer.info.render.triangles}  shake ${s.shake.toFixed(2)}`;
+    }
+
+    function render() {
+      if (useShake && vfx.shake > 0) {
+        camera.position.set(camBase.x + (Math.random() - 0.5) * 2 * vfx.shake, camBase.y + (Math.random() - 0.5) * vfx.shake, camBase.z + (Math.random() - 0.5) * 2 * vfx.shake);
+      } else {
+        camera.position.copy(camBase);
+      }
+      renderer.render(scene, camera);
+    }
+
+    placeLabels();
+
+    if (manual) {
+      // deterministic timing: spawn, simulate at 60 Hz, render once
+      if (film) {
+        const maxAge = Math.max(...film);
+        let t = 0;
+        const pending = cells.map((c) => ({ c, at: maxAge - c.age }));
+        while (t <= maxAge + 1e-6) {
+          for (const p of pending) if (!p.done && p.at <= t + 1e-6) { p.done = true; spawnCell(p.c); }
+          simStep(STEP);
+          t += STEP;
+        }
+      } else {
+        for (const c of cells) spawnCell(c);
+        if (mode === 'projectiles') for (const c of cells) { setTimeoutSim(0.25, () => spawnCell(c)); setTimeoutSim(0.5, () => spawnCell(c)); }
+        const n = Math.round(tAt / STEP);
+        for (let i = 0; i < n; i++) simStep(STEP);
+      }
+      render();
+      showStats(0);
+      window.vfxStep = (sec) => {
+        const n = Math.max(1, Math.round(sec / STEP));
+        for (let i = 0; i < n; i++) simStep(STEP);
+        render();
+        showStats(0);
+        return vfx.stats();
+      };
+      window.vfxSpawnAll = () => { for (const c of cells) spawnCell(c); };
+      window.galleryReady = true;
+    } else {
+      let last = performance.now();
+      let nextLoop = 0;
+      const loop = (now) => {
+        let dt = (now - last) / 1000;
+        last = now;
+        if (dt > 0.1) dt = 0.1;
+        worst = Math.max(worst * 0.995, dt * 1000);
+        fpsAcc += dt;
+        fpsN++;
+        if (fpsAcc > 0.5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+        if (mode === 'stress') stressTick(dt);
+        else if (simTime >= nextLoop) {
+          for (const c of cells) {
+            if (c.age !== undefined) setTimeoutSim(Math.max(...film) - c.age, () => spawnCell(c));
+            else spawnCell(c);
+            if (mode === 'projectiles') { setTimeoutSim(0.3, () => spawnCell(c)); setTimeoutSim(0.6, () => spawnCell(c)); }
+          }
+          nextLoop = simTime + (film ? Math.max(period, Math.max(...film) + 1.5) : period);
+        }
+        const t0 = performance.now();
+        simStep(dt);
+        const ms = performance.now() - t0;
+        render();
+        showStats(ms);
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+      window.galleryReady = true;
+    }
+
+    addEventListener('resize', () => {
+      renderer.setSize(innerWidth, innerHeight);
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      placeLabels();
+    });
+  </script>
+</body>
+</html>

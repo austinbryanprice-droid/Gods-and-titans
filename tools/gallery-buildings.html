@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Building Gallery — Mythic War</title>
+  <!--
+    Visual check page for src/render/models/building-models.js and props.js, seen from the
+    in-game camera angle (56° pitch, looking north).
+    URL params:
+      view=grid|construction|nature|map   default grid
+      src=data|roster|values              grid rows: registry pantheons (default), DESIGN 4.8 roster styles with
+                                          gallery colors, or one row per style value (every roof / wall / ornament)
+      pantheon=greek,norse                 filter rows by id
+      types=tc1,tc2,tc3,house,barracks,storehouse,shrine,temple,tower,titan_gate,mine   columns
+      stages=0,0.2,0.5,0.8,1               construction view: build progress columns (types default house,barracks,temple,tc1)
+      team=0..7|mix                        team color (PLAYER_COLORS index); mix cycles per row
+      t=1.5                                freeze animation time (seconds)
+      zoom=1.5   pitch=56   fov=40         camera
+      labels=0   outline=0   units=1       hide labels / footprint outlines; show a worshipper + warrior for scale
+      shadows=1                            shadow maps
+      seed=7 size=small|medium players=4   map view: a real generated map (forest, decor, mines, a town center per start)
+      overview=1                           map view: whole map instead of the in-game zoom
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #26301f; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; }
+    #labels { position: absolute; inset: 0; pointer-events: none; }
+    .lbl { position: absolute; transform: translate(-50%, 0); color: #fff; font-size: 11px; white-space: nowrap;
+      text-shadow: 0 1px 2px #000, 0 0 3px #000; padding: 0 2px; }
+    .col { font-size: 13px; font-weight: 700; color: #ffe9a8; }
+    .row { transform: translate(-100%, -50%); font-size: 13px; font-weight: 700; color: #cfe8ff; text-align: right; }
+    .row small { display: block; font-weight: 400; font-size: 10px; color: #b8c8d8; }
+    #stats { position: absolute; top: 6px; right: 8px; color: #fff; font: 12px monospace; text-shadow: 0 1px 2px #000; text-align: right; }
+    #err { position: absolute; bottom: 6px; left: 8px; color: #ff8a8a; font: 12px monospace; white-space: pre; }
+  </style>
+</head>
+<body>
+  <div id="labels"></div>
+  <div id="stats"></div>
+  <div id="err"></div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { buildBuildingModel, buildGoldMineModel, getBuildingModelInfo, getGoldMineInfo, setBuildingTime } from '../src/render/models/building-models.js';
+    import { createForest, createDecor } from '../src/render/models/props.js';
+    import { heightAt, footprintHeight } from '../src/render/height.js';
+    import { PANTHEON_LIST, BUILDINGS } from '../src/data/index.js';
+    import { PLAYER_COLORS, TERRAIN } from '../src/config.js';
+
+    const Q = new URLSearchParams(location.search);
+    const view = Q.get('view') || 'grid';
+    const src = Q.get('src') || 'data';
+    const filter = Q.get('pantheon') ? Q.get('pantheon').split(',') : null;
+    const teamQ = Q.get('team') ?? '0';
+    const frozen = Q.has('t') ? Number(Q.get('t')) : null;
+    const zoom = Number(Q.get('zoom') || 1);
+    const pitchDeg = Number(Q.get('pitch') || 56);
+    const fov = Number(Q.get('fov') || 40);
+    const showLabels = Q.get('labels') !== '0';
+    const showOutline = Q.get('outline') !== '0';
+    const showUnits = Q.get('units') === '1';
+    const errEl = document.getElementById('err');
+    const fail = (msg, e) => { console.error(msg, e); errEl.textContent += `${msg}: ${e && e.message}\n`; };
+
+    // ---- the DESIGN 4.8 roster styles with gallery colors ----
+    const ROSTER = [
+      { id: 'greek', name: 'Greek', style: { roof: 'gable', wall: 'marble', ornament: 'columns' }, colors: { wall: '#eee8da', roof: '#b04a35', trim: '#2f5f9a', accent: '#d9b440' } },
+      { id: 'norse', name: 'Norse', style: { roof: 'longhouse', wall: 'timber', ornament: 'carvings' }, colors: { wall: '#8a6440', roof: '#6b8040', trim: '#2e2014', accent: '#c9d2d8' } },
+      { id: 'egyptian', name: 'Egyptian', style: { roof: 'pyramid', wall: 'sandstone', ornament: 'obelisks' }, colors: { wall: '#e6cc94', roof: '#e9d7a6', trim: '#1f6fae', accent: '#f0c040' } },
+      { id: 'hindu', name: 'Hindu', style: { roof: 'shikhara', wall: 'sandstone', ornament: 'carvings' }, colors: { wall: '#d49a6a', roof: '#c2683a', trim: '#8a2030', accent: '#f2b51e' } },
+      { id: 'japanese', name: 'Japanese', style: { roof: 'pagoda', wall: 'lacquer', ornament: 'torii' }, colors: { wall: '#d23c26', roof: '#30353f', trim: '#f5efe2', accent: '#d8b040' } },
+      { id: 'chinese', name: 'Chinese', style: { roof: 'curved', wall: 'lacquer', ornament: 'lanterns' }, colors: { wall: '#b0281e', roof: '#e2a828', trim: '#1d6e5c', accent: '#f5cd50' } },
+      { id: 'aztec', name: 'Aztec', style: { roof: 'stepped', wall: 'stone', ornament: 'serpents' }, colors: { wall: '#c8b896', roof: '#b8402a', trim: '#1e9e8e', accent: '#eab42e' } },
+      { id: 'celtic', name: 'Celtic', style: { roof: 'thatch_cone', wall: 'stone', ornament: 'knots' }, colors: { wall: '#a8a292', roof: '#b88e4c', trim: '#2e6a38', accent: '#d0a030' } },
+      { id: 'mesopotamian', name: 'Mesopotamian', style: { roof: 'stepped', wall: 'mudbrick', ornament: 'winged_bulls' }, colors: { wall: '#cfa676', roof: '#9c7048', trim: '#2348a8', accent: '#dcb444' } },
+      { id: 'west_african', name: 'West African', style: { roof: 'dome', wall: 'mudbrick', ornament: 'spikes' }, colors: { wall: '#c48654', roof: '#a85e36', trim: '#246e4c', accent: '#e4ac2c' } },
+    ];
+    // one row per style value not already covered by a roster combination
+    const BASE = { colors: { wall: '#d8d0c0', roof: '#8a4a3a', trim: '#4a6a9a', accent: '#d4af37' } };
+    const VALUES = [
+      { id: 'roof-flat', name: 'roof: flat', style: { roof: 'flat', wall: 'stone', ornament: 'banners' }, ...BASE },
+      { id: 'wall-brick', name: 'wall: brick', style: { roof: 'gable', wall: 'brick', ornament: 'banners' }, ...BASE },
+      { id: 'mix-1', name: 'pagoda / stone / lanterns', style: { roof: 'pagoda', wall: 'stone', ornament: 'lanterns' }, ...BASE },
+      { id: 'mix-2', name: 'thatch / timber / banners', style: { roof: 'thatch_cone', wall: 'timber', ornament: 'banners' }, ...BASE },
+      { id: 'mix-3', name: 'curved / marble / torii', style: { roof: 'curved', wall: 'marble', ornament: 'torii' }, ...BASE },
+      { id: 'mix-4', name: 'dome / brick / columns', style: { roof: 'dome', wall: 'brick', ornament: 'columns' }, ...BASE },
+      { id: 'mix-5', name: 'shikhara / lacquer / obelisks', style: { roof: 'shikhara', wall: 'lacquer', ornament: 'obelisks' }, ...BASE },
+      { id: 'mix-6', name: 'longhouse / stone / knots', style: { roof: 'longhouse', wall: 'stone', ornament: 'knots' }, ...BASE },
+      { id: 'mix-7', name: 'pyramid / mudbrick / serpents', style: { roof: 'pyramid', wall: 'mudbrick', ornament: 'serpents' }, ...BASE },
+      { id: 'mix-8', name: 'stepped / sandstone / winged bulls', style: { roof: 'stepped', wall: 'sandstone', ornament: 'winged_bulls' }, ...BASE },
+      { id: 'mix-9', name: 'gable / timber / spikes', style: { roof: 'gable', wall: 'timber', ornament: 'spikes' }, ...BASE },
+      { id: 'neutral', name: 'no pantheon (null)', style: null, colors: null },
+    ];
+    let rows = src === 'roster' ? ROSTER : src === 'values' ? VALUES : PANTHEON_LIST;
+    if (filter) rows = rows.filter((p) => filter.includes(p.id));
+
+    const TYPE_TOKENS = { tc1: ['town_center', 1], tc2: ['town_center', 2], tc3: ['town_center', 3] };
+    const DEFAULT_TYPES = view === 'construction' ? 'tc1,house,barracks,temple' : 'tc1,tc2,tc3,house,barracks,storehouse,shrine,temple,tower,titan_gate';
+    const types = (Q.get('types') || DEFAULT_TYPES).split(',').map((t) => (TYPE_TOKENS[t] ? { token: t, type: TYPE_TOKENS[t][0], tier: TYPE_TOKENS[t][1] } : { token: t, type: t, tier: 1 }));
+    const stages = (Q.get('stages') || '0,0.2,0.5,0.8,1').split(',').map(Number);
+
+    // ---- renderer / scene ----
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = Q.get('shadows') === '1';
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.prepend(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#7fa0c0');
+    const hemi = new THREE.HemisphereLight(0xdfe9ff, 0x4a5a32, 1.2);
+    scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
+    sun.position.set(-30, 60, 40);
+    sun.castShadow = renderer.shadowMap.enabled;
+    scene.add(sun);
+
+    const labelsEl = document.getElementById('labels');
+    const labels = [];
+    const label = (text, x, y, z, cls = '', title = '') => {
+      if (!showLabels) return;
+      const el = document.createElement('div');
+      el.className = `lbl ${cls}`;
+      el.innerHTML = text;
+      if (title) el.title = title;
+      labelsEl.appendChild(el);
+      labels.push({ el, p: new THREE.Vector3(x, y, z) });
+    };
+    const animated = [];
+    let bounds = { x0: 0, z0: 0, x1: 10, z1: 10 };
+    let camTarget = null;
+    let camDist = null;
+
+    function outline(cx, cz, size, y = 0.012) {
+      if (!showOutline) return;
+      const h = size / 2;
+      const g = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(cx - h, y, cz - h), new THREE.Vector3(cx + h, y, cz - h),
+        new THREE.Vector3(cx + h, y, cz + h), new THREE.Vector3(cx - h, y, cz + h),
+      ]);
+      scene.add(new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 })));
+    }
+
+    function groundPlane(x0, z0, x1, z1) {
+      const w = x1 - x0 + 10;
+      const d = z1 - z0 + 10;
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ color: '#5d8a3e' }));
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
+      ground.receiveShadow = true;
+      scene.add(ground);
+      const n = Math.ceil(Math.max(w, d));
+      const grid = new THREE.GridHelper(n, n, 0x4f7a34, 0x4f7a34);
+      grid.position.set(Math.round((x0 + x1) / 2), 0.004, Math.round((z0 + z1) / 2));
+      grid.material.opacity = 0.3;
+      grid.material.transparent = true;
+      scene.add(grid);
+    }
+
+    function placeModel(spec, pantheon, color, x, z, bp = 1) {
+      try {
+        if (spec.type === 'mine') {
+          const m = buildGoldMineModel();
+          m.root.position.set(x, 0, z);
+          scene.add(m.root);
+          animated.push(m);
+          return { model: m, size: 3, info: getGoldMineInfo() };
+        }
+        const m = buildBuildingModel(spec.type, pantheon, color, spec.tier);
+        m.setProgress(bp);
+        m.root.position.set(x, 0, z);
+        scene.add(m.root);
+        animated.push(m);
+        return { model: m, size: BUILDINGS[spec.type].size, info: getBuildingModelInfo(spec.type, pantheon, spec.tier) };
+      } catch (e) {
+        fail(`${spec.token} ${pantheon && pantheon.id}`, e);
+        return null;
+      }
+    }
+
+    const pending = []; // async model loads that must finish before __ready
+    function addScaleUnits(x, z) {
+      pending.push(loadScaleUnits(x, z));
+    }
+
+    async function loadScaleUnits(x, z) {
+      try {
+        const { buildUnitModel } = await import('../src/render/models/unit-models.js');
+        const { MORTALS } = await import('../src/data/index.js');
+        ['worshipper', 'warrior'].forEach((id, i) => {
+          const u = buildUnitModel(MORTALS[id], PLAYER_COLORS[0]);
+          u.root.position.set(x + i * 0.8, 0, z);
+          u.root.rotation.y = -Math.PI / 2;
+          scene.add(u.root);
+          animated.push({ animate: (t) => u.animate('idle', t, 0.016, {}) });
+        });
+      } catch (e) {
+        fail('scale units', e);
+      }
+    }
+
+    // ---- grid & construction views ----
+    function buildGrid() {
+      const GAP = 1.4;
+      const cols = view === 'construction'
+        ? types.flatMap((t) => stages.map((bp) => ({ ...t, bp, head: `${t.token} ${Math.round(bp * 100)}%` })))
+        : types.map((t) => ({ ...t, bp: 1, head: t.token }));
+      const sizes = cols.map((c) => (c.type === 'mine' ? 3 : BUILDINGS[c.type]?.size ?? 2));
+      const xs = [];
+      let x = 0;
+      sizes.forEach((s, i) => {
+        if (i > 0 && view === 'construction' && cols[i].token !== cols[i - 1].token) x += 1.2;
+        xs.push(x + s / 2);
+        x += s + GAP;
+      });
+      const width = x - GAP;
+      const ROW = 5.6;
+      rows.forEach((p, r) => {
+        const z = r * ROW + 2;
+        const color = teamQ === 'mix' ? PLAYER_COLORS[r % PLAYER_COLORS.length] : PLAYER_COLORS[Number(teamQ) % PLAYER_COLORS.length];
+        const st = p && p.style ? `${p.style.roof} · ${p.style.wall} · ${p.style.ornament}` : 'default style';
+        label(`${p ? p.name : 'none'}<small>${st}</small>`, -0.6, 0, z, 'row');
+        cols.forEach((c, i) => {
+          const placed = placeModel(c, p && p.style ? p : null, color, xs[i], z, c.bp);
+          if (!placed) return;
+          outline(xs[i], z, placed.size);
+          const inf = placed.info;
+          const warn = inf.triangles > 3000 || (inf.fit !== undefined && inf.fit < 0.999) ? ' ⚠' : '';
+          label(`${inf.triangles}${warn}`, xs[i], 0, z + placed.size / 2 + 0.25, '', `${c.token}: ${inf.triangles} tris, h ${inf.height.toFixed(2)}${inf.fit ? `, fit ${inf.fit.toFixed(3)}` : ''}`);
+        });
+        if (showUnits) addScaleUnits(width + 1, z);
+      });
+      cols.forEach((c, i) => label(c.head, xs[i], 0, -0.6, 'col'));
+      bounds = { x0: -1, z0: -0.5, x1: width + (showUnits ? 2.6 : 0), z1: (rows.length - 1) * ROW + 4.5 };
+      groundPlane(bounds.x0 - 4, bounds.z0, bounds.x1, bounds.z1);
+    }
+
+    // ---- nature view: synthetic map patch ----
+    function terrainMesh(map) {
+      const W = map.width;
+      const H = map.height;
+      const geo = new THREE.PlaneGeometry(W, H, W, H);
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(W / 2, 0, H / 2);
+      const pos = geo.attributes.position;
+      const colors = new Float32Array(pos.count * 3);
+      const TC = { [TERRAIN.GRASS]: '#5f8f3e', [TERRAIN.DIRT]: '#8a7450', [TERRAIN.WATER]: '#3e6a7a', [TERRAIN.FOREST]: '#3e6a2e', [TERRAIN.ROCK]: '#7d776c', [TERRAIN.SAND]: '#cdb784' };
+      const cols = Object.fromEntries(Object.entries(TC).map(([k, v]) => [k, new THREE.Color(v)]));
+      const c = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) {
+        const vx = Math.round(pos.getX(i));
+        const vy = Math.round(pos.getZ(i));
+        pos.setY(i, map.heights[vy * (W + 1) + vx]);
+        c.setRGB(0, 0, 0);
+        let n = 0;
+        for (const [ox, oy] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
+          const tx = vx + ox;
+          const ty = vy + oy;
+          if (tx < 0 || ty < 0 || tx >= W || ty >= H) continue;
+          c.add(cols[map.terrain[ty * W + tx]]);
+          n++;
+        }
+        c.multiplyScalar(1 / Math.max(1, n));
+        colors.set([c.r, c.g, c.b], i * 3);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({ color: '#3f7fa8', transparent: true, opacity: 0.8 }));
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(W / 2, -0.2, H / 2);
+      scene.add(water);
+    }
+
+    function syntheticMap() {
+      const W = 48;
+      const H = 32;
+      const T = new Uint8Array(W * H);
+      const n2 = (x, y) => Math.sin(x * 0.7) * 0.5 + Math.sin(y * 0.9 + x * 0.3) * 0.5;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          let t = TERRAIN.GRASS;
+          if (y < 8 + n2(x, y) * 1.5 || x > 41 + n2(y, x)) t = TERRAIN.FOREST;
+          const dw = Math.hypot(x - 33, y - 23);
+          if (dw < 3.6) t = TERRAIN.WATER;
+          else if (dw < 5.2) t = TERRAIN.SAND;
+          else if (dw < 7 && y > 25 && t === TERRAIN.GRASS) t = TERRAIN.FOREST;
+          if ((x - 20) ** 2 / 9 + (y - 27) ** 2 < 3) t = TERRAIN.DIRT;
+          if (x >= 3 && x <= 4 && y >= 24 && y <= 26) t = TERRAIN.ROCK;
+          T[y * W + x] = t;
+        }
+      }
+      const heights = new Float32Array((W + 1) * (H + 1));
+      for (let y = 0; y <= H; y++) {
+        for (let x = 0; x <= W; x++) {
+          let h = 0.25 + 0.2 * Math.sin(x * 0.21) * Math.cos(y * 0.17) + 0.08 * Math.sin(x * 0.7 + y * 0.4);
+          const dw = Math.hypot(x - 33.5, y - 23.5);
+          if (dw < 3.4) h = -0.6;
+          else if (dw < 4.4) h = -0.35;
+          else if (dw < 8) h = -0.05 + (h + 0.05) * ((dw - 4.4) / 3.6);
+          heights[y * (W + 1) + x] = h;
+        }
+      }
+      const decor = [];
+      const kinds = ['rock', 'bush', 'flowers', 'ruin', 'stump', 'grass'];
+      let s = 1;
+      const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < 160; i++) {
+        const x = 2 + rnd() * 44;
+        const y = 9 + rnd() * 21;
+        const t = T[Math.floor(y) * W + Math.floor(x)];
+        if (t === TERRAIN.FOREST || t === TERRAIN.WATER) continue;
+        if (x > 12 && x < 30 && y > 12 && y < 24) continue;
+        decor.push({ x, y, kind: kinds[i % kinds.length], rot: rnd() * 6.28, scale: 0.7 + rnd() * 0.6 });
+      }
+      return { width: W, height: H, seed: 'gallery', terrain: T, heights, decor, wood: new Uint16Array(W * H) };
+    }
+
+    function placeOnMap(map, spec, pantheon, color, tx, ty, bp = 1) {
+      const size = spec.type === 'mine' ? 3 : BUILDINGS[spec.type].size;
+      const placed = placeModel(spec, pantheon, color, tx + size / 2, ty + size / 2, bp);
+      if (placed) placed.model.root.position.y = footprintHeight(map, tx, ty, size);
+      return placed;
+    }
+
+    function buildNature() {
+      const map = syntheticMap();
+      terrainMesh(map);
+      const hf = (x, y) => heightAt(map, x, y);
+      const forest = createForest(map, hf);
+      scene.add(forest.object3d);
+      const decor = createDecor(map, hf);
+      scene.add(decor.object3d);
+      // a felled strip along the forest edge
+      for (let x = 14; x <= 22; x++) for (let y = 7; y <= 9; y++) if (forest.isStanding(x, y) && (x + y) % 2 === 0) forest.fell(x, y);
+      const P = Object.fromEntries(PANTHEON_LIST.map((p) => [p.id, p]));
+      const c0 = PLAYER_COLORS[0];
+      const c1 = PLAYER_COLORS[1];
+      placeOnMap(map, { type: 'mine', token: 'mine' }, null, c0, 6, 15);
+      placeOnMap(map, { type: 'town_center', tier: 2, token: 'tc2' }, P.greek, c0, 13, 15);
+      placeOnMap(map, { type: 'house', tier: 1, token: 'house' }, P.greek, c0, 18, 13);
+      placeOnMap(map, { type: 'house', tier: 1, token: 'house' }, P.greek, c0, 18, 16);
+      placeOnMap(map, { type: 'shrine', tier: 1, token: 'shrine' }, P.greek, c0, 18, 19);
+      placeOnMap(map, { type: 'barracks', tier: 1, token: 'barracks' }, P.greek, c0, 13, 20, 0.55);
+      placeOnMap(map, { type: 'town_center', tier: 1, token: 'tc1' }, P.norse, c1, 24, 13);
+      placeOnMap(map, { type: 'temple', tier: 1, token: 'temple' }, P.norse, c1, 29, 12);
+      placeOnMap(map, { type: 'tower', tier: 1, token: 'tower' }, P.norse, c1, 25, 18);
+      placeOnMap(map, { type: 'storehouse', tier: 1, token: 'storehouse' }, P.norse, c1, 28, 16);
+      placeOnMap(map, { type: 'mine', token: 'mine' }, null, c1, 36, 13);
+      bounds = { x0: 2, z0: 6, x1: 40, z1: 30 };
+      const st = document.getElementById('stats');
+      st.dataset.extra = `${forest.count} trees`;
+      window.__forest = forest;
+      window.__decor = decor;
+    }
+
+    // ---- map view: a real generated map ----
+    async function buildMap() {
+      const { generateMap } = await import('../src/sim/mapgen.js');
+      const players = Number(Q.get('players') || 4);
+      const map = generateMap({ seed: Number(Q.get('seed') || 7), mapSize: Q.get('size') || 'medium', playerCount: players });
+      terrainMesh(map);
+      const hf = (x, y) => heightAt(map, x, y);
+      const t0 = performance.now();
+      const forest = createForest(map, hf);
+      const decor = createDecor(map, hf);
+      const ms = performance.now() - t0;
+      scene.add(forest.object3d);
+      scene.add(decor.object3d);
+      map.starts.forEach((s, i) => {
+        const p = PANTHEON_LIST[(i * 3) % PANTHEON_LIST.length];
+        placeOnMap(map, { type: 'town_center', tier: 1 + (i % 3), token: 'tc' }, p, PLAYER_COLORS[i], s.x, s.y);
+        decor.hideInRect(s.x, s.y, s.x + 4, s.y + 4);
+      });
+      for (const m of map.mines) placeOnMap(map, { type: 'mine', token: 'mine' }, null, PLAYER_COLORS[0], m.tx, m.ty);
+      document.getElementById('stats').dataset.extra = `${forest.count} trees, built in ${ms.toFixed(0)} ms`;
+      const s0 = map.starts[0];
+      if (Q.get('overview') === '1') bounds = { x0: 0, z0: 0, x1: map.width, z1: map.height };
+      else {
+        camTarget = new THREE.Vector3(s0.x + 6, 0.3, s0.y + 5);
+        camDist = 34 / zoom;
+      }
+      window.__forest = forest;
+    }
+
+    if (view === 'nature') buildNature();
+    else if (view === 'map') await buildMap();
+    else buildGrid();
+
+    // ---- camera: in-game angle, looking north ----
+    const camera = new THREE.PerspectiveCamera(fov, innerWidth / innerHeight, 0.1, 3000);
+    const pitch = (pitchDeg * Math.PI) / 180;
+    function placeCamera() {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      let target = camTarget;
+      let dist = camDist;
+      if (!target) {
+        const W = bounds.x1 - bounds.x0;
+        const D = bounds.z1 - bounds.z0;
+        target = new THREE.Vector3((bounds.x0 + bounds.x1) / 2 - (view === 'grid' || view === 'construction' ? 0.8 : 0), 0.8, (bounds.z0 + bounds.z1) / 2);
+        const fovV = (camera.fov * Math.PI) / 180;
+        const needW = (W + 4) / (2 * Math.tan(fovV / 2) * camera.aspect);
+        const needD = (D * Math.sin(pitch) + 3) / (2 * Math.tan(fovV / 2));
+        dist = Math.max(needW, needD, 6) / zoom;
+      }
+      camera.position.set(target.x, target.y + dist * Math.sin(pitch), target.z + dist * Math.cos(pitch));
+      camera.lookAt(target);
+      if (sun.castShadow) {
+        sun.shadow.mapSize.set(4096, 4096);
+        const c = sun.shadow.camera;
+        const R = Math.max(bounds.x1 - bounds.x0, bounds.z1 - bounds.z0) * 0.75 + 4;
+        c.left = -R; c.right = R; c.top = R; c.bottom = -R; c.near = 1; c.far = 400;
+        sun.shadow.bias = -0.0004;
+        sun.shadow.normalBias = 0.02;
+        sun.target.position.copy(target);
+        sun.position.copy(target).add(new THREE.Vector3(-30, 60, 40));
+        scene.add(sun.target);
+        c.updateProjectionMatrix();
+      }
+    }
+    placeCamera();
+
+    const statsEl = document.getElementById('stats');
+    const v = new THREE.Vector3();
+    let frames = 0;
+    let fpsT = performance.now();
+    let fps = 0;
+    function renderAt(t) {
+      setBuildingTime(t);
+      for (const m of animated) if (m.animate) m.animate(t);
+      renderer.render(scene, camera);
+      for (const l of labels) {
+        v.copy(l.p).project(camera);
+        l.el.style.left = `${((v.x + 1) / 2) * innerWidth}px`;
+        l.el.style.top = `${((1 - v.y) / 2) * innerHeight}px`;
+      }
+      const info = renderer.info.render;
+      statsEl.textContent = `${animated.length} models • ${info.calls} draws • ${info.triangles} tris${fps ? ` • ${fps.toFixed(0)} fps` : ''}${statsEl.dataset.extra ? ` • ${statsEl.dataset.extra}` : ''}`;
+    }
+    window.renderAt = renderAt;
+    window.addEventListener('resize', () => {
+      renderer.setSize(innerWidth, innerHeight);
+      placeCamera();
+      renderAt(frozen ?? performance.now() / 1000);
+    });
+    if (frozen !== null) {
+      renderAt(frozen);
+    } else {
+      const loop = () => {
+        renderAt(performance.now() / 1000);
+        frames++;
+        const now = performance.now();
+        if (now - fpsT > 1000) {
+          fps = (frames * 1000) / (now - fpsT);
+          frames = 0;
+          fpsT = now;
+        }
+        requestAnimationFrame(loop);
+      };
+      loop();
+    }
+    await Promise.all(pending);
+    if (frozen !== null) renderAt(frozen);
+    window.__ready = true;
+  </script>
+</body>
+</html>

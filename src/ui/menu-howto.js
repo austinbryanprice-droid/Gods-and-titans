@@ -1,0 +1,96 @@
+// How to Play: the rules (DESIGN 5) and controls (DESIGN 9) in friendly words.
+import { h } from './menu-dom.js';
+import { BUILDINGS } from '../data/index.js';
+import { MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS } from '../config.js';
+
+// kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
+const kbd = (...k) => k.map((x, i) => [i ? h('span.mw-plus', '+') : null, h('kbd', x)]);
+const keys = (...k) => k.map((x, i) => [i ? h('span.mw-keysep') : null, h('kbd', x)]);
+
+function faithRate(id) {
+  const b = BUILDINGS[id];
+  return b && b.faithRate ? `${b.faithRate}` : '?';
+}
+
+const HOTKEYS = [
+  ['Units', [
+    [kbd('Right-click'), 'Smart command: move, attack, gather, pray, help build'],
+    [kbd('A'), 'Attack-move (then click the ground)'],
+    [kbd('M'), 'Move'],
+    [kbd('S'), 'Stop'],
+    [kbd('H'), 'Hold position'],
+    [keys('Q', 'W', 'E', 'R'), 'God and creature abilities'],
+  ]],
+  ['Worshippers', [
+    [kbd('G'), 'Gather gold or wood'],
+    [kbd('B'), 'Build menu: H House · B Barracks · S Shrine · O Storehouse · T Tower · E Temple · G Titan Gate · C Town Center'],
+    [kbd('P'), 'Pray at a Shrine or Temple'],
+    [kbd('C'), 'Return carried gold or wood'],
+  ]],
+  ['Buildings', [
+    [kbd('W'), 'Town Center: Worshipper · Barracks: Warrior'],
+    [kbd('U'), 'Town Center: grow to Town, then City'],
+    [keys('A', 'P', 'R'), 'Barracks: Archer · Priest · Battering Ram'],
+    [keys('Q', 'W', 'E'), 'Shrine: creatures · Temple: gods (R for the fourth)'],
+    [kbd('T'), 'Titan Gate: summon the Titan'],
+    [kbd('Y'), 'Set rally point'],
+    [kbd('Esc'), 'Cancel construction / targeting'],
+  ]],
+  ['Camera & groups', [
+    [kbd('Ctrl', '1–9'), 'Assign a control group'],
+    [kbd('1–9'), 'Select a group (tap twice to jump to it)'],
+    [kbd('F1–F3'), 'Select your gods'],
+    [kbd('Space'), 'Center on selection or the last alert'],
+    [kbd('Alt'), 'Show every health bar'],
+    [kbd('Enter'), 'Chat'],
+    [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera; mouse wheel zooms'],
+  ]],
+];
+
+function step(num, icon, title, ...body) {
+  return h('section.mw-howto-step',
+    h('div.mw-howto-num', { 'aria-hidden': 'true' }, icon),
+    h('div',
+      h('h3.mw-h3', h('span.mw-howto-idx', `${num}.`), ` ${title}`),
+      ...body.map((p) => (typeof p === 'string' ? h('p', p) : p)),
+    ),
+  );
+}
+
+/** The How to Play content (rules column + controls column). */
+export function renderHowToContent() {
+  const rules = h('div.mw-howto-rules',
+    h('p.mw-lead', 'Lead a people devoted to their gods. Your worshippers gather, build and pray; your prayers call down creatures, gods and a colossal titan. Destroy every building of the enemy to win.'),
+    step(1, '⛏️', 'Gather gold and wood',
+      `You start with a Town Center, ${START_WORKERS} Worshippers, ${START_RESOURCES.gold} gold and ${START_RESOURCES.wood} wood. Select worshippers and right-click a gold mine or the forest. They carry 10 at a time back to the Town Center or a Storehouse.`),
+    step(2, '🙏', 'Pray for Faith',
+      `Build a Shrine, then right-click it with worshippers (or press P). Every kneeling worshipper earns Faith each second (Shrine ${faithRate('shrine')}/s, Temple ${faithRate('temple')}/s) until you give them another order. Faith is what summons the divine.`),
+    step(3, '🏛️', 'Grow from Village to Town to City',
+      `Houses raise your population limit (up to ${POP_MAX}). Barracks train Warriors, Archers, Priests and Battering Rams. Grow your Town Center (U) to unlock stronger creatures, more gods and finally the Titan Gate.`),
+    step(4, '✨', 'Summon creatures, gods and a Titan',
+      'Shrines summon your pantheon\'s mythical creatures: one per tier, Village, Town and City. Temples summon gods: heroes who level up and cast spells.',
+      `You may lead ${MAX_GODS} gods at once: the first in the Village, the second once you are a Town, the third as a City. In the City, raise a Titan Gate and summon one colossal Titan.`),
+    step(5, '⚡', 'Level up your gods',
+      'Gods gain experience when enemies fall nearby and rise to level 6. Their first ability (Q) is ready at once, the second (W) at level 2 and the ultimate (R) at level 4. A fallen god can be revived at the Temple for half the price, keeping its level.'),
+    step(6, '⚔️', 'Wage war',
+      'Armor softens blows; arrows and spells never miss. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.'),
+    h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
+  );
+  const controls = h('div.mw-howto-controls',
+    h('h3.mw-h3', 'Mouse'),
+    h('table.mw-keys',
+      h('tbody',
+        h('tr', h('td', kbd('Left-click')), h('td', 'Select a unit or building')),
+        h('tr', h('td', kbd('Drag')), h('td', 'Box-select units')),
+        h('tr', h('td', kbd('Shift', 'Click')), h('td', 'Add to or remove from the selection')),
+        h('tr', h('td', kbd('Double-click')), h('td', 'Select every unit of that type on screen')),
+        h('tr', h('td', kbd('Shift', 'Right-click')), h('td', 'Queue orders')),
+      ),
+    ),
+    HOTKEYS.map(([title, rows]) => [
+      h('h3.mw-h3', title),
+      h('table.mw-keys', h('tbody', rows.map(([keys, text]) => h('tr', h('td', keys), h('td', text))))),
+    ]),
+  );
+  return h('div.mw-howto', rules, controls);
+}

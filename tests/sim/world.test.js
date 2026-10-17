@@ -1,0 +1,248 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { godsFor } from '../../src/data/index.js';
+import { makeWorld, run, runCollect, runUntil, place, spawn, clearUnits, defineUnit, eventsOf, errorsOf } from './helpers.js';
+
+const workers = (w, p = 0) => w.unitsOf(p).filter((u) => u.type === 'worshipper');
+
+test('snapshot shape: top level and player view', () => {
+  const w = makeWorld();
+  w.tick();
+  const s = w.getSnapshot();
+  assert.deepEqual(Object.keys(s).sort(), ['entities', 'events', 'felled', 'fields', 'gameOver', 'players', 'reveals', 'tick', 'time'].sort());
+  assert.equal(s.tick, 1);
+  assert.equal(s.time, 0.05);
+  assert.equal(s.gameOver, null);
+  const p = s.players[0];
+  for (const k of ['i', 'name', 'team', 'pantheon', 'color', 'kind', 'gold', 'wood', 'faith', 'faithRate', 'pop', 'popCap', 'tier', 'defeated', 'gods', 'fallen', 'titan', 'stats']) {
+    assert.ok(k in p, `player.${k}`);
+  }
+  assert.deepEqual(Object.keys(p.stats).sort(), ['buildings', 'gathered', 'kills', 'losses', 'unitsTrained']);
+  // events are cleared by getSnapshot
+  assert.deepEqual(w.getSnapshot().events, []);
+});
+
+test('snapshot shape: entity views with omission rules', () => {
+  const w = makeWorld();
+  const godDef = godsFor(w.players[0].pantheon)[0];
+  const g = spawn(w, 0, godDef.id, 20, 20);
+  const minion = defineUnit({ class: 'minion', pop: 0 });
+  const m = spawn(w, 0, minion, 22, 22, { summoned: true, expire: 10 });
+  const wk = workers(w)[0];
+  w.issueCommand(0, { type: 'build', units: [wk.id], building: 'house', tx: 30, ty: 30 });
+  w.tick();
+  const s = w.getSnapshot();
+  const by = new Map(s.entities.map((e) => [e.id, e]));
+  const common = ['id', 'k', 't', 'o', 'x', 'y', 'f', 'hp', 'mhp', 'sh', 'st', 'tg'];
+  for (const e of s.entities) for (const k of common) assert.ok(k in e, `${e.k}.${k}`);
+  const gv = by.get(g.id);
+  assert.equal(gv.k, 'u');
+  assert.equal(gv.lv, 1);
+  assert.equal(gv.xp, 0);
+  assert.deepEqual(gv.cd, {});
+  assert.deepEqual(gv.fx, []);
+  assert.equal(gv.c, 0);
+  assert.ok(!('ex' in gv));
+  assert.ok(!('bo' in gv));
+  assert.ok(!('tx' in gv));
+  const wv = by.get(wk.id);
+  assert.ok(!('lv' in wv) && !('xp' in wv));
+  assert.deepEqual(wv.bo, { b: 'house', tx: 30, ty: 30 });
+  assert.ok(by.get(m.id).ex > 9);
+  const tc = s.entities.find((e) => e.k === 'b' && e.t === 'town_center' && e.o === 0);
+  for (const k of ['tx', 'ty', 'bp', 'q', 'tr', 'rp']) assert.ok(k in tc, `building.${k}`);
+  assert.equal(tc.bp, 1);
+  assert.equal(tc.tr, 1);
+  assert.equal(tc.rp, null);
+  assert.ok(!('pr' in tc));
+  assert.ok(!('c' in tc) && !('cd' in tc));
+  const mine = s.entities.find((e) => e.k === 'm');
+  assert.equal(mine.amt, 12000);
+  assert.equal(mine.o, -1);
+  // rounding
+  for (const e of s.entities) {
+    assert.equal(e.x, Math.round(e.x * 100) / 100);
+    assert.ok(Number.isInteger(e.hp));
+  }
+  // JSON-safe
+  assert.doesNotThrow(() => JSON.stringify(s));
+});
+
+test('smart command resolution', () => {
+  const w = makeWorld({ map: { forest: [{ x: 2, y: 20, w: 4, h: 4 }] } });
+  const [w1, w2, w3, w4, w5] = workers(w);
+  const war = spawn(w, 0, 'warrior', 12, 16);
+  const enemy = spawn(w, 1, 'warrior', 30, 30);
+  const mine = w.mineList[0];
+  const shrine = place(w, 0, 'shrine', 18, 12);
+  const smart = (units, extra) => w.issueCommand(0, { type: 'smart', units: units.map((u) => u.id), ...extra });
+  smart([war, w1], { target: enemy.id, x: enemy.x, y: enemy.y });
+  smart([w2], { target: mine.id, x: mine.x, y: mine.y });
+  smart([w3], { x: 3.5, y: 21.5 });
+  smart([w4], { target: shrine.id, x: shrine.x, y: shrine.y });
+  smart([w5], { target: war.id, x: war.x, y: war.y });
+  w.tick();
+  assert.equal(war.order.type, 'attack');
+  assert.equal(w1.order.type, 'attack');
+  assert.equal(w2.order.type, 'gather');
+  assert.equal(w2.order.mine, mine.id);
+  assert.equal(w3.order.type, 'gather');
+  assert.deepEqual(w3.order.tree, { tx: 3, ty: 21 });
+  assert.equal(w4.order.type, 'pray');
+  assert.equal(w5.order.type, 'follow');
+  // non-worker on a mine or own building just moves
+  smart([war], { target: mine.id, x: mine.x, y: mine.y });
+  w.tick();
+  assert.equal(war.order.type, 'move');
+  // worker carrying cargo + own drop-off -> return cargo
+  w2.carry = 'g';
+  w2.carryAmount = 10;
+  const tc = w.buildingsOf(0).find((b) => b.type === 'town_center');
+  const gold = w.players[0].gold;
+  smart([w2], { target: tc.id, x: tc.x, y: tc.y });
+  w.tick();
+  assert.ok(w2.order.type === 'return' || (w.players[0].gold === gold + 10 && w2.order.type === 'gather'));
+  runUntil(w, () => w2.carry === 0, 10);
+  assert.equal(w.players[0].gold, gold + 10);
+  // worker + own unfinished building -> help build
+  const site = w.createBuilding(0, 'house', 30, 8, false);
+  smart([w1], { target: site.id, x: site.x, y: site.y });
+  w.tick();
+  assert.equal(w1.order.type, 'build');
+  assert.equal(w1.order.site, site.id);
+  // plain ground -> move
+  smart([w5], { x: 25, y: 25 });
+  w.tick();
+  assert.equal(w5.order.type, 'move');
+  // melee vs flyer -> move instead
+  const bird = spawn(w, 1, defineUnit({ air: true }), 35, 20);
+  smart([war], { target: bird.id, x: bird.x, y: bird.y });
+  w.tick();
+  assert.equal(war.order.type, 'move');
+});
+
+test('queued orders (shift) run in sequence', () => {
+  const w = makeWorld();
+  const u = spawn(w, 0, 'warrior', 20, 20);
+  w.issueCommand(0, { type: 'move', units: [u.id], x: 25, y: 20 });
+  w.issueCommand(0, { type: 'move', units: [u.id], x: 25, y: 26, queue: true });
+  w.tick();
+  assert.equal(u.orders.length, 1);
+  runUntil(w, () => !u.order, 20);
+  assert.ok(Math.hypot(u.x - 25, u.y - 26) < 0.3);
+});
+
+test('commands for units of another player are dropped', () => {
+  const w = makeWorld();
+  const mine = workers(w, 1)[0];
+  w.issueCommand(0, { type: 'move', units: [mine.id], x: 10, y: 10 });
+  w.tick();
+  assert.equal(mine.order, null);
+});
+
+test('defeat when no buildings remain; victory and gameOver', () => {
+  const w = makeWorld();
+  const tc1 = w.buildingsOf(1)[0];
+  const u1 = workers(w, 1);
+  w.killEntity(tc1, null);
+  const ev = runCollect(w, 0.1);
+  assert.ok(u1.every((u) => u.dead));
+  assert.deepEqual(eventsOf(ev, 'playerDefeated').map((e) => e.player), [1]);
+  assert.deepEqual(eventsOf(ev, 'gameOver').map((e) => e.winningTeam), [1]);
+  assert.equal(w.isGameOver(), true);
+  assert.equal(w.winningTeam, 1);
+  assert.deepEqual(w.getSnapshot().gameOver, { winningTeam: 1 });
+  assert.equal(w.players[1].defeated, true);
+});
+
+test('surrender defeats the issuing player; teams win together', () => {
+  const w = makeWorld({ players: 3, teams: [1, 1, 2], map: { width: 64, height: 64 } });
+  w.issueCommand(2, { type: 'surrender' });
+  const ev = runCollect(w, 0.1);
+  assert.equal(w.players[2].defeated, true);
+  assert.equal(w.buildingsOf(2).length, 0);
+  assert.deepEqual(eventsOf(ev, 'gameOver').map((e) => e.winningTeam), [1]);
+});
+
+test('no victory while two teams still stand', () => {
+  const w = makeWorld({ players: 3, teams: [1, 2, 3], map: { width: 64, height: 64 } });
+  w.issueCommand(2, { type: 'surrender' });
+  run(w, 0.1);
+  assert.equal(w.isGameOver(), false);
+  w.issueCommand(1, { type: 'surrender' });
+  run(w, 0.1);
+  assert.equal(w.winningTeam, 1);
+});
+
+test('determinism: same setup and commands give identical snapshots', () => {
+  const play = () => {
+    const w = makeWorld({ map: { camps: [{ x: 24, y: 24, level: 2 }], forest: [{ x: 2, y: 20, w: 6, h: 6 }] } });
+    const ws = workers(w);
+    w.issueCommand(0, { type: 'gather', units: ws.slice(0, 3).map((u) => u.id), target: w.mineList[0].id });
+    w.issueCommand(0, { type: 'gather', units: ws.slice(3).map((u) => u.id), tx: 5, ty: 21 });
+    const army = [];
+    for (let i = 0; i < 6; i++) army.push(spawn(w, 0, 'warrior', 14 + (i % 3), 18 + Math.floor(i / 3)));
+    w.issueCommand(0, { type: 'attackMove', units: army.map((u) => u.id), x: 24, y: 24 });
+    run(w, 30);
+    return JSON.stringify(w.getSnapshot());
+  };
+  assert.equal(play(), play());
+});
+
+test('read API helpers', () => {
+  const w = makeWorld();
+  assert.equal(w.areEnemies(0, 1), true);
+  assert.equal(w.areEnemies(0, 0), false);
+  assert.equal(w.areEnemies(-1, 0), true);
+  assert.equal(w.areEnemies(-1, -1), false);
+  assert.equal(w.canAfford(0, { gold: 400, wood: 200, faith: 50 }), true);
+  assert.equal(w.canAfford(0, { gold: 401, wood: 0, faith: 0 }), false);
+  assert.equal(w.hasBuilding(0, 'town_center'), true);
+  assert.equal(w.hasBuilding(0, 'shrine'), false);
+  const site = w.createBuilding(0, 'shrine', 20, 20, false);
+  assert.equal(w.hasBuilding(0, 'shrine'), false);
+  assert.equal(w.hasBuilding(0, 'shrine', false), true);
+  assert.equal(w.getEntity(site.id), site);
+  assert.equal(w.getEntity(99999), null);
+  const near = w.queryRadius(8, 8, 3);
+  assert.ok(near.some((e) => e.type === 'town_center'));
+  assert.ok(near.some((e) => e.type === 'worshipper'));
+  assert.equal(w.queryRadius(8, 8, 3, (e) => e.kind === 'building').length, 1);
+  assert.equal(w.map.isPassable(7, 7), false);
+  assert.equal(w.map.isBuildable(30, 30), true);
+  assert.equal(typeof w.tickCount, 'number');
+  assert.equal(w.unitsOf(0).length, 5);
+  assert.equal(w.buildingsOf(0).length, 2);
+});
+
+test('god death adds to fallen; players snapshot lists gods and titan', () => {
+  const w = makeWorld();
+  const godDef = godsFor(w.players[0].pantheon)[0];
+  const g = spawn(w, 0, godDef.id, 20, 20);
+  assert.deepEqual(w.getSnapshot().players[0].gods, [godDef.id]);
+  const killer = spawn(w, 1, 'warrior', 21, 20);
+  w.killEntity(g, killer);
+  run(w, 0.1);
+  const s = w.getSnapshot().players[0];
+  assert.deepEqual(s.gods, []);
+  assert.deepEqual(s.fallen, { [godDef.id]: 1 });
+  assert.equal(s.stats.losses, 1);
+  assert.equal(w.getSnapshot().players[1].stats.kills, 1);
+});
+
+test('unknown pantheon falls back deterministically', () => {
+  const w = makeWorld({ pantheons: ['random', 'nope'] });
+  assert.ok(w.players[0].pantheon && w.players[0].pantheon !== 'random');
+  assert.ok(w.players[1].pantheon !== 'nope');
+});
+
+test('error event shape', () => {
+  const w = makeWorld();
+  const tc = w.buildingsOf(0)[0];
+  w.players[0].gold = 0;
+  w.issueCommand(0, { type: 'train', building: tc.id, unit: 'worshipper' });
+  w.tick();
+  const e = eventsOf(w.events, 'error')[0];
+  assert.deepEqual(e, { type: 'error', player: 0, message: 'Not enough gold.' });
+  assert.deepEqual(errorsOf(w.events, 1), []);
+});

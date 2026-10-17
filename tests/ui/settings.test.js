@@ -1,0 +1,85 @@
+// Settings persistence (src/settings.js) with a fake localStorage.
+import { test, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { getSettings, saveSettings, onSettingsChange, defaultSettings, _resetSettingsForTests, SETTINGS_KEY } from '../../src/settings.js';
+
+class FakeStorage {
+  constructor() {
+    this.map = new Map();
+  }
+  getItem(k) {
+    return this.map.has(k) ? this.map.get(k) : null;
+  }
+  setItem(k, v) {
+    this.map.set(k, String(v));
+  }
+  removeItem(k) {
+    this.map.delete(k);
+  }
+}
+
+beforeEach(() => {
+  globalThis.localStorage = new FakeStorage();
+  _resetSettingsForTests();
+});
+
+test('defaults: random 3-digit player name, volume 0.7, medium quality, edge scroll on', () => {
+  const s = getSettings();
+  assert.match(s.name, /^Player\d{3}$/);
+  assert.equal(s.volume, 0.7);
+  assert.equal(s.quality, 'medium');
+  assert.equal(s.edgeScroll, true);
+  assert.equal(s.showAllBars, false);
+  assert.ok(Object.isFrozen(s));
+  // the generated name is persisted so it stays the same next visit
+  const stored = JSON.parse(globalThis.localStorage.getItem(SETTINGS_KEY));
+  assert.equal(stored.name, s.name);
+  _resetSettingsForTests();
+  assert.equal(getSettings().name, s.name);
+});
+
+test('saveSettings merges, validates, persists and notifies', () => {
+  const seen = [];
+  const off = onSettingsChange((s, changed) => seen.push([s.volume, changed]));
+  const next = saveSettings({ volume: 0.25, quality: 'ultra', edgeScroll: 'yes', name: '  Zeus   Fan  ' });
+  assert.equal(next.volume, 0.25);
+  assert.equal(next.quality, 'medium'); // invalid value ignored
+  assert.equal(next.edgeScroll, true); // non-boolean ignored
+  assert.equal(next.name, 'Zeus Fan');
+  assert.deepEqual(seen, [[0.25, ['name', 'volume']]]);
+  assert.equal(JSON.parse(globalThis.localStorage.getItem(SETTINGS_KEY)).volume, 0.25);
+  saveSettings({ volume: 0.25 }); // no change → no notification
+  assert.equal(seen.length, 1);
+  off();
+  saveSettings({ volume: 0.5 });
+  assert.equal(seen.length, 1);
+});
+
+test('clamps volume and limits the name to 20 characters', () => {
+  assert.equal(saveSettings({ volume: 7 }).volume, 1);
+  assert.equal(saveSettings({ volume: -1 }).volume, 0);
+  assert.equal(saveSettings({ name: 'x'.repeat(40) }).name.length, 20);
+  const before = getSettings().name;
+  assert.equal(saveSettings({ name: '   ' }).name, before); // empty name ignored
+});
+
+test('loads stored settings and ignores corrupt or hostile values', () => {
+  globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
+  _resetSettingsForTests();
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true });
+  globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
+  _resetSettingsForTests();
+  assert.equal(getSettings().volume, 0.7);
+});
+
+test('works without storage at all, and when storage throws', () => {
+  delete globalThis.localStorage;
+  _resetSettingsForTests();
+  assert.equal(getSettings().quality, 'medium');
+  assert.equal(saveSettings({ quality: 'low' }).quality, 'low');
+  globalThis.localStorage = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); }, removeItem() { throw new Error('blocked'); } };
+  _resetSettingsForTests();
+  assert.equal(getSettings().volume, 0.7);
+  assert.equal(saveSettings({ volume: 0.4 }).volume, 0.4);
+  assert.ok(defaultSettings().name.startsWith('Player'));
+});
