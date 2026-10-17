@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Pathfinder, PathService, lineClear, segmentClear, smoothTilePath, octile } from '../../src/sim/pathfinding.js';
 import { MapState } from '../../src/sim/map-state.js';
+import { moveToRect } from '../../src/sim/movement.js';
 import { makeMap, makeWorld, run, runUntil, spawn, clearUnits, place, defineUnit } from './helpers.js';
 
 function mapWith(opts) {
@@ -216,4 +217,59 @@ test('workers path to the reachable side of a mine', () => {
   w.issueCommand(0, { type: 'gather', units: [u.id], target: w.mineList[0].id });
   const t = runUntil(w, () => u.carry === 'g', 40);
   assert.ok(t > 0, 'reached the open south side and mined');
+});
+
+// A worker already standing on a tile next to a footprint (its far diagonal
+// corner, say) gets an empty rect path; that is not an arrival while it is
+// out of reach. Here a building blocks the side tile, so the straight walk
+// test fails and the worker asks for a path.
+test('a worker on the far corner tile next to a tree, drop-off or site walks in and works', () => {
+  const opts = (forest) => ({ players: 2, map: { width: 48, height: 48, forest, starts: [{ x: 30, y: 30 }, { x: 40, y: 40 }], mines: [] } });
+  // wood: barracks covers (10, 10), the worker stands on (11, 10), the tree is (10, 11)
+  let w = makeWorld(opts([{ x: 10, y: 11, w: 1, h: 1 }, { x: 12, y: 10, w: 1, h: 2 }]));
+  clearUnits(w, 0);
+  place(w, 0, 'barracks', 8, 8);
+  let u = spawn(w, 0, 'worshipper', 11.47, 10.21);
+  w.issueCommand(0, { type: 'gather', units: [u.id], tx: 10, ty: 11 });
+  assert.ok(runUntil(w, () => u.carry === 'w', 10) > 0, 'chopped');
+  // return cargo: a house blocks the tile above the Town Center's top-right corner tile
+  w = makeWorld({ players: 2, map: { width: 48, height: 48, starts: [{ x: 20, y: 20 }, { x: 40, y: 40 }], mines: [] } });
+  clearUnits(w, 0);
+  place(w, 0, 'house', 22, 18);
+  u = spawn(w, 0, 'worshipper', 24.47, 19.21);
+  u.carry = 'g';
+  u.carryAmount = 10;
+  const gold = w.players[0].gold;
+  w.issueCommand(0, { type: 'returnCargo', units: [u.id] });
+  assert.ok(runUntil(w, () => u.carryAmount === 0, 10) > 0, 'deposited');
+  assert.equal(w.players[0].gold, gold + 10);
+  // build: a house blocks the tile above the new site's top-right tile
+  w = makeWorld(opts([]));
+  clearUnits(w, 0);
+  place(w, 0, 'house', 12, 8);
+  u = spawn(w, 0, 'worshipper', 14.47, 9.21);
+  w.issueCommand(0, { type: 'build', units: [u.id], building: 'house', tx: 12, ty: 10 });
+  assert.ok(runUntil(w, () => w.buildingList.some((b) => b.type === 'house' && b.tx === 12 && b.ty === 10), 10) > 0, 'site placed');
+});
+
+test('a rect goal with no reachable tile next to it fails instead of arriving', () => {
+  // the worker stands in a one-tile pocket of rock; the only tree is outside
+  const w = makeWorld({ players: 2, map: { width: 48, height: 48, forest: [{ x: 30, y: 20, w: 1, h: 1 }], rock: [{ x: 19, y: 19, w: 3, h: 1 }, { x: 19, y: 21, w: 3, h: 1 }, { x: 19, y: 20, w: 1, h: 1 }, { x: 21, y: 20, w: 1, h: 1 }], starts: [{ x: 6, y: 6 }, { x: 40, y: 40 }], mines: [] } });
+  clearUnits(w, 0);
+  const u = spawn(w, 0, 'worshipper', 20.5, 20.5);
+  w.issueCommand(0, { type: 'gather', units: [u.id], tx: 30, ty: 20 });
+  assert.ok(runUntil(w, () => !u.order, 5) > 0, 'gave up');
+});
+
+test('a rect arrival does not stand once the unit is pushed away from the footprint', () => {
+  const w = makeWorld({ players: 2, map: { width: 48, height: 48, forest: [{ x: 20, y: 20, w: 1, h: 1 }], starts: [{ x: 6, y: 6 }, { x: 40, y: 40 }], mines: [] } });
+  clearUnits(w, 0);
+  const u = spawn(w, 0, 'worshipper', 21.4, 20.5);
+  const mv = moveToRect(w, u, 20, 20, 1, 't20,20');
+  assert.ok(mv.arrived);
+  assert.equal(moveToRect(w, u, 20, 20, 1, 't20,20'), mv, 'kept while next to it');
+  u.x = 24.5;
+  const again = moveToRect(w, u, 20, 20, 1, 't20,20');
+  assert.notEqual(again, mv);
+  assert.ok(!again.arrived);
 });

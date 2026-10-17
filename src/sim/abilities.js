@@ -239,7 +239,9 @@ function collect(world, ctx, eff, c, harmful, withBuildings) {
     list = world.queryRadius(c.x, c.y, r, ok);
   }
   if (eff.maxTargets > 0 && list.length > eff.maxTargets) {
-    list.sort((a, b) => hyp(a.x - c.x, a.y - c.y) - hyp(b.x - c.x, b.y - c.y) || a.id - b.id);
+    // The cast's own target first (a pull "at self" drags the enemy it seized), then the nearest.
+    const tid = ctx.targetId || 0;
+    list.sort((a, b) => (b.id === tid) - (a.id === tid) || hyp(a.x - c.x, a.y - c.y) - hyp(b.x - c.x, b.y - c.y) || a.id - b.id);
     list.length = eff.maxTargets;
   }
   return list;

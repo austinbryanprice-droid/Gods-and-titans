@@ -71,6 +71,25 @@ test('rally on a tree sends new workers to chop', () => {
   assert.ok(u.order.tree);
 });
 
+test('Return Cargo resumes gathering for workers the rally sent to a mine or tree', () => {
+  const w = makeWorld({ map: { forest: [{ x: 2, y: 16, w: 4, h: 2 }] } });
+  const tc = tcOf(w);
+  const mine = w.mineList[0];
+  for (const rally of [{ x: mine.x, y: mine.y, target: mine.id }, { x: 3.5, y: 16.5 }]) {
+    cmd(w, { type: 'rally', building: tc.id, ...rally });
+    cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' });
+    const ev = runCollect(w, MORTALS.worshipper.buildTime + 0.2);
+    const u = w.getEntity(eventsOf(ev, 'spawn')[0].id);
+    assert.ok(runUntil(w, () => u.carryAmount > 0, 40) > 0, 'gathered');
+    const kind = u.order.mine ? 'mine' : 'tree';
+    cmd(w, { type: 'returnCargo', units: [u.id] });
+    assert.ok(runUntil(w, () => u.carryAmount === 0, 20) > 0, 'deposited');
+    run(w, 0.2);
+    assert.equal(u.order && u.order.type, 'gather', `back to the ${kind}`);
+    assert.equal(kind, rally.target ? 'mine' : 'tree');
+  }
+});
+
 test('queue full, population and resource errors', () => {
   const w = makeWorld();
   const tc = tcOf(w);

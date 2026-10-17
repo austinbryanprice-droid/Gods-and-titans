@@ -101,10 +101,24 @@ function nextTree(world, x, y, exclude) {
 }
 
 /**
+ * Remember the resource the worker gathers now (u.lastGather), whatever gave
+ * the order (command, rally, a mine or tree switch), so Return Cargo resumes it.
+ */
+function noteGather(u, o) {
+  const g = u.lastGather;
+  if (o.mine) {
+    if (!g || g.mine !== o.mine) u.lastGather = { type: 'gather', mine: o.mine };
+  } else if (!g || !g.tree || g.tree.tx !== o.tree.tx || g.tree.ty !== o.tree.ty) {
+    u.lastGather = { type: 'gather', tree: { tx: o.tree.tx, ty: o.tree.ty } };
+  }
+}
+
+/**
  * Gather order: { type: 'gather', mine?: id, tree?: {tx, ty}, phase: 'go'|'work'|'return', timer, fails }.
  * Returns true when the order is finished.
  */
 export function updateGather(world, u, o) {
+  noteGather(u, o);
   const want = o.mine ? 'g' : 'w';
   if (o.phase !== 'return') {
     if (u.carry && u.carry !== want && u.carryAmount > 0) o.phase = 'return';

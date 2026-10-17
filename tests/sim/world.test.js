@@ -132,6 +132,64 @@ test('queued orders (shift) run in sequence', () => {
   assert.ok(Math.hypot(u.x - 25, u.y - 26) < 0.3);
 });
 
+test('Shift-placing buildings with a mining worker builds them in turn (queued orders replace gather)', () => {
+  const w = makeWorld();
+  const u = workers(w)[0];
+  w.issueCommand(0, { type: 'gather', units: [u.id], target: w.mineList[0].id });
+  run(w, 3);
+  const gold = w.players[0].gold + (u.carry === 'g' ? u.carryAmount : 0);
+  w.issueCommand(0, { type: 'build', units: [u.id], building: 'house', tx: 14, ty: 14, queue: true });
+  w.issueCommand(0, { type: 'build', units: [u.id], building: 'house', tx: 17, ty: 14, queue: true });
+  w.tick();
+  assert.equal(u.order.type, 'build');
+  assert.deepEqual(u.orders.map((o) => o.type), ['build']);
+  const houses = () => w.buildingList.filter((b) => b.type === 'house' && b.owner === 0);
+  const t = runUntil(w, () => houses().length === 2 && houses().every((b) => b.constructed), 120);
+  assert.ok(t > 0, 'both houses built');
+  run(w, 0.1);
+  assert.equal(u.order, null);
+  // Paid exactly twice (mined gold deposited before the order change stays).
+  assert.ok(w.players[0].gold <= gold - 2 * 80 + 10);
+});
+
+test('a queued order replaces hold, pray and follow; Return Cargo deposits first', () => {
+  const w = makeWorld();
+  const shrine = place(w, 0, 'shrine', 12, 12);
+  const [prayer, carrier] = workers(w);
+  const war = spawn(w, 0, 'warrior', 20, 20);
+  const guard = spawn(w, 0, 'warrior', 22, 20);
+  w.issueCommand(0, { type: 'pray', units: [prayer.id], target: shrine.id });
+  w.issueCommand(0, { type: 'hold', units: [war.id] });
+  w.issueCommand(0, { type: 'smart', units: [guard.id], target: war.id });
+  w.issueCommand(0, { type: 'gather', units: [carrier.id], target: w.mineList[0].id });
+  runUntil(w, () => carrier.carry === 'g', 20);
+  w.issueCommand(0, { type: 'stop', units: [carrier.id] });
+  w.tick();
+  w.issueCommand(0, { type: 'returnCargo', units: [carrier.id] });
+  w.tick();
+  assert.equal(prayer.order.type, 'pray');
+  assert.equal(guard.order.type, 'follow');
+  const gold = w.players[0].gold;
+  for (const [u, x] of [[prayer, 24], [war, 26], [guard, 28], [carrier, 30]]) w.issueCommand(0, { type: 'move', units: [u.id], x, y: 26, queue: true });
+  w.tick();
+  assert.ok(!shrine.prayers.includes(prayer.id), 'prayer slot freed');
+  assert.equal(carrier.order.type, 'return');
+  runUntil(w, () => [prayer, war, guard, carrier].every((u) => !u.order), 30);
+  for (const [u, x] of [[prayer, 24], [war, 26], [guard, 28], [carrier, 30]]) assert.ok(Math.hypot(u.x - x, u.y - 26) < 0.5, `${u.type} ${u.id} at ${u.x},${u.y}`);
+  assert.equal(w.players[0].gold, gold + 10, 'deposited on the way');
+});
+
+test('a queued order replaces a queued gather at the end of the queue', () => {
+  const w = makeWorld();
+  const u = workers(w)[0];
+  w.issueCommand(0, { type: 'move', units: [u.id], x: 20, y: 20 });
+  w.issueCommand(0, { type: 'gather', units: [u.id], target: w.mineList[0].id, queue: true });
+  w.issueCommand(0, { type: 'move', units: [u.id], x: 22, y: 22, queue: true });
+  w.tick();
+  assert.equal(u.order.type, 'move');
+  assert.deepEqual(u.orders.map((o) => o.type), ['move']);
+});
+
 test('commands for units of another player are dropped', () => {
   const w = makeWorld();
   const mine = workers(w, 1)[0];

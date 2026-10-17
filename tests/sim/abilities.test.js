@@ -399,6 +399,49 @@ test('autocast creature ability fires during combat and resumes the attack', () 
   assert.equal(u.order.type, 'attack');
 });
 
+test('a pull capped by maxTargets drags the enemy the cast targets, not a closer one (Drowning Grasp)', () => {
+  const w = arena();
+  const c = caster(w, [ab('t_grasp', [
+    { type: 'pull', distance: 2, radius: 3.5, at: 'self', maxTargets: 1 },
+    { type: 'damage', amount: 60, radius: 0, at: 'target' },
+  ], { target: 'enemy', range: 3 })]);
+  const target = dummy(w, 1, 23.5, 20);
+  const bystander = dummy(w, 1, 20, 21.6);
+  const tx = target.x;
+  const bx = bystander.x;
+  const by = bystander.y;
+  cast(w, c, 't_grasp', { target: target.id });
+  run(w, 0.5);
+  assert.ok(target.hp < target.maxHp, 'damaged');
+  assert.ok(tx - target.x > 1.5, `target pulled ${(tx - target.x).toFixed(2)}`);
+  assert.ok(Math.hypot(bystander.x - bx, bystander.y - by) < 0.05, 'the closer enemy stays put');
+});
+
+test('minions that run out of time are not counted as losses', () => {
+  const minion = defineUnit({ class: 'minion', producedAt: null, cost: { gold: 0, wood: 0, faith: 0 }, pop: 0 });
+  const w = arena();
+  const c = caster(w, [ab('t_sum2', [{ type: 'summon', unit: minion, count: 2, duration: 1, at: 'self' }], { target: 'none', ai: { use: 'summon' } })]);
+  cast(w, c, 't_sum2');
+  const ids = w.unitsOf(0).filter((u) => u.type === minion).map((u) => u.id);
+  assert.equal(ids.length, 2);
+  w.killEntity(w.getEntity(ids[0]), null); // one dies to something
+  run(w, 1.5); // the other expires
+  assert.equal(w.getEntity(ids[1]), null, 'expired');
+  assert.equal(w.players[0].stats.losses, 1);
+});
+
+test('a queued cast behind Hold Position replaces it instead of never running', () => {
+  const w = arena();
+  const c = caster(w, [ab('t_qhold', [{ type: 'damage', amount: 30, radius: 1, at: 'target' }], { target: 'point', range: 8 })]);
+  const e = dummy(w, 1, 24, 20);
+  w.issueCommand(0, { type: 'hold', units: [c.id] });
+  w.tick();
+  cast(w, c, 't_qhold', { x: 24, y: 20, queue: true });
+  run(w, 0.5);
+  assert.ok(e.hp < e.maxHp, 'cast went off');
+  assert.equal(c.orders.length, 0);
+});
+
 test('every effect type is exercised', () => {
   for (const t of EFFECT_TYPES) assert.ok(covered.has(t), `effect ${t} not covered`);
 });

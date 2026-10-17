@@ -233,7 +233,7 @@ function castCommand(world, player, cmd) {
   }
   const o = { type: 'cast', ability: ab.id, x: tgt.x, y: tgt.y, target: tgt.target ? tgt.target.id : 0, phase: 'approach', timer: 0 };
   if (queue) {
-    u.orders.push(o);
+    world.setOrder(u, o, true);
     return;
   }
   const cur = u.order;
