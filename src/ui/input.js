@@ -62,6 +62,8 @@ export class InputController {
     this.hoverMoved = true;
     this.placeAt = 0;
     this.placeSig = '';
+    this.queuedBuilds = []; // [{ b, tx, ty }] placed with Shift in this placement mode
+    this.shiftHeld = false;
     this.cursor = '';
     this.disposed = false;
 
@@ -120,16 +122,13 @@ export class InputController {
     return { x: clientX - r.left, y: clientY - r.top, w: r.width, h: r.height };
   }
 
-  /** Visible entity under a canvas point (or null). */
+  /** Entity under a canvas point as I know it (a fogged enemy building is its remembered copy), or null. */
   pick(x, y) {
     const r = this.renderer;
     if (!r) return null;
     const id = r.pickEntity(x, y);
     if (id === null || id === undefined) return null;
-    const e = this.vs.entities.get(id) || (this.vs.lastSeen && this.vs.lastSeen.get(id)) || null;
-    if (!e) return null;
-    if (e.o !== this.vs.myIndex && !this.vs.isEntityVisible(e) && !(e.k === 'b' && this.vs.lastSeen && this.vs.lastSeen.has(id))) return null;
-    return e;
+    return this.vs.knownEntity(id);
   }
 
   ground(x, y) {
@@ -180,7 +179,27 @@ export class InputController {
     this.mode = mode;
     if (mode.kind !== 'place' && this.renderer) this.renderer.hidePlacement();
     this.placeSig = '';
+    if (this.queuedBuilds.length) {
+      this.queuedBuilds = [];
+      if (this.renderer && this.renderer.setPlannedBuilds) this.renderer.setPlannedBuilds(this.queuedBuilds);
+    }
     if (this.hud) this.hud.refreshCard();
+  }
+
+  /**
+   * My buildings already ordered but not placed yet, which a new one may not
+   * overlap: the ones Shift-queued in this placement mode and, when this order
+   * queues too, the selected workers' pending builds (the snapshot's `bo`).
+   */
+  plannedBuilds(queue) {
+    const out = this.queuedBuilds.slice();
+    if (queue) {
+      for (const id of this.ownWorkers()) {
+        const e = this.vs.entities.get(id);
+        if (e && e.bo) out.push(e.bo);
+      }
+    }
+    return out;
   }
 
   cancelMode() {
@@ -232,6 +251,7 @@ export class InputController {
   onMouseMove(e) {
     this.mx = e.clientX;
     this.my = e.clientY;
+    this.shiftHeld = !!e.shiftKey;
     this.mouseInWindow = true;
     this.overCanvas = e.target === this.canvas;
     this.hoverMoved = true;
@@ -376,7 +396,7 @@ export class InputController {
     let y = 0;
     let n = 0;
     for (const id of ids) {
-      const e = this.vs.entities.get(id);
+      const e = this.vs.knownEntity(id);
       if (!e) continue;
       x += e.ix ?? e.x;
       y += e.iy ?? e.y;
@@ -463,7 +483,7 @@ export class InputController {
       } else if (p) {
         const tx = Math.floor(p.x);
         const ty = Math.floor(p.y);
-        if (tx >= 0 && ty >= 0 && tx < vs.width && ty < vs.height && vs.map.terrain[ty * vs.width + tx] === TERRAIN.FOREST && vs.isExplored(tx, ty)) {
+        if (tx >= 0 && ty >= 0 && tx < vs.width && ty < vs.height && vs.seenTerrain[ty * vs.width + tx] === TERRAIN.FOREST && vs.isExplored(tx, ty)) {
           cmd.tx = tx;
           cmd.ty = ty;
           kind = 'gather';
@@ -507,7 +527,7 @@ export class InputController {
     for (let ty = cy - r; ty <= cy + r; ty++) {
       for (let tx = cx - r; tx <= cx + r; tx++) {
         if (tx < 0 || ty < 0 || tx >= vs.width || ty >= vs.height) continue;
-        if (vs.map.terrain[ty * vs.width + tx] !== TERRAIN.FOREST || !vs.isExplored(tx, ty)) continue;
+        if (vs.seenTerrain[ty * vs.width + tx] !== TERRAIN.FOREST || !vs.isExplored(tx, ty)) continue;
         const d = Math.hypot(tx + 0.5 - x, ty + 0.5 - y);
         if (d < bestD) {
           bestD = d;
@@ -540,7 +560,12 @@ export class InputController {
         break;
       }
       case 'attack': {
-        if (target && (target.k === 'u' || target.k === 'b') && (vs.isEnemy(target.o) || target.o < 0)) {
+        if (target && target.k === 'b' && !vs.isEntityVisible(vs.entities.get(target.id))) {
+          // A remembered building in the fog (maybe destroyed since): a smart order attacks
+          // it if it still stands, else walks to it. 'attack' would do nothing at all then.
+          this.command({ type: 'smart', units, target: target.id, x: target.x, y: target.y, queue: !!shift });
+          this.marker(target.x, target.y, 'attack');
+        } else if (target && (target.k === 'u' || target.k === 'b') && (vs.isEnemy(target.o) || target.o < 0)) {
           this.command({ type: 'attack', units, target: target.id, queue: !!shift });
           this.marker(target.ix ?? target.x, target.iy ?? target.y, 'attack');
         } else {
@@ -665,7 +690,7 @@ export class InputController {
     const p = this.ground(x, y);
     if (!p) return;
     const { tx, ty } = footprintAt(m.building, p.x, p.y);
-    const chk = checkPlacement(this.vs, this.vs.myIndex, m.building, tx, ty);
+    const chk = checkPlacement(this.vs, this.vs.myIndex, m.building, tx, ty, this.plannedBuilds(shift));
     if (!chk.valid) {
       this.error(chk.message || "Can't build there.");
       return;
@@ -705,6 +730,9 @@ export class InputController {
     } else {
       m.shiftUsed = true; // keep placing while Shift is held
       this.placeSig = '';
+      // Until the worker gets there this spot is taken: the ghost turns red on it, and it is drawn.
+      this.queuedBuilds.push({ b: m.building, tx, ty });
+      if (this.renderer && this.renderer.setPlannedBuilds) this.renderer.setPlannedBuilds(this.queuedBuilds);
     }
   }
 
@@ -825,6 +853,7 @@ export class InputController {
     if (!hud) return;
     if (isTyping(e)) return;
     const key = e.key;
+    if (key === 'Shift') this.shiftHeld = true;
     const overlays = hud.overlays;
     if (overlays.open) {
       if (key === 'Escape' || key === 'F10') {
@@ -939,7 +968,10 @@ export class InputController {
 
   onKeyUp(e) {
     if (ARROWS[e.key]) this.keys.delete(e.key);
-    if (e.key === 'Shift') this.endShiftMode();
+    if (e.key === 'Shift') {
+      this.shiftHeld = false;
+      this.endShiftMode();
+    }
     if (e.key === 'Alt') {
       e.preventDefault();
       this.altHeld = false;
@@ -955,6 +987,7 @@ export class InputController {
   }
 
   onBlur() {
+    this.shiftHeld = false;
     this.endShiftMode();
     this.keys.clear();
     if (this.altHeld) {
@@ -1029,7 +1062,7 @@ export class InputController {
         const w = this.ground(p.x, p.y);
         if (w) {
           const { tx, ty } = footprintAt(this.mode.building, w.x, w.y);
-          const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty);
+          const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty, this.plannedBuilds(this.shiftHeld));
           const sig = `${this.mode.building}|${tx}|${ty}|${chk.tiles.map((t) => (t ? 1 : 0)).join('')}`;
           if (sig !== this.placeSig || now - this.placeAt > 400) {
             this.placeSig = sig;
@@ -1044,7 +1077,7 @@ export class InputController {
   updateCursor() {
     if (this.midDown) return this.setCursor('pan');
     const vs = this.vs;
-    const h = this.hoverId !== null ? vs.entities.get(this.hoverId) : null;
+    const h = this.hoverId !== null ? vs.knownEntity(this.hoverId) : null;
     if (this.mode.kind === 'place') return this.setCursor('place');
     if (this.mode.kind === 'target') {
       if (h && (vs.isEnemy(h.o) || (h.o < 0 && h.k === 'u'))) return this.setCursor('target-enemy');

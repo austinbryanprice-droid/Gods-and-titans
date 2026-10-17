@@ -23,6 +23,19 @@ const MAX_DT = 0.1;
 const SPELL_SOUNDS = { lightning: 'lightning', fire: 'fire', sun: 'fire', holy: 'heal' };
 const PROJECTILE_SOUNDS = { arrow: 'attack_ranged', spear: 'attack_ranged', rock: 'attack_ranged', feather: 'attack_ranged', leaf: 'attack_ranged', ice: 'attack_ranged', bolt: 'lightning', fireball: 'fire', sunray: 'fire' };
 
+/**
+ * A canvas keeps its first WebGL context, whose attributes (antialias) cannot
+ * change: each match draws on a new copy of the page's canvas, so the quality
+ * chosen in Settings applies to the next match (the old context is freed when
+ * its renderer is disposed).
+ */
+function freshCanvas(old) {
+  if (!old || typeof old.cloneNode !== 'function' || typeof old.replaceWith !== 'function') return old;
+  const canvas = old.cloneNode(false);
+  old.replaceWith(canvas);
+  return canvas;
+}
+
 /** Stand-in AI until src/ai/ai.js exists: the AI players stand still. */
 const idleAI = () => ({ tick() {} });
 
@@ -54,7 +67,7 @@ export class Game {
     this.settings = settings || getSettings();
     this.onExit = onExit;
     this.root = root || document.getElementById('game-root');
-    this.canvas = this.root.querySelector('#game-canvas') || this.root.querySelector('canvas');
+    this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
     this.renderer = null;
     this.hud = null;
@@ -142,6 +155,7 @@ export class Game {
     const onResize = () => this.resize();
     window.addEventListener('resize', onResize);
     this.offs.push(() => window.removeEventListener('resize', onResize));
+    this.watchPixelRatio();
     this.lastFrame = performance.now();
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
@@ -171,6 +185,24 @@ export class Game {
       if (!best) best = e;
     }
     if (best && this.renderer) this.renderer.camera.centerOn(best.x, best.y + (best.k === 'b' ? 1.5 : 0));
+  }
+
+  /** Moving the window to a screen with another devicePixelRatio fires no resize: watch for it. */
+  watchPixelRatio() {
+    if (typeof window.matchMedia !== 'function') return;
+    let mq = null;
+    const onChange = () => {
+      this.resize();
+      listen();
+    };
+    const listen = () => {
+      if (mq) mq.removeEventListener('change', onChange);
+      mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      if (mq && typeof mq.addEventListener === 'function') mq.addEventListener('change', onChange);
+      else mq = null;
+    };
+    listen();
+    this.offs.push(() => mq && mq.removeEventListener('change', onChange));
   }
 
   resize() {
@@ -268,6 +300,9 @@ export class Game {
       this.paused = true;
     } else if (!on && this.paused) {
       this.paused = false;
+      // Sim time stood still while local time ran on: re-anchor the playback clock, or
+      // the view would render ahead of its newest snapshot (no interpolation) for a while.
+      if (this.viewState) this.viewState.resetClock();
       if (!s.stopped) s.ticker.start();
     }
     return this.paused;
@@ -438,8 +473,9 @@ export class Game {
         if (ev.player === me) this.worldSound('mine', ev.x, ev.y, 0.7);
         break;
       case 'resourceDepleted': {
-        const m = vs.entities.get(ev.id);
-        if (!m || vs.isExplored(m.x, m.y)) hud.message('A gold mine has collapsed.', 'info');
+        // The mine has already left the view: where it was comes from the view's memory.
+        const m = vs.mineMemory.get(ev.id);
+        if (m && vs.isExplored(m.x, m.y)) hud.message('A gold mine has collapsed.', 'info');
         break;
       }
       case 'death': {

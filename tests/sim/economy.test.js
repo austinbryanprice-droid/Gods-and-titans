@@ -109,6 +109,22 @@ test('return cargo command deposits and resumes gathering', () => {
   assert.equal(u.order && u.order.type, 'gather');
 });
 
+test('return cargo resumes the mine the worker moved on to, not the depleted one', () => {
+  // A runs dry after one trip; B is the mine next to A, C the one next to the Town Center.
+  const w = makeWorld({ map: { mines: [{ tx: 13, ty: 6, amount: 10 }, { tx: 19, ty: 6, amount: 5000 }, { tx: 6, ty: 13, amount: 5000 }, { tx: 38, ty: 30, amount: 5000 }] } });
+  const [a, b] = w.mineList;
+  const u = workers(w)[0];
+  w.issueCommand(0, { type: 'gather', units: [u.id], target: a.id });
+  assert.ok(runUntil(w, () => u.order.mine === b.id && u.carry === 'g', 60) > 0, 'moved on to B and mined');
+  w.issueCommand(0, { type: 'stop', units: [u.id] });
+  w.tick();
+  w.issueCommand(0, { type: 'returnCargo', units: [u.id] });
+  runUntil(w, () => u.carry === 0, 20);
+  run(w, 0.2);
+  assert.equal(u.order && u.order.type, 'gather');
+  assert.equal(u.order.mine, b.id);
+});
+
 test('faith accrues from praying worshippers; shrine full error', () => {
   const w = makeWorld();
   const shrine = place(w, 0, 'shrine', 12, 12);

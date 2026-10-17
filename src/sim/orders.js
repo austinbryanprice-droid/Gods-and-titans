@@ -26,10 +26,42 @@ export function discardOrder(world, u, o) {
   }
 }
 
+/** Orders that never finish by themselves (gather and pray loop, hold and follow last). */
+function openEnded(o) {
+  const t = o.type;
+  return t === 'gather' || t === 'pray' || t === 'hold' || t === 'follow' || (t === 'return' && !!o.resume);
+}
+
+/**
+ * Append o to a unit's order queue. An open-ended order at the end of the
+ * queue would keep everything behind it waiting forever, so (as with a WC3 /
+ * SC2 harvest order) it is replaced by o instead; Return Cargo just drops
+ * its resume and deposits first.
+ */
+function queueOrder(world, u, o) {
+  const n = u.orders.length;
+  const last = n ? u.orders[n - 1] : u.order;
+  if (!last || !openEnded(last)) {
+    u.orders.push(o);
+  } else if (last.type === 'return') {
+    last.resume = null;
+    u.orders.push(o);
+  } else if (n) {
+    discardOrder(world, u, last);
+    u.orders[n - 1] = o;
+  } else {
+    discardOrder(world, u, last);
+    u.order = o;
+    u.mv = null;
+    u.target = 0;
+    u.arrivedGroup = null;
+  }
+}
+
 /** Replace (or with queue, append to) a unit's orders. o = null clears them. */
 export function setOrder(world, u, o, queue = false) {
   if (queue && o && (u.order || u.orders.length)) {
-    u.orders.push(o);
+    queueOrder(world, u, o);
     return;
   }
   discardOrder(world, u, u.order);

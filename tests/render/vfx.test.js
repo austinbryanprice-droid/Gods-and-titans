@@ -326,6 +326,30 @@ test('follow keeps shields on a moving unit and survives the unit vanishing', ()
   vfx.dispose();
 });
 
+test('follow: an effect whose unit goes out of sight (out.hidden) fades out at once', () => {
+  const { vfx } = make();
+  const unit = { x: 3, y: 3, seen: true };
+  const follow = (out) => {
+    if (!unit.seen) {
+      out.hidden = true;
+      return false;
+    }
+    out.x = unit.x;
+    out.y = unit.y;
+    return true;
+  };
+  for (const shape of ['shield', 'buff', 'heal']) vfx.spawnEffect({ el: 'holy', shape, x: unit.x, y: unit.y, r: 1, duration: 10, follow });
+  step(vfx, 0.3, () => { unit.x += 0.05; });
+  unit.seen = false;
+  unit.x += 8; // where it really is now, in the fog
+  step(vfx, 0.4);
+  for (const f of vfx.effects) assert.ok(Math.abs(f.x - unit.x) > 5, `${f.shape} moved into the fog`);
+  assert.equal(vfx.effects.filter((f) => f.shape === 'shield').length, 0, 'the 10 s shield ended');
+  step(vfx, 2);
+  assertIdle(vfx, 'hidden follow');
+  vfx.dispose();
+});
+
 test('dispose detaches everything and later calls are no-ops', () => {
   const { scene, vfx } = make();
   vfx.spawnEffect({ el: 'arcane', shape: 'storm', x: 5, y: 5, r: 3, duration: 3 });

@@ -1,6 +1,7 @@
 // Grid pathfinding: A* with a binary heap, octile heuristic, no diagonal corner
 // cutting and a node cap with closest-reachable fallback; line-of-sight path
 // smoothing; and a per-tick budgeted request queue shared by all units.
+import { distPointRect } from './common.js';
 
 const SQRT2 = Math.SQRT2;
 const DXS = [1, -1, 0, 0, 1, 1, -1, -1];
@@ -459,6 +460,20 @@ export class PathService {
     mv.pending = false;
     mv.complete = reached;
     mv.ver = this.map.version;
-    if (path.length === 0) mv.arrived = true;
+    if (path.length === 0) {
+      const r = mv.kind === 'rect' ? mv.rect : null;
+      if (r && distPointRect(u.x, u.y, r.x0, r.y0, r.x1, r.y1) > u.radius + 0.15) {
+        if (reached || !this.map.isPassable(Math.floor(u.x), Math.floor(u.y))) {
+          // On a tile next to the footprint (say its far diagonal corner) but not
+          // close enough to work it, or in a blocked tile about to be pushed out:
+          // walk straight in (stepUnit's rect approach; stuck detection repaths).
+          mv.direct = true;
+          return;
+        }
+        // No tile next to the footprint can be reached from here.
+        mv.failed = true;
+      }
+      mv.arrived = true;
+    }
   }
 }

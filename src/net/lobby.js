@@ -21,6 +21,11 @@ export const PRESETS = ['coop', '1v1', '2v2', 'ffa'];
 export const MAP_SIZE_NAMES = ['small', 'medium'];
 const HELLO_TIMEOUT_MS = 10000;
 const KICK_CLOSE_DELAY_MS = 300;
+// Connections that have not said HELLO yet. An honest client says it as soon as
+// its link opens, so only a few are ever waiting; more are turned away at once
+// (they hold no member, limiters or timer), which bounds what a flood of
+// connections costs the host. Joined members are bounded by the slots.
+export const MAX_WAITING_MEMBERS = MAX_PLAYERS;
 // Per-member limits on the host (token buckets: rate per second, burst).
 export const MEMBER_LIMITS = { patch: [5, 10], chat: [1, 5], ping: [4, 8] };
 const CLIENT_CHAT_LIMIT = [10, 30]; // lobby chat lines a client shows per second
@@ -210,6 +215,13 @@ export class LobbyHost {
   handleConnection(conn) {
     if (this.started || this.closed) {
       conn.send({ t: MSG.KICK, reason: this.started ? REASONS.STARTED : REASONS.HOST_CLOSED });
+      setTimeout(() => conn.close('kicked'), KICK_CLOSE_DELAY_MS);
+      return;
+    }
+    let waiting = 0;
+    for (const x of this.members) if (!x.joined) waiting++;
+    if (waiting >= MAX_WAITING_MEMBERS) {
+      conn.send({ t: MSG.KICK, reason: REASONS.BUSY });
       setTimeout(() => conn.close('kicked'), KICK_CLOSE_DELAY_MS);
       return;
     }

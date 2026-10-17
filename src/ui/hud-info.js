@@ -272,7 +272,8 @@ export class InfoView {
   updateSingle() {
     const s = this.single;
     const vs = this.o.viewState;
-    const e = vs.entities.get(s.e.id) || s.e;
+    // Never the live entity of a fogged enemy building: its remembered copy.
+    const e = vs.knownEntity(s.e.id) || s.e;
     const def = s.def;
     // hp
     if (e.k !== 'm') {
@@ -342,10 +343,12 @@ export class InfoView {
         setText(p.pray, `🙏 Praying: ${n} / ${def.prayerSlots}${n ? ` · +${(n * def.faithRate).toFixed(1)} faith/s` : ''}`);
       }
     } else if (e.k === 'm') {
-      setText(p.gold, fmt(e.amt));
-      setText(p.miners, minersText(e));
+      // Out of sight: the gold left when last seen, and nobody knows who mines there.
+      const inSight = vs.mineInSight(e);
+      setText(p.gold, fmt(vs.mineGold(e)));
+      setText(p.miners, inSight ? minersText(e) : '?');
       const mine = ownMinersAt(vs, e.id);
-      setText(p.mineNote, mine ? `${mine} of your Worshippers ${mine === 1 ? 'works' : 'work'} here.` : '');
+      setText(p.mineNote, mine ? `${mine} of your Worshippers ${mine === 1 ? 'works' : 'work'} here.` : inSight ? '' : 'Not in sight: gold left as last seen.');
     }
     // Name can change (town center tier).
     setText(s.nameEl, nameOf(e));

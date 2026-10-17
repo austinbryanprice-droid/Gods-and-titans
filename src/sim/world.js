@@ -401,8 +401,11 @@ export class World {
     if (t.kind === 'unit' && src && amount > 0) onUnitAttacked(this, t, src);
   }
 
-  /** Kill a unit or destroy a building; src is the killer (may be null). */
-  killEntity(e, src) {
+  /**
+   * Kill a unit or destroy a building; src is the killer (may be null).
+   * expired: a summoned minion ran out of time, which is not a loss.
+   */
+  killEntity(e, src, expired = false) {
     if (e.dead) return;
     e.dead = true;
     e.hp = 0;
@@ -418,7 +421,7 @@ export class World {
       e.forced = null;
       const p = this.players[e.owner];
       if (p) {
-        p.stats.losses++;
+        if (!expired) p.stats.losses++;
         if (!e.summoned) p.popUsed = Math.max(0, p.popUsed - e.def.pop);
         if (e.def.class === 'god' && !e.summoned) p.fallen[e.type] = { level: e.level, xp: e.xp };
       }
@@ -622,7 +625,7 @@ export class World {
       const u = units[i];
       if (u.dead || !u.summoned || !(u.expire > 0)) continue;
       u.expire -= DT;
-      if (u.expire <= 1e-9) this.killEntity(u, null);
+      if (u.expire <= 1e-9) this.killEntity(u, null, true);
     }
 
     this.accrueFaith();
