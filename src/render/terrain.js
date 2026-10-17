@@ -534,6 +534,9 @@ function borderMesh(map) {
   mat.name = 'terrain-border';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain-border';
+  // after the ground and everything else opaque: the depth test then skips the
+  // (large) part of the plane hidden under the map
+  mesh.renderOrder = 1;
   mesh.matrixAutoUpdate = false;
   mesh.updateMatrix();
   return mesh;
