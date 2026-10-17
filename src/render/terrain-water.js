@@ -125,12 +125,9 @@ void main() {
   vec3 Ng = normalize( vec3( - slope.x * 7.0, 1.0, - slope.y * 7.0 ) );
   float glint = pow( saturate( dot( Ng, H ) ), 220.0 ) * 6.0;
   float sheen = pow( saturate( dot( N, H ) ), 24.0 ) * 0.05;
-  #ifdef WATER_HQ
-    // twinkle: glints come and go with a fast-moving noise
-    glint *= smoothstep( 0.45, 0.8, texture2D( uFx, p * 0.83 + vec2( t * 0.11, - t * 0.07 ) ).a );
-  #else
-    glint *= 0.5;
-  #endif
+  // twinkle: glints come and go with a fast-moving noise, which also breaks the
+  // broad highlights of the smoother single-layer ripples into sparkles
+  glint *= smoothstep( 0.45, 0.8, texture2D( uFx, p * 0.83 + vec2( t * 0.11, - t * 0.07 ) ).a );
   vec3 sun = uSunColor * ( glint + sheen ) * shade * calm;
 
   // ---- foam: a lapping line at the shore and bands rolling in over the shallows
@@ -170,7 +167,7 @@ void main() {
  * @param {THREE.Texture} o.fx ripple / foam texture (terrain-textures.js)
  * @param {THREE.Texture} o.noise tileable fbm noise texture (terrain-textures.js)
  * @param {{ value: number }} [o.time] clock uniform (seconds), driven by the owner
- * @param {boolean} [o.hq] two ripple layers, cloud reflections, twinkling glints
+ * @param {boolean} [o.hq] a second ripple layer and cloud reflections
  * @returns {THREE.Mesh|null}
  */
 export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true } = {}) {
