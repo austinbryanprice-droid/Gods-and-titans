@@ -1,0 +1,1066 @@
+// Mouse and keyboard control (DESIGN 9 input): WC3-style selection (click,
+// drag box, shift add/remove, double-click / ctrl-click for all of a type on
+// screen, control groups, Tab subgroups), right-click smart orders with shift
+// queueing, command-card hotkeys, targeting modes (attack-move, abilities,
+// gather, pray, rally), building placement with the ghost, and the camera
+// (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3).
+import { TERRAIN, MAX_QUEUE } from '../config.js';
+import { UNITS, BUILDINGS } from '../data/index.js';
+import { getSettings } from '../settings.js';
+import { sfx } from '../audio/sfx.js';
+import { checkPlacement, footprintAt } from '../game/placement.js';
+import { buttonForKey, buildCheck, trainCheck } from './command-card.js';
+import { isComplete } from './hud-data.js';
+import { MAX_SELECTION } from './hud-selection.js';
+
+const DRAG_THRESHOLD = 5; // px before a left press becomes a box
+const DOUBLE_MS = 350;
+const EDGE_PX = 4;
+const PAN_SPEED = 26; // tiles per second for edge scroll and arrow keys
+const HOVER_MS = 60;
+const PLACE_CHECK_MS = 90;
+const ALERT_JUMP_MS = 20000;
+
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+function isTyping(e) {
+  const t = e.target;
+  if (!t || !t.tagName) return false;
+  const tag = t.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+}
+
+export class InputController {
+  /**
+   * @param {object} o
+   * @param {object} o.game the Game: viewState, selection, renderer, hud, command(cmd), setShowAllBars(bool)
+   * @param {HTMLCanvasElement} o.canvas
+   * @param {HTMLElement} o.overlayRoot element that receives the drag box
+   */
+  constructor({ game, canvas, overlayRoot }) {
+    this.game = game;
+    this.vs = game.viewState;
+    this.sel = game.selection;
+    this.canvas = canvas;
+    this.mode = { kind: 'normal' };
+    this.menu = 'root';
+    this.mx = -1;
+    this.my = -1;
+    this.mouseInWindow = false;
+    this.overCanvas = false;
+    this.leftDown = null;
+    this.midDown = null;
+    this.keys = new Set();
+    this.altHeld = false;
+    this.lastClick = null;
+    this.lastGroup = { n: -1, t: 0 };
+    this.lastGod = { i: -1, t: 0 };
+    this.lastAlert = null;
+    this.idleIndex = -1;
+    this.hoverId = null;
+    this.hoverAt = 0;
+    this.hoverMoved = true;
+    this.placeAt = 0;
+    this.placeSig = '';
+    this.cursor = '';
+    this.disposed = false;
+
+    this.box = document.createElement('div');
+    this.box.className = 'hud-dragbox';
+    this.box.hidden = true;
+    (overlayRoot || canvas.parentNode).appendChild(this.box);
+
+    this.offs = [];
+    const on = (el, type, fn, opts) => {
+      el.addEventListener(type, fn, opts);
+      this.offs.push(() => el.removeEventListener(type, fn, opts));
+    };
+    on(canvas, 'mousedown', (e) => this.onMouseDown(e));
+    on(canvas, 'contextmenu', (e) => e.preventDefault());
+    on(canvas, 'wheel', (e) => this.onWheel(e), { passive: false });
+    on(canvas, 'dblclick', (e) => e.preventDefault());
+    on(window, 'mousemove', (e) => this.onMouseMove(e));
+    on(window, 'mouseup', (e) => this.onMouseUp(e));
+    on(window, 'keydown', (e) => this.onKeyDown(e));
+    on(window, 'keyup', (e) => this.onKeyUp(e));
+    on(window, 'blur', () => this.onBlur());
+    on(document, 'mouseleave', () => (this.mouseInWindow = false));
+    on(window, 'mouseout', (e) => {
+      if (!e.relatedTarget) this.mouseInWindow = false;
+    });
+    on(document, 'visibilitychange', () => {
+      if (document.hidden) this.onBlur();
+    });
+    // The canvas rect is cached (reading layout every frame forces a reflow).
+    this.rect = null;
+    on(window, 'resize', () => (this.rect = null));
+    if (typeof ResizeObserver === 'function') {
+      this.resizeObs = new ResizeObserver(() => (this.rect = null));
+      this.resizeObs.observe(canvas);
+    }
+    this.setCursor('');
+  }
+
+  get renderer() {
+    return this.game.renderer;
+  }
+
+  get hud() {
+    return this.game.hud;
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  canvasPoint(clientX, clientY) {
+    if (!this.rect) {
+      const b = this.canvas.getBoundingClientRect();
+      this.rect = { left: b.left, top: b.top, width: b.width, height: b.height };
+    }
+    const r = this.rect;
+    return { x: clientX - r.left, y: clientY - r.top, w: r.width, h: r.height };
+  }
+
+  /** Visible entity under a canvas point (or null). */
+  pick(x, y) {
+    const r = this.renderer;
+    if (!r) return null;
+    const id = r.pickEntity(x, y);
+    if (id === null || id === undefined) return null;
+    const e = this.vs.entities.get(id) || (this.vs.lastSeen && this.vs.lastSeen.get(id)) || null;
+    if (!e) return null;
+    if (e.o !== this.vs.myIndex && !this.vs.isEntityVisible(e) && !(e.k === 'b' && this.vs.lastSeen && this.vs.lastSeen.has(id))) return null;
+    return e;
+  }
+
+  ground(x, y) {
+    const r = this.renderer;
+    return r ? r.screenToWorld(x, y) : null;
+  }
+
+  error(text) {
+    if (!text) return;
+    this.hud.message(text, 'error');
+    sfx.play('error');
+  }
+
+  command(cmd) {
+    this.game.command(cmd);
+  }
+
+  marker(x, y, kind) {
+    const r = this.renderer;
+    if (r && Number.isFinite(x) && Number.isFinite(y)) r.showCommandMarker(x, y, kind);
+  }
+
+  /** 'root' | 'build' | 'target' | 'place' for the command card. */
+  cardMode() {
+    if (this.mode.kind === 'target') return 'target';
+    if (this.mode.kind === 'place') return 'place';
+    return this.menu;
+  }
+
+  setCursor(c) {
+    if (this.cursor === c) return;
+    this.cursor = c;
+    this.canvas.className = c ? `cur-${c}` : 'cur-default';
+  }
+
+  ownUnits() {
+    return this.sel.ownUnitIds();
+  }
+
+  ownWorkers() {
+    return this.ownUnits().filter((id) => {
+      const e = this.vs.entities.get(id);
+      return e && UNITS[e.t] && UNITS[e.t].class === 'worker';
+    });
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    if (mode.kind !== 'place' && this.renderer) this.renderer.hidePlacement();
+    this.placeSig = '';
+    if (this.hud) this.hud.refreshCard();
+  }
+
+  cancelMode() {
+    if (this.mode.kind !== 'normal') {
+      this.setMode({ kind: 'normal' });
+      return true;
+    }
+    if (this.menu !== 'root') {
+      this.menu = 'root';
+      this.hud.refreshCard();
+      return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------- mouse
+
+  onMouseDown(e) {
+    if (this.disposed || this.hud.overlays.open) return;
+    if (this.hud.chatOpen) this.hud.closeChat();
+    const p = this.canvasPoint(e.clientX, e.clientY);
+    this.mx = e.clientX;
+    this.my = e.clientY;
+    this.mouseInWindow = true;
+    if (e.button === 1) {
+      e.preventDefault();
+      this.midDown = { x: e.clientX, y: e.clientY };
+      this.setCursor('pan');
+      return;
+    }
+    if (e.button === 2) {
+      e.preventDefault();
+      if (this.mode.kind !== 'normal') this.cancelMode();
+      else this.smartAt(p.x, p.y, e.shiftKey);
+      return;
+    }
+    if (e.button !== 0) return;
+    if (this.mode.kind === 'target') {
+      this.confirmTarget(p.x, p.y, null, e.shiftKey);
+      return;
+    }
+    if (this.mode.kind === 'place') {
+      this.confirmPlace(p.x, p.y, e.shiftKey);
+      return;
+    }
+    this.leftDown = { x: e.clientX, y: e.clientY, cx: p.x, cy: p.y, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, box: false };
+  }
+
+  onMouseMove(e) {
+    this.mx = e.clientX;
+    this.my = e.clientY;
+    this.mouseInWindow = true;
+    this.overCanvas = e.target === this.canvas;
+    this.hoverMoved = true;
+    if (this.leftDown) {
+      const d = Math.hypot(e.clientX - this.leftDown.x, e.clientY - this.leftDown.y);
+      if (!this.leftDown.box && d > DRAG_THRESHOLD) this.leftDown.box = true;
+      if (this.leftDown.box) this.drawBox(this.leftDown.x, this.leftDown.y, e.clientX, e.clientY);
+    }
+    if (this.midDown && this.renderer) {
+      const cam = this.renderer.camera;
+      if (typeof cam.panPixels === 'function') {
+        cam.panPixels(e.clientX - this.midDown.x, e.clientY - this.midDown.y);
+      } else {
+        const a = this.canvasPoint(this.midDown.x, this.midDown.y);
+        const b = this.canvasPoint(e.clientX, e.clientY);
+        const wa = this.ground(a.x, a.y);
+        const wb = this.ground(b.x, b.y);
+        if (wa && wb) cam.pan(wa.x - wb.x, wa.y - wb.y);
+      }
+      this.midDown = { x: e.clientX, y: e.clientY };
+    }
+  }
+
+  onMouseUp(e) {
+    if (e.button === 1 && this.midDown) {
+      this.midDown = null;
+      this.setCursor('');
+      return;
+    }
+    if (e.button !== 0 || !this.leftDown) return;
+    const ld = this.leftDown;
+    this.leftDown = null;
+    this.box.hidden = true;
+    if (this.disposed) return;
+    if (ld.box) {
+      const a = this.canvasPoint(ld.x, ld.y);
+      const b = this.canvasPoint(e.clientX, e.clientY);
+      this.boxSelect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y), ld.shift);
+    } else {
+      this.clickSelect(ld.cx, ld.cy, ld.shift, ld.ctrl);
+    }
+  }
+
+  onWheel(e) {
+    e.preventDefault();
+    if (this.hud.overlays.open || !this.renderer) return;
+    const dy = e.deltaY || 0;
+    if (dy === 0) return;
+    this.renderer.camera.zoomBy(dy < 0 ? 1 : -1);
+  }
+
+  drawBox(x0, y0, x1, y1) {
+    const b = this.box;
+    b.hidden = false;
+    b.style.left = `${Math.min(x0, x1)}px`;
+    b.style.top = `${Math.min(y0, y1)}px`;
+    b.style.width = `${Math.abs(x1 - x0)}px`;
+    b.style.height = `${Math.abs(y1 - y0)}px`;
+  }
+
+  // ---------------------------------------------------------------- selection
+
+  /** Own entities of a type currently on screen. */
+  ownOfTypeOnScreen(type) {
+    const r = this.renderer;
+    const vs = this.vs;
+    if (!r) return [];
+    const { w, h } = this.canvasPoint(0, 0);
+    const out = [];
+    for (const e of vs.entities.values()) {
+      if (e.o !== vs.myIndex || e.t !== type || (e.k !== 'u' && e.k !== 'b')) continue;
+      const p = r.worldToScreen(e.ix ?? e.x, e.iy ?? e.y, 0);
+      if (p && p.sx >= 0 && p.sy >= 0 && p.sx <= w && p.sy <= h) out.push(e.id);
+    }
+    return out;
+  }
+
+  clickSelect(x, y, shift, ctrl) {
+    const e = this.pick(x, y);
+    const now = performance.now();
+    const sel = this.sel;
+    if (!e) {
+      if (!shift) sel.clear();
+      this.lastClick = null;
+      return;
+    }
+    const own = e.o === this.vs.myIndex;
+    const dbl = this.lastClick && this.lastClick.t > now - DOUBLE_MS && this.lastClick.type === e.t && Math.hypot(this.lastClick.x - x, this.lastClick.y - y) < 12;
+    this.lastClick = { t: now, type: e.t, x, y };
+    if (own && (ctrl || dbl)) {
+      const ids = this.ownOfTypeOnScreen(e.t);
+      if (!ids.includes(e.id)) ids.unshift(e.id);
+      if (shift) sel.add(ids);
+      else sel.set(ids, { activeType: e.t });
+      this.lastClick = null;
+    } else if (own && shift && sel.isOwn()) {
+      sel.toggle(e.id);
+    } else {
+      sel.set([e.id]);
+    }
+    this.afterSelect();
+  }
+
+  boxSelect(x0, y0, x1, y1, shift) {
+    const r = this.renderer;
+    if (!r) return;
+    const vs = this.vs;
+    let ids = (r.entitiesInRect(x0, y0, x1, y1) || []).filter((id) => {
+      const e = vs.entities.get(id);
+      return e && e.k === 'u' && e.o === vs.myIndex;
+    });
+    if (!ids.length) {
+      // No units: own buildings whose centre is inside the box.
+      for (const e of vs.entities.values()) {
+        if (e.k !== 'b' || e.o !== vs.myIndex) continue;
+        const p = r.worldToScreen(e.x, e.y, 0);
+        if (p && p.sx >= x0 && p.sx <= x1 && p.sy >= y0 && p.sy <= y1) ids.push(e.id);
+      }
+    }
+    if (!ids.length) {
+      if (!shift) this.sel.clear();
+      return;
+    }
+    ids = ids.slice(0, MAX_SELECTION * 2);
+    if (shift && this.sel.isOwn()) this.sel.add(ids);
+    else this.sel.set(ids);
+    this.afterSelect();
+  }
+
+  afterSelect() {
+    this.menu = 'root';
+    if (this.sel.size) sfx.play('select');
+    if (this.renderer) this.renderer.setSelection(this.sel.ids);
+    this.hud.refreshCard();
+  }
+
+  /** Centre the camera on a list of ids (their average position). */
+  centerOnIds(ids) {
+    const r = this.renderer;
+    if (!r || !ids.length) return false;
+    let x = 0;
+    let y = 0;
+    let n = 0;
+    for (const id of ids) {
+      const e = this.vs.entities.get(id);
+      if (!e) continue;
+      x += e.ix ?? e.x;
+      y += e.iy ?? e.y;
+      n++;
+    }
+    if (!n) return false;
+    r.camera.centerOn(x / n, y / n);
+    return true;
+  }
+
+  centerOnSelection() {
+    const prim = this.sel.primary();
+    if (prim && prim.k !== 'u') return this.centerOnIds([prim.id]);
+    return this.centerOnIds(this.sel.ownUnitIds().length ? this.sel.ownUnitIds() : this.sel.ids);
+  }
+
+  /** Remember the latest alert for Space. */
+  noteAlert(x, y) {
+    this.lastAlert = { x, y, t: performance.now(), used: false };
+  }
+
+  spaceJump() {
+    const a = this.lastAlert;
+    if (a && !a.used && performance.now() - a.t < ALERT_JUMP_MS && this.renderer) {
+      a.used = true;
+      this.renderer.camera.centerOn(a.x, a.y);
+      return;
+    }
+    this.centerOnSelection();
+  }
+
+  /** F1–F3 / portrait click. */
+  selectGod(i, center = false, shift = false) {
+    const gods = this.hud.ownGods();
+    const g = gods[i];
+    if (!g) return;
+    const now = performance.now();
+    const dbl = this.lastGod.i === i && now - this.lastGod.t < DOUBLE_MS;
+    this.lastGod = { i, t: now };
+    if (shift) this.sel.toggle(g.id);
+    else this.sel.set([g.id]);
+    this.afterSelect();
+    if (center || dbl) this.centerOnIds([g.id]);
+  }
+
+  /** "." / idle button: next idle worshipper (all of them with shift / ctrl). */
+  cycleIdleWorker(all = false) {
+    const ids = this.hud.idleWorkers();
+    if (!ids.length) return;
+    if (all) {
+      this.sel.set(ids);
+      this.afterSelect();
+      return;
+    }
+    const cur = this.sel.size === 1 ? this.sel.ids[0] : null;
+    let i = cur !== null ? ids.indexOf(cur) : -1;
+    i = i >= 0 ? (i + 1) % ids.length : (this.idleIndex + 1) % ids.length;
+    this.idleIndex = i;
+    this.sel.set([ids[i]]);
+    this.afterSelect();
+    this.centerOnIds([ids[i]]);
+  }
+
+  // ---------------------------------------------------------------- orders
+
+  /** Right click: smart order for units, rally for production buildings. */
+  smartAt(x, y, shift, world = null) {
+    const vs = this.vs;
+    const units = this.ownUnits();
+    const target = world ? null : this.pick(x, y);
+    const p = world || this.ground(x, y);
+    if (units.length) {
+      if (!p && !target) return;
+      const cmd = { type: 'smart', units, queue: !!shift };
+      const px = p ? p.x : target.x;
+      const py = p ? p.y : target.y;
+      cmd.x = px;
+      cmd.y = py;
+      let kind = 'move';
+      if (target && !(target.k === 'u' && units.includes(target.id))) {
+        cmd.target = target.id;
+        if (target.k === 'm') kind = 'gather';
+        else if (vs.isEnemy(target.o) || target.o < 0) kind = 'attack';
+      } else if (p) {
+        const tx = Math.floor(p.x);
+        const ty = Math.floor(p.y);
+        if (tx >= 0 && ty >= 0 && tx < vs.width && ty < vs.height && vs.map.terrain[ty * vs.width + tx] === TERRAIN.FOREST && vs.isExplored(tx, ty)) {
+          cmd.tx = tx;
+          cmd.ty = ty;
+          kind = 'gather';
+        }
+      }
+      this.command(cmd);
+      const mx = target && kind !== 'move' ? target.ix ?? target.x : px;
+      const my = target && kind !== 'move' ? target.iy ?? target.y : py;
+      this.marker(mx, my, kind);
+      sfx.play('move');
+      return;
+    }
+    const blds = this.sel.ownBuildings().filter((b) => isComplete(b) && this.produces(b));
+    if (blds.length && (p || target)) {
+      this.rally(blds, p || { x: target.x, y: target.y }, target);
+      sfx.play('click');
+    }
+  }
+
+  produces(b) {
+    const def = BUILDINGS[b.t];
+    return !!def && (Array.isArray(def.produces) ? def.produces.length > 0 : !!def.produces);
+  }
+
+  rally(buildings, p, target) {
+    for (const b of buildings) {
+      const cmd = { type: 'rally', building: b.id, x: p.x, y: p.y };
+      if (target && target.id !== b.id) cmd.target = target.id;
+      this.command(cmd);
+    }
+    this.marker(target ? target.x : p.x, target ? target.y : p.y, 'rally');
+  }
+
+  /** Is there a tree at or near a tile (gather targeting)? */
+  treeNear(x, y, r = 2) {
+    const vs = this.vs;
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+    let best = null;
+    let bestD = Infinity;
+    for (let ty = cy - r; ty <= cy + r; ty++) {
+      for (let tx = cx - r; tx <= cx + r; tx++) {
+        if (tx < 0 || ty < 0 || tx >= vs.width || ty >= vs.height) continue;
+        if (vs.map.terrain[ty * vs.width + tx] !== TERRAIN.FOREST || !vs.isExplored(tx, ty)) continue;
+        const d = Math.hypot(tx + 0.5 - x, ty + 0.5 - y);
+        if (d < bestD) {
+          bestD = d;
+          best = { tx, ty };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Left click in a targeting mode. `world` is set when clicking the minimap.
+   * Stays in the mode on an invalid target, or with shift held.
+   */
+  confirmTarget(x, y, world, shift) {
+    const m = this.mode;
+    const vs = this.vs;
+    const target = world ? null : this.pick(x, y);
+    const p = world || this.ground(x, y) || (target ? { x: target.x, y: target.y } : null);
+    if (!p) return;
+    const units = this.ownUnits();
+    let ok = true;
+    switch (m.order) {
+      case 'move': {
+        if (target && target.k === 'u' && vs.isAlly(target.o) && !units.includes(target.id)) {
+          this.command({ type: 'smart', units, x: target.x, y: target.y, target: target.id, queue: !!shift });
+        } else this.command({ type: 'move', units, x: p.x, y: p.y, queue: !!shift });
+        this.marker(p.x, p.y, 'move');
+        sfx.play('move');
+        break;
+      }
+      case 'attack': {
+        if (target && (target.k === 'u' || target.k === 'b') && (vs.isEnemy(target.o) || target.o < 0)) {
+          this.command({ type: 'attack', units, target: target.id, queue: !!shift });
+          this.marker(target.ix ?? target.x, target.iy ?? target.y, 'attack');
+        } else {
+          this.command({ type: 'attackMove', units, x: p.x, y: p.y, queue: !!shift });
+          this.marker(p.x, p.y, 'attack');
+        }
+        sfx.play('move');
+        break;
+      }
+      case 'gather': {
+        const workers = this.ownWorkers();
+        if (target && target.k === 'm') {
+          this.command({ type: 'gather', units: workers, target: target.id, queue: !!shift });
+          this.marker(target.x, target.y, 'gather');
+        } else {
+          const tree = this.treeNear(p.x, p.y);
+          if (!tree) {
+            ok = false;
+            this.error('Must target a gold mine or trees.');
+            break;
+          }
+          this.command({ type: 'gather', units: workers, tx: tree.tx, ty: tree.ty, queue: !!shift });
+          this.marker(tree.tx + 0.5, tree.ty + 0.5, 'gather');
+        }
+        sfx.play('move');
+        break;
+      }
+      case 'pray': {
+        const def = target && target.k === 'b' ? BUILDINGS[target.t] : null;
+        if (!def || target.o !== vs.myIndex || !(def.prayerSlots > 0) || !isComplete(target)) {
+          ok = false;
+          this.error('Must target your Shrine or Temple.');
+          break;
+        }
+        this.command({ type: 'pray', units: this.ownWorkers(), target: target.id, queue: !!shift });
+        this.marker(target.x, target.y, 'move');
+        sfx.play('move');
+        break;
+      }
+      case 'rally': {
+        const blds = this.sel.ownBuildings().filter((b) => isComplete(b) && this.produces(b));
+        this.rally(blds, p, target);
+        sfx.play('click');
+        break;
+      }
+      case 'cast':
+        ok = this.castAt(m, p, target, shift);
+        break;
+      default:
+        break;
+    }
+    if (ok && !shift) this.setMode({ kind: 'normal' });
+    else if (ok) m.shiftUsed = true; // releasing Shift ends the mode
+  }
+
+  /** Units of the active ability's type that can cast it now. */
+  readyCasters(m) {
+    const ab = UNITS[m.unitType] && UNITS[m.unitType].abilities.find((a) => a.id === m.ability);
+    if (!ab) return { ab: null, casters: [] };
+    const casters = [];
+    for (const id of this.ownUnits()) {
+      const e = this.vs.entities.get(id);
+      if (!e || e.t !== m.unitType) continue;
+      if (UNITS[e.t].class === 'god' && (e.lv || 1) < (ab.unlockLevel || 1)) continue;
+      if (e.cd && e.cd[ab.id] > 0) continue;
+      if (e.fx && e.fx.includes('stun')) continue;
+      casters.push(e);
+    }
+    return { ab, casters };
+  }
+
+  castAt(m, p, target, shift) {
+    const vs = this.vs;
+    const { ab, casters } = this.readyCasters(m);
+    if (!ab) return true;
+    if (!casters.length) {
+      this.error('That ability is not ready.');
+      return true;
+    }
+    let tgt = null;
+    if (m.target === 'unit') {
+      if (!target || target.k !== 'u') return this.castError('Must target a unit.');
+      tgt = target;
+    } else if (m.target === 'ally') {
+      if (!target || target.k !== 'u' || !vs.isAlly(target.o)) return this.castError('Must target a friendly unit.');
+      tgt = target;
+    } else if (m.target === 'enemy') {
+      if (!target || target.k === 'm' || !(vs.isEnemy(target.o) || target.o < 0)) return this.castError('Must target an enemy.');
+      tgt = target;
+    }
+    const tx = tgt ? tgt.x : p.x;
+    const ty = tgt ? tgt.y : p.y;
+    // The closest ready caster takes it.
+    let best = casters[0];
+    let bestD = Infinity;
+    for (const c of casters) {
+      const d = Math.hypot(c.x - tx, c.y - ty);
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+    const cmd = { type: 'cast', unit: best.id, ability: ab.id, queue: !!shift };
+    if (tgt) cmd.target = tgt.id;
+    else {
+      cmd.x = p.x;
+      cmd.y = p.y;
+    }
+    this.command(cmd);
+    this.marker(tx, ty, tgt && vs.isAlly(tgt.o) ? 'move' : 'attack');
+    sfx.play('move');
+    return true;
+  }
+
+  castError(text) {
+    this.error(text);
+    return false;
+  }
+
+  confirmPlace(x, y, shift) {
+    const m = this.mode;
+    const p = this.ground(x, y);
+    if (!p) return;
+    const { tx, ty } = footprintAt(m.building, p.x, p.y);
+    const chk = checkPlacement(this.vs, this.vs.myIndex, m.building, tx, ty);
+    if (!chk.valid) {
+      this.error("Can't build there.");
+      return;
+    }
+    const bc = buildCheck(this.vs, m.building);
+    if (bc.state !== 'ready') {
+      this.error(bc.reason);
+      this.setMode({ kind: 'normal' });
+      return;
+    }
+    const workers = this.ownWorkers();
+    if (!workers.length) {
+      this.setMode({ kind: 'normal' });
+      return;
+    }
+    // WC3: the nearest selected worker goes.
+    const size = BUILDINGS[m.building].size;
+    const cx = tx + size / 2;
+    const cy = ty + size / 2;
+    let best = workers[0];
+    let bestD = Infinity;
+    for (const id of workers) {
+      const e = this.vs.entities.get(id);
+      if (!e) continue;
+      const d = Math.hypot(e.x - cx, e.y - cy);
+      if (d < bestD) {
+        bestD = d;
+        best = id;
+      }
+    }
+    this.command({ type: 'build', units: [best], building: m.building, tx, ty, queue: !!shift });
+    this.marker(cx, cy, 'move');
+    sfx.play('move');
+    if (!shift) {
+      this.menu = 'root';
+      this.setMode({ kind: 'normal' });
+    } else {
+      m.shiftUsed = true; // keep placing while Shift is held
+      this.placeSig = '';
+    }
+  }
+
+  /** Minimap pointer events (from minimap.js). */
+  onMinimap({ button, phase, x, y, shift }) {
+    if (this.hud.overlays.open) return;
+    const r = this.renderer;
+    if (button === 0) {
+      if (phase === 'down' && this.mode.kind === 'target') {
+        this.confirmTarget(0, 0, { x, y }, shift);
+        return;
+      }
+      if (this.mode.kind !== 'normal' && phase === 'down') return;
+      if (r && (phase === 'down' || phase === 'drag')) r.camera.centerOn(x, y);
+    } else if (button === 2 && phase === 'down') {
+      if (this.mode.kind !== 'normal') {
+        this.cancelMode();
+        return;
+      }
+      this.smartAt(0, 0, shift, { x, y });
+    }
+  }
+
+  // ---------------------------------------------------------------- command card
+
+  /**
+   * Run a command card button (click or hotkey).
+   * @param {object} b button from getCommandCard
+   * @param {{ shift?: boolean, fromClick?: boolean }} [opts]
+   */
+  activate(b, { shift = false } = {}) {
+    if (!b || b.passive || this.disposed) return;
+    if (!b.enabled) {
+      if (b.reason) this.error(b.reason);
+      return;
+    }
+    const a = b.action || {};
+    const vs = this.vs;
+    sfx.play('click');
+    switch (a.kind) {
+      case 'stop':
+        this.command({ type: 'stop', units: this.ownUnits() });
+        break;
+      case 'hold':
+        this.command({ type: 'hold', units: this.ownUnits(), queue: !!shift });
+        break;
+      case 'return':
+        this.command({ type: 'returnCargo', units: this.ownWorkers(), queue: !!shift });
+        break;
+      case 'submenu':
+        this.menu = a.menu;
+        this.hud.refreshCard();
+        break;
+      case 'back':
+      case 'cancel':
+        this.cancelMode();
+        break;
+      case 'place':
+        this.setMode({ kind: 'place', building: a.building });
+        break;
+      case 'target':
+        this.setMode({ kind: 'target', ...a });
+        break;
+      case 'cast': {
+        const { ab, casters } = this.readyCasters(a);
+        if (!ab) break;
+        if (!casters.length) {
+          this.error('That ability is not ready.');
+          break;
+        }
+        for (const c of casters) this.command({ type: 'cast', unit: c.id, ability: ab.id, queue: !!shift });
+        break;
+      }
+      case 'train': {
+        const group = this.sel.activeGroup();
+        const blds = this.sel.ownBuildings().filter((e) => group && e.t === group.type && isComplete(e));
+        // Shift-click queues up to five (as many as the queues and the purse allow).
+        let budget = 1;
+        if (shift) {
+          const me = vs.me;
+          const chk = trainCheck(vs, a.unit, blds);
+          budget = 5;
+          for (const k of ['gold', 'wood', 'faith']) if (chk.cost[k] > 0) budget = Math.min(budget, Math.floor(me[k] / chk.cost[k]));
+          if (chk.cost.pop > 0) budget = Math.min(budget, Math.floor((me.popCap - me.pop) / chk.cost.pop));
+          budget = Math.max(1, budget);
+        }
+        const slots = blds.map((e) => ({ id: e.id, n: (e.q || []).length, growing: (e.q || []).some((q) => q.u === 'tier_up') }));
+        let sent = 0;
+        for (let i = 0; i < budget; i++) {
+          let pick = null;
+          for (const s of slots) if (!s.growing && s.n < MAX_QUEUE && (!pick || s.n < pick.n)) pick = s;
+          if (!pick) break;
+          pick.n++;
+          this.command({ type: 'train', building: pick.id, unit: a.unit });
+          sent++;
+        }
+        if (!sent) this.error('Production queue is full.');
+        break;
+      }
+      case 'tier': {
+        const tc = this.sel.ownBuildings().find((e) => e.t === 'town_center' && isComplete(e));
+        if (tc) this.command({ type: 'upgradeTier', building: tc.id });
+        break;
+      }
+      case 'cancelBuild':
+        for (const e of this.sel.ownBuildings()) if (!isComplete(e)) this.command({ type: 'cancelBuild', building: e.id });
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ---------------------------------------------------------------- keyboard
+
+  onKeyDown(e) {
+    if (this.disposed) return;
+    const hud = this.hud;
+    if (!hud) return;
+    if (isTyping(e)) return;
+    const key = e.key;
+    const overlays = hud.overlays;
+    if (overlays.open) {
+      if (key === 'Escape' || key === 'F10') {
+        e.preventDefault();
+        overlays.escape();
+      } else if (key === 'Enter' && overlays.name === 'menu') {
+        // let Enter activate the focused button
+      } else if (key.startsWith('F') && key.length <= 3) e.preventDefault();
+      return;
+    }
+    if (key === 'F10') {
+      e.preventDefault();
+      overlays.openMenu();
+      return;
+    }
+    if (key === 'Enter') {
+      e.preventDefault();
+      hud.openChat();
+      return;
+    }
+    if (key === 'Alt') {
+      e.preventDefault();
+      if (!this.altHeld) {
+        this.altHeld = true;
+        this.game.setShowAllBars(true);
+      }
+      return;
+    }
+    if (ARROWS[key]) {
+      e.preventDefault();
+      this.keys.add(key);
+      return;
+    }
+    if (key === 'Tab') {
+      e.preventDefault();
+      if (this.sel.cycleSubgroup(e.shiftKey ? -1 : 1)) {
+        this.menu = 'root';
+        hud.refreshCard();
+      }
+      return;
+    }
+    if (key === ' ' || e.code === 'Space') {
+      e.preventDefault();
+      this.spaceJump();
+      return;
+    }
+    if (key === 'F1' || key === 'F2' || key === 'F3') {
+      e.preventDefault();
+      this.selectGod(Number(key[1]) - 1, false, e.shiftKey);
+      return;
+    }
+    if (key === 'Backspace') {
+      e.preventDefault();
+      const tc = [...this.vs.entities.values()].find((x) => x.k === 'b' && x.o === this.vs.myIndex && x.t === 'town_center');
+      if (tc) this.renderer.camera.centerOn(tc.x, tc.y);
+      return;
+    }
+    // Control groups: Digit1..9 (also with shift, whose key is a symbol).
+    const m = /^(Digit|Numpad)([1-9])$/.exec(e.code || '');
+    if (m) {
+      e.preventDefault();
+      const n = Number(m[2]);
+      if (e.ctrlKey || e.metaKey) {
+        if (this.sel.saveGroup(n)) hud.message(`Group ${n} assigned.`, 'info');
+      } else if (e.shiftKey) {
+        this.sel.addToGroup(n);
+      } else {
+        const now = performance.now();
+        const dbl = this.lastGroup.n === n && now - this.lastGroup.t < DOUBLE_MS;
+        this.lastGroup = { n, t: now };
+        if (this.sel.recallGroup(n)) {
+          this.afterSelect();
+          if (dbl) this.centerOnSelection();
+        }
+      }
+      return;
+    }
+    if (key === '.' || e.code === 'NumpadDecimal' || e.code === 'Period') {
+      e.preventDefault();
+      this.cycleIdleWorker(e.shiftKey || e.ctrlKey);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts alone
+    if (key === 'Escape') {
+      e.preventDefault();
+      const card = hud.currentCard();
+      const b = buttonForKey(card, 'Escape');
+      if (b) {
+        hud.flashSlot(b.slot);
+        this.activate(b);
+        return;
+      }
+      if (this.cancelMode()) return;
+      // A building with a queue: cancel the last item (WC3).
+      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length);
+      if (blds.length) {
+        const bq = blds[0];
+        this.command({ type: 'cancelTrain', building: bq.id, index: bq.q.length - 1 });
+      }
+      return;
+    }
+    if (key.length === 1) {
+      const card = hud.currentCard();
+      const b = buttonForKey(card, key);
+      if (b) {
+        e.preventDefault();
+        hud.flashSlot(b.slot);
+        this.activate(b, { shift: e.shiftKey });
+      }
+    }
+  }
+
+  onKeyUp(e) {
+    if (ARROWS[e.key]) this.keys.delete(e.key);
+    if (e.key === 'Shift') this.endShiftMode();
+    if (e.key === 'Alt') {
+      e.preventDefault();
+      this.altHeld = false;
+      this.game.setShowAllBars(false);
+    }
+  }
+
+  /** After Shift-queued targets or placements, letting go of Shift finishes the mode. */
+  endShiftMode() {
+    if (!this.mode.shiftUsed) return;
+    if (this.mode.kind === 'place') this.menu = 'root';
+    this.setMode({ kind: 'normal' });
+  }
+
+  onBlur() {
+    this.endShiftMode();
+    this.keys.clear();
+    if (this.altHeld) {
+      this.altHeld = false;
+      this.game.setShowAllBars(false);
+    }
+    this.mouseInWindow = false;
+    if (this.leftDown) {
+      this.leftDown = null;
+      this.box.hidden = true;
+    }
+    this.midDown = null;
+  }
+
+  // ---------------------------------------------------------------- per frame
+
+  update(dt) {
+    const r = this.renderer;
+    if (!r || this.disposed) return;
+    const overlay = this.hud.overlays.open;
+    // Camera pan: arrows and edge scroll.
+    let dx = 0;
+    let dy = 0;
+    for (const k of this.keys) {
+      dx += ARROWS[k][0];
+      dy += ARROWS[k][1];
+    }
+    if (!overlay && getSettings().edgeScroll && this.mouseInWindow && !this.leftDown && !this.midDown && (typeof document.hasFocus !== 'function' || document.hasFocus())) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (this.mx >= 0) {
+        if (this.mx <= EDGE_PX) dx -= 1;
+        else if (this.mx >= w - 1 - EDGE_PX) dx += 1;
+        if (this.my <= EDGE_PX) dy -= 1;
+        else if (this.my >= h - 1 - EDGE_PX) dy += 1;
+      }
+    }
+    if ((dx || dy) && !overlay) {
+      const len = Math.hypot(dx, dy) || 1;
+      const sx = (dx / len) * PAN_SPEED * dt;
+      const sy = (dy / len) * PAN_SPEED * dt;
+      if (typeof r.camera.scroll === 'function') r.camera.scroll(sx, sy);
+      else r.camera.pan(sx, sy);
+    }
+
+    const now = performance.now();
+    const p = this.canvasPoint(this.mx, this.my);
+    // Hover + cursor.
+    if (this.overCanvas && !overlay && (this.hoverMoved || now - this.hoverAt > 250) && now - this.hoverAt > HOVER_MS) {
+      this.hoverAt = now;
+      this.hoverMoved = false;
+      const e = this.pick(p.x, p.y);
+      const id = e ? e.id : null;
+      if (id !== this.hoverId) {
+        this.hoverId = id;
+        r.setHover(id);
+      }
+    } else if ((!this.overCanvas || overlay) && this.hoverId !== null) {
+      this.hoverId = null;
+      r.setHover(null);
+    }
+    this.updateCursor();
+
+    // Placement ghost.
+    if (this.mode.kind === 'place') {
+      if (!this.overCanvas) {
+        if (this.placeSig) {
+          r.hidePlacement();
+          this.placeSig = '';
+        }
+      } else if (now - this.placeAt > PLACE_CHECK_MS || this.hoverMoved) {
+        const w = this.ground(p.x, p.y);
+        if (w) {
+          const { tx, ty } = footprintAt(this.mode.building, w.x, w.y);
+          const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty);
+          const sig = `${this.mode.building}|${tx}|${ty}|${chk.tiles.map((t) => (t ? 1 : 0)).join('')}`;
+          if (sig !== this.placeSig || now - this.placeAt > 400) {
+            this.placeSig = sig;
+            r.showPlacement(this.mode.building, tx, ty, chk.valid, chk.tiles);
+          }
+          this.placeAt = now;
+        }
+      }
+    }
+  }
+
+  updateCursor() {
+    if (this.midDown) return this.setCursor('pan');
+    const vs = this.vs;
+    const h = this.hoverId !== null ? vs.entities.get(this.hoverId) : null;
+    if (this.mode.kind === 'place') return this.setCursor('place');
+    if (this.mode.kind === 'target') {
+      if (h && (vs.isEnemy(h.o) || (h.o < 0 && h.k === 'u'))) return this.setCursor('target-enemy');
+      if (h && h.k !== 'm' && vs.isAlly(h.o)) return this.setCursor('target-ally');
+      return this.setCursor('target');
+    }
+    if (h && this.sel.ownUnitIds().length && (vs.isEnemy(h.o) || (h.o < 0 && h.k === 'u'))) return this.setCursor('enemy');
+    if (h) return this.setCursor('select');
+    return this.setCursor('');
+  }
+
+  dispose() {
+    this.disposed = true;
+    for (const off of this.offs.splice(0)) off();
+    if (this.resizeObs) this.resizeObs.disconnect();
+    this.box.remove();
+    this.keys.clear();
+  }
+}

@@ -512,7 +512,7 @@ export default {
       radius: 0.55,
       sight: 10,
       air: true,
-      attack: { damage: 24, range: 3.5, cooldown: 1.5, canHitAir: true, projectile: 'bolt', element: 'lightning', splash: 0, buildingMult: 1 },
+      attack: { damage: 27, range: 4, cooldown: 1.5, canHitAir: true, projectile: 'bolt', element: 'lightning', splash: 0, buildingMult: 1 },
       abilities: [
         {
           id: 'greek_pegasus_thunder_bearer',
@@ -558,13 +558,13 @@ export default {
       pop: 5,
       buildTime: 40,
       producedAt: 'shrine',
-      hp: 1200,
+      hp: 1300,
       armor: 3,
       speed: 2.3,
       radius: 0.85,
       sight: 9,
       air: false,
-      attack: { damage: 48, range: 4.5, cooldown: 1.7, canHitAir: false, projectile: 'rock', element: 'earth', splash: 1.1, buildingMult: 2 },
+      attack: { damage: 52, range: 4.5, cooldown: 1.7, canHitAir: false, projectile: 'rock', element: 'earth', splash: 1.5, buildingMult: 2 },
       abilities: [],
       passives: [],
       visual: {

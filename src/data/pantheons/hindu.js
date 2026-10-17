@@ -401,7 +401,7 @@ export default {
     pop: 10,
     buildTime: 60,
     producedAt: 'titan_gate',
-    hp: 6500,
+    hp: 6100,
     armor: 7,
     speed: 2.0,
     radius: 1.6,

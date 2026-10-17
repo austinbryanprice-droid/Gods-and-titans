@@ -1,0 +1,359 @@
+// Selection panel (bottom centre): a portrait and full stats for a single
+// selection, or a grid of icons with health bars for a group. Building queues
+// (click an item to cancel it), construction progress, prayer counts, god
+// level / xp, status effects and carried resources.
+import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE } from '../config.js';
+import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
+import { el, setText, setStyle, setHidden, fmt, pct, hpColor } from './hud-dom.js';
+import { defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName } from './hud-data.js';
+
+const STATUS = {
+  stun: ['💫', 'Stunned'],
+  slow: ['🐌', 'Slowed'],
+  shield: ['🔰', 'Shielded'],
+  invuln: ['✨', 'Invulnerable'],
+  buff: ['⬆️', 'Empowered'],
+  debuff: ['⬇️', 'Weakened'],
+  dot: ['☠️', 'Taking damage over time'],
+};
+
+const STATE_TEXT = {
+  idle: 'Idle', move: 'Moving', attack: 'Attacking', gather: 'Gathering', return: 'Returning resources',
+  build: 'Building', pray: 'Praying', cast: 'Casting',
+};
+
+const CLASS_TEXT = {
+  worker: 'Worker', infantry: 'Infantry', ranged: 'Ranged', support: 'Support', siege: 'Siege',
+  creature: 'Mythical Creature', god: 'God', titan: 'Titan', minion: 'Summoned',
+};
+
+function teamColor(vs, owner) {
+  if (owner < 0) return '#8a7a5a';
+  const p = vs.players[owner] || (vs.setup && vs.setup.players[owner]);
+  return (p && p.color) || '#888';
+}
+
+function ownerName(vs, owner) {
+  if (owner < 0) return 'Neutral';
+  const p = vs.players[owner] || (vs.setup && vs.setup.players[owner]);
+  return p ? p.name : `Player ${owner + 1}`;
+}
+
+/** Shape of an entity that needs a panel rebuild when it changes. */
+function shapeOf(e, vs) {
+  if (!e) return '-';
+  const q = e.q ? e.q.map((it) => it.u).join(',') : '';
+  return `${e.id}|${e.t}|${e.o}|${e.k === 'b' ? (isComplete(e) ? 1 : 0) : ''}|${q}|${e.lv || ''}|${e.tr || ''}|${vs.relation(e.o)}`;
+}
+
+export class InfoView {
+  /**
+   * @param {HTMLElement} root container
+   * @param {{ selection: object, viewState: object, onSelectOnly(id), onRemove(id), onSelectType(type), onCancelQueue(buildingId, index), onPortrait() }} o
+   */
+  constructor(root, o) {
+    this.root = root;
+    this.o = o;
+    this.sig = null;
+    this.single = null;
+    this.multi = null;
+  }
+
+  update() {
+    const { selection, viewState: vs } = this.o;
+    const ents = selection.entities();
+    const active = selection.activeGroup();
+    let sig;
+    if (ents.length === 0) sig = 'empty';
+    else if (ents.length === 1) sig = `1:${shapeOf(ents[0], vs)}`;
+    else sig = `n:${ents.map((e) => e.id).join(',')}:${active ? active.type : ''}`;
+    if (sig !== this.sig) {
+      this.sig = sig;
+      this.root.textContent = '';
+      this.single = null;
+      this.multi = null;
+      if (ents.length === 1) this.buildSingle(ents[0]);
+      else if (ents.length > 1) this.buildMulti(ents, active);
+      else this.root.appendChild(el('div', 'hi-empty', el('div', 'hi-empty-crest', '⚜'), el('div', 'hi-empty-text', 'Select a unit or building')));
+    }
+    if (this.single) this.updateSingle();
+    if (this.multi) this.updateMulti();
+  }
+
+  // ---------------------------------------------------------------- single
+
+  buildSingle(e) {
+    const vs = this.o.viewState;
+    const def = defOf(e);
+    const portrait = el('button', 'hi-portrait');
+    portrait.type = 'button';
+    portrait.tabIndex = -1;
+    portrait.title = 'Center the camera (Space)';
+    portrait.addEventListener('click', () => this.o.onPortrait && this.o.onPortrait());
+    setStyle(portrait, '--team', teamColor(vs, e.o));
+    const picon = el('span', 'hi-portrait-icon', iconOf(e));
+    const lvl = el('span', 'hi-level');
+    portrait.append(picon, lvl);
+    const hpBar = el('div', 'hi-bar is-hp', el('i', 'hi-bar-fill'), el('i', 'hi-bar-shield'));
+    const hpText = el('div', 'hi-hp-text');
+    const left = el('div', 'hi-left', portrait, hpBar, hpText);
+
+    const name = el('div', 'hi-name', nameOf(e));
+    const sub = el('div', 'hi-sub');
+    const stats = el('div', 'hi-stats');
+    const extra = el('div', 'hi-extra');
+    const right = el('div', 'hi-right', name, sub, stats, extra);
+    const wrap = el('div', 'hi-single', left, right);
+    this.root.appendChild(wrap);
+
+    const s = { e, def, nameEl: name, portrait, lvl, hpBar, hpFill: hpBar.children[0], shFill: hpBar.children[1], hpText, sub, stats, extra, parts: {} };
+    this.single = s;
+
+    // Subtitle.
+    const rel = vs.relation(e.o);
+    if (e.k === 'u' && def) {
+      const bits = [];
+      if (def.title) bits.push(el('span', 'hi-title', def.title));
+      else bits.push(el('span', 'hi-class', CLASS_TEXT[def.class] || ''));
+      sub.append(...bits);
+    } else if (e.k === 'b' && def) {
+      sub.appendChild(el('span', 'hi-class', e.t === 'town_center' ? `${tierName(e.tr)} · Drop-off point` : def.dropOff ? 'Drop-off point' : 'Building'));
+    } else if (e.k === 'm') {
+      sub.appendChild(el('span', 'hi-class', 'Resource'));
+    }
+    if (rel !== 'own') {
+      const owner = el('span', 'hi-owner', rel === 'neutral' ? (e.k === 'm' ? '' : 'Neutral creature') : ownerName(vs, e.o));
+      setStyle(owner, 'color', teamColor(vs, e.o));
+      if (owner.textContent) sub.append(' ', owner, rel === 'ally' ? el('span', 'hi-rel is-ally', ' (ally)') : rel === 'enemy' ? el('span', 'hi-rel is-enemy', ' (enemy)') : null);
+    }
+
+    // Stats.
+    const stat = (icon, label, cls = '') => {
+      const v = el('b', 'hi-stat-v');
+      const n = el('span', `hi-stat ${cls}`, el('i', 'hi-stat-i', icon), el('span', 'hi-stat-l', label), v);
+      stats.appendChild(n);
+      return v;
+    };
+    if (e.k === 'u' && def) {
+      if (def.attack) {
+        s.parts.dmg = stat('⚔️', 'Damage');
+        s.parts.range = stat('🎯', 'Range');
+      }
+      s.parts.armor = stat('🛡️', 'Armor');
+      s.parts.speed = stat('👣', 'Speed');
+    } else if (e.k === 'b' && def) {
+      s.parts.armor = stat('🛡️', 'Armor');
+      if (def.attack) {
+        s.parts.dmg = stat('⚔️', 'Damage');
+        s.parts.range = stat('🎯', 'Range');
+      }
+      if (def.popProvided && e.o === vs.myIndex) s.parts.popp = stat('🏠', 'Housing');
+    } else if (e.k === 'm') {
+      s.parts.gold = stat('🪙', 'Gold left', 'is-wide');
+    }
+
+    // Extra block by kind.
+    if (e.k === 'u') this.buildUnitExtra(s);
+    else if (e.k === 'b') this.buildBuildingExtra(s);
+  }
+
+  buildUnitExtra(s) {
+    const { e, def, extra } = s;
+    if (def && def.class === 'god') {
+      const xpBar = el('div', 'hi-bar is-xp', el('i', 'hi-bar-fill'));
+      const xpText = el('div', 'hi-xp-text');
+      extra.appendChild(el('div', 'hi-xp', xpBar, xpText));
+      s.parts.xpFill = xpBar.children[0];
+      s.parts.xpText = xpText;
+    }
+    s.parts.state = el('div', 'hi-state');
+    s.parts.status = el('div', 'hi-status');
+    extra.append(s.parts.state, s.parts.status);
+    s.parts.statusSig = null;
+  }
+
+  buildBuildingExtra(s) {
+    const { e, def, extra } = s;
+    const vs = this.o.viewState;
+    if (!isComplete(e)) {
+      const bar = el('div', 'hi-bar is-build', el('i', 'hi-bar-fill'));
+      const txt = el('div', 'hi-progress-text');
+      extra.appendChild(el('div', 'hi-progress', el('div', 'hi-progress-label', 'Under construction'), bar, txt));
+      s.parts.buildFill = bar.children[0];
+      s.parts.buildText = txt;
+      return;
+    }
+    if (e.o === vs.myIndex && e.q && e.q.length) {
+      const q = e.q;
+      const first = q[0];
+      const big = el('button', 'hi-q-main');
+      big.type = 'button';
+      big.tabIndex = -1;
+      big.title = 'Click to cancel';
+      big.addEventListener('click', () => this.o.onCancelQueue(e.id, 0));
+      const bar = el('div', 'hi-bar is-train', el('i', 'hi-bar-fill'));
+      const cls = UNITS[first.u] ? UNITS[first.u].class : '';
+      const verb = cls === 'god' || cls === 'titan' || cls === 'creature' ? 'Summoning' : 'Training';
+      const label = first.u === 'tier_up' ? `Growing into a ${tierName((e.tr || 1) + 1)}` : `${verb} ${typeName(first.u)}`;
+      big.append(el('span', 'hi-q-icon', typeIcon(first.u)));
+      const info = el('div', 'hi-q-info', el('div', 'hi-q-label', label), bar);
+      const small = el('div', 'hi-q-rest');
+      for (let i = 1; i < MAX_QUEUE; i++) {
+        const it = q[i];
+        const b = el('button', it ? 'hi-q-item' : 'hi-q-item is-empty');
+        b.type = 'button';
+        b.tabIndex = -1;
+        if (it) {
+          b.textContent = typeIcon(it.u);
+          b.title = `${typeName(it.u)} — click to cancel`;
+          b.addEventListener('click', () => this.o.onCancelQueue(e.id, i));
+        }
+        small.appendChild(b);
+      }
+      extra.appendChild(el('div', 'hi-queue', big, el('div', 'hi-q-side', info, small)));
+      s.parts.trainFill = bar.children[0];
+      return;
+    }
+    if (def && def.prayerSlots > 0) {
+      s.parts.pray = el('div', 'hi-note');
+      extra.appendChild(s.parts.pray);
+    }
+    if (e.t === 'town_center' && e.o === vs.myIndex) {
+      extra.appendChild(el('div', 'hi-note is-dim', 'Trains Worshippers. Gold and wood are delivered here.'));
+    } else if (e.t === 'storehouse' && e.o === vs.myIndex) {
+      extra.appendChild(el('div', 'hi-note is-dim', 'Gold and wood can be delivered here.'));
+    } else if (e.t === 'house' && e.o === vs.myIndex) {
+      extra.appendChild(el('div', 'hi-note is-dim', 'Provides housing for 8 population.'));
+    }
+  }
+
+  updateSingle() {
+    const s = this.single;
+    const vs = this.o.viewState;
+    const e = vs.entities.get(s.e.id) || s.e;
+    const def = s.def;
+    // hp
+    if (e.k !== 'm') {
+      const f = e.mhp > 0 ? e.hp / e.mhp : 0;
+      setStyle(s.hpFill, 'width', pct(f));
+      setStyle(s.hpFill, 'background', hpColor(f));
+      const sh = e.sh > 0 && e.mhp > 0 ? Math.min(1, e.sh / e.mhp) : 0;
+      setStyle(s.shFill, 'width', pct(sh));
+      setText(s.hpText, `${fmt(e.hp)} / ${fmt(e.mhp)}${e.sh > 0 ? ` +${fmt(e.sh)}` : ''}`);
+    } else {
+      setHidden(s.hpBar, true);
+      setText(s.hpText, '');
+    }
+    const lv = e.lv || 1;
+    setText(s.lvl, def && def.class === 'god' ? String(lv) : '');
+    setHidden(s.lvl, !(def && def.class === 'god'));
+    const p = s.parts;
+    if (e.k === 'u' && def) {
+      const isGod = def.class === 'god';
+      if (p.dmg) {
+        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1);
+        setText(p.dmg, `${Math.round(dmg)}${def.attack.splash ? ' (splash)' : ''}`);
+        setText(p.range, def.attack.range <= 1 ? 'Melee' : String(def.attack.range));
+      }
+      const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0);
+      setText(p.armor, String(Math.round(armor * 10) / 10));
+      setText(p.speed, String(def.speed));
+      if (p.xpFill) {
+        const lo = GOD_XP_LEVELS[lv - 1] || 0;
+        const hi = GOD_XP_LEVELS[lv];
+        if (lv >= GOD_MAX_LEVEL || hi === undefined) {
+          setStyle(p.xpFill, 'width', '100%');
+          setText(p.xpText, `Level ${lv} · Max level`);
+        } else {
+          setStyle(p.xpFill, 'width', pct(((e.xp || 0) - lo) / (hi - lo)));
+          setText(p.xpText, `Level ${lv} · XP ${fmt(e.xp || 0)} / ${fmt(hi)}`);
+        }
+      }
+      // state line
+      let st = STATE_TEXT[e.st] || '';
+      if (e.st === 'gather' && def.class === 'worker') st = e.tg ? 'Mining gold' : 'Chopping wood';
+      if (e.c) st += `${st ? ' · ' : ''}Carrying ${e.c === 'g' ? 'gold' : 'wood'}`;
+      if (e.bo && BUILDINGS[e.bo.b]) st = `On the way to build a ${BUILDINGS[e.bo.b].name}`;
+      if (e.ex) st += `${st ? ' · ' : ''}Vanishes in ${Math.ceil(e.ex)}s`;
+      if (e.o !== vs.myIndex) st = e.ex ? `Vanishes in ${Math.ceil(e.ex)}s` : '';
+      setText(p.state, st);
+      const fx = e.fx || [];
+      const sig = fx.join(',') + (e.c || '');
+      if (sig !== p.statusSig) {
+        p.statusSig = sig;
+        p.status.textContent = '';
+        if (e.c) p.status.appendChild(el('span', 'hi-chip is-carry', e.c === 'g' ? '🪙' : '🪵'));
+        for (const code of fx) {
+          const [icon, label] = STATUS[code] || ['❔', code];
+          const chip = el('span', `hi-chip is-${code}`, icon);
+          chip.title = label;
+          p.status.appendChild(chip);
+        }
+      }
+    } else if (e.k === 'b' && def) {
+      setText(p.armor, String(def.armor));
+      if (p.dmg) {
+        setText(p.dmg, String(def.attack.damage));
+        setText(p.range, String(def.attack.range));
+      }
+      if (p.popp) setText(p.popp, `+${def.popProvided}`);
+      if (p.buildFill) {
+        setStyle(p.buildFill, 'width', pct(e.bp || 0));
+        setText(p.buildText, `${Math.floor((e.bp || 0) * 100)}%`);
+      }
+      if (p.trainFill && e.q && e.q[0]) setStyle(p.trainFill, 'width', pct(e.q[0].p || 0));
+      if (p.pray) {
+        const n = e.pr || 0;
+        setText(p.pray, `🙏 Praying: ${n} / ${def.prayerSlots}${n ? ` · +${(n * def.faithRate).toFixed(1)} faith/s` : ''}`);
+      }
+    } else if (e.k === 'm') {
+      setText(p.gold, fmt(e.amt));
+    }
+    // Name can change (town center tier).
+    setText(s.nameEl, nameOf(e));
+  }
+
+  // ---------------------------------------------------------------- multi
+
+  buildMulti(ents, active) {
+    const vs = this.o.viewState;
+    const grid = el('div', 'hi-grid');
+    const cells = [];
+    for (const e of ents) {
+      const c = el('button', 'hi-cell');
+      c.type = 'button';
+      c.tabIndex = -1;
+      c.title = `${nameOf(e)} — click: select · Shift: remove · Ctrl: select all of this type`;
+      setStyle(c, '--team', teamColor(vs, e.o));
+      const bar = el('div', 'hi-cell-bar', el('i', 'hi-bar-fill'));
+      c.append(el('span', 'hi-cell-icon', iconOf(e)), bar);
+      if (e.lv) c.appendChild(el('span', 'hi-cell-lv', String(e.lv)));
+      if (active && e.t === active.type) c.classList.add('is-active');
+      c.addEventListener('click', (ev) => {
+        if (ev.shiftKey) this.o.onRemove(e.id);
+        else if (ev.ctrlKey || ev.metaKey) this.o.onSelectType(e.t);
+        else this.o.onSelectOnly(e.id);
+      });
+      grid.appendChild(c);
+      cells.push({ id: e.id, fill: bar.children[0] });
+    }
+    const label = el('div', 'hi-grid-label');
+    if (active) {
+      const def = UNITS[active.type] || BUILDINGS[active.type] || GOLD_MINE;
+      label.append(el('b', null, def.name), ` × ${active.ids.length}`, el('span', 'hi-grid-hint', ents.length > active.ids.length ? '  ·  Tab: next group' : ''));
+    }
+    this.root.appendChild(el('div', 'hi-multi', label, grid));
+    this.multi = { cells };
+  }
+
+  updateMulti() {
+    const vs = this.o.viewState;
+    for (const c of this.multi.cells) {
+      const e = vs.entities.get(c.id);
+      if (!e) continue;
+      const f = e.mhp > 0 ? e.hp / e.mhp : 0;
+      setStyle(c.fill, 'width', pct(f));
+      setStyle(c.fill, 'background', hpColor(f));
+    }
+  }
+}

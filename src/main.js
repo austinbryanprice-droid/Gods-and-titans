@@ -1,49 +1,67 @@
 // Entry point: boots settings and audio, shows the menu, and hands a started
-// lobby to the game (DESIGN 11). Provisional: the integration engineer
-// replaces the placeholder in startGame() with HostSession / ClientSession + Game.
+// lobby to the Game (DESIGN 11). Returning to the menu tears the game down
+// completely, so matches can be played one after another without a reload.
 import { getSettings, onSettingsChange } from './settings.js';
 import { sfx } from './audio/sfx.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 
 export { showMenu, hideMenu };
 
-let placeholder = null;
+let current = null; // the running Game
+let gameModule = null;
+
+function loadGameModule() {
+  if (!gameModule) {
+    gameModule = import('./game/game.js').catch((err) => {
+      gameModule = null;
+      throw err;
+    });
+  }
+  return gameModule;
+}
+
+/** Tear down the running game (if any) and show the title screen. */
+function backToMenu() {
+  if (current) {
+    const g = current;
+    current = null;
+    g.dispose();
+  }
+  const root = document.getElementById('game-root');
+  if (root) root.hidden = true;
+  showMenu('title');
+}
 
 /**
  * Called by the menu when a lobby starts.
  * @param {{ role: 'host'|'client', setup: object, myIndex: number, conns?: Map<number, object>, conn?: object, lobby: object }} launch
  */
-export function startGame(launch) {
+export async function startGame(launch) {
   globalThis.__mythicwarLaunch = launch; // debug / test hook
   hideMenu();
-  if (!placeholder) {
-    placeholder = document.createElement('div');
-    placeholder.className = 'mw-root mw-placeholder';
-    document.getElementById('app').appendChild(placeholder);
+  if (current) {
+    current.dispose();
+    current = null;
   }
-  const players = launch.setup.players.map((p) => `${p.name} (${p.pantheon}, team ${p.team})`).join(' · ');
-  placeholder.innerHTML = '';
-  const box = document.createElement('div');
-  box.className = 'mw-panel mw-placeholder-box';
-  const title = document.createElement('h2');
-  title.className = 'mw-h2';
-  title.textContent = 'Game starting…';
-  const note = document.createElement('p');
-  note.textContent = '(game view not wired yet)';
-  const info = document.createElement('p');
-  info.className = 'mw-hint';
-  info.textContent = `${launch.role === 'host' ? 'Hosting' : 'Joined'} · seed ${launch.setup.seed} · ${launch.setup.mapSize} map · ${players}`;
-  const back = document.createElement('button');
-  back.className = 'mw-btn';
-  back.type = 'button';
-  back.textContent = 'Back to Menu';
-  back.addEventListener('click', () => {
-    placeholder.hidden = true;
-    showMenu('title');
-  });
-  box.append(title, note, info, back);
-  placeholder.appendChild(box);
-  placeholder.hidden = false;
+  try {
+    const { Game } = await loadGameModule();
+    const game = new Game({
+      launch,
+      settings: getSettings(),
+      onExit: () => {
+        if (current === game) current = null;
+        backToMenu();
+      },
+    });
+    current = game;
+    await game.ready;
+  } catch (err) {
+    console.error('[main] the game failed to start', err);
+    if (!current) {
+      // Nothing on screen to show the error: go back to the menu.
+      showMenu('title');
+    }
+  }
 }
 
 function boot() {
@@ -56,6 +74,8 @@ function boot() {
   createMenu({ root: document.getElementById('menu-root'), onStart: startGame });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
+  // Warm the game module while the player is in the menu.
+  setTimeout(() => loadGameModule().catch(() => {}), 1500);
 }
 
 try {
