@@ -255,9 +255,11 @@ const groundAO = (h) => (p) => 0.58 + 0.42 * smooth01(p.y / h);
 // trees (≤ 160 triangles each, built once, shared)
 // ---------------------------------------------------------------------------
 
-/** One drooping pine tier: apex, a mid ring and a jagged rim of n branch tips (3n triangles). */
+/**
+ * One drooping pine tier: a mid ring and a jagged rim of n branch tips (2n
+ * triangles). The tier's top is left open: the tier above (or the tip) covers it.
+ */
 function pineTier(R, h, n, rot, rng) {
-  const apex = [0, h, 0];
   const mid = [];
   const rim = [];
   for (let i = 0; i < n; i++) {
@@ -272,7 +274,7 @@ function pineTier(R, h, n, rot, rng) {
   const tris = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    tris.push([apex, mid[i], mid[j]], [mid[i], rim[i], rim[j]], [mid[i], rim[j], mid[j]]);
+    tris.push([mid[i], rim[i], rim[j]], [mid[i], rim[j], mid[j]]);
   }
   return triGeo(orient(tris, (m) => _d.set(m.x, R * 0.6, m.z)));
 }
@@ -290,8 +292,9 @@ function pineGeo() {
     const grad = { to: '#4f7a3c', t: (p) => 0.6 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.5) };
     parts.push(shade(g, col, r, { jit: 0.09, leaf: 1, center: c, soft: 0.55, ao, grad }));
   });
-  const tip = cone(0.15, 0.4, 5).translate(0, 1.56, 0);
-  wobble(tip, 0.03, r);
+  // the tip is wide enough at its base to close the open top of the last tier
+  const tip = cone(0.23, 0.52, 6).translate(0, 1.39, 0);
+  wobble(tip, 0.02, r);
   parts.push(shade(tip, '#3e6c40', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.45, 0), soft: 0.5 }));
   return finish(parts, { height: 1.95, bend: 0.075, flutter: 0.008 });
 }
@@ -590,6 +593,9 @@ function shared() {
   // light; the double-sided variant for flat leaves (palm fronds, flowers, grass).
   const plant = new THREE.MeshLambertMaterial({ vertexColors: true });
   plant.name = 'props-plant';
+  // Pine tiers are open skirts flatter than the sun is high: with the default
+  // back-face shadow pass they would cast only thin rings. Both faces cast.
+  plant.shadowSide = THREE.DoubleSide;
   patchWorldMaterial(patchFoliageMaterial(plant), { cloud: true, rim: 0.12 });
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';

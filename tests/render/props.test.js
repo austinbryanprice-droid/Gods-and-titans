@@ -227,6 +227,9 @@ test('plants sway (their shadows too), stone and stumps stay still', () => {
     assert.ok(m.material.userData.__foliage, `${m.name} uses the foliage material`);
     assert.ok(m.customDepthMaterial && m.customDepthMaterial.isMeshDepthMaterial, `${m.name} casts a swaying shadow`);
     assert.ok(m.castShadow && m.receiveShadow, `${m.name} casts and receives shadows`);
+    // open leaf shells (pine tiers, fronds) cast from both faces, not just the back ones
+    const both = m.material.side === THREE.DoubleSide || m.material.shadowSide === THREE.DoubleSide;
+    assert.ok(both, `${m.name}: both faces cast`);
     // wind weights: no bend at the roots, most at the crown; only leaves flutter
     const pos = m.geometry.attributes.position;
     const fol = m.geometry.attributes.aFol;
