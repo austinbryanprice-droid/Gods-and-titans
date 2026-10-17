@@ -105,7 +105,7 @@ test('GameRenderer: builds the scene, warms shaders, starts on the local town ce
   for (const v of r.units.values()) assert.ok(!v.visible || vs.isEntityVisible(v.e));
   assert.ok(r.mines.size >= 1);
   r.render();
-  assert.equal(webgl.renders, 1);
+  assert.equal(webgl.renders, 2, 'world, then the overlays on top');
   const s = r.getStats();
   for (const k of ['drawCalls', 'triangles', 'entities', 'updateMs']) assert.ok(Number.isFinite(s[k]), k);
   assert.ok(s.entities >= mine.length);

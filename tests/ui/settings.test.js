@@ -41,7 +41,7 @@ test('defaults: random 3-digit player name, volume 0.7, medium quality, edge scr
 test('saveSettings merges, validates, persists and notifies', () => {
   const seen = [];
   const off = onSettingsChange((s, changed) => seen.push([s.volume, changed]));
-  const next = saveSettings({ volume: 0.25, quality: 'ultra', edgeScroll: 'yes', name: '  Zeus   Fan  ' });
+  const next = saveSettings({ volume: 0.25, quality: 'extreme', edgeScroll: 'yes', name: '  Zeus   Fan  ' });
   assert.equal(next.volume, 0.25);
   assert.equal(next.quality, 'medium'); // invalid value ignored
   assert.equal(next.edgeScroll, true); // non-boolean ignored

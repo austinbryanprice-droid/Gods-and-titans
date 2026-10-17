@@ -4,7 +4,8 @@
 //
 //   node tools/shot-render.mjs [--port 8201] [--out DIR] [--only name1,name2] [--list]
 //                              [--width 1600] [--height 900] [--perf] [--units 300]
-//                              [--extra "name=query;name2=query2"]
+//                              [--extra "name=query;name2=query2"] [--quality low|medium|high|ultra]
+//                              [--js "code run in the page before each shot's frames"]
 //
 // Uses the static server on --port when one answers there, otherwise starts
 // node_modules/.bin/http-server itself. Every shot runs the harness in manual
@@ -33,6 +34,8 @@ const width = Number(opt('width', '1600'));
 const height = Number(opt('height', '900'));
 const only = opt('only', '') ? opt('only', '').split(',').map((s) => s.trim()) : null;
 const perfOnly = args.includes('--perf');
+const quality = opt('quality', '');
+const preJs = opt('js', '');
 
 /** name -> { q, frames: [{ advance?, js?, suffix? }] } */
 const SHOTS = {
@@ -148,7 +151,8 @@ async function openHarness(browser, q, w = width, h = height) {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(`http://localhost:${port}/tools/render-harness.html?manual=1&${q}`);
+  const qq = quality && !/(^|&)quality=/.test(q) ? `${q}&quality=${quality}` : q;
+  await page.goto(`http://localhost:${port}/tools/render-harness.html?manual=1&${qq}`);
   await page.waitForFunction(() => window.harness && window.harness.ready === true, null, { timeout: 240000 });
   return { page, errors };
 }
@@ -196,6 +200,7 @@ async function main() {
         const t0 = Date.now();
         const { page, errors } = await openHarness(browser, shot.q, shot.w, shot.h);
         const frames = shot.frames || [{}];
+        if (preJs) await page.evaluate((code) => { (0, eval)(code); }, preJs);
         for (let i = 0; i < frames.length; i++) {
           const f = frames[i];
           if (f.js) await page.evaluate((code) => { (0, eval)(code); }, f.js);

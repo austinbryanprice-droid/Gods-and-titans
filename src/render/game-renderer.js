@@ -24,14 +24,34 @@ import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
+import { PostFX } from './post.js';
+import { createEnvironment, setCloudShadows, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
+import { FOW_UNIFORMS } from './fog.js';
 
+// Low draws straight to the canvas; the others go through the post-processing
+// pipeline (post.js: MSAA, bloom, + ambient occlusion on high / ultra), which
+// also does the antialiasing, so the canvas itself never needs it.
+// `minScale` bounds adaptive resolution (scene drawn below the canvas size
+// while frames are slow); `vfx` is the VFX tier (it has no 'ultra').
 const QUALITY = {
-  low: { pixelRatio: 1, shadows: false, shadowSize: 0, antialias: false },
-  medium: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, antialias: true },
-  high: { pixelRatio: 2, shadows: true, shadowSize: 4096, antialias: true },
+  low: { pixelRatio: 1, shadows: false, shadowSize: 0, shadowRadius: 1, clouds: 0, minScale: 1, vfx: 'low' },
+  medium: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, shadowRadius: 2.2, clouds: 0.3, minScale: 0.6, vfx: 'medium' },
+  high: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 2.6, clouds: 0.34, minScale: 0.6, vfx: 'high' },
+  ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 3, clouds: 0.34, minScale: 0.7, vfx: 'high' },
 };
+export const QUALITY_LEVELS = Object.keys(QUALITY);
 
-const SUN_DIR = new THREE.Vector3(-30, 60, 40).normalize();
+// Light rig (linear, tone-mapped by post.js / the low path's Neutral mapping)
+const SUN_COLOR = 0xfff1dc;
+const SUN_INTENSITY = 2.6;
+const SKY_COLOR = 0xd6e4ff;
+const GROUND_COLOR = 0x5a5638;
+const HEMI_INTENSITY = 0.85;
+const ENV_INTENSITY = 0.55;
+const EXPOSURE = 1.0;
+// Adaptive resolution: frame times (ms, smoothed) that lower / raise the scene scale
+const SLOW_FRAME_MS = 24;
+const FAST_FRAME_MS = 15;
 const AIR_RING_LIFT = AIR_HOVER_HEIGHT - 0.14; // flyers' rings: just under the hovering body
 const DEATH_SECONDS = 1.65; // keep animating 'dead' this long (topple + sink)
 const COLLAPSE_SECONDS = 1.6; // destroyed buildings sink this long
@@ -116,23 +136,33 @@ export class GameRenderer {
 
     // ---- WebGL
     this.ownsWebgl = !webgl;
-    this.renderer = webgl || new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance', stencil: false });
+    this.renderer = webgl || new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.setClearColor(0x050605, 1);
     this.renderer.shadowMap.enabled = Q.shadows;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap; // (three r186 dropped PCFSoftShadowMap)
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // soft: vogel-disk taps scaled by shadow.radius
     this.renderer.shadowMap.autoUpdate = true;
+    this.renderer.toneMappingExposure = EXPOSURE;
+    if (this.renderer.info) this.renderer.info.autoReset = false; // several render() calls per frame
+    // the post pipeline needs a real WebGLRenderer (tests draw through a stub)
+    this.post = typeof this.renderer.setRenderTarget === 'function' ? new PostFX(this.renderer, this.quality) : null;
+    this.renderScale = 1;
+    this.frameMs = 16.7;
+    this.lastRenderAt = 0;
+    this.scaleHold = 0;
     this.applyPixelRatio();
 
     // ---- scene, lights
     const scene = (this.scene = new THREE.Scene());
     scene.name = 'game';
     scene.background = new THREE.Color(0x050605);
-    scene.fog = new THREE.Fog(0x9db3c2, 60, 150);
-    this.hemi = new THREE.HemisphereLight(0xdfe9ff, 0x4a5a32, 1.15);
+    // aerial haze: only the far edge of the view at the farthest zoom reaches it
+    scene.fog = new THREE.Fog(0xaebfcc, 44, 170);
+    this.hemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, HEMI_INTENSITY);
     scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.45);
+    this.sun = new THREE.DirectionalLight(SUN_COLOR, SUN_INTENSITY);
     this.sun.castShadow = Q.shadows;
     this.sun.shadow.mapSize.set(Q.shadowSize || 1024, Q.shadowSize || 1024);
+    this.sun.shadow.radius = Q.shadowRadius;
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.03;
     this.sun.shadow.camera.near = 1;
@@ -140,6 +170,23 @@ export class GameRenderer {
     this.shadowR = 0;
     scene.add(this.sun);
     scene.add(this.sun.target);
+    // image-based lighting from a procedural sky (reflections on metal, stone, lacquer)
+    this.env = createEnvironment(this.ownsWebgl ? this.renderer : null);
+    if (this.env) {
+      scene.environment = this.env.texture;
+      scene.environmentIntensity = ENV_INTENSITY;
+    }
+    setCloudShadows(Q.clouds);
+
+    // Overlays that must keep their exact colors (health bars, selection rings,
+    // markers, text, rally flags, placement ghosts, status icons) live in their
+    // own scene, drawn after post-processing, depth-tested against the world.
+    const overlayScene = (this.overlayScene = new THREE.Scene());
+    overlayScene.name = 'overlays';
+    this.overlayHemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, 1.15);
+    this.overlaySun = new THREE.DirectionalLight(SUN_COLOR, 2.45);
+    this.overlaySun.position.copy(SUN_DIR).multiplyScalar(60);
+    overlayScene.add(this.overlayHemi, this.overlaySun);
 
     // ---- camera
     const cam = new THREE.PerspectiveCamera(CAMERA_DEFAULTS.fov, 16 / 9, 0.5, 400);
@@ -167,17 +214,21 @@ export class GameRenderer {
     this.entityRoot = new THREE.Group();
     this.entityRoot.name = 'entities';
     scene.add(this.entityRoot);
+    // world-space overlays that belong to the lit, post-processed picture
+    this.groundFxRoot = new THREE.Group();
+    this.groundFxRoot.name = 'ground-fx';
+    scene.add(this.groundFxRoot);
     this.overlayRoot = new THREE.Group();
     this.overlayRoot.name = 'overlays';
-    scene.add(this.overlayRoot);
+    overlayScene.add(this.overlayRoot);
 
-    this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: this.quality });
+    this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: Q.vfx });
 
-    this.blobs = new BlobLayer(this.overlayRoot);
+    this.blobs = new BlobLayer(this.groundFxRoot);
     this.rings = new RingLayer(this.overlayRoot);
-    this.stars = new StarLayer(this.overlayRoot);
+    this.stars = new StarLayer(this.groundFxRoot);
     this.status = new StatusLayer(this.overlayRoot);
-    this.fires = new FireLayer(this.overlayRoot);
+    this.fires = new FireLayer(this.groundFxRoot);
     this.bars = new BarLayer(this.overlayRoot);
     this.markers = new MarkerLayer(this.overlayRoot);
     this.texts = new FloatingTextLayer(this.overlayRoot);
@@ -229,6 +280,13 @@ export class GameRenderer {
   applyPixelRatio() {
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     this.renderer.setPixelRatio(Math.min(dpr, QUALITY[this.quality].pixelRatio));
+  }
+
+  /** Size the post-processing targets to the canvas' drawing buffer. */
+  syncPostSize() {
+    if (!this.post || typeof this.renderer.getDrawingBufferSize !== 'function') return;
+    const v = this.renderer.getDrawingBufferSize(this._dbs || (this._dbs = new THREE.Vector2()));
+    this.post.setSize(v.x, v.y);
   }
 
   buildForest() {
@@ -322,7 +380,16 @@ export class GameRenderer {
         }
       });
       this.scene.add(group);
-      if (typeof this.renderer.compile === 'function') this.renderer.compile(this.scene, this.threeCamera);
+      if (typeof this.renderer.compile === 'function') {
+        // compile for the target the world is drawn into (linear HDR) or the canvas (low)
+        const target = this.post && this.post.enabled ? this.post.sceneTarget() : null;
+        const prevTone = this.renderer.toneMapping;
+        if (target) this.renderer.setRenderTarget(target);
+        else this.renderer.toneMapping = THREE.NeutralToneMapping;
+        this.renderer.compile(this.scene, this.threeCamera);
+        if (target) this.renderer.setRenderTarget(null);
+        this.renderer.toneMapping = prevTone;
+      }
     } catch (err) {
       console.error('[render] warm-up failed', err);
     } finally {
@@ -377,6 +444,7 @@ export class GameRenderer {
     this.applyPixelRatio(); // browser zoom or another screen changes devicePixelRatio
     this.renderer.setSize(this.viewW, this.viewH, !!(this.canvas && this.canvas.style));
     this.camera.setViewport(this.viewW, this.viewH);
+    this.syncPostSize();
   }
 
   /**
@@ -388,10 +456,13 @@ export class GameRenderer {
     if (!QUALITY[q] || q === this.quality) return;
     this.quality = q;
     const Q = QUALITY[q];
+    if (this.post) this.post.setQuality(q);
+    this.setRenderScale(1);
     this.resize(this.viewW, this.viewH);
     const was = this.renderer.shadowMap.enabled;
     this.renderer.shadowMap.enabled = Q.shadows;
     this.sun.castShadow = Q.shadows;
+    this.sun.shadow.radius = Q.shadowRadius;
     if (Q.shadows) {
       this.sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize);
       if (this.sun.shadow.map) {
@@ -402,14 +473,50 @@ export class GameRenderer {
     if (was !== Q.shadows) this.scene.traverse((o) => {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
     });
-    this.vfx.setQuality(q);
+    setCloudShadows(Q.clouds);
+    this.vfx.setQuality(Q.vfx);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
   }
 
-  /** Unit meshes cast real shadows on high only; blob shadows ground them everywhere. */
+  /** Unit meshes cast real shadows on high and ultra; blob shadows ground them everywhere. */
   unitsCastShadows() {
-    return this.quality === 'high' && QUALITY.high.shadows;
+    return (this.quality === 'high' || this.quality === 'ultra') && QUALITY[this.quality].shadows;
+  }
+
+  /** Scene resolution relative to the canvas (adaptive resolution; post-processed qualities only). */
+  setRenderScale(s) {
+    const Q = QUALITY[this.quality];
+    s = clamp(s, Q.minScale, 1);
+    this.renderScale = s;
+    if (this.post) this.post.setRenderScale(s);
+  }
+
+  /**
+   * Adaptive resolution: while frames take longer than SLOW_FRAME_MS (smoothed),
+   * draw the scene a step smaller; when they are fast again, step back up.
+   * Only the 3D scene scales (the composite sharpens it back to the canvas);
+   * overlays and the HUD stay crisp.
+   */
+  adaptResolution(t) {
+    const last = this.lastRenderAt;
+    this.lastRenderAt = t;
+    if (!last || !this.post || !this.post.enabled) return;
+    const ms = t - last;
+    if (!(ms > 0) || ms > 250) return; // tab was hidden, paused, or a hitch
+    this.frameMs += (ms - this.frameMs) * 0.05;
+    if (this.scaleHold > 0) {
+      this.scaleHold--;
+      return;
+    }
+    const Q = QUALITY[this.quality];
+    if (this.frameMs > SLOW_FRAME_MS && this.renderScale > Q.minScale + 0.01) {
+      this.setRenderScale(this.renderScale - 0.1);
+      this.scaleHold = 90; // let the average settle before deciding again
+    } else if (this.frameMs < FAST_FRAME_MS && this.renderScale < 0.99) {
+      this.setRenderScale(this.renderScale + 0.1);
+      this.scaleHold = 240;
+    }
   }
 
   setSelection(ids) {
@@ -825,6 +932,7 @@ export class GameRenderer {
     this.flushPendingHits();
 
     this.fow.update(dt);
+    WORLD_UNIFORMS.uTime.value = this.time;
     this.terrain.update(this.time);
     setBuildingTime(this.time);
     this.vfx.update(dt);
@@ -1244,7 +1352,9 @@ export class GameRenderer {
     const bars = this.bars;
     const zk = this.zoomK();
     const blobs = this.blobs;
-    const blobAlpha = this.unitsCastShadows() ? 0.2 : 0.36;
+    let blobAlpha = this.unitsCastShadows() ? 0.2 : 0.36;
+    // blended in linear light (post-processed qualities): same perceived darkening
+    if (this.post && this.post.enabled) blobAlpha = 1 - (1 - blobAlpha) ** 2.2;
     const stars = this.stars;
     rings.begin(this.time);
     bars.begin();
@@ -1470,7 +1580,28 @@ export class GameRenderer {
 
   render() {
     if (this.disposed) return;
-    this.renderer.render(this.scene, this.threeCamera);
+    const r = this.renderer;
+    if (r.info && typeof r.info.reset === 'function') r.info.reset();
+    if (this.post && this.post.enabled) {
+      this.adaptResolution(now());
+      // materials write linear values into the HDR target; a little under 2.2
+      // because the tone curve's toe darkens the dimmed (remembered) ground further
+      FOW_UNIFORMS.uFowPow.value = 1.7;
+      this.post.look.exposure = EXPOSURE;
+      this.post.render(this.scene, this.threeCamera, this.overlayScene);
+      return;
+    }
+    // low: straight to the canvas, tone mapped in the material shaders; then the overlays, untouched
+    FOW_UNIFORMS.uFowPow.value = 1;
+    const prevTone = r.toneMapping;
+    const prevAuto = r.autoClear;
+    r.toneMapping = THREE.NeutralToneMapping;
+    r.render(this.scene, this.threeCamera);
+    r.toneMapping = THREE.NoToneMapping;
+    r.autoClear = false;
+    r.render(this.overlayScene, this.threeCamera);
+    r.autoClear = prevAuto;
+    r.toneMapping = prevTone;
   }
 
   // ------------------------------------------------------------------ picking
@@ -1642,7 +1773,13 @@ export class GameRenderer {
     if (this.sun.shadow.map) this.sun.shadow.map.dispose();
     this.sun.dispose();
     this.hemi.dispose();
+    this.overlaySun.dispose();
+    this.overlayHemi.dispose();
+    if (this.post) this.post.dispose();
+    if (this.env) this.env.dispose();
+    this.scene.environment = null;
     this.scene.clear();
+    this.overlayScene.clear();
     clearUnitModelCache();
     clearBuildingCaches();
     if (this.ownsWebgl) {
