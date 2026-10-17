@@ -14,12 +14,21 @@
 // per (building, pantheon style + colors, tier). Team-colored parts store a gray
 // shade that a shared per-team-color material multiplies.
 //
+// Materials are physically based: every part also carries what it is made of
+// (`aSurf`: roughness, metalness, a surface class and how high the vertex sits
+// above the part's own foot). Without UVs, the fragment shader draws stylized
+// detail from the object-space position and normal per surface class (stone
+// courses, bricks, planks, roof-tile rows, thatch), plus grime and ambient
+// occlusion near the ground and where a part stands on another. Glowing parts
+// (fires, lanterns, runes, lit doorways) store HDR colors so they bloom.
+//
 // Styles (pantheon.style): roof drives the silhouette, wall the materials and
 // ornament the signature details. All values of DESIGN 4.7 are supported.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import { BUILDINGS, GOLD_MINE } from '../../data/buildings.js';
+import { patchWorldMaterial } from '../shading.js';
 
 /** Height of the foundation top above the model origin (ground level). */
 export const PLINTH = 0.1;
@@ -36,7 +45,12 @@ export const DEFAULT_COLORS = { wall: '#d8d0c0', roof: '#8a4a3a', trim: '#4a6a9a
 // ---------------------------------------------------------------------------
 
 const WHITE = new THREE.Color(1, 1, 1);
-const C = (c) => (c instanceof THREE.Color ? c.clone() : new THREE.Color(c));
+/** Copy of a color (a Color keeps its surface tag, see `made`). */
+function C(c) {
+  const o = c instanceof THREE.Color ? c.clone() : new THREE.Color(c);
+  if (c && c.surf) o.surf = c.surf;
+  return o;
+}
 const mix = (a, b, t) => C(a).lerp(C(b), t);
 const shade = (c, k) => C(c).multiplyScalar(k);
 const tint = (c, t) => C(c).lerp(WHITE, t);
@@ -48,7 +62,58 @@ function luma(c) {
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // ---------------------------------------------------------------------------
-// geometry primitives (non-indexed, position only; colors are added by Kit)
+// surfaces: what a part is made of
+// ---------------------------------------------------------------------------
+
+/**
+ * Surface classes: the procedural detail the fragment shader draws (keep in
+ * sync with SURFACE_GLSL). WOOD resolves per part to planks (WOOD_*) or a beam
+ * (BEAM_*) with the grain along the part's long axis.
+ */
+const CLS = {
+  PLAIN: 0, STONE: 1, SANDSTONE: 2, MARBLE: 3, PLASTER: 4, MUDBRICK: 5, BRICK: 6,
+  WOOD_Y: 7, WOOD_X: 8, WOOD_Z: 9, TILE: 10, TURF: 11, THATCH: 12, METAL: 13, GOLD: 14,
+  CLOTH: 15, LACQUER: 16, ROCK: 17, EARTH: 18, BEAM_Y: 19, BEAM_X: 20, BEAM_Z: 21, WOOD: -1,
+};
+const surf = (cls, rough, metal = 0) => Object.freeze({ cls, rough, metal });
+/** Surface tags: class + base roughness / metalness. */
+const SURF = {
+  plain: surf(CLS.PLAIN, 0.7),
+  paint: surf(CLS.PLAIN, 0.55),
+  stone: surf(CLS.STONE, 0.82),
+  sandstone: surf(CLS.SANDSTONE, 0.86),
+  marble: surf(CLS.MARBLE, 0.38),
+  plaster: surf(CLS.PLASTER, 0.9),
+  mudbrick: surf(CLS.MUDBRICK, 0.93),
+  brick: surf(CLS.BRICK, 0.8),
+  glazed: surf(CLS.BRICK, 0.3),
+  wood: surf(CLS.WOOD, 0.8),
+  tile: surf(CLS.TILE, 0.6),
+  glazedTile: surf(CLS.TILE, 0.42),
+  slateTile: surf(CLS.TILE, 0.58),
+  turf: surf(CLS.TURF, 0.97),
+  thatch: surf(CLS.THATCH, 0.95),
+  // metals keep half their diffuse color: at RTS distance most facets mirror
+  // only the dim ground or sky, and fully metallic trim would read dark
+  metal: surf(CLS.METAL, 0.42, 0.55),
+  gold: surf(CLS.GOLD, 0.34, 0.5),
+  cloth: surf(CLS.CLOTH, 0.92),
+  lacquer: surf(CLS.LACQUER, 0.3),
+  rock: surf(CLS.ROCK, 0.86),
+  earth: surf(CLS.EARTH, 0.97),
+  water: surf(CLS.PLAIN, 0.08),
+};
+
+/** A copy of `color` tagged as made of `s` (the tag survives C, shade, tint and mix). */
+function made(color, s) {
+  const c = C(color);
+  c.surf = s;
+  return c;
+}
+
+// ---------------------------------------------------------------------------
+// geometry primitives (non-indexed, position only — or with smooth normals
+// for round parts; colors and surfaces are added by Kit)
 // ---------------------------------------------------------------------------
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -57,13 +122,22 @@ const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
-function prep(g) {
+/**
+ * Non-indexed, position-only copy of a three.js geometry. `smooth` keeps its
+ * normals (round parts shade smoothly; transforms keep them right). Parts
+ * without normals get flat face normals in Kit.add, so a part whose vertices
+ * are moved afterwards must not be smooth.
+ */
+function prep(g, smooth = false) {
   const n = g.index ? g.toNonIndexed() : g;
-  for (const key of Object.keys(n.attributes)) if (key !== 'position') n.deleteAttribute(key);
+  for (const key of Object.keys(n.attributes)) if (key !== 'position' && !(smooth && key === 'normal')) n.deleteAttribute(key);
   n.morphAttributes = {};
   n.clearGroups();
   return n;
 }
+
+/** Cylinders and cones with this many sides or more are shaded round. */
+const SMOOTH_SEGMENTS = 6;
 
 /** Box w×h×d standing on y (bottom face at y), centered on x/z, turned by ry. */
 export function box(w, h, d, x = 0, y = 0, z = 0, ry = 0) {
@@ -86,32 +160,32 @@ export function frustum(w, h, d, kx, x = 0, y = 0, z = 0, kz = kx) {
   return g.translate(x, y, z);
 }
 
-/** Cylinder standing on y. A flat side faces +Z when `flat` is set. */
+/** Cylinder standing on y. A flat side faces +Z when `flat` is set. Round-shaded from SMOOTH_SEGMENTS sides. */
 export function cyl(rt, rb, h, seg = 6, x = 0, y = 0, z = 0, open = false, flat = false) {
-  const g = prep(new THREE.CylinderGeometry(rt, rb, h, seg, 1, open));
+  const g = prep(new THREE.CylinderGeometry(rt, rb, h, seg, 1, open), seg >= SMOOTH_SEGMENTS);
   g.translate(0, h / 2, 0);
   if (flat) g.rotateY(PI / seg);
   return g.translate(x, y, z);
 }
 
-/** Cone standing on y. */
+/** Cone standing on y. Round-shaded from SMOOTH_SEGMENTS sides. */
 export function cone(r, h, seg = 6, x = 0, y = 0, z = 0, open = false, flat = false) {
-  const g = prep(new THREE.ConeGeometry(r, h, seg, 1, open));
+  const g = prep(new THREE.ConeGeometry(r, h, seg, 1, open), seg >= SMOOTH_SEGMENTS);
   g.translate(0, h / 2, 0);
   if (flat) g.rotateY(PI / seg);
   return g.translate(x, y, z);
 }
 
-/** Sphere centered at (x, y, z), optionally squashed vertically. */
+/** Sphere centered at (x, y, z), optionally squashed vertically (round-shaded). */
 export function ball(r, x = 0, y = 0, z = 0, ws = 6, hs = 4, sy = 1) {
-  const g = prep(new THREE.SphereGeometry(r, ws, hs));
+  const g = prep(new THREE.SphereGeometry(r, ws, hs), true);
   if (sy !== 1) g.scale(1, sy, 1);
   return g.translate(x, y, z);
 }
 
-/** Half sphere of radius r and height h standing on y. */
+/** Half sphere of radius r and height h standing on y (round-shaded). */
 export function dome(r, h, x = 0, y = 0, z = 0, ws = 8, hs = 3) {
-  const g = prep(new THREE.SphereGeometry(r, ws, hs, 0, PI * 2, 0, PI / 2));
+  const g = prep(new THREE.SphereGeometry(r, ws, hs, 0, PI * 2, 0, PI / 2), true);
   g.scale(1, h / r, 1);
   return g.translate(x, y, z);
 }
@@ -290,16 +364,34 @@ function hipLoft({ cx = 0, cz = 0, y, hw, hd, tw = 0, td = 0, h, steps = 3, pi =
 // Kit: collects colored parts into buckets and merges them
 // ---------------------------------------------------------------------------
 
+/** Contact shading needs the height above a part's foot: stored / CONTACT_RANGE in aSurf.w (8 bits). */
+const CONTACT_RANGE = 2.5;
+
+// HDR gains of glowing parts (linear color × gain): over ~1 they bloom. Flames
+// stay moderate (tone mapping turns very bright orange pale), their cores hot.
+const GLOW = { flame: 1.35, core: 2.4, lamp: 2.1, paper: 1.7, halo: 1.9, rune: 1.7, portal: 2.3 };
+// Lit doorways and windows: a warm, dim interior (linear), brighter toward the floor.
+const INTERIOR_LOW = new THREE.Color(0.075, 0.028, 0.009);
+const INTERIOR_HIGH = new THREE.Color(0.008, 0.005, 0.004);
+
 class Kit {
   constructor(seed) {
     this.rng = new RNG(seed);
     this.parts = { base: [], body: [], team: [], glow: [] };
+    this.count = 0;
   }
 
-  add(bucket, g, color, jit = 0.035, anim = null) {
+  /**
+   * Add a part. Colors get a small per-triangle jitter; `anim` (team / glow)
+   * maps a vertex to aAnim (wave or flicker amount, twinkle seed); `gain`
+   * scales glowing colors into HDR. The part's surface comes from the color's
+   * tag (see `made`), else a default per bucket.
+   */
+  add(bucket, g, color, jit = 0.035, anim = null, gain = 1) {
     const pos = g.attributes.position;
     const n = pos.count;
     const c = bucket === 'team' && typeof color === 'number' ? gray(color) : C(color);
+    if (gain !== 1) c.multiplyScalar(gain);
     const col = new Float32Array(n * 3);
     for (let i = 0; i < n; i += 3) {
       const k = jit ? 1 + (this.rng.next() * 2 - 1) * jit : 1;
@@ -321,8 +413,54 @@ class Kit {
       }
       g.setAttribute('aAnim', new THREE.BufferAttribute(an, 2));
     }
+    // flat face normals unless the primitive kept smooth ones
+    if (!g.attributes.normal) g.computeVertexNormals();
+    this.surface(g, bucket, (color && color.surf) || (bucket === 'team' ? (anim ? SURF.cloth : SURF.paint) : bucket === 'base' ? SURF.stone : SURF.plain), !!anim);
     this.parts[bucket].push(g);
     return g;
+  }
+
+  /**
+   * aSurf (normalized bytes): x roughness, y metalness, z class × 8 + a per-part
+   * pattern offset, w the vertex's height above the part's foot (contact
+   * shading; 1 = none for small, hanging or foundation parts).
+   */
+  surface(g, bucket, s, hanging) {
+    const p = g.attributes.position;
+    const n = p.count;
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (z < z0) z0 = z;
+      if (z > z1) z1 = z;
+    }
+    const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    let cls = s.cls;
+    if (cls === CLS.WOOD) {
+      // grain along the longest side; parts thinner than a plank are single beams
+      const axis = dy >= Math.max(dx, dz) * 0.9 ? 0 : dx >= dz ? 1 : 2;
+      const thin = axis === 0 ? Math.max(dx, dz) < 0.15 : axis === 1 ? Math.max(dy, dz) < 0.15 : Math.max(dx, dy) < 0.15;
+      cls = (thin ? [CLS.BEAM_Y, CLS.BEAM_X, CLS.BEAM_Z] : [CLS.WOOD_Y, CLS.WOOD_X, CLS.WOOD_Z])[axis];
+    }
+    const id = this.count++;
+    const code = cls * 8 + ((id * 5 + 3) & 7);
+    // a little roughness variety between parts (stones, planks), rocks more
+    const rj = (((id * 37 + 11) % 17) / 16 - 0.5) * (cls === CLS.ROCK ? 0.2 : 0.06);
+    const rough = Math.round(clamp01(s.rough + rj) * 255);
+    const metal = Math.round(clamp01(s.metal) * 255);
+    const contact = bucket !== 'base' && bucket !== 'glow' && !hanging && dy >= 0.2;
+    const a = new Uint8Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      a[i * 4] = rough;
+      a[i * 4 + 1] = metal;
+      a[i * 4 + 2] = code;
+      a[i * 4 + 3] = contact ? Math.round(clamp01((p.getY(i) - y0) / CONTACT_RANGE) * 255) : 255;
+    }
+    g.setAttribute('aSurf', new THREE.BufferAttribute(a, 4, true));
   }
 
   /** Body part (lit, vertex colored). */
@@ -335,9 +473,22 @@ class Kit {
     return this.add('team', g, gray(shadeK), 0.02, anim);
   }
 
-  /** Glowing (unlit) part. */
-  g(g, color, anim = null) {
-    return this.add('glow', g, color, 0, anim);
+  /** Glowing (unlit) part; gain > 1 makes it bloom. */
+  g(g, color, anim = null, gain = 1) {
+    return this.add('glow', g, color, 0, anim, gain);
+  }
+
+  /** Lit doorway / window opening: a glowing interior, warm at the floor (y0), dark at the lintel (y0 + h). */
+  hole(g, y0, h) {
+    this.add('glow', g, INTERIOR_HIGH, 0);
+    const p = g.attributes.position;
+    const col = g.attributes.color;
+    // a pane only has floor and lintel vertices: a linear ramp between them
+    for (let i = 0; i < p.count; i++) {
+      const t = 1 - clamp01((p.getY(i) - y0) / Math.max(h, 1e-3));
+      col.setXYZ(i, INTERIOR_HIGH.r + (INTERIOR_LOW.r - INTERIOR_HIGH.r) * t, INTERIOR_HIGH.g + (INTERIOR_LOW.g - INTERIOR_HIGH.g) * t, INTERIOR_HIGH.b + (INTERIOR_LOW.b - INTERIOR_HIGH.b) * t);
+    }
+    return g;
   }
 
   /** Foundation part. */
@@ -358,29 +509,16 @@ function finishKit(kit) {
       out[name] = null;
       continue;
     }
+    // normals were set per part (flat, or smooth for round parts); ground
+    // and contact shading happen per pixel in the shader
     const g = mergeGeometries(list, false);
     for (const p of list) p.dispose();
-    if (name === 'body') applyGroundShade(g);
-    g.computeVertexNormals();
     g.computeBoundingBox();
     g.computeBoundingSphere();
     out[name] = g;
     out.triangles += g.attributes.position.count / 3;
   }
   return out;
-}
-
-// Darken vertices near the ground a little (cheap ambient occlusion).
-function applyGroundShade(g) {
-  const p = g.attributes.position;
-  const c = g.attributes.color;
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i);
-    if (y > 0.55) continue;
-    const t = clamp01((y - PLINTH) / 0.45);
-    const k = 0.8 + 0.2 * t * t * (3 - 2 * t);
-    c.setXYZ(i, c.getX(i) * k, c.getY(i) * k, c.getZ(i) * k);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -391,16 +529,137 @@ const TIME = { value: 0 };
 const MATS = {};
 const TEAM_MATS = new Map();
 const VORTEX_MATS = new Map();
+// a faint sky-colored rim on lit parts (patchWorldMaterial), so silhouettes read against the ground
+const RIM = 0.12;
 
+// ---- detail texture: the patterns the surface shader draws, tileable, mipmapped
+
+const DETAIL = { value: null };
+const DETAIL_MEAN = { value: new THREE.Vector4(0.5, 0.5, 0.5, 0.5) }; // channel averages (zero-mean patterns)
+
+/**
+ * 256² RGBA: (r) bevelled blocks in a running bond, 8 rows × 4 blocks, 0 in
+ * the joints; (g) a random value per block; (b) fine value noise; (a) streaks
+ * running along U (wood grain, straw, brush marks). Made on first use.
+ */
+function detailTexture() {
+  if (DETAIL.value) return DETAIL.value;
+  const S = 256;
+  const data = new Uint8Array(S * S * 4);
+  const hash = (x, y, s) => {
+    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 2246822519);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+  // value noise, periodic with px × py cells over the tile
+  const vn = (fx, fy, s, px, py) => {
+    const x = fx * px;
+    const y = fy * py;
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const tx = x - x0;
+    const ty = y - y0;
+    const sx = tx * tx * (3 - 2 * tx);
+    const sy = ty * ty * (3 - 2 * ty);
+    const xa = ((x0 % px) + px) % px;
+    const xb = (xa + 1) % px;
+    const ya = ((y0 % py) + py) % py;
+    const yb = (ya + 1) % py;
+    const a = hash(xa, ya, s);
+    const b = hash(xb, ya, s);
+    const c = hash(xa, yb, s);
+    const d = hash(xb, yb, s);
+    return a + (b - a) * sx + (c - a + (d - c - b + a) * sx) * sy;
+  };
+  const smooth = (e0, e1, v) => {
+    const t = clamp01((v - e0) / (e1 - e0));
+    return t * t * (3 - 2 * t);
+  };
+  const ROWS = 8;
+  const COLS = 4;
+  const rh = S / ROWS;
+  const bw = S / COLS;
+  // block values: an even spread (mean ½) dealt out in a scrambled order
+  const ids = Array.from({ length: ROWS * COLS }, (_, i) => i).sort((a, b) => hash(a, 0, 7) - hash(b, 0, 7));
+  const chan = [new Float32Array(S * S), new Float32Array(S * S), new Float32Array(S * S), new Float32Array(S * S)];
+  for (let y = 0; y < S; y++) {
+    const fy = (y + 0.5) / S;
+    const row = Math.floor(y / rh);
+    const ly = y + 0.5 - row * rh;
+    for (let x = 0; x < S; x++) {
+      const fx = (x + 0.5) / S;
+      const sx = (x + (row & 1 ? bw / 2 : 0)) % S;
+      const col = Math.floor(sx / bw);
+      const lx = sx + 0.5 - col * bw;
+      // distance to the block edge (texels), corners rounded, edges a little chipped
+      const ex = Math.min(lx, bw - lx);
+      const ey = Math.min(ly, rh - ly);
+      let d = ex < 4 && ey < 4 ? 4 - Math.hypot(4 - ex, 4 - ey) : Math.min(ex, ey);
+      d += (vn(fx, fy, 3, 64, 64) - 0.5) * 1.8;
+      const id = (ids[row * COLS + col] + 0.5) / (ROWS * COLS);
+      const blk = smooth(0.5, 3.2, d) * (0.92 + 0.08 * hash(col, row, 9)) * (0.95 + 0.05 * vn(fx, fy, 5, 32, 32));
+      let n = 0;
+      let amp = 0.5;
+      let norm = 0;
+      for (let o = 0; o < 4; o++) {
+        const p = 8 << o;
+        n += vn(fx, fy, 11 + o, p, p) * amp;
+        norm += amp;
+        amp *= 0.5;
+      }
+      n /= norm;
+      // streaks: slow along U (x), fast along V (y)
+      const st = (vn(fx, fy, 21, 2, 32) * 0.55 + vn(fx, fy, 22, 4, 64) * 0.3 + vn(fx, fy, 23, 8, 128) * 0.15);
+      const i = y * S + x;
+      chan[0][i] = blk;
+      chan[1][i] = id;
+      chan[2][i] = (n - 0.5) * 1.7;
+      chan[3][i] = (st - 0.5) * 2;
+    }
+  }
+  // noise and streaks centered on ½, so patterns shift a surface's tone without changing its average
+  for (const c of [chan[2], chan[3]]) {
+    let m = 0;
+    for (let i = 0; i < c.length; i++) m += c[i];
+    m /= c.length;
+    for (let i = 0; i < c.length; i++) c[i] = c[i] - m + 0.5;
+  }
+  const mean = [0, 0, 0, 0];
+  for (let i = 0; i < S * S; i++) {
+    for (let k = 0; k < 4; k++) {
+      const v = Math.round(clamp01(chan[k][i]) * 255);
+      data[i * 4 + k] = v;
+      mean[k] += v / 255;
+    }
+  }
+  DETAIL_MEAN.value.set(mean[0] / (S * S), mean[1] / (S * S), mean[2] / (S * S), mean[3] / (S * S));
+  const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 4; // walls are mostly seen at a slant
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.name = 'building-detail';
+  tex.needsUpdate = true;
+  DETAIL.value = tex;
+  return tex;
+}
+
+// ---- shader chunks
+
+const ANIM_PARS = '\nattribute vec2 aAnim;\nuniform float uBldTime;';
 const WAVE_GLSL = `
 if (aAnim.x > 0.0) {
-  float wph = uTime * 3.6 + position.x * 6.5 + position.y * 2.3;
+  float wph = uBldTime * 3.6 + position.x * 6.5 + position.y * 2.3;
   transformed.z += sin(wph) * 0.055 * aAnim.x;
   transformed.y += cos(wph * 0.8) * 0.012 * aAnim.x;
 }`;
 const FLICKER_GLSL = `
 if (aAnim.x > 0.0) {
-  float fph = uTime * 9.0 + position.x * 17.0 + position.z * 13.0;
+  float fph = uBldTime * 9.0 + position.x * 17.0 + position.z * 13.0;
   transformed.x += sin(fph + position.y * 21.0) * 0.022 * aAnim.x;
   transformed.z += cos(fph * 1.13 + position.y * 17.0) * 0.022 * aAnim.x;
   transformed.y += (0.5 + 0.5 * sin(fph * 0.73)) * 0.06 * aAnim.x;
@@ -408,69 +667,356 @@ if (aAnim.x > 0.0) {
 const TWINKLE_GLSL = `
 #ifdef USE_COLOR
 if (aAnim.y > 0.0) {
-  float tw = sin(uTime * 2.3 + aAnim.y * 41.0);
+  float tw = sin(uBldTime * 2.3 + aAnim.y * 41.0);
   vColor.rgb *= 0.72 + 1.3 * pow(max(tw, 0.0), 10.0);
 }
 #endif`;
+// Glowing colors are HDR (bloom in the post pipeline). Drawn straight to the
+// canvas (low quality, tone mapped per material, no bloom) the part above 1
+// is compressed instead, so fires stay orange rather than turning white.
+const GLOW_LOW_PATH = `
+#ifdef TONE_MAPPING
+gl_FragColor.rgb = min( gl_FragColor.rgb, vec3( 1.0 ) ) + max( gl_FragColor.rgb - 1.0, vec3( 0.0 ) ) * 0.35;
+#endif`;
 
-// Construction sites are cut open at the build height; what shows through the cut
-// is the inside (back faces) of walls and roofs. Team trim keeps its darkened
-// colour; the body's inside becomes dark wooden boards (about 0.22 wide, along x),
-// and so do horizontal tops in the last 0.3 below the cut (the course being laid,
-// e.g. a wall top that a roof will cover), so a cut-open building reads as a
-// building site rather than a finished flat roof in its wall or roof colour.
-// Floors and foundations (below PLINTH + 0.15) keep their colour.
-const TEAM_INSIDE_GLSL = 'if (!gl_FrontFacing) diffuseColor.rgb *= 0.45;';
-const SITE_INSIDE_GLSL = `{
-  vec3 boards = vec3(0.13, 0.068, 0.028) * (0.72 + 0.28 * step(0.5, fract(vBldX * 4.5)));
-  if (!gl_FrontFacing) diffuseColor.rgb = boards;
-  else if (vBldY > uCut - 0.3 && vBldY > ${(PLINTH + 0.15).toFixed(2)} && abs(dFdx(vBldY)) + abs(dFdy(vBldY)) < 1e-5) diffuseColor.rgb = boards;
+const SURF_PARS_VERTEX = `
+attribute vec4 aSurf;
+varying vec4 vSurf;
+varying vec3 vObjPos;
+varying vec3 vObjN;`;
+// pattern space = object space before animation (waving cloth does not swim)
+const SURF_VERTEX = `
+vSurf = aSurf;
+vObjPos = position;
+vObjN = objectNormal;`;
+
+const SURFACE_GLSL = `
+uniform sampler2D uDetail;
+uniform vec4 uDetailMean;
+varying vec4 vSurf;
+varying vec3 vObjPos;
+varying vec3 vObjN;
+#define BLD_PLINTH ${PLINTH.toFixed(3)}
+#define BLD_CONTACT ${CONTACT_RANGE.toFixed(2)}
+
+// Bump mapping from the screen-space derivatives of a height (Mikkelsen 2010):
+// no UVs or tangents needed; the height is in world units, so the relief does
+// not change with zoom.
+vec3 bldBump( vec3 p, vec3 n, vec2 dh ) {
+  vec3 dpx = dFdx( p );
+  vec3 dpy = dFdy( p );
+  vec3 r1 = cross( dpy, n );
+  vec3 r2 = cross( n, dpx );
+  float det = dot( dpx, r1 );
+  vec3 grad = sign( det ) * ( dh.x * r1 + dh.y * r2 );
+  return normalize( abs( det ) * n - grad );
+}
+
+float bldHash( vec2 p ) {
+  return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+}
+
+// Stylized surface detail per class (CLS in building-models.js) from the
+// object-space position and normal: the pattern plane is the floor plan for
+// level faces, else (along the wall, up the surface) so courses and tile rows
+// stay horizontal and keep their spacing on slopes. alb multiplies the vertex
+// color, h is a relief height (world units) for bldBump, ao dims ambient
+// light. The detail texture's mipmaps fade every pattern into its average with
+// distance, so buildings stay calm when zoomed out.
+void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb, out float rough, out float metal, out float h, out float ao ) {
+  vec3 P = vObjPos;
+  vec3 N = normalize( vObjN );
+  float sinS = length( N.xz );
+  bool roofy = cls >= 10.0 && cls <= 12.0;
+  bool level = abs( N.y ) > ( roofy ? 0.985 : 0.72 );
+  vec2 tH = sinS > 1e-4 ? vec2( -N.z, N.x ) / sinS : vec2( 1.0, 0.0 );
+  float u = dot( P.xz, tH );
+  vec2 uv = level ? P.xz : vec2( u, P.y / max( sinS, 0.3 ) );
+  bool mason = cls >= 1.0 && cls <= 6.0 && cls != 4.0;
+  bool wood = ( cls >= 7.0 && cls <= 9.0 ) || cls >= 19.0;
+  bool beam = cls >= 19.0;
+  // world size of one texture tile (8 rows x 4 blocks); swap puts U along the grain
+  vec2 ts = vec2( 0.6 );
+  bool swap = false;
+  if ( cls == 1.0 ) ts = vec2( 1.2, 1.2 );
+  else if ( cls == 2.0 ) ts = vec2( 1.6, 1.6 );
+  else if ( cls == 3.0 ) ts = vec2( 2.4, 2.0 );
+  else if ( cls == 4.0 ) ts = vec2( 1.6, 1.6 );
+  else if ( cls == 5.0 ) ts = vec2( 0.8, 0.64 );
+  else if ( cls == 6.0 ) ts = vec2( 0.64, 0.5 );
+  else if ( wood ) {
+    float ax = beam ? cls - 12.0 : cls; // 7 grain along y, 8 along x, 9 along z
+    ts = vec2( 2.4, 0.8 );
+    swap = ( ax == 7.0 && !level ) || ( ax == 9.0 && level );
+  } else if ( cls == 10.0 ) ts = vec2( 0.56, 0.88 );
+  else if ( cls == 11.0 ) ts = vec2( 1.0, 1.0 );
+  else if ( cls == 12.0 ) { ts = vec2( 0.96, 0.6 ); swap = !level; }
+  else if ( cls == 15.0 ) ts = vec2( 0.25, 0.25 );
+  else if ( cls == 16.0 ) { ts = vec2( 3.0, 1.0 ); swap = !level; }
+  else if ( cls == 17.0 ) ts = vec2( 1.4, 1.4 );
+  else if ( cls == 18.0 ) ts = vec2( 1.2, 1.2 );
+  if ( mason && level ) ts.y *= 2.0; // paving: squarer slabs
+  if ( swap ) uv = uv.yx;
+  vec2 uvT = uv / ts + seed * vec2( 0.3711, 0.6133 );
+  vec4 d = texture2D( uDetail, uvT );
+  // coarse layer: mottling (b) and, on walls, vertical weathering streaks (a)
+  vec4 c = texture2D( uDetail, ( level ? P.xz * 0.27 : vec2( P.y * 0.22, u * 0.55 ) ) + seed * 0.173 );
+  vec2 fw = fwidth( uvT );
+  // zero-mean terms: patterns move a surface's tone around its vertex color, so
+  // seen from afar (mipmapped to the average) it keeps the palette color
+  float blk = d.r;
+  float blk0 = d.r - uDetailMean.r;
+  float bid = d.g - uDetailMean.g;
+  float nz = d.b - uDetailMean.b;
+  float stk = d.a - uDetailMean.a;
+  float mot = c.b - uDetailMean.b;
+  alb = vec3( 1.0 );
+  rough = rough0;
+  metal = metal0;
+  h = 0.0;
+  ao = 1.0;
+  if ( mason ) {
+    // ashlar, marble, bricks: dark bevelled joints, a tint per block
+    float jd = cls == 3.0 ? 0.16 : cls == 2.0 ? 0.3 : cls == 5.0 ? 0.24 : cls == 6.0 ? 0.28 : 0.42;
+    float bv = cls == 3.0 ? 0.05 : cls == 6.0 ? 0.18 : 0.12;
+    alb *= ( 1.0 + jd * blk0 ) * ( 1.0 + bv * 2.0 * bid ) * ( 1.0 + 0.1 * nz );
+    if ( cls == 2.0 ) alb *= vec3( 1.0 + 0.1 * bid, 1.0, 1.0 - 0.1 * bid );
+    rough += 0.14 * ( 1.0 - blk ) + 0.12 * bid;
+    h = blk * ( cls == 3.0 ? 0.004 : cls >= 5.0 ? 0.006 : 0.012 );
+    ao = mix( cls == 3.0 ? 0.88 : 0.68, 1.0, blk );
+    if ( cls == 5.0 ) {
+      // mudbrick: a mud wash over most of the wall hides the bricks
+      float wash = smoothstep( -0.1, 0.12, mot + 0.15 * nz );
+      alb = mix( alb, vec3( 1.0 + 0.08 * nz ), wash * 0.8 );
+      h *= 1.0 - wash * 0.8;
+      ao = mix( ao, 1.0, wash * 0.8 );
+    }
+  } else if ( cls == 4.0 ) {
+    // plaster
+    alb *= 1.0 + 0.12 * mot + 0.06 * nz;
+    rough += 0.06 * nz;
+  } else if ( wood ) {
+    // planks: the blocks stretched along the grain (rows = boards, block ends =
+    // butt joints) with grain streaks; a beam is a single board
+    float seams = beam ? 1.0 : blk;
+    alb *= ( beam ? 1.0 : ( 1.0 + 0.5 * blk0 ) * ( 1.0 + 0.22 * bid ) ) * ( 1.0 + 0.3 * stk );
+    rough += 0.12 * stk + 0.1 * ( 1.0 - seams );
+    h = seams * 0.006 + stk * 0.0015;
+    ao = mix( 0.7, 1.0, seams );
+  } else if ( cls == 10.0 ) {
+    // roof tiles: rows rising up the slope with a shadow under each overlapping
+    // lip, barrel ribs across; both fade out once a row is under ~3 pixels
+    float rowF = uvT.y * 8.0;
+    float colF = uvT.x * 4.0;
+    float rowP = fract( rowF );
+    float fr = 1.0 - smoothstep( 0.16, 0.36, fw.y * 8.0 );
+    float fc = 1.0 - smoothstep( 0.16, 0.36, fw.x * 4.0 );
+    float lip = smoothstep( 0.55, 1.0, rowP );
+    float rib = 0.5 + 0.5 * cos( fract( colF ) * 6.2832 );
+    float tid = bldHash( floor( vec2( colF, rowF ) ) ) - 0.5;
+    alb *= ( 1.0 - 0.24 * ( lip - 0.225 ) * fr ) * ( 1.0 + 0.14 * ( rib - 0.5 ) * fc ) * ( 1.0 + 0.14 * tid * fr * fc ) * ( 1.0 + 0.1 * nz + 0.08 * mot );
+    rough += 0.1 * nz + 0.08 * ( 1.0 - rib );
+    // a soft lip (the drop spans a quarter row) keeps glossy tiles from glinting in lines
+    h = ( rowP * ( 1.0 - smoothstep( 0.72, 1.0, rowP ) ) * 0.008 * fr + rib * 0.006 * fc );
+    ao = 1.0 - 0.24 * lip * fr;
+  } else if ( cls == 11.0 ) {
+    // turf: clumps and blades
+    alb *= ( 1.0 + 0.3 * mot + 0.14 * stk + 0.12 * nz ) * vec3( 1.0 + 0.1 * stk, 1.0, 1.0 - 0.12 * stk );
+    h = d.b * 0.012;
+    ao = 0.85 + 0.15 * d.b;
+  } else if ( cls == 12.0 ) {
+    // thatch: straw streaks down the slope, layered courses with a shadowed lip
+    float rowP = fract( uvT.x * 8.0 );
+    float fr = 1.0 - smoothstep( 0.2, 0.45, fw.x * 8.0 );
+    float lip = smoothstep( 0.6, 1.0, rowP );
+    alb *= ( 1.0 + 0.32 * stk ) * ( 1.0 - 0.3 * ( lip - 0.2 ) * fr ) * ( 1.0 + 0.12 * mot );
+    h = d.a * 0.006 + rowP * ( 1.0 - smoothstep( 0.85, 1.0, rowP ) ) * 0.016 * fr;
+    ao = ( 1.0 - 0.3 * lip * fr ) * ( 0.85 + 0.15 * d.a );
+  } else if ( cls == 13.0 || cls == 14.0 ) {
+    // metal: hammered, worn roughness
+    alb *= 1.0 + 0.1 * nz;
+    rough += 0.16 * nz + 0.1 * mot;
+  } else if ( cls == 15.0 ) {
+    alb *= 1.0 + 0.08 * stk + 0.06 * nz;
+  } else if ( cls == 16.0 ) {
+    // lacquer: faint brush streaks in the gloss
+    alb *= 1.0 + 0.04 * stk;
+    rough += 0.12 * stk + 0.1 * mot;
+  } else if ( cls == 17.0 ) {
+    // rock: mottled, faint strata
+    alb *= ( 1.0 + 0.25 * nz + 0.22 * mot ) * ( 1.0 + 0.07 * sin( P.y * 26.0 + nz * 4.0 ) );
+    rough += 0.14 * nz;
+    h = d.b * 0.02;
+    ao = 0.8 + 0.2 * d.b;
+  } else if ( cls == 18.0 ) {
+    // packed earth
+    alb *= 1.0 + 0.2 * mot + 0.12 * nz;
+    h = d.b * 0.008;
+  } else {
+    alb *= 1.0 + 0.05 * nz + 0.04 * mot;
+  }
+  // walls weather in vertical streaks
+  if ( !level && ( mason || cls == 4.0 ) ) alb *= 1.0 - 0.08 * smoothstep( 0.05, 0.3, c.a - 0.5 );
+  #ifndef BLD_BASE
+  // grime and ambient occlusion toward the ground, and at the foot of a part
+  // standing on another (vertical faces only; contact height in vSurf.w)
+  float gnd = 1.0 - smoothstep( BLD_PLINTH, BLD_PLINTH + 0.42, P.y );
+  float grime = clamp( gnd * ( 0.65 + 1.2 * mot ), 0.0, 1.0 );
+  alb *= mix( vec3( 1.0 ), vec3( 0.68, 0.61, 0.52 ), grime * 0.55 );
+  rough = mix( rough, 1.0, grime * 0.4 );
+  float aoG = mix( 0.52, 1.0, smoothstep( BLD_PLINTH - 0.05, BLD_PLINTH + 0.5, P.y ) );
+  float vert = 1.0 - smoothstep( 0.5, 0.8, abs( N.y ) );
+  float aoC = 1.0 - 0.38 * vert * ( 1.0 - smoothstep( 0.0, 0.16, vSurf.w * BLD_CONTACT ) );
+  ao *= min( aoG, aoC );
+  #endif
+  rough = clamp( rough, 0.04, 1.0 );
 }`;
 
-/** Patch a built-in material: animated vertices (team: waving, glow: flicker) and construction clipping. */
-function patchShader(mat, anim, clip) {
-  mat.onBeforeCompile = (sh) => {
-    let vs = sh.vertexShader;
-    let fs = sh.fragmentShader;
-    let common = '';
-    let begin = '';
-    if (anim) {
-      sh.uniforms.uTime = TIME;
-      common += '\nattribute vec2 aAnim;\nuniform float uTime;';
-      begin += anim === 'team' ? WAVE_GLSL : FLICKER_GLSL;
-      if (anim === 'glow') vs = vs.replace('#include <color_vertex>', `#include <color_vertex>\n${TWINKLE_GLSL}`);
+// Runs after color_fragment: evaluates the surface once for the later chunks.
+const SURF_COLOR = `
+vec3 bldAlb;
+float bldRough;
+float bldMetal;
+float bldH;
+float bldAO;
+{
+  float code = floor( vSurf.z * 255.0 + 0.5 );
+  float cls = floor( code / 8.0 );
+  float seed = code - cls * 8.0;
+  float rough0 = vSurf.x;
+  float metal0 = vSurf.y;
+  #ifdef BLD_CLIP
+    #ifdef BLD_TEAM
+    if ( !gl_FrontFacing ) diffuseColor.rgb *= 0.45;
+    #else
+    // Construction sites are cut open at uCut; what shows through the cut is
+    // the inside (back faces) of walls and roofs, drawn as dark wooden boards,
+    // and so are level tops in the last 0.3 below the cut (the course being
+    // laid), so a cut-open building reads as a building site rather than a
+    // finished flat roof. Floors and foundations (below PLINTH + 0.15) keep
+    // their own look.
+    if ( !gl_FrontFacing || ( vObjPos.y > uCut - 0.3 && vObjPos.y > BLD_PLINTH + 0.15 && abs( vObjN.y ) > 0.98 * length( vObjN ) ) ) {
+      diffuseColor.rgb = vec3( 0.13, 0.068, 0.028 );
+      cls = 8.0;
+      rough0 = 0.85;
+      metal0 = 0.0;
     }
+    #endif
+  #endif
+  bldSurface( cls, seed, rough0, metal0, bldAlb, bldRough, bldMetal, bldH, bldAO );
+  // AO on direct light too (half): the stylized look wants dark feet even in sunlight
+  diffuseColor.rgb *= bldAlb * mix( 1.0, bldAO, 0.5 );
+}`;
+
+/**
+ * Lit building material (MeshStandardMaterial with vertex colors): per-vertex
+ * roughness / metalness and procedural surface detail, optional animation
+ * (team: waving cloth) and construction clipping (everything above
+ * userData.uCut is cut away, the inside shows as boards). `base` (the
+ * foundation) skips ground grime and occlusion.
+ */
+function patchBuilding(mat, { anim = null, clip = false, base = false } = {}) {
+  detailTexture();
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uDetail = DETAIL;
+    sh.uniforms.uDetailMean = DETAIL_MEAN;
+    let vsPars = SURF_PARS_VERTEX;
+    let vsBegin = SURF_VERTEX;
+    if (anim) {
+      sh.uniforms.uBldTime = TIME;
+      vsPars += ANIM_PARS;
+      vsBegin += WAVE_GLSL;
+    }
+    let defs = '';
+    if (base) defs += '\n#define BLD_BASE';
+    if (anim) defs += '\n#define BLD_TEAM';
     if (clip) {
       sh.uniforms.uCut = mat.userData.uCut;
-      common += '\nvarying float vBldY;\nvarying float vBldX;';
-      begin += '\nvBldY = position.y;\nvBldX = position.x;';
-      fs = fs
-        .replace('#include <common>', '#include <common>\nvarying float vBldY;\nvarying float vBldX;\nuniform float uCut;')
-        .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vBldY > uCut) discard;')
-        .replace('#include <color_fragment>', `#include <color_fragment>\n${anim === 'team' ? TEAM_INSIDE_GLSL : SITE_INSIDE_GLSL}`);
+      defs += '\n#define BLD_CLIP\nuniform float uCut;';
     }
-    vs = vs.replace('#include <common>', `#include <common>${common}`).replace('#include <begin_vertex>', `#include <begin_vertex>${begin}`);
-    sh.vertexShader = vs;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>${vsPars}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>${vsBegin}`);
+    let fs = sh.fragmentShader
+      .replace('#include <common>', `#include <common>${defs}\n${SURFACE_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${SURF_COLOR}`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = bldRough;')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = bldMetal;')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = bldBump( - vViewPosition, normal, vec2( dFdx( bldH ), dFdy( bldH ) ) );')
+      .replace('#include <aomap_fragment>', '#include <aomap_fragment>\nreflectedLight.indirectDiffuse *= bldAO;\nreflectedLight.indirectSpecular *= mix( 1.0, bldAO, 0.7 );');
+    if (clip) fs = fs.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif ( vObjPos.y > uCut ) discard;');
     sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => `mythicwar-bld-${anim || 'none'}-${clip ? 'clip' : 'full'}`;
+  mat.customProgramCacheKey = () => `mythicwar-bld3-${anim || 'none'}-${clip ? 'clip' : 'full'}-${base ? 'base' : 'part'}`;
   return mat;
+}
+
+/** Lit building material: patched, then cloud shadows and rim (before the fog of war, which game-renderer adds). */
+function litMaterial(o, patch) {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, ...o });
+  patchBuilding(m, patch);
+  patchWorldMaterial(m, { cloud: true, rim: patch.base ? 0 : RIM });
+  return m;
 }
 
 function bodyMaterial() {
   if (!MATS.body) {
-    MATS.body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    MATS.body = litMaterial({}, {});
     MATS.body.name = 'building-body';
   }
   return MATS.body;
 }
 
+function baseMaterial() {
+  if (!MATS.base) {
+    MATS.base = litMaterial({}, { base: true });
+    MATS.base.name = 'building-base';
+  }
+  return MATS.base;
+}
+
 function glowMaterial() {
   if (!MATS.glow) {
-    MATS.glow = patchShader(new THREE.MeshBasicMaterial({ vertexColors: true }), 'glow', false);
-    MATS.glow.name = 'building-glow';
+    const m = new THREE.MeshBasicMaterial({ vertexColors: true });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uBldTime = TIME;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', `#include <common>${ANIM_PARS}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>${FLICKER_GLSL}`)
+        .replace('#include <color_vertex>', `#include <color_vertex>\n${TWINKLE_GLSL}`);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <tonemapping_fragment>', `${GLOW_LOW_PATH}\n#include <tonemapping_fragment>`);
+    };
+    m.customProgramCacheKey = () => 'mythicwar-bld3-glow';
+    m.name = 'building-glow';
+    MATS.glow = m;
   }
   return MATS.glow;
+}
+
+/**
+ * Gold veins of a mine: polished gold that catches the sky, with a faint
+ * glow of its own and sparkles (twinkle) bright enough to bloom.
+ */
+function mineGoldMaterial() {
+  if (!MATS.mineGold) {
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.85 });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uBldTime = TIME;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', `#include <common>${ANIM_PARS}\nvarying float vSpark;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vSpark = aAnim.y > 0.0 ? pow( max( sin( uBldTime * 2.3 + aAnim.y * 41.0 ), 0.0 ), 10.0 ) : 0.0;`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vSpark;')
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance += vColor.rgb * ( 0.28 + 3.2 * vSpark );`);
+    };
+    m.customProgramCacheKey = () => 'mythicwar-bld3-minegold';
+    patchWorldMaterial(m, { cloud: true, rim: 0 });
+    m.name = 'mine-gold';
+    MATS.mineGold = m;
+  }
+  return MATS.mineGold;
 }
 
 function teamMaterial(teamColor) {
@@ -478,7 +1024,7 @@ function teamMaterial(teamColor) {
   const key = col.getHexString();
   let m = TEAM_MATS.get(key);
   if (!m) {
-    m = patchShader(new THREE.MeshLambertMaterial({ color: col, vertexColors: true, flatShading: true }), 'team', false);
+    m = litMaterial({ color: new THREE.Color().copy(col) }, { anim: 'team' });
     m.name = `building-team-${key}`;
     TEAM_MATS.set(key, m);
   }
@@ -487,10 +1033,12 @@ function teamMaterial(teamColor) {
 
 /** Per-model clone used while under construction (clips everything above uCut). */
 function clipMaterial(base, anim) {
-  const m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, color: base.color, side: THREE.DoubleSide });
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, color: base.color, side: THREE.DoubleSide });
   m.userData.uCut = { value: 0 };
   m.name = `${base.name}-clip`;
-  return patchShader(m, anim, true);
+  patchBuilding(m, { anim, clip: true });
+  patchWorldMaterial(m, { cloud: true, rim: RIM });
+  return m;
 }
 
 const VORTEX_VS = `
@@ -499,8 +1047,12 @@ void main() {
   vUv = uv;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
+// Colors are linear; the swirl is HDR (× uGain) so it blooms. Straight to the
+// canvas (low quality: tone mapped here, no bloom) it is added onto an already
+// tone-mapped gate, so it is kept under 1 there or it washes out to white.
 const VORTEX_FS = `
 uniform float uTime;
+uniform float uGain;
 uniform vec3 uColA;
 uniform vec3 uColB;
 uniform vec3 uColC;
@@ -519,7 +1071,11 @@ void main() {
   float edge = smoothstep(1.0, 0.82, r);
   float rim = smoothstep(0.78, 0.95, r) * edge;
   col += uColB * rim * 0.8;
-  gl_FragColor = vec4(col * edge, edge);
+  float gain = uGain;
+  #ifdef TONE_MAPPING
+  gain = 0.75;
+  #endif
+  gl_FragColor = vec4(col * edge * gain, edge);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
@@ -529,7 +1085,7 @@ function vortexMaterial(colA, colB, colC) {
   let m = VORTEX_MATS.get(key);
   if (!m) {
     m = new THREE.ShaderMaterial({
-      uniforms: { uTime: TIME, uColA: { value: C(colA) }, uColB: { value: C(colB) }, uColC: { value: C(colC) } },
+      uniforms: { uTime: TIME, uGain: { value: GLOW.portal }, uColA: { value: C(colA) }, uColB: { value: C(colB) }, uColC: { value: C(colC) } },
       vertexShader: VORTEX_VS,
       fragmentShader: VORTEX_FS,
       transparent: true,
@@ -553,15 +1109,43 @@ const YARD_BY_WALL = {
   timber: '#6f5f45', brick: '#8a7a64', lacquer: '#948e83',
 };
 
+// What the palette colors are made of, per wall / roof style.
+const WALL_SURF = {
+  marble: SURF.marble, timber: SURF.wood, sandstone: SURF.sandstone, stone: SURF.stone,
+  mudbrick: SURF.mudbrick, brick: SURF.brick, lacquer: SURF.lacquer,
+};
+const STONE_SURF = { marble: SURF.marble, sandstone: SURF.sandstone, mudbrick: SURF.mudbrick };
+const YARD_SURF = { marble: SURF.marble, sandstone: SURF.sandstone, brick: SURF.brick, mudbrick: SURF.earth, timber: SURF.earth };
+
+function roofSurf(st) {
+  switch (st.roof) {
+    case 'gable': return SURF.tile;
+    case 'curved': return SURF.glazedTile;
+    case 'pagoda': return SURF.slateTile;
+    case 'longhouse': return SURF.turf;
+    case 'thatch_cone': return SURF.thatch;
+    case 'pyramid': return st.wall === 'sandstone' || st.wall === 'mudbrick' ? SURF.sandstone : SURF.stone;
+    case 'shikhara': return SURF.sandstone;
+    case 'dome': return SURF.plaster;
+    case 'stepped': return st.wall === 'mudbrick' || st.wall === 'brick' ? SURF.mudbrick : SURF.plaster; // painted stucco
+    default: return WALL_SURF[st.wall] || SURF.stone;
+  }
+}
+
 function makePalette(colors, st) {
-  const wall = C(colors.wall);
-  const roof = C(colors.roof);
-  const trim = C(colors.trim);
-  const accent = C(colors.accent);
+  const wall = made(colors.wall, WALL_SURF[st.wall] || SURF.stone);
+  const roof = made(colors.roof, roofSurf(st));
+  const lacquer = st.wall === 'lacquer';
+  const trimSurf = st.wall === 'timber' ? SURF.wood : lacquer ? SURF.lacquer : st.wall === 'mudbrick' && st.roof === 'stepped' ? SURF.glazed : SURF.paint;
+  const trim = made(colors.trim, trimSurf);
+  // gold-like accents are gold, pale ones silver
+  const acc = C(colors.accent).convertLinearToSRGB();
+  const accent = made(colors.accent, acc.r - acc.b > 0.25 ? SURF.gold : SURF.metal);
   let stone;
   if (STONE_BY_WALL[st.wall]) stone = C(STONE_BY_WALL[st.wall]);
   else if (st.wall === 'sandstone') stone = mix(wall, '#b39566', 0.35);
   else stone = shade(wall, 0.88);
+  stone.surf = STONE_SURF[st.wall] || SURF.stone;
   const lightTrim = luma(trim) > 0.62;
   return {
     wall, wallD: shade(wall, 0.76), wallL: tint(wall, 0.22),
@@ -569,14 +1153,14 @@ function makePalette(colors, st) {
     trim, trimD: shade(trim, 0.72), trimL: tint(trim, 0.3),
     accent, accentD: shade(accent, 0.7),
     stone, stoneD: shade(stone, 0.74), stoneL: tint(stone, 0.18),
-    infill: lightTrim ? C(colors.trim) : mix(wall, '#2a1410', 0.3),
-    beam: lightTrim ? shade(wall, 0.9) : trim,
-    yard: C(YARD_BY_WALL[st.wall] || '#8d877a'),
-    wood: C('#7b5536'), woodD: C('#4d3421'), woodL: C('#a27c54'),
-    dark: C('#21180f'), metal: C('#8c949b'), cloth: C('#d6cbb0'), white: C('#f2ede2'),
-    straw: C('#c9a35a'), leaf: C('#4f7a36'), sack: C('#bfa57a'),
+    infill: made(lightTrim ? C(colors.trim) : mix(wall, '#2a1410', 0.3), st.wall === 'timber' ? SURF.wood : lightTrim || !lacquer ? SURF.plaster : SURF.lacquer),
+    beam: made(lightTrim ? shade(wall, 0.9) : trim, lacquer ? SURF.lacquer : SURF.wood),
+    yard: made(YARD_BY_WALL[st.wall] || '#8d877a', YARD_SURF[st.wall] || SURF.stone),
+    wood: made('#7b5536', SURF.wood), woodD: made('#4d3421', SURF.wood), woodL: made('#a27c54', SURF.wood),
+    dark: made('#21180f', SURF.plain), metal: made('#8c949b', SURF.metal), cloth: made('#d6cbb0', SURF.cloth), white: made('#f2ede2', SURF.paint),
+    straw: made('#c9a35a', SURF.thatch), leaf: C('#4f7a36'), sack: made('#bfa57a', SURF.cloth),
     fire: C('#ff8a1e'), fireHot: C('#ffe07a'), lantern: C('#ff5a2a'),
-    gold: C('#f3c63c'),
+    gold: made('#f3c63c', SURF.gold),
   };
 }
 
@@ -665,8 +1249,8 @@ function goldPile(k, P, x, y, z, s) {
 /** Flames (glowing, flickering) rising from y with height fh. */
 function flames(k, P, x, y, z, s) {
   const fh = 0.34 * s;
-  k.g(cone(0.13 * s, fh, 5, x, y, z, true), P.fire, (vx, vy) => [clamp01((vy - y) / fh), 0]);
-  k.g(cone(0.08 * s, fh * 0.72, 4, x + 0.02 * s, y, z + 0.02 * s, true), P.fireHot, (vx, vy) => [clamp01((vy - y) / fh), 0]);
+  k.g(cone(0.13 * s, fh, 5, x, y, z, true), P.fire, (vx, vy) => [clamp01((vy - y) / fh), 0], GLOW.flame);
+  k.g(cone(0.08 * s, fh * 0.72, 4, x + 0.02 * s, y, z + 0.02 * s, true), P.fireHot, (vx, vy) => [clamp01((vy - y) / fh), 0], GLOW.core);
 }
 
 /** Brazier on a short stand with a sacred flame. */
@@ -698,7 +1282,7 @@ function idol(k, P, x, y, z, s = 1, head = 'halo') {
   k.b(strut([x + 0.09 * s, by + 0.44 * s, z], [x + 0.14 * s, by + 0.28 * s, z + 0.06 * s], 0.04 * s), gold, 0.03);
   if (head === 'halo') {
     const halo = torus(0.11 * s, 0.014 * s, x, by + 0.57 * s, z - 0.03 * s, 3, 10);
-    k.g(halo, tint(P.accent, 0.35));
+    k.g(halo, tint(P.accent, 0.35), null, GLOW.halo);
   }
   return by + 0.7 * s;
 }
@@ -768,7 +1352,7 @@ function lampPillar(k, P, x, y, z, h) {
     k.b(cyl(r, r * 0.8, h * 0.03, 6, x, yy, z), P.accentD, 0.03);
     for (let j = 0; j < 4; j++) {
       const a = (j / 4) * PI * 2 + i * 0.4;
-      k.g(cone(h * 0.025, h * 0.07, 3, x + Math.cos(a) * r * 0.85, yy + h * 0.03, z + Math.sin(a) * r * 0.85, true), P.fireHot);
+      k.g(cone(h * 0.025, h * 0.07, 3, x + Math.cos(a) * r * 0.85, yy + h * 0.03, z + Math.sin(a) * r * 0.85, true), P.fireHot, null, GLOW.lamp);
     }
   }
   k.b(cone(h * 0.07, h * 0.12, 6, x, y + h * 0.9, z), P.accent, 0);
@@ -778,7 +1362,7 @@ function lampPillar(k, P, x, y, z, h) {
 /** Torii gate spanning `span` at z, facing south. */
 function torii(k, P, cx, y, z, span, h) {
   const r = 0.035 + span * 0.025;
-  const red = luma(P.wall) > 0.25 && P.wall.r > P.wall.g * 1.3 ? P.wall : C('#d8462c');
+  const red = luma(P.wall) > 0.25 && P.wall.r > P.wall.g * 1.3 ? made(P.wall, SURF.lacquer) : made('#d8462c', SURF.lacquer);
   for (const sx of [-1, 1]) {
     k.b(cyl(r * 0.9, r, h, 6, cx + (sx * span) / 2, y, z, true), red, 0.03);
     k.b(cyl(r * 1.25, r * 1.25, 0.06, 6, cx + (sx * span) / 2, y, z), P.dark, 0);
@@ -799,7 +1383,7 @@ function torii(k, P, cx, y, z, span, h) {
   }
   const kasagi = extrude(pts, r * 2.6);
   kasagi.translate(cx, y + h - 0.02, z);
-  k.b(kasagi, P.roofD.r + P.roofD.g + P.roofD.b < 0.3 ? P.roofD : C('#2a2a2e'), 0.02);
+  k.b(kasagi, made(P.roofD.r + P.roofD.g + P.roofD.b < 0.3 ? P.roofD : '#2a2a2e', SURF.lacquer), 0.02);
   k.b(box(span + 0.16, 0.06, r * 1.6, cx, y + h * 0.78, z), red, 0.02);
   k.b(box(0.06, h * 0.2, r * 1.4, cx, y + h * 0.8, z), red, 0.02);
   return y + h + 0.17;
@@ -810,7 +1394,7 @@ function stoneLantern(k, P, x, y, z, h) {
   k.b(cyl(h * 0.12, h * 0.16, h * 0.12, 6, x, y, z), P.stoneD, 0.04);
   k.b(cyl(h * 0.05, h * 0.06, h * 0.38, 6, x, y + h * 0.12, z), P.stone, 0.04);
   k.b(box(h * 0.24, h * 0.06, h * 0.24, x, y + h * 0.5, z), P.stone, 0.03);
-  k.g(box(h * 0.15, h * 0.16, h * 0.15, x, y + h * 0.56, z), P.fireHot);
+  k.g(box(h * 0.15, h * 0.16, h * 0.15, x, y + h * 0.56, z), P.fireHot, null, GLOW.lamp);
   k.b(cone(h * 0.22, h * 0.16, 4, x, y + h * 0.72, z, true, true), P.stoneD, 0.03);
   k.b(ball(h * 0.04, x, y + h * 0.9, z, 4, 3), P.stone, 0);
 }
@@ -823,7 +1407,7 @@ function lanternPost(k, P, x, y, z, h, dir = 1) {
 }
 
 function hangingLantern(k, P, x, yTop, z, s) {
-  k.g(ball(s * 0.5, x, yTop - s * 0.65, z, 6, 4, 1.25), P.lantern);
+  k.g(ball(s * 0.5, x, yTop - s * 0.65, z, 6, 4, 1.25), P.lantern, null, GLOW.paper);
   k.b(cyl(s * 0.28, s * 0.28, s * 0.08, 5, x, yTop - s * 0.18, z), P.dark, 0);
   k.b(cyl(s * 0.28, s * 0.28, s * 0.08, 5, x, yTop - s * 1.3, z), P.dark, 0);
   k.b(cyl(s * 0.03, s * 0.03, s * 0.3, 3, x, yTop - s * 1.6, z, true), P.accent, 0);
@@ -949,13 +1533,13 @@ const isRound = (st) => st.roof === 'thatch_cone' || st.roof === 'dome';
 function door(k, P, st, x, y, fz, w, h) {
   const frame = st.wall === 'timber' ? P.woodD : st.wall === 'lacquer' ? P.beam : P.trim;
   k.b(box(w + 0.1, h + 0.06, 0.05, x, y, fz + 0.005), frame, 0.03);
-  k.b(box(w, h, 0.06, x, y, fz + 0.012), P.dark, 0);
+  k.hole(box(w, h, 0.06, x, y, fz + 0.012), y, h);
   if (st.wall === 'mudbrick' || st.wall === 'sandstone') k.b(box(w + 0.14, 0.05, 0.07, x, y + h + 0.06, fz + 0.01), P.wallD, 0.03);
 }
 
 function windowHole(k, P, x, y, fz, w = 0.12, h = 0.16) {
   k.b(box(w + 0.05, h + 0.05, 0.03, x, y - 0.025, fz + 0.004), P.wallD, 0);
-  k.b(box(w, h, 0.04, x, y, fz + 0.008), P.dark, 0);
+  k.hole(box(w, h, 0.04, x, y, fz + 0.008), y, h);
 }
 
 /** Wooden spikes (toron) protruding from a south and side walls. */
@@ -1066,7 +1650,7 @@ function rectWalls(k, P, st, o) {
     if (nw > 1 && d > 0.7) {
       for (const sx of [-1, 1]) {
         const g = box(0.04, 0.16, 0.12, x + sx * (w / 2 + 0.005), wy, z);
-        k.b(g, P.dark, 0);
+        k.hole(g, wy, 0.16);
       }
     }
   }
@@ -1677,7 +2261,7 @@ function towerStruct(k, P, st, o) {
   // arrow slits
   if (st.wall !== 'timber') {
     const fz = round ? z + s / 2 - 0.02 : z + s / 2 - 0.03;
-    for (const fy of o.simple ? [0.6] : [0.45, 0.75]) k.b(box(0.06, 0.16, 0.06, x, y + h * fy, fz), P.dark, 0);
+    for (const fy of o.simple ? [0.6] : [0.45, 0.75]) k.hole(box(0.06, 0.16, 0.06, x, y + h * fy, fz), y + h * fy, 0.16);
   }
   // platform
   const pw = s + (st.wall === 'timber' ? 0.18 : 0.22);
@@ -1814,7 +2398,7 @@ function buildStorehouse(k, P, st) {
         k.b(box(0.06, lift, 0.06, gx + Math.cos(a) * r * 0.6, y, gz + Math.sin(a) * r * 0.6), st.roof === 'thatch_cone' ? P.woodD : P.stoneD, 0.05);
       }
       k.b(cyl(r * 0.92, r, 0.5, 8, gx, y + lift, gz, false, true), P.wall, 0.06);
-      k.b(box(0.13, 0.15, 0.04, gx, y + lift + 0.18, gz + r * 0.95), P.dark, 0);
+      k.hole(box(0.13, 0.15, 0.04, gx, y + lift + 0.18, gz + r * 0.95), y + lift + 0.18, 0.15);
       k.b(cone(r + 0.1, 0.42, 8, gx, y + lift + 0.47, gz, true, true), st.roof === 'dome' ? P.straw : P.roof, 0.14);
       k.t(cyl(r * 0.5, r * 0.62, 0.05, 8, gx, y + lift + 0.6, gz, true, true), 1);
     }
@@ -2035,7 +2619,7 @@ function templeLonghouse(k, P, st) {
   // entrance porch
   k.b(box(0.62, 0.5, 0.36, 0, y, 0.62), P.wall, 0.06);
   roofGable(k, P, { ...st, ornament: 'none' }, { x: 0, z: 0.64, w: 0.66, d: 0.42, y: y + 0.5, h: 0.32, ridge: 'z', team: false });
-  k.b(box(0.26, 0.38, 0.03, 0, y, 0.82), P.dark, 0);
+  k.hole(box(0.26, 0.38, 0.03, 0, y, 0.82), y, 0.38);
   // carved pillars with shields, sacred fire
   for (const sx of [-1, 1]) {
     carvedPost(k, P, sx * 0.85, y, 0.95, 1.05);
@@ -2073,7 +2657,7 @@ function templePyramid(k, P, st) {
   }
   // gate and lintel with a winged sun disk
   k.b(box(0.44, 0.08, 0.4, 0, y + 0.92, pyz), P.trim, 0.02);
-  k.b(box(0.42, 0.84, 0.03, 0, y, pyz - 0.1), P.dark, 0);
+  k.hole(box(0.42, 0.84, 0.03, 0, y, pyz - 0.1), y, 0.84);
   k.b(cyl(0.07, 0.07, 0.03, 8, 0, 0, 0).rotateX(PI / 2).translate(0, y + 0.96, pyz + 0.22), P.accent, 0);
   for (const sx of [-1, 1]) k.b(box(0.18, 0.05, 0.02, sx * 0.15, y + 0.95, pyz + 0.215), P.accent, 0);
   return y + 0.12 + ph;
@@ -2178,7 +2762,7 @@ function templeStepped(k, P, st) {
     // shrine on top with blue glazed walls
     k.b(box(0.7, 0.42, 0.55, 0, yy, zc), P.trim, 0.04);
     k.b(box(0.76, 0.06, 0.6, 0, yy + 0.42, zc), P.accent, 0.02);
-    k.b(box(0.18, 0.28, 0.03, 0, yy, zc + 0.28), P.dark, 0);
+    k.hole(box(0.18, 0.28, 0.03, 0, yy, zc + 0.28), yy, 0.28);
     for (let i = 0; i < 4; i++) k.b(box(0.1, 0.1, 0.06, -0.3 + i * 0.2, yy + 0.48, zc + 0.27), P.wallL, 0.02);
     flag(k, P, 0.3, yy + 0.48, zc - 0.15, 0.6, 0.3, 0.18);
     k.t(box(2.62, 0.05, 2.12, 0, y + 0.47, -0.25), 1);
@@ -2206,7 +2790,7 @@ function templeStepped(k, P, st) {
     const sxp = sx * 0.33;
     const c = sx < 0 ? P.trim : P.roof;
     k.b(box(0.5, 0.42, 0.62, sxp, yy, -0.32), P.wallL, 0.03);
-    k.b(box(0.16, 0.26, 0.03, sxp, yy, -0.0), P.dark, 0);
+    k.hole(box(0.16, 0.26, 0.03, sxp, yy, -0.0), yy, 0.26);
     k.b(frustum(0.54, 0.32, 0.66, 0.85, sxp, yy + 0.42, -0.32), c, 0.04);
     for (let i = 0; i < 3; i++) k.b(box(0.08, 0.1, 0.08, sxp - 0.16 + i * 0.16, yy + 0.74, -0.06), c, 0.03);
     k.t(box(0.5, 0.08, 0.02, sxp, yy + 0.26, -0.005), 1);
@@ -2258,7 +2842,7 @@ function templeDome(k, P, st) {
   k.b(ball(0.06, 0, y + 2.12, fz + 0.06, 5, 4, 1.3), P.white, 0);
   for (let i = 0; i < 3; i++) k.b(pole([-0.18, y + 0.85 + i * 0.3, fz + 0.2], [0.18, y + 0.85 + i * 0.3, fz + 0.2], 0.018, 3), P.woodD, 0);
   k.b(box(0.34, 0.66, 0.06, 0, y, fz + 0.2), P.trim, 0.03);
-  k.b(box(0.26, 0.56, 0.07, 0, y, fz + 0.21), P.dark, 0);
+  k.hole(box(0.26, 0.56, 0.07, 0, y, fz + 0.21), y, 0.56);
   for (const sx of [-1, 1]) {
     banner(k, P, sx * 0.77, y + 0.95, fz + 0.01, 0.2, 0.4);
     brazier(k, P, sx * 0.35, y, 1.15, 0.55, 0.25);
@@ -2505,8 +3089,8 @@ function buildTitanGate(k, P, st) {
   const rim = torus(1, 0.035, 0, 0, 0, 3, 18);
   rim.scale(0.84, (GATE.open * 0.5 - 0.02) / 1, 1);
   rim.translate(0, vy, 0);
-  k.g(rim, tint(P.accent, 0.3));
-  k.g(box(1.7, 0.012, 0.5, 0, top0, 0.32), shade(P.accent, 0.55));
+  k.g(rim, tint(P.accent, 0.3), null, GLOW.portal);
+  k.g(box(1.7, 0.012, 0.5, 0, top0, 0.32), shade(P.accent, 0.55), null, GLOW.rune);
   // team banners on the pillar fronts
   if (st.ornament !== 'torii') {
     for (const sx of [-1, 1]) banner(k, P, sx * GATE.px, top0 + GATE.open - 0.25, GATE.pd / 2 + (st.wall === 'sandstone' || st.wall === 'mudbrick' ? 0.02 : 0), 0.3, 0.85);
@@ -2536,7 +3120,7 @@ function buildTownCenter(k, P, st, tier) {
     }
     // well, firewood, crates, cart
     k.b(cyl(0.22, 0.24, 0.26, 8, -1.25, y, 1.2), P.stone, 0.1);
-    k.b(cyl(0.16, 0.16, 0.02, 8, -1.25, y + 0.25, 1.2), C('#2a4a6a'), 0);
+    k.b(cyl(0.16, 0.16, 0.02, 8, -1.25, y + 0.25, 1.2), made('#2a4a6a', SURF.water), 0);
     for (const sx of [-1, 1]) k.b(box(0.04, 0.42, 0.04, -1.25 + sx * 0.2, y + 0.2, 1.2), P.woodD, 0);
     k.b(box(0.48, 0.04, 0.04, -1.25, y + 0.6, 1.2), P.woodD, 0);
     k.b(prep(new THREE.ConeGeometry(0.32, 0.18, 4, 1, true)).rotateY(PI / 4).translate(-1.25, y + 0.72, 1.2), P.roof, 0.05);
@@ -2628,7 +3212,7 @@ function buildFoundation(k, P, st, size) {
 
 function scaffoldKit(size, H) {
   const k = new Kit(hashSeed(`scaffold|${size}|${H}`));
-  const P = { wood: C('#9c7a52'), woodD: C('#6b4e30'), stone: C('#a39b8c'), plank: C('#b38d5e') };
+  const P = { wood: made('#9c7a52', SURF.wood), woodD: made('#6b4e30', SURF.wood), stone: made('#a39b8c', SURF.stone), plank: made('#b38d5e', SURF.wood) };
   const half = size / 2 - MARGIN - 0.05;
   const n = size >= 4 ? 3 : 2;
   const xs = [];
@@ -2658,10 +3242,10 @@ const GOLD_LEVELS = [0.12, 0.38, 0.68, 1];
 
 function buildGoldMineGeometry() {
   const k = new Kit(hashSeed('gold-mine'));
-  const rock = C('#7d746a');
-  const rockD = C('#5e564e');
-  const rockL = C('#9a9084');
-  const P = { wood: C('#7b5536'), woodD: C('#4d3421'), dark: C('#140f0a'), gold: C('#f3c63c'), metal: C('#6c7278') };
+  const rock = made('#7d746a', SURF.rock);
+  const rockD = made('#5e564e', SURF.rock);
+  const rockL = made('#9a9084', SURF.rock);
+  const P = { wood: made('#7b5536', SURF.wood), woodD: made('#4d3421', SURF.wood), gold: made('#f3c63c', SURF.gold), metal: made('#6c7278', SURF.metal) };
   const rr = new RNG(hashSeed('gold-mine-rocks'));
   const rockAt = (r, x, y, z, sy, color) => {
     const g = prep(new THREE.DodecahedronGeometry(r, 0));
@@ -2691,7 +3275,8 @@ function buildGoldMineGeometry() {
   // timber entrance on the south face
   const ez = 0.32;
   k.b(box(0.7, 0.62, 0.3, 0, 0, ez - 0.05), rockD, 0.08);
-  k.b(box(0.48, 0.52, 0.06, 0, 0, ez + 0.12), P.dark, 0);
+  // the mine has no glow mesh: its mouth stays a dark, unlit shaft
+  k.b(box(0.48, 0.52, 0.06, 0, 0, ez + 0.12), made('#0d0907', SURF.earth), 0);
   for (const sx of [-1, 1]) k.b(box(0.1, 0.62, 0.1, sx * 0.3, 0, ez + 0.14), P.wood, 0.05);
   k.b(box(0.78, 0.11, 0.13, 0, 0.6, ez + 0.14), P.woodD, 0.05);
   k.b(strut([-0.38, 0.5, ez + 0.2], [-0.12, 0.72, ez + 0.2], 0.05), P.wood, 0.04);
@@ -2894,7 +3479,7 @@ export function buildBuildingModel(buildingTypeId, pantheon, teamColor, tier = 1
   function apply(e) {
     entry = e;
     const spec = [
-      ['base', root, bodyMaterial(), false, true],
+      ['base', root, baseMaterial(), false, true],
       ['body', structure, bodyMaterial(), true, true],
       ['team', structure, teamMat, true, false],
       ['glow', structure, glowMaterial(), false, false],
@@ -3018,7 +3603,7 @@ export function buildGoldMineModel() {
   root.name = 'gold-mine';
   const body = makeMesh(MINE_GEO.body, bodyMaterial(), 'mine-body', true, true);
   root.add(body);
-  const veins = makeMesh(MINE_GEO.levels[3], glowMaterial(), 'mine-gold', false, false);
+  const veins = makeMesh(MINE_GEO.levels[3], mineGoldMaterial(), 'mine-gold', false, false);
   root.add(veins);
   let level = 3;
   return {
