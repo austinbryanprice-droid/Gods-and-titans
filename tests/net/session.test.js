@@ -89,7 +89,8 @@ test('sessions: commands always use the sender’s player index', async () => {
   ben.sendCommand({ type: 'stop', units: [3] });
   host.sendCommand({ type: 'hold', units: [4] });
   ann.sendCommand({ nope: true }); // malformed: dropped
-  await sleep(10);
+  await waitFor(() => host.world.queue.length >= 3, 3000, 'commands to reach the host');
+  await sleep(10); // let the malformed one arrive too, so the test would see it if it were kept
   host.step(1);
   const cmds = host.world.commands.map((c) => [c.player, c.cmd.type]);
   assert.deepEqual(cmds.sort(), [[0, 'hold'], [1, 'move'], [2, 'stop']].sort());
