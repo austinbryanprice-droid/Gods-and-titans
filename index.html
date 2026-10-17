@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mythic War — Gods, Titans &amp; Worshippers</title>
+  <meta name="description" content="A browser real-time strategy game: lead worshippers, raise a city, and summon the gods, titans and mythical creatures of ten mythologies. Play co-op against AI or battle friends online.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="src/ui/hud.css">
+  <script src="vendor/peerjs.min.js" defer></script>
+</head>
+<body>
+  <div id="app">
+    <div id="game-root" hidden>
+      <canvas id="game-canvas"></canvas>
+      <div id="hud-root"></div>
+    </div>
+    <div id="menu-root"></div>
+    <div id="boot-message">Loading…</div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
