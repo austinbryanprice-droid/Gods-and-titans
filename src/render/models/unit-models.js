@@ -32,8 +32,9 @@ let seedCounter = 1;
 
 /**
  * Shared by every unit material (uUnitLook): x = emissive gain of full glow
- * (eyes, runes, flames, orbs reach ~2.5x their albedo, above the bloom
- * threshold of the HDR pipeline), y = how much of the baked occlusion also
+ * (eyes, runes, flames, orbs reach up to ~2.5x their albedo, above the bloom
+ * threshold of the HDR pipeline; see UNIT_EMISSIVE for the per-channel cap),
+ * y = how much of the baked occlusion also
  * dims direct sunlight (indirect light always gets all of it), z = extra sky
  * reflection on metal (an RTS camera sees little bright sky in reflections;
  * without it metal reads darker than cloth), w = diffuse gain (makes up for
