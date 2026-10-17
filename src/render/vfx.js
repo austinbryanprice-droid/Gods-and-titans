@@ -33,10 +33,12 @@ const LIGHT_PER_FLARE = 3.2;
 const LIGHT_LIFT = 2;
 
 // lights: point lights in the pool, fixed for the system's life (the count is
-// part of every lit shader); a later switch to 'low' only turns them down to 0
+// part of every lit shader, and each one costs every lit pixel: medium, which
+// must hold 60 fps on integrated GPUs at up to 1.5x pixel ratio, gets 2); a
+// later switch to 'low' only turns them down to 0
 const QUALITY = {
   low: { particles: 1600, mult: 0.5, lights: 0 },
-  medium: { particles: 3000, mult: 0.8, lights: 4 },
+  medium: { particles: 3000, mult: 0.8, lights: 2 },
   high: { particles: 4000, mult: 1, lights: 4 },
 };
 
@@ -143,7 +145,7 @@ export class VFXSystem {
    * @param {THREE.Scene} scene
    * @param {(x:number, y:number) => number} getHeight ground height at sim (x, y)
    * @param {{ quality?: 'low'|'medium'|'high', maxParticles?: number, lights?: number }} [options]
-   *   lights: point lights in the pool (default per quality: 0 on low, else 4)
+   *   lights: point lights in the pool (default per quality: 0 on low, 2 on medium, 4 on high)
    */
   constructor(scene, getHeight, options = {}) {
     this.scene = scene;

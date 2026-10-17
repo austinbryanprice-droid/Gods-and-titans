@@ -110,9 +110,11 @@ void main() {
   float a = t.a * vColor.a;
   if (a < 0.003) discard;
   // white-hot centre: the dense middle of a glow / star / spark (heat > 0) whitens
-  // and goes past 1, so it blooms; smoke, rings and shards (heat 0) keep their color
+  // and goes past 1, so it blooms; smoke, rings and shards (heat 0) keep their color.
+  // Blue whitens last, like a heating flame (orange → yellow → white): whitening
+  // red-orange evenly in linear light turns it salmon pink.
   float hot = t.a * t.a * t.a * vHeat;
-  vec3 c = mix(vColor.rgb * t.rgb, vec3(1.0), min(hot, 1.0) * uCore) * (1.0 + hot * uBoost);
+  vec3 c = mix(vColor.rgb * t.rgb, vec3(1.0), min(hot, 1.0) * uCore * vec3(1.0, 1.0, 0.55)) * (1.0 + hot * uBoost);
   gl_FragColor = vec4(c, 1.0);
   ${OUT}
   gl_FragColor = vfxPremul(gl_FragColor.rgb, a);
@@ -411,9 +413,10 @@ function markRange(attr, count) {
 
 /**
  * Default heat (HDR hot centre, see POINT_FS) per atlas cell: glows, stars and
- * sparks burn white-hot, flames a little, smoke / rings / shards / plus not at all.
+ * sparks burn white-hot, plus signs and flames a little (flame puffs pile up),
+ * smoke / rings / shards not at all.
  */
-export const CELL_HEAT = [0.8, 1, 0, 1.4, 0, 0, 0.25, 0.3];
+export const CELL_HEAT = [0.8, 1, 0, 1.4, 0, 0, 0.25, 0.15];
 
 /**
  * Dense particle buffer drawn as one THREE.Points. Dead particles are swapped
