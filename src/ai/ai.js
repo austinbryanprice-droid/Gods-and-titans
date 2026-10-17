@@ -7,8 +7,8 @@
 import { RNG, hashSeed } from '../sim/rng.js';
 import { profileFor } from './profiles.js';
 import { scanWorld } from './scan.js';
-import { refreshEconomy, manageWorkers } from './economy.js';
-import { planBuildings, resumeSites } from './build.js';
+import { refreshEconomy, manageWorkers, minersFor, unstickWoodcutters } from './economy.js';
+import { planBuildings, resumeSites, unstickBuilders } from './build.js';
 import { planProduction } from './production.js';
 import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
@@ -106,7 +106,9 @@ export class AIPlayer {
     lap('econ');
     runMilitary(this, s);
     lap('military');
+    unstickWoodcutters(this, s);
     manageWorkers(this, s);
+    unstickBuilders(this, s);
     resumeSites(this, s);
     lap('workers');
     const wants = [];
@@ -291,22 +293,31 @@ export class AIPlayer {
         return;
       }
       ex.ready = !ex.camp || !ex.camp.members.some((m) => !m.dead);
-      ex.built = this.pairs.some((p) => p.mine === ex.mine);
+      ex.built = this.pairs.some((p) => p.mine === ex.mine && !p.far);
       if (ex.built) {
-        if (prof.towersMax >= 2 && !this.towerTarget && !ex.towerAsked) {
-          this.towerTarget = { x: ex.mine.x, y: ex.mine.y, urgent: false, t: s.t };
-          ex.towerAsked = true;
-        }
-        // Done: keep it as the current expansion until it runs low.
-        if (ex.mine.amount < 2500) this.expansion = null;
+        // Done: ask for a guard tower (normal/hard) and free the slot for the next expansion.
+        if (prof.towersMax >= 2 && !this.towerTarget) this.towerTarget = { x: ex.mine.x, y: ex.mine.y, urgent: false, t: s.t };
+        this.expansion = null;
+        return;
       }
       if (this.expansion && s.t - ex.since > 300 && !ex.built) this.expansion = null; // give up, try another
       return;
     }
     if (!s.tcs.length || s.t < 150) return;
+    // One mine caps at 13.3 gold/s (2 miners at once), so income grows by
+    // taking more mines: a second one from expandAt, a third from expandAt2,
+    // and a replacement whenever the owned mines run low.
     let owned = 0;
-    for (const p of this.pairs) owned += p.mine.amount;
-    const trigger = owned < prof.expandBelow || (s.t >= prof.expandAt && this.pairs.length < 2);
+    let live = 0;
+    for (const p of this.pairs) {
+      if (p.far) continue;
+      owned += p.mine.amount;
+      if (p.mine.amount >= 2500) live++;
+    }
+    let want = 1;
+    if (s.t >= prof.expandAt) want = 2;
+    if (s.t >= prof.expandAt2) want = 3;
+    const trigger = live < want || owned < prof.expandBelow;
     if (!trigger) return;
     if (s.workers.length < 10) return;
     const home = this.home();
@@ -314,7 +325,7 @@ export class AIPlayer {
     let bestD = Infinity;
     for (const m of world.mineList) {
       if (m.dead || m.amount < 3000) continue;
-      if (this.pairs.some((p) => p.mine === m)) continue;
+      if (this.pairs.some((p) => p.mine === m && !p.far)) continue;
       let blocked = false;
       for (const b of world.buildingList) {
         if (b.dead || b.owner === this.me || b.owner < 0) continue;
@@ -340,7 +351,7 @@ export class AIPlayer {
         camp = c;
       }
     }
-    this.expansion = { mine: best, camp, ready: !camp, built: false, since: s.t, towerAsked: false };
+    this.expansion = { mine: best, camp, ready: !camp, built: false, since: s.t };
   }
 
   // ---------------------------------------------------------------- rallies
@@ -351,9 +362,25 @@ export class AIPlayer {
     for (const b of s.buildings) {
       if (!b.constructed) continue;
       if (b.type === 'town_center') {
-        const pr = this.pairs.find((p) => p.drop === b);
-        const target = pr ? pr.mine.id : 0;
-        if (target && (!b.rally || b.rally.target !== target)) this.issue({ type: 'rally', building: b.id, x: pr.mine.x, y: pr.mine.y, target });
+        // New worshippers go where a job is open: a mine with room (this one's first), else the wood line.
+        let pr = null;
+        let room = 0;
+        for (const q of this.pairs) {
+          const r = minersFor(this, q) - q.workers + (q.drop === b ? 0.5 : 0) - Math.hypot(q.mine.x - b.x, q.mine.y - b.y) * 0.01;
+          if (r > room) {
+            room = r;
+            pr = q;
+          }
+        }
+        const tw = this.woodSpot;
+        if (pr) {
+          if (!b.rally || b.rally.target !== pr.mine.id) this.issue({ type: 'rally', building: b.id, x: pr.mine.x, y: pr.mine.y, target: pr.mine.id });
+        } else if (tw && this.world.map.isTreeAccessible(tw.tx, tw.ty)) {
+          if (!b.rally || !b.rally.tree || b.rally.tree.tx !== tw.tx || b.rally.tree.ty !== tw.ty) this.issue({ type: 'rally', building: b.id, x: tw.tx + 0.5, y: tw.ty + 0.5 });
+        } else {
+          const home = this.pairs.find((p) => p.drop === b);
+          if (home && (!b.rally || b.rally.target !== home.mine.id)) this.issue({ type: 'rally', building: b.id, x: home.mine.x, y: home.mine.y, target: home.mine.id });
+        }
         continue;
       }
       if (b.type === 'barracks' || b.type === 'shrine' || b.type === 'temple' || b.type === 'titan_gate') {

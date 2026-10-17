@@ -1,10 +1,13 @@
 // AI economy: which mines and trees the AI uses, and how its worshippers are
 // split between gold, wood and prayer (DESIGN 10). Only issues gather / pray
 // commands; buildings are planned in build.js.
+import { TICK_RATE } from '../config.js';
 import { doneOf } from './scan.js';
 import { mirrorTie } from './placement.js';
 
 const MINE_DROP_RANGE = 7; // a mine counts as "owned" with a drop-off this close (footprint gap)
+const WOOD_STUCK_TICKS = 8 * TICK_RATE; // a woodcutter walking to its tree that has not moved this long is stuck
+const BAD_TREE_TICKS = 120 * TICK_RATE; // and that tree is left alone this long
 
 function rectGap(a, b) {
   const gx = Math.max(0, b.tx - (a.tx + a.size), a.tx - (b.tx + b.size));
@@ -32,13 +35,27 @@ export function refreshEconomy(ai, s) {
     }
     if (best && bestGap <= MINE_DROP_RANGE && !ai.mineThreatened(m, s)) pairs.push({ mine: m, drop: best, gap: bestGap, workers: 0 });
   }
+  if (!pairs.length && drops.length) {
+    // No mine next to a drop-off (the owned ones ran dry or were lost): mine the
+    // nearest safe one the long way until a Storehouse there pays for itself,
+    // rather than have no gold at all (then not even a Storehouse is affordable).
+    let far = null;
+    for (const m of world.mineList) {
+      if (m.dead || m.amount <= 0 || ai.mineThreatened(m, s)) continue;
+      for (const d of drops) {
+        const g = rectGap(m, d);
+        if (!far || g < far.gap) far = { mine: m, drop: d, gap: g, workers: 0, far: true };
+      }
+    }
+    if (far && far.gap <= 40) pairs.push(far);
+  }
   ai.pairs = pairs;
   // Wood: the drop-off with the closest accessible trees (re-checked when the
   // drop-offs change, the trees are gone, or every 10 s).
   let dropKey = '';
   for (const d of drops) dropKey += `${d.id},`;
   const cur = ai.woodSpot;
-  if (!cur || dropKey !== ai.woodDropKey || !world.map.isTreeAccessible(cur.tx, cur.ty) || world.tickCount - (ai.woodCheckTick || 0) > 200) {
+  if (!cur || dropKey !== ai.woodDropKey || !world.map.isTreeAccessible(cur.tx, cur.ty) || badTree(ai, cur.tx, cur.ty) || world.tickCount - (ai.woodCheckTick || 0) > 200) {
     ai.woodCheckTick = world.tickCount;
     ai.woodDropKey = dropKey;
     let best = null;
@@ -53,7 +70,7 @@ export function refreshEconomy(ai, s) {
     }
     // Keep the current wood line while it is nearly as good (chopping thins a
     // forest; hopping between lines would strand the planned storehouse).
-    if (best && cur && cur.drop === best.drop && !cur.drop.dead && world.map.isTreeAccessible(cur.tx, cur.ty)) {
+    if (best && cur && cur.drop === best.drop && !cur.drop.dead && world.map.isTreeAccessible(cur.tx, cur.ty) && !badTree(ai, cur.tx, cur.ty)) {
       const curDist = Math.hypot(cur.tx + 0.5 - cur.drop.x, cur.ty + 0.5 - cur.drop.y) - cur.drop.size / 2;
       if (curDist <= best.dist + 1.5) best = { tx: cur.tx, ty: cur.ty, drop: cur.drop, dist: curDist };
     }
@@ -74,7 +91,9 @@ export function refreshEconomy(ai, s) {
  */
 function pickWoodTile(ai, d) {
   const map = ai.world.map;
-  const first = map.nearestForest(d.x, d.y, 22, true);
+  const first = ai.badTrees && ai.badTrees.size
+    ? map.spiralNearest(d.x, d.y, 22, (tx, ty) => map.isTreeAccessible(tx, ty) && !badTree(ai, tx, ty))
+    : map.nearestForest(d.x, d.y, 22, true);
   if (!first) return null;
   const dist = (tx, ty) => Math.hypot(tx + 0.5 - d.x, ty + 0.5 - d.y) - d.size / 2;
   const limit = dist(first.tx, first.ty) + 1;
@@ -86,7 +105,7 @@ function pickWoodTile(ai, d) {
   for (let ty = cy - R; ty <= cy + R; ty++) {
     for (let tx = cx - R; tx <= cx + R; tx++) {
       const dd = dist(tx, ty);
-      if (dd > limit || !map.isTreeAccessible(tx, ty)) continue;
+      if (dd > limit || !map.isTreeAccessible(tx, ty) || badTree(ai, tx, ty)) continue;
       let dense = 0;
       for (let y = ty - 2; y <= ty + 2; y++) for (let x = tx - 2; x <= tx + 2; x++) if (map.isForest(x, y)) dense++;
       const score = dd - dense * 0.06 + mirrorTie(ai, tx + 0.5 - d.x, ty + 0.5 - d.y);
@@ -104,13 +123,13 @@ function treesNear(ai) {
   const world = ai.world;
   const spot = ai.woodSpot;
   if (!spot) return [];
-  if (ai.treeList && ai.treeListVer === world.map.version) return ai.treeList;
+  if (ai.treeList && ai.treeListVer === world.map.version && ai.treeListBad === (ai.badTreeVer || 0)) return ai.treeList;
   const list = [];
   const map = world.map;
   const R = 5;
   for (let y = spot.ty - R; y <= spot.ty + R; y++) {
     for (let x = spot.tx - R; x <= spot.tx + R; x++) {
-      if (!map.isTreeAccessible(x, y)) continue;
+      if (!map.isTreeAccessible(x, y) || badTree(ai, x, y)) continue;
       const d = spot.drop ? Math.hypot(x + 0.5 - spot.drop.x, y + 0.5 - spot.drop.y) : Math.hypot(x - spot.tx, y - spot.ty);
       list.push({ tx: x, ty: y, d });
     }
@@ -122,7 +141,124 @@ function treesNear(ai) {
   if (list.length > 12) list.length = 12;
   ai.treeList = list;
   ai.treeListVer = world.map.version;
+  ai.treeListBad = ai.badTreeVer || 0;
   return list;
+}
+
+function badTree(ai, tx, ty) {
+  const bad = ai.badTrees;
+  if (!bad || !bad.size) return false;
+  const until = bad.get(ty * 4096 + tx);
+  return until !== undefined && until > ai.world.tickCount;
+}
+
+/**
+ * Woodcutters stuck on the way to their tree. A walk whose path came back
+ * empty can end short of the tree, and the sim then leaves the worker in
+ * phase 'go' for good (seen: 7 of 8 woodcutters frozen next to one forest
+ * edge for 15 min, 2 wood/s income and 17000 gold that wood could not pair).
+ * One that has not moved for 8 s is sent to another tree, and its tree is
+ * left alone (also as the wood line) for 2 minutes.
+ */
+export function unstickWoodcutters(ai, s) {
+  const now = ai.world.tickCount;
+  const map = ai.world.map;
+  const watch = ai.woodWatch || (ai.woodWatch = new Map());
+  const live = new Set();
+  let marked = false;
+  for (const u of s.workers) {
+    const o = u.order;
+    if (!o || o.type !== 'gather' || !o.tree || o.phase !== 'go') continue;
+    live.add(u.id);
+    const key = o.tree.ty * 4096 + o.tree.tx;
+    const w = watch.get(u.id);
+    if (!w || w.key !== key || Math.hypot(u.x - w.x, u.y - w.y) > 0.4) {
+      watch.set(u.id, { key, x: u.x, y: u.y, t: now });
+      continue;
+    }
+    if (now - w.t < WOOD_STUCK_TICKS) continue;
+    watch.delete(u.id);
+    const bad = ai.badTrees || (ai.badTrees = new Map());
+    for (const [k, until] of bad) if (until <= now) bad.delete(k);
+    bad.set(key, now + BAD_TREE_TICKS);
+    marked = true;
+    const t = map.spiralNearest(u.x, u.y, 12, (tx, ty) => map.isTreeAccessible(tx, ty) && !badTree(ai, tx, ty));
+    if (t) ai.issue({ type: 'gather', units: [u.id], tx: t.tx, ty: t.ty });
+    else ai.issue({ type: 'stop', units: [u.id] });
+    if (ai.log) ai.log.push(`${(s.t / 60).toFixed(2)}m unstuck woodcutter ${u.id} (tree ${o.tree.tx},${o.tree.ty})`);
+  }
+  for (const id of watch.keys()) if (!live.has(id)) watch.delete(id);
+  if (marked) ai.badTreeVer = (ai.badTreeVer || 0) + 1;
+}
+
+/**
+ * Gold workers wanted at an owned mine. Only MINE_SLOTS (2) workers mine at
+ * once, so a mine is saturated by about 5–6 workers at the minimum drop-off
+ * gap (13.3 gold/s); a drop-off farther away needs one or two more walkers.
+ */
+export function minersFor(ai, pr) {
+  const amount = pr.mine.amount;
+  if (amount < 150) return 1;
+  let n = ai.prof.minersPerMine + (pr.gap >= 5 ? 1 : 0) + (pr.gap >= 7 ? 1 : 0);
+  if (amount < 600) n = Math.min(n, 2);
+  else if (amount < 1500) n = Math.min(n, 4);
+  return n;
+}
+
+/** Gold workers all owned mines can use. */
+export function goldCapacity(ai) {
+  let n = 0;
+  for (const pr of ai.pairs) n += minersFor(ai, pr);
+  return n;
+}
+
+/** Woodcutters wanted for a number of gold workers, adjusted by the wood bank. */
+function woodWant(ai, s, gold) {
+  const prof = ai.prof;
+  const p = s.p;
+  let w = Math.max(prof.woodMin, Math.round(gold * prof.woodPerGold));
+  if (p.wood > 1000) w = Math.round(w * 0.35);
+  else if (p.wood > 650) w = Math.round(w * 0.6);
+  else if (p.wood > 400) w = Math.round(w * 0.8);
+  else if (p.wood < 150) w = Math.round(w * 1.35) + 1;
+  return Math.max(1, Math.min(prof.woodMax, w));
+}
+
+/** Praying worshippers wanted (before the cap by free prayer slots). */
+function prayWant(ai, s) {
+  const prof = ai.prof;
+  const p = s.p;
+  const temple = doneOf(s, 'temple') > 0;
+  const titan = ai.savingForTitan(s);
+  let pray = temple ? prof.prayLate : prof.prayEarly;
+  if (titan) pray = prof.prayTitan;
+  // Faith piling up with nothing to buy: pray less.
+  const faithCap = titan ? 1200 : temple ? 700 : 450;
+  // Gold piling up while faith is short: more worshippers pray (faith buys gods and creatures).
+  if (p.faith < faithCap * 0.6) {
+    if (p.gold > 2500) pray += 4;
+    else if (p.gold > 1200) pray += 2;
+  }
+  if (p.faith > faithCap) pray = Math.max(1, Math.floor(pray / 2));
+  if (p.faith > faithCap * 1.8) pray = 0;
+  return pray;
+}
+
+/**
+ * Worshippers this AI wants in total: enough to saturate its mines (plus the
+ * expansion being prepared), the wood line it needs and its prayer slots.
+ */
+export function workerNeed(ai, s) {
+  let gold = goldCapacity(ai);
+  const ex = ai.expansion;
+  if (ex && ex.ready && !ex.built) gold += ai.prof.minersPerMine; // train ahead for the new mine
+  if (!ai.pairs.length && !ex) gold = Math.max(gold, ai.prof.minersPerMine);
+  let slots = prayerSlots(s);
+  if (!slots) slots = 5; // a Shrine is coming
+  else if (!doneOf(s, 'temple') && slots < 10) slots += 5; // and a Temple
+  const pray = Math.min(slots, Math.max(ai.prof.prayLate, prayWant(ai, s)));
+  const wood = woodWant(ai, s, gold);
+  return Math.min(ai.prof.workers, gold + wood + pray + 2);
 }
 
 /** Desired worker split for this think. */
@@ -131,33 +267,46 @@ function targets(ai, s) {
   const p = s.p;
   const slots = prayerSlots(s);
   let pray = 0;
-  if (slots > 0) {
-    const temple = doneOf(s, 'temple') > 0;
-    pray = temple ? prof.prayLate : prof.prayEarly;
-    if (ai.savingForTitan(s)) pray = prof.prayTitan;
-    // Faith piling up with nothing to buy: pray less.
-    const faithCap = ai.savingForTitan(s) ? 1200 : temple ? 700 : 450;
-    // Gold piling up while faith is short: more worshippers pray (faith buys gods and creatures).
-    if (p.faith < faithCap * 0.6) {
-      if (p.gold > 2500) pray += 4;
-      else if (p.gold > 1200) pray += 2;
-    }
-    if (p.faith > faithCap) pray = Math.max(1, Math.floor(pray / 2));
-    if (p.faith > faithCap * 1.8) pray = 0;
-    pray = Math.min(pray, slots, Math.floor(s.workers.length * 0.5));
-  }
+  if (slots > 0) pray = Math.min(prayWant(ai, s), slots, Math.floor(s.workers.length * 0.5));
   const avail = Math.max(0, s.workers.length - s.jobs.build - pray - (ai.militia ? ai.militia.size : 0));
+  const goldCap = goldCapacity(ai);
+  if (!ai.pairs.length || !goldCap) {
+    // No usable mine: everyone on wood (or nothing to do).
+    const wood = ai.woodSpot ? avail : 0;
+    return { pray, wood, gold: 0, goldCap: 0 };
+  }
+  if (!ai.woodSpot) return { pray, wood: 0, gold: avail, goldCap };
+  // Early on (fewer workers than the mines can use) wood gets its share, as
+  // before; once the mines are full the rest go to wood up to what is needed,
+  // then to prayer, and only then wait at a saturated mine.
   let share = prof.woodShare;
   if (p.wood > 700) share *= 0.4;
   else if (p.wood > 400) share *= 0.75;
   else if (p.wood < 120) share *= 1.3;
   if (p.gold > 1200 && p.wood < 400) share *= 1.35;
   if (p.gold < 150 && p.wood > 250) share *= 0.7;
-  if (!ai.pairs.length) share = 1;
-  if (!ai.woodSpot) share = 0;
   share = Math.min(1, share);
-  const wood = Math.round(avail * share);
-  return { pray, wood, gold: avail - wood };
+  const wantWood = woodWant(ai, s, goldCap);
+  let wood = Math.min(wantWood, Math.round(avail * share));
+  let gold = Math.min(goldCap, avail - wood);
+  let left = avail - wood - gold;
+  if (left > 0) {
+    const w = Math.min(left, wantWood - wood);
+    wood += w;
+    left -= w;
+  }
+  if (left > 0 && slots > pray && p.faith < 1500) {
+    const k = Math.min(left, slots - pray);
+    pray += k;
+    left -= k;
+  }
+  if (left > 0 && p.wood < 1200) {
+    // Spare hands chop (wood never runs short of buyers for long) rather than queue at a full mine.
+    wood += left;
+    left = 0;
+  }
+  gold += left;
+  return { pray, wood, gold, goldCap };
 }
 
 function prayerSlots(s) {
@@ -190,11 +339,14 @@ function prayerBuildingFor(ai, s, u, praying) {
   return best;
 }
 
-function bestPair(ai) {
+/** Owned mine with the most room for another gold worker (nearest to `u` on ties). */
+function bestPair(ai, u) {
   let best = null;
   let bestScore = Infinity;
   for (const pr of ai.pairs) {
-    const score = pr.workers + pr.gap * 0.8 + (pr.mine.amount < 1200 ? 8 : 0);
+    const room = minersFor(ai, pr) - pr.workers;
+    const d = u ? Math.hypot(pr.mine.x - u.x, pr.mine.y - u.y) : 0;
+    const score = -room * 10 + d * 0.05 + pr.gap * 0.1;
     if (score < bestScore) {
       bestScore = score;
       best = pr;
@@ -218,6 +370,7 @@ export function manageWorkers(ai, s) {
   const wood = [];
   const pray = [];
   const free = [];
+  const pairOf = new Map(); // gold worker id -> its pair
   for (const u of s.workers) {
     if (ai.militia && ai.militia.has(u.id)) continue;
     const j = s.job.get(u.id);
@@ -227,6 +380,7 @@ export function manageWorkers(ai, s) {
       if (pr) {
         pr.workers++;
         gold.push(u);
+        pairOf.set(u.id, pr);
       } else free.push(u); // mining an unowned / threatened / gone mine
     } else if (j === 'wood') wood.push(u);
     else if (j === 'pray') {
@@ -243,7 +397,7 @@ export function manageWorkers(ai, s) {
     // Group by mine to keep commands few.
     const groups = new Map();
     for (const u of list) {
-      const pr = bestPair(ai);
+      const pr = bestPair(ai, u);
       if (!pr) return;
       pr.workers++;
       let g = groups.get(pr.mine.id);
@@ -291,17 +445,31 @@ export function manageWorkers(ai, s) {
       g++;
     }
   }
+  // Leave a gold job: prefer a worker queued at an over-full mine, without cargo.
+  const takeGold = () => {
+    const u = pickGoldMover(ai, gold, pairOf);
+    if (!u) return null;
+    removeFrom(gold, u);
+    const p0 = pairOf.get(u.id);
+    if (p0) p0.workers--;
+    pairOf.delete(u.id);
+    g--;
+    return u;
+  };
   // 2. Rebalance a couple of workers per think.
   const moves = ai.prof.think >= 20 ? 3 : 2;
   for (let k = 0; k < moves; k++) {
     if (pr < want.pray) {
       const fromWood = (w - want.wood > g - want.gold && wood.length > 0) || gold.length === 0;
-      const src = fromWood ? wood : gold;
-      const u = nearestTo(src, ai.prayerPoint(s));
+      let u;
+      if (fromWood) {
+        u = nearestTo(wood, ai.prayerPoint(s));
+        if (u) {
+          removeFrom(wood, u);
+          w--;
+        }
+      } else u = takeGold();
       if (!u) break;
-      removeFrom(src, u);
-      if (fromWood) w--;
-      else g--;
       toPray.push(u);
       pr++;
     } else if (pr > want.pray + 1 && pray.length) {
@@ -314,26 +482,74 @@ export function manageWorkers(ai, s) {
         toGold.push(u);
         g++;
       }
-    } else if (want.wood - w >= 2 && gold.length && trees.length) {
-      const u = pickMovable(gold, 'g');
+    } else if ((want.wood - w >= 2 || (want.wood > w && g > want.gold)) && gold.length && trees.length) {
+      const u = takeGold();
       if (!u) break;
-      removeFrom(gold, u);
-      g--;
       toWood.push(u);
       w++;
-    } else if (want.gold - g >= 2 && wood.length && ai.pairs.length) {
+    } else if ((want.gold - g >= 2 || (want.gold > g && w > want.wood)) && wood.length && ai.pairs.length) {
       const u = pickMovable(wood, 'w');
       if (!u) break;
       removeFrom(wood, u);
       w--;
       toGold.push(u);
       g++;
-    } else break;
+    } else if (!moveBetweenMines(ai, gold, pairOf)) break;
   }
   ai.treeRot = treeIdx % 997;
   sendPray(toPray);
   sendGold(toGold);
   sendWood(toWood);
+}
+
+/** A gold worker to reassign: queued at an over-full mine first, never one carrying gold if avoidable. */
+function pickGoldMover(ai, list, pairOf) {
+  let best = null;
+  let bestV = -Infinity;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const u = list[i];
+    const pr = pairOf.get(u.id);
+    let v = 0;
+    if (pr && pr.workers > minersFor(ai, pr)) v += 4;
+    const o = u.order;
+    if (o && o.type === 'gather' && o.phase === 'wait') v += 2;
+    if (u.carry === 'g' && u.carryAmount > 0) v -= 3;
+    if (v > bestV) {
+      bestV = v;
+      best = u;
+    }
+  }
+  return best;
+}
+
+/** Move one gold worker from an over-full mine to one with room. */
+function moveBetweenMines(ai, gold, pairOf) {
+  if (ai.pairs.length < 2) return false;
+  let over = null;
+  let under = null;
+  for (const pr of ai.pairs) {
+    const d = pr.workers - minersFor(ai, pr);
+    if (d >= 1 && (!over || d > over.workers - minersFor(ai, over))) over = pr;
+    if (d <= -1 && (!under || d < under.workers - minersFor(ai, under))) under = pr;
+  }
+  if (!over || !under) return false;
+  let u = null;
+  let bestV = -Infinity;
+  for (const w of gold) {
+    if (pairOf.get(w.id) !== over) continue;
+    const o = w.order;
+    const v = (o && o.type === 'gather' && o.phase === 'wait' ? 2 : 0) - (w.carryAmount > 0 ? 1 : 0);
+    if (v > bestV) {
+      bestV = v;
+      u = w;
+    }
+  }
+  if (!u) return false;
+  over.workers--;
+  under.workers++;
+  pairOf.set(u.id, under);
+  ai.issue({ type: 'gather', units: [u.id], target: under.mine.id });
+  return true;
 }
 
 function removeFrom(list, u) {

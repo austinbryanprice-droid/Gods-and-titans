@@ -239,16 +239,26 @@ export function godRoles(def) {
         case 'shield': support += (e.amount || 0) * (e.affects === 'self' ? 0.4 : 1); break;
         case 'buff': if (e.amount > 0 && e.affects !== 'self') support += 120; break;
         case 'invulnerable': support += 150; break;
-        case 'summon': summon += 80 * (e.count || 1); break;
+        case 'summon': {
+          // Summoned fighters deal damage too (worth their strength for their lifetime).
+          const inf = unitInfo(e.unit);
+          summon += (e.count || 1) * (inf ? inf.str : 40) * (Math.min(e.duration || 30, 40) / 30) * 1.5;
+          break;
+        }
         default: break;
       }
     }
+  }
+  for (const p of def.passives || []) {
+    if (p.type !== 'aura' || p.affects === 'enemies' || !(p.amount > 0)) continue;
+    const per = p.stat === 'armor' ? 40 : p.stat === 'regen' ? 30 : p.stat === 'speed' ? 300 : 1000; // damage / attackSpeed
+    support += p.amount * per;
   }
   const atk = def.attack;
   const dps = atk ? atk.damage / atk.cooldown : 0;
   const ranged = !!atk && atk.range > 1.5;
   return {
-    damage: damage + dps * 6 + (ranged ? 60 : 0),
+    damage: damage + summon + dps * 6 + (ranged ? 60 : 0),
     heal: heal + support * 0.6,
     tank: def.hp * 0.25 + (def.armor || 0) * 30 + (ranged ? 0 : 80),
     summon,

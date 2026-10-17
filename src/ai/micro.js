@@ -537,8 +537,11 @@ function retarget(ai, u, target) {
 
 /**
  * Army micro: ranged units in combat switch to an enemy they can finish or a
- * wounded enemy god; melee units stuck chasing a target they cannot reach
- * (crowded fights around buildings) hit an enemy already in reach instead.
+ * wounded enemy god. Melee units are left to the sim, which re-targets
+ * attack-moving and auto-acquired melee units itself when they are blocked
+ * (surround spots, src/sim/orders.js); an AI `attack` order would pin them to
+ * one target instead. `prof.meleeRetarget` brings the old AI-side melee
+ * re-targeting back for comparison.
  */
 function focusFire(ai, s) {
   const world = ai.world;
@@ -556,6 +559,7 @@ function focusFire(ai, s) {
     const atk = u.def.attack;
     if (!atk || atk.buildingsOnly || !u.target) continue;
     const melee = atk.range < 2;
+    if (melee && !ai.prof.meleeRetarget) continue;
     if (melee ? u.state !== 'move' : u.state !== 'attack') continue;
     if (ai.godRetreat.has(u.id)) continue;
     const cur = world.entities.get(u.target);

@@ -314,7 +314,7 @@ export default {
       radius: 0.55,
       sight: 10,
       air: false,
-      attack: { damage: 28, range: 0.5, cooldown: 1.5, canHitAir: true, projectile: null, element: 'death', splash: 0, buildingMult: 1 },
+      attack: { damage: 30, range: 0.5, cooldown: 1.5, canHitAir: true, projectile: null, element: 'death', splash: 0, buildingMult: 1 },
       abilities: [
         {
           id: 'mesopotamian_nergal_scorching_noon',
@@ -484,7 +484,7 @@ export default {
       pop: 2,
       buildTime: 20,
       producedAt: 'shrine',
-      hp: 380,
+      hp: 400,
       armor: 2,
       speed: 2.9,
       radius: 0.45,

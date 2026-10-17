@@ -4,6 +4,7 @@ import { BUILDINGS, getUnitType } from '../data/index.js';
 import { MAX_GODS, GOD_SLOT_TIER, REVIVE_COST_MULT, MAX_QUEUE, POP_MAX } from '../config.js';
 import { countOf, doneOf } from './scan.js';
 import { unitInfo, godRoles } from './unit-info.js';
+import { workerNeed } from './economy.js';
 
 function halfCost(cost) {
   return {
@@ -150,10 +151,21 @@ export function planProduction(ai, s, wants) {
     }
   }
 
+  // Population kept free for the gods and the Titan still to come (workers and army both respect it).
+  const heroes = s.gods.length + s.queuedGods;
+  const titanHave = ai.roster.titan ? countOf(s, ai.roster.titan) : 1;
+  // At most 10 (the next hero or two): a larger reserve after a lost battle (gods
+  // and Titan dead, waiting for faith to revive them) froze the army while gold
+  // piled up; with a big bank and little faith only one god's worth is kept.
+  let heroReserve = Math.min(10, Math.max(0, MAX_GODS - heroes) * 5 + (tier >= 2 && !titanHave ? 10 : 0));
+  if (p.gold > 1500 && p.faith < 300) heroReserve = Math.min(heroReserve, 5);
+
   // ---- Worshippers
   const workerCount = s.workers.length + (s.queued.get('worshipper') || 0);
-  let workerTarget = prof.workers;
+  let workerTarget = workerNeed(ai, s);
+  ai.workerTarget = workerTarget;
   if (ai.pairs.length === 0 && !ai.woodSpot) workerTarget = Math.min(workerTarget, s.workers.length);
+  workerTarget = Math.min(workerTarget, workerCount + Math.max(0, POP_MAX - heroReserve - p.popUsed));
   for (const tc of s.tcs) {
     if (workerCount >= workerTarget) break;
     if (tc.queue.some((q) => q.u === 'tier_up') || (growing && tc === mainTc)) continue;
@@ -223,9 +235,6 @@ export function planProduction(ai, s, wants) {
   }
 
   // ---- Army (leaving population room for the gods and the Titan still to come)
-  const heroes = s.gods.length + s.queuedGods;
-  const titanHave = ai.roster.titan ? countOf(s, ai.roster.titan) : 1;
-  const heroReserve = Math.max(0, MAX_GODS - heroes) * 5 + (tier >= 2 && !titanHave ? 10 : 0);
   let popRoom = POP_MAX - heroReserve - p.popUsed;
   if (s.armyPop < prof.armyCap && popRoom > 0) {
     const mix = armyMix(s);

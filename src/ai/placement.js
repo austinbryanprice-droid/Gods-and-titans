@@ -50,6 +50,7 @@ function reservedMask(world, ai) {
     }
   };
   for (const pair of ai.minePairs()) {
+    if (pair.far) continue; // a long-distance fallback mine keeps no lane
     const { drop, mine } = pair;
     // Bounding box between the drop-off and the mine (1 tile of slack around it).
     const x0 = Math.min(drop.tx, mine.tx) - 1;
@@ -106,6 +107,16 @@ function walkwayClear(map, tx, ty, s) {
   return runs > 1 ? -1 : blocked;
 }
 
+/** Overlaps (or touches) a spot whose builders got stuck recently (build.js unstickBuilders). */
+function nearBadSpot(ai, tx, ty, size) {
+  const now = ai.world.tickCount;
+  for (const b of ai.badSpots) {
+    if (b.until <= now) continue;
+    if (tx <= b.tx + b.size && b.tx <= tx + size && ty <= b.ty + b.size && b.ty <= ty + size) return true;
+  }
+  return false;
+}
+
 /**
  * Best footprint for a building near (x, y).
  * opts: { minR, maxR, ideal (preferred distance), avoidReserved, dir: {x, y} preferred direction, walkway }
@@ -151,6 +162,7 @@ export function findSpot(world, ai, typeId, x, y, opts = {}) {
           }
           if (hit) continue;
         }
+        if (ai.badSpots && nearBadSpot(ai, tx, ty, size)) continue;
         if (!world.canPlaceBuilding(ai.me, typeId, tx, ty)) continue;
         if (walkway) {
           const blocked = walkwayClear(map, tx, ty, size);

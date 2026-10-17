@@ -458,7 +458,7 @@ export default {
       pop: 2,
       buildTime: 20,
       producedAt: 'shrine',
-      hp: 380,
+      hp: 400,
       armor: 1,
       speed: 3.5,
       radius: 0.38,
@@ -497,7 +497,7 @@ export default {
       radius: 0.45,
       sight: 8,
       air: false,
-      attack: { damage: 22, range: 0.5, cooldown: 1.4, canHitAir: false, projectile: null, element: 'water', splash: 0, buildingMult: 1 },
+      attack: { damage: 24, range: 0.5, cooldown: 1.4, canHitAir: false, projectile: null, element: 'water', splash: 0, buildingMult: 1 },
       abilities: [
         {
           id: 'aztec_ahuizotl_drowning_grasp',

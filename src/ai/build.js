@@ -1,8 +1,8 @@
 // AI construction planning: which buildings it wants next (with priorities
 // for the shared spending queue), where they go, who builds them, and
-// resuming construction sites that lost their builder.
+// resuming construction sites that lost their builder or got stuck.
 import { BUILDINGS } from '../data/index.js';
-import { POP_MAX } from '../config.js';
+import { POP_MAX, TICK_RATE } from '../config.js';
 import { haveOf, doneOf } from './scan.js';
 import { findSpot } from './placement.js';
 
@@ -19,6 +19,7 @@ export function pickBuilder(ai, s, x, y, exclude) {
     if (ai.militia && ai.militia.has(u.id)) continue;
     const j = s.job.get(u.id);
     if (j === 'build' || j === 'fight') continue;
+    if (ai.stuckBuilders && (ai.stuckBuilders.get(u.id) || 0) > ai.world.tickCount) continue; // it got stuck building lately
     let d = Math.hypot(u.x - x, u.y - y);
     if (j === 'pray') d += 25;
     if (j === 'idle') d -= 4;
@@ -103,7 +104,9 @@ function expansionSpot(ai) {
   const home = ai.home() || m;
   const dir = sub(home, m);
   const l = Math.hypot(dir.x, dir.y) || 1;
-  return findSpot(ai.world, ai, 'storehouse', m.x, m.y, { minR: 2.8, maxR: 7, ideal: 3.4, dir: { x: dir.x / l, y: dir.y / l }, dirWeight: 2, avoidReserved: false });
+  // Drop-offs keep DROPOFF_MINE_GAP (3) empty tiles from a mine: a 2×2 Storehouse
+  // centre is at least 5.5 tiles from the mine centre along an axis.
+  return findSpot(ai.world, ai, 'storehouse', m.x, m.y, { minR: 5.2, maxR: 9, ideal: 5.5, dir: { x: dir.x / l, y: dir.y / l }, dirWeight: 2, avoidReserved: false });
 }
 
 function towerSpot(ai) {
@@ -177,9 +180,13 @@ export function planBuildings(ai, s, wants) {
   if (barracks >= 1 && barracks < prof.maxBarracks && p.gold > 400 + 150 * barracks && t > 150 && barracksSites < (p.gold > 1800 ? 2 : 1)) {
     add(57, 'barracks', () => baseSpot(ai, 'barracks'), { reserve: false });
   }
+  // More Shrines once faith outruns one Shrine's summoning (a Town creature
+  // takes 28 s and ~100 faith, ~3.6 faith/s, while 10 worshippers pray ~6/s):
+  // a second at Town (or earlier when faith banks), a third at City (hard).
   const shrines = haveOf(s, 'shrine');
-  if (tier >= 2 && shrines >= 1 && shrines < prof.maxShrines && (p.gold > 1100 || (prof.secondShrine && tier >= 3))) {
-    add(55, 'shrine', () => baseSpot(ai, 'shrine'), { reserve: false });
+  if (shrines >= 1 && doneOf(s, 'temple')) {
+    const want = tier >= 3 ? prof.maxShrines : tier >= 2 || p.faith > 400 ? Math.min(2, prof.maxShrines) : 1;
+    if (shrines < want && (prof.secondShrine || p.gold > 1100 || p.faith > 450)) add(tier >= 2 ? 64 : 58, 'shrine', () => baseSpot(ai, 'shrine'), { reserve: false });
   }
   if (tier >= 3 && haveOf(s, 'titan_gate') === 0 && doneOf(s, 'temple')) {
     add(79, 'titan_gate', () => baseSpot(ai, 'titan_gate'), { helpers: prof.think <= 10 ? 1 : 0 });
@@ -198,10 +205,77 @@ export function planBuildings(ai, s, wants) {
   }
 
   // Towers where the base was hit (or guarding the expansion).
+  const tt = ai.towerTarget;
+  if (tt && !tt.urgent) {
+    // An expansion's guard tower stands (or is going up): done with that spot.
+    for (const b of s.buildings) {
+      if (b.type === 'tower' && Math.hypot(b.x - tt.x, b.y - tt.y) < 9) {
+        ai.towerTarget = null;
+        break;
+      }
+    }
+  }
   const towers = haveOf(s, 'tower');
   if (ai.towerTarget && towers < prof.towersMax && t > 150 && !s.pending.some((q) => q.b === 'tower')) {
     add(ai.towerTarget.urgent ? 85 : 58, 'tower', () => towerSpot(ai), { reserve: !!ai.towerTarget.urgent });
   }
+}
+
+const STUCK_TICKS = 10 * TICK_RATE; // without moving while walking to a build spot
+const BAD_SPOT_TICKS = 180 * TICK_RATE; // a spot that kept its builders stuck is avoided this long
+
+/**
+ * Builders stuck on the way. A worker whose walk to a build spot ended short
+ * of it (the path came back empty) can stay in 'move' for good, and an
+ * unplaced house blocks every later house (seen: pop stuck at 124/124 for
+ * 13 min with 17000 gold banked). A builder that has not moved for 10 s is
+ * stopped (an unplaced order is refunded in full) and not picked to build for
+ * a minute, so the site gets another builder or the building another spot.
+ * A site that sticks three times is cancelled (75 % back), and its spot, like
+ * one whose unplaced order stuck twice, is avoided for a while.
+ */
+export function unstickBuilders(ai, s) {
+  const now = ai.world.tickCount;
+  const watch = ai.buildWatch || (ai.buildWatch = new Map());
+  const strikes = ai.buildStrikes || (ai.buildStrikes = new Map());
+  if (strikes.size > 200) strikes.clear();
+  const live = new Set();
+  for (const u of s.workers) {
+    const o = u.order;
+    if (!o || o.type !== 'build' || u.state !== 'move') continue;
+    const key = o.site ? `s${o.site}` : `${o.b}@${o.tx},${o.ty}`;
+    live.add(u.id);
+    const w = watch.get(u.id);
+    if (!w || w.key !== key || Math.hypot(u.x - w.x, u.y - w.y) > 0.4) {
+      watch.set(u.id, { key, x: u.x, y: u.y, t: now });
+      continue;
+    }
+    if (now - w.t < STUCK_TICKS) continue;
+    watch.delete(u.id);
+    const n = (strikes.get(key) || 0) + 1;
+    strikes.set(key, n);
+    const site = o.site ? ai.world.entities.get(o.site) : null;
+    if (site && !site.dead && n >= 3) {
+      ai.issue({ type: 'cancelBuild', building: site.id });
+      markBadSpot(ai, site.tx, site.ty, site.size, now);
+    } else if (!o.site && n >= 2 && BUILDINGS[o.b]) {
+      markBadSpot(ai, o.tx, o.ty, BUILDINGS[o.b].size, now);
+    }
+    ai.issue({ type: 'stop', units: [u.id] });
+    s.job.set(u.id, 'idle');
+    // Someone else builds for the next minute (this one may be walled in).
+    const sb = ai.stuckBuilders || (ai.stuckBuilders = new Map());
+    for (const [id, until] of sb) if (until <= now) sb.delete(id);
+    sb.set(u.id, now + 60 * TICK_RATE);
+    if (ai.log) ai.log.push(`${(s.t / 60).toFixed(2)}m unstuck builder ${u.id} (${key}, strike ${n})`);
+  }
+  for (const id of watch.keys()) if (!live.has(id)) watch.delete(id);
+}
+
+function markBadSpot(ai, tx, ty, size, now) {
+  const list = (ai.badSpots || []).filter((b) => b.until > now);
+  list.push({ tx, ty, size, until: now + BAD_SPOT_TICKS });
+  ai.badSpots = list;
 }
 
 /** Unfinished sites with nobody building them get a worker. */

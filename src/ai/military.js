@@ -5,9 +5,17 @@
 import { newForce, addToForce, addBuildingToForce, addTypeToForce, fightRatio, forcePower } from './unit-info.js';
 import { teamTarget, clearTeamTarget } from './team.js';
 import { doneOf } from './scan.js';
+import { POP_MAX } from '../config.js';
+import { getUnitType } from '../data/index.js';
+
+function titanPop(ai) {
+  const d = ai.roster.titan ? getUnitType(ai.roster.titan) : null;
+  return d ? d.pop : 0;
+}
 
 const THREAT_RANGE = 12; // enemy units this close to a building threaten the base
 const ROUTE_STEP = 10; // tiles between march waypoints
+const RAM_BLOCKED_TICKS = 60; // a ram blocked this long at its building (u.blockedT) picks another
 const routeBuffers = new WeakMap(); // world -> BFS scratch arrays
 
 function dist(a, b) {
@@ -271,13 +279,13 @@ function pickCamp(ai, s, armyForce) {
 }
 
 /** Target building of an enemy player nearest a point (towers count a bit closer). */
-function nearestEnemyBuilding(s, player, from) {
+function nearestEnemyBuilding(s, player, from, exclude = null) {
   const rec = s.enemies.find((e) => e.index === player);
   if (!rec) return null;
   let best = null;
   let bestD = Infinity;
   for (const b of rec.buildings) {
-    if (b.dead) continue;
+    if (b.dead || b === exclude) continue;
     let d = dist(b, from);
     if (b.def.attack) d -= 4;
     if (d < bestD) {
@@ -441,7 +449,10 @@ export function runMilitary(ai, s) {
         const timerReady = sinceLast >= prof.waveInterval && s.armyPop >= wave * 0.6;
         const titanReady = s.titan && s.titan.hp > s.titan.maxHp * 0.6 && s.armyPop >= wave * 0.5;
         // Close to a Titan: wait for it unless far ahead (the big fight is better with it).
-        const titanSoon = !s.titan && ai.roster.titan && (s.p.tier >= 3 || (s.p.tier === 2 && doneOf(s, 'temple') > 0 && t >= prof.tier3At - 60)) && t < 1260 && ratio < 1.6;
+        // (Only while the Titan can still come: population room for it, or already summoning.)
+        const titanQueued = (s.queued.get(ai.roster.titan) || 0) > 0;
+        const titanRoom = titanQueued || s.p.popUsed + titanPop(ai) <= POP_MAX;
+        const titanSoon = !s.titan && ai.roster.titan && titanRoom && (s.p.tier >= 3 || (s.p.tier === 2 && doneOf(s, 'temple') > 0 && t >= prof.tier3At - 60)) && t < 1260 && ratio < 1.6;
         // At the army cap waiting gains nothing, unless far behind or the enemy Titan is
         // about to join (then the big clash comes with it, a minute later at most).
         const rec = s.enemies.find((e) => e.index === target);
@@ -553,11 +564,15 @@ function runAttack(ai, s, fighters, rams, all, c, armyForce) {
   const ty = tb.y + tb.size / 2 + 0.8;
   command(ai, fighters.concat(s.minions), 'attackMove', tx, ty);
   for (const r of rams) {
+    let skip = null;
     if (r.order && r.order.type === 'attack' && r.order.target) {
       const cur = world.entities.get(r.order.target);
-      if (cur && !cur.dead) continue;
+      // An explicit attack keeps its target; a ram with no free spot there
+      // (the sim reports it blocked) is sent to another building.
+      if (cur && !cur.dead && (r.blockedT || 0) < RAM_BLOCKED_TICKS) continue;
+      if (cur && !cur.dead) skip = cur;
     }
-    const b = nearestEnemyBuilding(s, mil.target, r);
+    const b = nearestEnemyBuilding(s, mil.target, r, skip);
     if (b) {
       ai.issue({ type: 'attack', units: [r.id], target: b.id });
       ai.cmdMemo.delete(r.id);
