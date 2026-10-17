@@ -196,3 +196,15 @@ test('footprintAt centres the footprint under the cursor', () => {
   assert.deepEqual(footprintAt('barracks', 10.2, 10.9), { tx: 9, ty: 9 });
   assert.deepEqual(footprintAt('town_center', 10.6, 10.4), { tx: 9, ty: 8 });
 });
+
+test('planned buildings (ordered, not placed yet) block like buildings', () => {
+  const world = makeWorld();
+  const vs = viewOf(world);
+  assert.equal(checkPlacement(vs, 0, 'house', 7, 12).valid, true);
+  const planned = [{ b: 'house', tx: 7, ty: 12 }, { b: 'nope', tx: 0, ty: 0 }];
+  const r = checkPlacement(vs, 0, 'house', 8, 12, planned);
+  assert.equal(r.valid, false);
+  assert.equal(r.message, CANT_BUILD);
+  assert.deepEqual(r.tiles, [false, true, false, true], 'only the overlapping column');
+  assert.equal(checkPlacement(vs, 0, 'house', 9, 12, planned).valid, true, 'right next to it is fine');
+});

@@ -27,6 +27,8 @@ const QUALITY = {
 /** Max ribbons one effect can own (chain hops). */
 const FX_RIBBONS = 16;
 const FX_POINTS = 24;
+/** Seconds a following effect takes to fade once its unit leaves the local player's sight. */
+const HIDDEN_FADE = 0.25;
 
 /** One running effect (pooled). Handlers keep their state in these generic fields. */
 class Fx {
@@ -107,7 +109,7 @@ const _m = new THREE.Matrix4();
 const _X = new THREE.Vector3(1, 0, 0);
 const _c = new THREE.Color();
 const WHITE = new THREE.Color(1, 1, 1);
-const _track = { x: 0, y: 0, h: 0 };
+const _track = { x: 0, y: 0, h: 0, hidden: false };
 const BOLT = new Float32Array(BOLT_N * 3);
 
 /**
@@ -180,7 +182,9 @@ export class VFXSystem {
    * for beam / cone / wave / blink / projectile / dash (and an optional chain start);
    * points = [[x, y], ...] for chain; duration = seconds for persistent shapes;
    * delay = seconds until impact (telegraphed). Optional follow(out) → bool keeps
-   * shield / buff / heal on a moving unit (write its { x, y } into out).
+   * shield / buff / heal on a moving unit (write its { x, y } into out; return false
+   * once it is gone, and also set out.hidden = true when the local player can no
+   * longer see it: the effect then fades out instead of staying where it was).
    */
   spawnEffect({ el, shape, x, y, r, fx, fy, points, duration, delay, follow } = {}) {
     if (this.disposed || !Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -503,12 +507,15 @@ export class VFXSystem {
     if (e.follow) {
       _track.x = e.x;
       _track.y = e.y;
+      _track.hidden = false;
       if (e.follow(_track) && Number.isFinite(_track.x) && Number.isFinite(_track.y)) {
         e.x = _track.x;
         e.y = _track.y;
         e.gz = this.ground(e.x, e.y);
       } else {
         e.follow = null;
+        // Its unit walked into the fog: fade out now (no glow marking it in the dark).
+        if (_track.hidden) e.dur = Math.min(e.dur, e.t + HIDDEN_FADE);
       }
     }
     return e.h.update(this, e, dt);
