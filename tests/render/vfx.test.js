@@ -1,7 +1,8 @@
 // Tests for the VFX system (src/render/vfx.js + vfx-*.js helpers): every schema
 // shape, projectile kind and element is covered, nothing produces NaNs, the
 // particle cap holds under load, everything is released when it finishes,
-// camera shake decays, delays / homing / follow behave, and dispose() cleans up.
+// camera shake decays, delays / homing / follow behave, the fixed set of point
+// lights goes to the strongest flashes, and dispose() cleans up.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
@@ -50,7 +51,7 @@ function assertIdle(vfx, what) {
 /** First non-finite value in the live part of every dynamic buffer, or null. */
 function findNaN(vfx) {
   for (const layer of [vfx.add, vfx.alpha]) {
-    for (const [name, arr, w] of [['pos', layer.aPos, 3], ['col', layer.aCol, 4], ['par', layer.aPar, 3]]) {
+    for (const [name, arr, w] of [['pos', layer.aPos, 3], ['col', layer.aCol, 4], ['par', layer.aPar, 4]]) {
       for (let i = 0; i < layer.count * w; i++) if (!Number.isFinite(arr[i])) return `${layer.points.name}.${name}[${i}]`;
     }
   }
@@ -364,4 +365,37 @@ test('dispose detaches everything and later calls are no-ops', () => {
   vfx.spawnProjectile({ kind: 'arrow', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } });
   assert.equal(vfx.stats().effects, 0);
   assert.equal(scene.children.length, 0);
+});
+
+test('point lights: a fixed pool given to the strongest flashes near the camera, dark when idle', () => {
+  const { scene, vfx } = make({ quality: 'high' });
+  const L = vfx.lights;
+  const lights = L.lights.slice();
+  const N = lights.length;
+  assert.ok(N > 0);
+  for (const l of lights) assert.ok(l.isPointLight && !l.castShadow && l.intensity === 0);
+  vfx.setFocus(20, 20, 30);
+  vfx.spawnEffect({ el: 'fire', shape: 'strike', x: 20, y: 20, r: 2 });
+  step(vfx, 0.1);
+  assert.ok(lights.some((l) => l.intensity > 1), 'an impact lights its surroundings');
+  step(vfx, 4);
+  assert.ok(lights.every((l) => l.intensity === 0), 'dark again once the flash is over');
+  vfx.spawnEffect({ el: 'fire', shape: 'strike', x: 200, y: 200, r: 2 });
+  step(vfx, 0.1);
+  assert.ok(lights.every((l) => l.intensity === 0), 'far from the camera: not worth a light');
+  // more sources than lights: the strongest get them, steadily
+  for (let f = 0; f < 30; f++) {
+    for (let i = 0; i < N + 3; i++) L.offer(i, 20 + i, 1, 20, 1, 0.4, 0.1, 1 + i, 6);
+    vfx.update(DT);
+  }
+  const lit = lights.map((l) => Math.round(l.intensity)).sort((a, b) => a - b);
+  assert.deepEqual(lit, Array.from({ length: N }, (_, k) => 4 + k));
+  // the set of lights never changes (it is part of every lit shader): low quality just turns them off
+  vfx.setQuality('low');
+  step(vfx, 0.1);
+  assert.ok(lights.every((l) => l.intensity === 0));
+  assert.deepEqual(L.lights, lights);
+  assert.equal(scene.children.length, 1);
+  vfx.dispose();
+  assert.equal(make({ quality: 'low' }).vfx.lights.lights.length, 0, 'no lights at all when a match starts on low');
 });

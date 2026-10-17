@@ -1,9 +1,16 @@
 // Low-level drawing layers for the VFX system. Everything here is pooled and
 // preallocated: particles live in typed arrays drawn as one THREE.Points per
-// blend mode, persistent glows in a slot batch, and decals / ribbons / flares /
+// blend mode, persistent glows in a slot batch, decals / ribbons / flares /
 // pillars / domes are reusable meshes with their own material clones (shared
-// geometry or preallocated buffers). Custom shaders work in sRGB directly, so
-// colors are plain { r, g, b } in 0..1.
+// geometry or preallocated buffers), and a fixed set of point lights follows
+// the brightest flashes (LightPool).
+//
+// Colors are linear { r, g, b } (vfx-palette.js). The shaders work in linear
+// light and may go past 1 (HDR) at hot cores so post.js blooms them; they end
+// with the tone mapping and color space chunks, which are no-ops into the HDR
+// target and tone map + sRGB-encode on the low-quality path (straight to the
+// canvas), before the color is premultiplied (vfxPremul), so there it blends in
+// sRGB space just as the effects were designed.
 import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
@@ -28,20 +35,50 @@ export function glowBlend(mat) {
   return mat;
 }
 
-const COVER_GLSL = /* glsl */ `
-float vfxCover(vec3 c) { return clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0); }`;
+/**
+ * Premultiplied output shared by every VFX shader (and fires.js). Usage, with
+ * c the un-premultiplied linear color and a its coverage:
+ *   gl_FragColor = vec4( c, 1.0 );
+ *   #include <tonemapping_fragment>
+ *   #include <colorspace_fragment>
+ *   gl_FragColor = vfxPremul( gl_FragColor.rgb, a );
+ * uOcc: how much of the coverage hides what is behind (1 = alpha blended).
+ */
+export const VFX_OUT_GLSL = /* glsl */ `
+uniform float uOcc;
+// true when this pass writes linear values (the HDR target), false on an sRGB canvas
+bool vfxLinearOut() { return linearToOutputTexel( vec4( 0.5 ) ).r < 0.6; }
+vec4 vfxPremul( vec3 c, float a ) {
+  a = clamp( a, 0.0, 1.0 );
+  float cov = a * uOcc;
+  float w = a;
+  if ( vfxLinearOut() ) {
+    // Blended in linear light the same coverage hides far less than it did in
+    // sRGB (half coverage over black reads ~73% bright, not 50%). Curve it so
+    // veils and dark smoke darken by the same perceived amount; bright smoke
+    // already matches with plain linear coverage, so the curve eases off.
+    float p = uOcc < 0.999 ? 2.2 : mix( 2.2, 1.0, smoothstep( 0.02, 0.25, dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ) );
+    cov = 1.0 - pow( 1.0 - cov, p );
+    if ( uOcc >= 0.999 ) w = cov;
+  }
+  return vec4( c * w, cov );
+}`;
+
+const OUT = /* glsl */ `
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>`;
 
 // ---------------------------------------------------------------- shaders
 
 const POINT_VS = /* glsl */ `
 attribute vec4 aColor;
-attribute vec3 aParams; // world size, rotation, atlas cell
+attribute vec4 aParams; // world size, rotation, atlas cell, heat
 uniform float uScale;
 uniform float uMaxSize;
 varying vec4 vColor;
 varying vec2 vCell;
 varying vec2 vRot;
-varying float vHot;
+varying float vHeat;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float dist = max(0.5, -mv.z);
@@ -54,26 +91,31 @@ void main() {
   if (aColor.a < 0.004 || ps < 0.3) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   vRot = vec2(cos(aParams.y), sin(aParams.y));
   vCell = vec2(mod(aParams.z, 4.0), floor(aParams.z / 4.0 + 0.01));
-  // only glow / star / spark sprites get a white-hot centre; smoke, flames, rings and shards keep their color
-  vHot = (aParams.z < 1.5 || abs(aParams.z - 3.0) < 0.5) ? 1.0 : 0.0;
+  vHeat = aParams.w;
 }`;
 
 const POINT_FS = /* glsl */ `
 uniform sampler2D uMap;
-uniform float uCore;
-uniform float uOcc;
+uniform float uCore;  // how far the hot centre whitens
+uniform float uBoost; // HDR gain of the hot centre per unit of heat
 varying vec4 vColor;
 varying vec2 vCell;
 varying vec2 vRot;
-varying float vHot;
+varying float vHeat;
+${VFX_OUT_GLSL}
 void main() {
   vec2 p = gl_PointCoord - 0.5;
   p = vec2(vRot.x * p.x - vRot.y * p.y, vRot.y * p.x + vRot.x * p.y) + 0.5;
   vec4 t = texture2D(uMap, (vCell + clamp(p, 0.004, 0.996)) * vec2(0.25, 0.5));
   float a = t.a * vColor.a;
   if (a < 0.003) discard;
-  vec3 c = mix(vColor.rgb * t.rgb, vec3(1.0), t.a * t.a * t.a * uCore * vHot);
-  gl_FragColor = vec4(c * a, a * uOcc);
+  // white-hot centre: the dense middle of a glow / star / spark (heat > 0) whitens
+  // and goes past 1, so it blooms; smoke, rings and shards (heat 0) keep their color
+  float hot = t.a * t.a * t.a * vHeat;
+  vec3 c = mix(vColor.rgb * t.rgb, vec3(1.0), min(hot, 1.0) * uCore) * (1.0 + hot * uBoost);
+  gl_FragColor = vec4(c, 1.0);
+  ${OUT}
+  gl_FragColor = vfxPremul(gl_FragColor.rgb, a);
 }`;
 
 const DECAL_VS = /* glsl */ `
@@ -92,6 +134,7 @@ float vfxNoise(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }`;
 
+// Ground decals are big and can last: their color stays at or below 1 (no bloom).
 const DECAL_FS = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uCore;
@@ -105,10 +148,10 @@ uniform float uTime;
 uniform float uSpin;
 uniform vec3 uArc;    // start angle, angle span, 1 = partial sector
 uniform float uSeed;
-uniform float uOcc;
 uniform float uEdge;  // ragged outline amount (clouds, smoke underlays)
 varying vec2 vP;
 ${NOISE_GLSL}
+${VFX_OUT_GLSL}
 float band(float x, float c, float w) { return exp(-((x - c) * (x - c)) / (w * w)); }
 void main() {
   float r = vP.y;
@@ -162,8 +205,9 @@ void main() {
   a *= 1.0 - smoothstep(0.96, 1.0, r);
   if (uArc.z > 0.5) a *= smoothstep(0.0, 0.14, vP.x) * (1.0 - smoothstep(0.86, 1.0, vP.x));
   vec3 col = mix(uColor, uCore, clamp(ring * 0.6 + fill * fill * uFill.z, 0.0, 1.0));
-  float A = clamp(a, 0.0, 1.0) * uOpacity;
-  gl_FragColor = vec4(col * A, A * uOcc);
+  gl_FragColor = vec4(col, 1.0);
+  ${OUT}
+  gl_FragColor = vfxPremul(gl_FragColor.rgb, a * uOpacity);
 }`;
 
 const RIBBON_VS = /* glsl */ `
@@ -182,6 +226,7 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 
+// The bright line down the middle of a ribbon is HDR (uHot): bolts and beams bloom.
 const RIBBON_FS = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uCore;
@@ -189,18 +234,20 @@ uniform float uOpacity;
 uniform float uTime;
 uniform float uStripes;
 uniform vec2 uFade;
-uniform float uOcc;
+uniform float uHot;
 varying vec2 vUv;
-${COVER_GLSL}
+${VFX_OUT_GLSL}
 void main() {
   float v = abs(vUv.y);
   float core = exp(-v * v * 20.0);
   float halo = (1.0 - v) * (1.0 - v);
   float ends = smoothstep(0.0, uFade.x, vUv.x) * (1.0 - smoothstep(1.0 - uFade.y, 1.0, vUv.x));
   float st = 1.0 - uStripes * (0.5 + 0.5 * sin(vUv.x * 34.0 - uTime * 16.0));
-  vec3 col = uColor * halo * 0.9 * st + uCore * core;
-  col *= uOpacity * ends;
-  gl_FragColor = vec4(col, vfxCover(col) * uOcc);
+  float wHalo = halo * 0.9 * st;
+  float cover = min(1.0, wHalo + core);
+  gl_FragColor = vec4((uColor * wHalo + uCore * core * uHot) / max(cover, 1e-3), 1.0);
+  ${OUT}
+  gl_FragColor = vfxPremul(gl_FragColor.rgb, cover * uOpacity * ends);
 }`;
 
 const FLARE_VS = /* glsl */ `
@@ -215,15 +262,16 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 
+// Short flashes: a white-hot HDR core (uHot) and slightly hot rays bloom.
 const FLARE_FS = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uCore;
 uniform float uOpacity;
 uniform float uRays;
 uniform float uSpin;
-uniform float uOcc;
+uniform float uHot;
 varying vec2 vUv;
-${COVER_GLSL}
+${VFX_OUT_GLSL}
 void main() {
   float d = length(vUv);
   if (d > 1.0) discard;
@@ -232,9 +280,10 @@ void main() {
   float core = exp(-d * d * 34.0);
   float a = atan(vUv.y, vUv.x) + uSpin;
   float rays = uRays * (pow(abs(cos(a * 4.0)), 14.0) * e * e + 0.55 * pow(abs(cos(a * 4.0 + 0.3927)), 24.0) * e * e * e);
-  vec3 col = uColor * (glow + rays) + uCore * core;
-  col *= uOpacity;
-  gl_FragColor = vec4(col, vfxCover(col) * uOcc);
+  float cover = min(1.0, glow + rays + core);
+  gl_FragColor = vec4((uColor * (glow + rays * 1.8) + uCore * core * uHot) / max(cover, 1e-3), 1.0);
+  ${OUT}
+  gl_FragColor = vfxPremul(gl_FragColor.rgb, cover * uOpacity);
 }`;
 
 const FRESNEL_VS = /* glsl */ `
@@ -253,47 +302,56 @@ uniform vec3 uColor;
 uniform vec3 uCore;
 uniform float uOpacity;
 uniform float uTime;
-uniform float uOcc;
+uniform float uHot;
 varying vec2 vUv;
 varying float vF;
-${COVER_GLSL}
+${VFX_OUT_GLSL}
 void main() {
   float y = vUv.y;
   float fade = pow(1.0 - y, 1.5) * smoothstep(0.0, 0.05, y);
   float edge = 0.3 + 0.7 * pow(1.0 - vF, 1.8);
   float s1 = 0.5 + 0.5 * sin(vUv.x * 37.699 + y * 9.0 - uTime * 6.0);
   float s2 = 0.5 + 0.5 * sin(vUv.x * 18.85 - y * 5.0 + uTime * 3.1);
-  float streak = 0.55 + 0.45 * s1 * s2;
-  vec3 col = uColor * edge * streak + uCore * pow(vF, 3.0) * 0.55 * (1.0 - y);
-  col *= fade * uOpacity;
-  gl_FragColor = vec4(col, vfxCover(col) * uOcc);
+  float wEdge = edge * (0.55 + 0.45 * s1 * s2);
+  float wCore = pow(vF, 3.0) * 0.55 * (1.0 - y);
+  float cover = min(1.0, wEdge + wCore);
+  gl_FragColor = vec4((uColor * wEdge + uCore * wCore * uHot) / max(cover, 1e-3), 1.0);
+  ${OUT}
+  gl_FragColor = vfxPremul(gl_FragColor.rgb, cover * fade * uOpacity);
 }`;
 
+// Shield domes stay up for seconds: a weighted mix of the two colors, never past 1.
 const DOME_FS = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uCore;
 uniform float uOpacity;
 uniform float uTime;
-uniform float uOcc;
 varying vec2 vUv;
 varying float vF;
-${COVER_GLSL}
+${VFX_OUT_GLSL}
 void main() {
   float rim = pow(1.0 - vF, 2.2);
   float lon = smoothstep(0.86, 1.0, abs(sin(vUv.x * 3.14159 * 10.0)));
   float lat = smoothstep(0.86, 1.0, abs(sin(vUv.y * 3.14159 * 6.0)));
-  float scan = smoothstep(0.0, 0.06, 0.06 - abs(fract(vUv.y * 1.5 - uTime * 0.6) - 0.5) + 0.0);
-  float base = smoothstep(0.0, 0.08, vUv.y) ;
+  float scan = smoothstep(0.0, 0.06, 0.06 - abs(fract(vUv.y * 1.5 - uTime * 0.6) - 0.5));
+  float base = smoothstep(0.0, 0.08, vUv.y);
   float grid = (lon + lat) * 0.22;
-  vec3 col = uColor * (0.1 + rim * 1.05 + grid * (0.35 + rim) + scan * 0.35) + uCore * pow(rim, 5.0) * 0.6;
-  col *= uOpacity * (0.4 + 0.6 * base);
-  gl_FragColor = vec4(col, vfxCover(col) * uOcc);
+  float wBody = 0.1 + rim * 1.05 + grid * (0.35 + rim) + scan * 0.35;
+  float wCore = pow(rim, 5.0) * 0.6;
+  float sum = wBody + wCore;
+  gl_FragColor = vec4((uColor * wBody + uCore * wCore) / sum, 1.0);
+  ${OUT}
+  gl_FragColor = vfxPremul(gl_FragColor.rgb, min(sum, 1.0) * uOpacity * (0.4 + 0.6 * base));
 }`;
 
 // ---------------------------------------------------------------- helpers
 
 const tmpV2 = new THREE.Vector2();
+const tmpV4 = new THREE.Vector4();
 let maxPointSize = 0;
+
+/** HDR gain of a point sprite's hot centre per unit of heat (see POINT_FS). */
+export const POINT_BOOST = 2.6;
 
 function makePointsMaterial(map, additive) {
   const mat = new THREE.ShaderMaterial({
@@ -302,6 +360,7 @@ function makePointsMaterial(map, additive) {
       uScale: { value: 800 },
       uMaxSize: { value: 256 },
       uCore: { value: additive ? 0.55 : 0 },
+      uBoost: { value: additive ? POINT_BOOST : 0 },
       uOcc: { value: additive ? OCCLUSION.points : 1 },
     },
     vertexShader: POINT_VS,
@@ -312,12 +371,17 @@ function makePointsMaterial(map, additive) {
   return glowBlend(mat);
 }
 
-/** onBeforeRender hook: point size scale from the viewport and camera. */
+/**
+ * onBeforeRender hook: point size scale from the camera and the viewport being
+ * drawn into. post.js draws the world into its own target, smaller than the
+ * canvas under adaptive resolution, so the drawing buffer is the wrong size.
+ */
 function pointScaleHook(mat) {
   return (renderer, scene, camera) => {
-    renderer.getDrawingBufferSize(tmpV2);
+    let h = typeof renderer.getCurrentViewport === 'function' ? renderer.getCurrentViewport(tmpV4).w : 0;
+    if (!(h > 0)) h = renderer.getDrawingBufferSize(tmpV2).y;
     const proj = camera.projectionMatrix.elements[5] || 1;
-    mat.uniforms.uScale.value = tmpV2.y * proj * 0.5;
+    mat.uniforms.uScale.value = h * proj * 0.5;
     if (!maxPointSize) {
       try {
         const gl = renderer.getContext();
@@ -346,6 +410,12 @@ function markRange(attr, count) {
 // ---------------------------------------------------------------- particles
 
 /**
+ * Default heat (HDR hot centre, see POINT_FS) per atlas cell: glows, stars and
+ * sparks burn white-hot, flames a little, smoke / rings / shards / plus not at all.
+ */
+export const CELL_HEAT = [0.8, 1, 0, 1.4, 0, 0, 0.25, 0.3];
+
+/**
  * Dense particle buffer drawn as one THREE.Points. Dead particles are swapped
  * with the last live one, so the draw range is exactly the live count.
  */
@@ -370,14 +440,15 @@ export class ParticleLayer {
     this.r1 = F(); this.g1 = F(); this.b1 = F();
     this.al = F(); this.grav = F(); this.drag = F();
     this.rot = F(); this.spin = F(); this.fin = F(); this.floor = F();
+    this.heat = F();
     this.cell = new Uint8Array(n);
     this.aPos = new Float32Array(n * 3);
     this.aCol = new Float32Array(n * 4);
-    this.aPar = new Float32Array(n * 3);
+    this.aPar = new Float32Array(n * 4);
     const geo = new THREE.BufferGeometry();
     this.posAttr = dynAttr(this.aPos, 3);
     this.colAttr = dynAttr(this.aCol, 4);
-    this.parAttr = dynAttr(this.aPar, 3);
+    this.parAttr = dynAttr(this.aPar, 4);
     geo.setAttribute('position', this.posAttr);
     geo.setAttribute('aColor', this.colAttr);
     geo.setAttribute('aParams', this.parAttr);
@@ -399,7 +470,7 @@ export class ParticleLayer {
 
   /**
    * Add one particle. Returns its index (valid until the next update) or -1 when full.
-   * c = { r, g, b } start (and end) color, a = peak alpha, cell = atlas cell.
+   * c = { r, g, b } linear start (and end) color, a = peak alpha, cell = atlas cell.
    */
   add(x, y, z, vx, vy, vz, life, s0, s1, c, a, cell, grav = 0, drag = 0) {
     if (this.count >= this.cap || life <= 0) return -1;
@@ -411,8 +482,14 @@ export class ParticleLayer {
     this.r0[i] = this.r1[i] = c.r; this.g0[i] = this.g1[i] = c.g; this.b0[i] = this.b1[i] = c.b;
     this.al[i] = a; this.grav[i] = grav; this.drag[i] = drag;
     this.rot[i] = 0; this.spin[i] = 0; this.fin[i] = 0.08; this.floor[i] = -1e9;
+    this.heat[i] = CELL_HEAT[cell] || 0;
     this.cell[i] = cell;
     return i;
+  }
+
+  /** How white-hot (HDR) the centre burns: 0 none, 1 a spark (defaults per cell, CELL_HEAT). */
+  setHeat(i, h) {
+    if (i >= 0) this.heat[i] = h;
   }
 
   /** Color the particle fades to over its life. */
@@ -447,6 +524,7 @@ export class ParticleLayer {
     this.r1[i] = this.r1[j]; this.g1[i] = this.g1[j]; this.b1[i] = this.b1[j];
     this.al[i] = this.al[j]; this.grav[i] = this.grav[j]; this.drag[i] = this.drag[j];
     this.rot[i] = this.rot[j]; this.spin[i] = this.spin[j]; this.fin[i] = this.fin[j]; this.floor[i] = this.floor[j];
+    this.heat[i] = this.heat[j];
     this.cell[i] = this.cell[j];
   }
 
@@ -491,9 +569,10 @@ export class ParticleLayer {
       this.aCol[p4 + 1] = this.g0[i] + (this.g1[i] - this.g0[i]) * t;
       this.aCol[p4 + 2] = this.b0[i] + (this.b1[i] - this.b0[i]) * t;
       this.aCol[p4 + 3] = this.al[i] * fade;
-      this.aPar[p3] = this.s0[i] + (this.s1[i] - this.s0[i]) * t;
-      this.aPar[p3 + 1] = this.rot[i];
-      this.aPar[p3 + 2] = this.cell[i];
+      this.aPar[p4] = this.s0[i] + (this.s1[i] - this.s0[i]) * t;
+      this.aPar[p4 + 1] = this.rot[i];
+      this.aPar[p4 + 2] = this.cell[i];
+      this.aPar[p4 + 3] = this.heat[i];
       i++;
     }
     this.geo.setDrawRange(0, this.count);
@@ -527,11 +606,11 @@ export class GlowBatch {
     this.used = new Uint8Array(capacity);
     this.aPos = new Float32Array(capacity * 3);
     this.aCol = new Float32Array(capacity * 4);
-    this.aPar = new Float32Array(capacity * 3);
+    this.aPar = new Float32Array(capacity * 4);
     const geo = new THREE.BufferGeometry();
     this.posAttr = dynAttr(this.aPos, 3);
     this.colAttr = dynAttr(this.aCol, 4);
-    this.parAttr = dynAttr(this.aPar, 3);
+    this.parAttr = dynAttr(this.aPar, 4);
     geo.setAttribute('position', this.posAttr);
     geo.setAttribute('aColor', this.colAttr);
     geo.setAttribute('aParams', this.parAttr);
@@ -558,13 +637,14 @@ export class GlowBatch {
     return i;
   }
 
-  set(i, x, y, z, size, c, a, cell = 0, rot = 0) {
+  /** Place glow i: world position, size, linear color, alpha, atlas cell, rotation, heat (HDR centre). */
+  set(i, x, y, z, size, c, a, cell = 0, rot = 0, heat = 1) {
     if (i < 0) return;
     const p3 = i * 3;
     const p4 = i * 4;
     this.aPos[p3] = x; this.aPos[p3 + 1] = y; this.aPos[p3 + 2] = z;
     this.aCol[p4] = c.r; this.aCol[p4 + 1] = c.g; this.aCol[p4 + 2] = c.b; this.aCol[p4 + 3] = a;
-    this.aPar[p3] = size; this.aPar[p3 + 1] = rot; this.aPar[p3 + 2] = cell;
+    this.aPar[p4] = size; this.aPar[p4 + 1] = rot; this.aPar[p4 + 2] = cell; this.aPar[p4 + 3] = heat;
   }
 
   free(i) {
@@ -572,7 +652,7 @@ export class GlowBatch {
     this.used[i] = 0;
     this.active--;
     this.aCol[i * 4 + 3] = 0;
-    this.aPar[i * 3] = 0;
+    this.aPar[i * 4] = 0;
     this.freeList.push(i);
     while (this.high > 0 && !this.used[this.high - 1]) this.high--;
   }
@@ -729,6 +809,7 @@ export class Decal {
     return this;
   }
 
+  /** Linear colors (vfx-palette.js). */
   color(c, core) {
     this.u.uColor.value.set(c.r, c.g, c.b);
     const k = core || c;
@@ -841,11 +922,13 @@ export class Ribbon {
     this.u.uTime.value = 0;
     this.u.uFade.value.set(0.06, 0.06);
     this.u.uWidth.value = 0.3;
+    this.u.uHot.value = 1;
     this.n = 0;
     this.geo.setDrawRange(0, 0);
     return this;
   }
 
+  /** Linear colors (vfx-palette.js). */
   color(c, core) {
     this.u.uColor.value.set(c.r, c.g, c.b);
     const k = core || c;
@@ -929,6 +1012,7 @@ export function createRibbonPool(root, max) {
       uStripes: { value: 0 },
       uFade: { value: new THREE.Vector2(0.06, 0.06) },
       uWidth: { value: 0.3 },
+      uHot: { value: 1 },
       uOcc: { value: OCCLUSION.ribbon },
     },
     vertexShader: RIBBON_VS,
@@ -954,6 +1038,7 @@ export function createFlarePool(root, max) {
       uSize: { value: 1 },
       uRays: { value: 0 },
       uSpin: { value: 0 },
+      uHot: { value: 3.5 },
       uOcc: { value: OCCLUSION.flare },
     },
     vertexShader: FLARE_VS,
@@ -983,6 +1068,7 @@ export function createPillarPool(root, max) {
       uCore: { value: new THREE.Vector3(1, 1, 1) },
       uOpacity: { value: 1 },
       uTime: { value: 0 },
+      uHot: { value: 2 },
       uOcc: { value: OCCLUSION.pillar },
     },
     vertexShader: FRESNEL_VS,
@@ -1035,4 +1121,308 @@ export function disposePool(pool) {
   pool.dispose();
   if (pool.sharedGeo) pool.sharedGeo.dispose();
   if (pool.baseMat) pool.baseMat.dispose();
+}
+
+// ---------------------------------------------------------------- lights
+
+const EMITTERS = 64;
+const SOURCES = 48;
+const SOURCE_KEY = 1e12; // keys of per-frame sources sit above every emitter key
+const FADE_RATE = 40; // 1/s: how fast a light follows its source and hands over
+
+/**
+ * Dynamic point lights for the VFX. The pool owns a fixed number of
+ * PointLights (no shadows) that are never added, removed or hidden at runtime:
+ * the light count is part of every lit material's shader program, so idle
+ * lights just sit at intensity 0. Emitters are requested freely, either
+ * flashes with an envelope (strikes, explosions, level ups) or held lights
+ * that follow something until released (a fireball's head, a beam's end);
+ * per-frame sources (burning buildings) are offered anew every frame. update()
+ * hands the lights to the strongest candidates near the camera focus, keeps a
+ * light on the same source while it stays in the top set (incumbents get a
+ * bonus, so two similar sources do not make it flip) and fades a light out
+ * before it moves to another source. Allocation-free.
+ *
+ *   const pool = new LightPool(root, 4);
+ *   pool.flash(x, y, z, color, 15, 8, 0.6);        // a strike
+ *   const h = pool.hold(x, y, z, color, 5, 5);      // a fireball's head …
+ *   pool.move(h, x, y, z); pool.release(h);         // … follows it, then fades out
+ *   pool.offer(id, x, y, z, r, g, b, 4, 6, 0.6);    // a burning building, this frame
+ *   pool.update(dt, focusX, focusY, focusRadius, 1);
+ */
+export class LightPool {
+  /**
+   * @param {THREE.Object3D} root
+   * @param {number} count lights (0 = none: the pool accepts requests and does nothing)
+   */
+  constructor(root, count) {
+    this.count = Math.max(0, count | 0);
+    this.lights = [];
+    for (let i = 0; i < this.count; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 6, 2);
+      l.castShadow = false;
+      l.name = 'vfx-light';
+      root.add(l);
+      this.lights.push(l);
+    }
+    const N = Math.max(1, this.count);
+    this.key = new Float64Array(N).fill(-1);
+    this.cur = new Float32Array(N);
+    this.want = new Int16Array(N);
+    this.top = new Int16Array(N);
+    const n = EMITTERS;
+    const F = () => new Float32Array(n);
+    this.ex = F(); this.ey = F(); this.ez = F();
+    this.er = F(); this.eg = F(); this.eb = F();
+    this.ePeak = F(); this.eRange = F(); this.eFlick = F();
+    this.eAge = F(); this.eLife = F(); this.eAttack = F();
+    this.eDecay = F(); // age at which the fade-out starts
+    this.eState = new Uint8Array(n); // 0 free, 1 flash (fades out over its life), 2 held
+    this.eGen = new Float64Array(n);
+    this.freeList = new Int16Array(n);
+    for (let i = 0; i < n; i++) this.freeList[i] = n - 1 - i;
+    this.nFree = n;
+    const m = SOURCES;
+    const G = () => new Float32Array(m);
+    this.sx = G(); this.sy = G(); this.sz = G();
+    this.sr = G(); this.sg = G(); this.sb = G();
+    this.sI = G(); this.sRange = G(); this.sW = G();
+    this.sKey = new Float64Array(m);
+    this.ns = 0;
+    const c = n + m;
+    this.cKey = new Float64Array(c);
+    this.cScore = new Float32Array(c);
+    this.cI = new Float32Array(c);
+    this.cRef = new Int16Array(c); // >= 0 emitter index, < 0: source -1 - ref
+    this.time = 0;
+    this.lit = 0;
+  }
+
+  /** A flash: rises over `attack` s, then fades out (quadratic) until `life`. Returns its index or -1. */
+  flash(x, y, z, c, intensity, range, life, attack = 0.04, flicker = 0) {
+    if (!this.count || !(intensity > 0) || !(life > 0)) return -1;
+    const i = this.alloc(x, y, z, c, intensity, range, flicker);
+    if (i < 0) return -1;
+    this.eState[i] = 1;
+    this.eLife[i] = life;
+    this.eAttack[i] = Math.min(attack, life * 0.5);
+    this.eDecay[i] = this.eAttack[i];
+    return i;
+  }
+
+  /** A light that stays on (follow it with move()) until release(). Returns its index or -1. */
+  hold(x, y, z, c, intensity, range, attack = 0.08, flicker = 0) {
+    if (!this.count || !(intensity > 0)) return -1;
+    const i = this.alloc(x, y, z, c, intensity, range, flicker);
+    if (i < 0) return -1;
+    this.eState[i] = 2;
+    this.eLife[i] = 0;
+    this.eAttack[i] = attack;
+    this.eDecay[i] = 0;
+    return i;
+  }
+
+  move(i, x, y, z) {
+    if (i < 0 || !this.eState[i]) return;
+    this.ex[i] = x;
+    this.ey[i] = y;
+    this.ez[i] = z;
+  }
+
+  /** Let a held light fade out over `fade` seconds (it frees itself). */
+  release(i, fade = 0.15) {
+    if (i < 0 || this.eState[i] !== 2) return;
+    this.eState[i] = 1;
+    this.eDecay[i] = this.eAge[i];
+    this.eLife[i] = this.eAge[i] + Math.max(0.01, fade);
+  }
+
+  /**
+   * A light source for this frame only (key: stable id, so it keeps its light).
+   * Color is linear; weight scales its priority (not its intensity), so steady
+   * sources can yield to the flashes of a fight.
+   */
+  offer(key, x, y, z, r, g, b, intensity, range, weight = 1) {
+    if (!this.count || this.ns >= SOURCES || !(intensity > 0)) return;
+    const s = this.ns++;
+    this.sKey[s] = key;
+    this.sx[s] = x; this.sy[s] = y; this.sz[s] = z;
+    const k = 1 / Math.max(r, g, b, 1e-4);
+    this.sr[s] = r * k; this.sg[s] = g * k; this.sb[s] = b * k;
+    this.sI[s] = intensity;
+    this.sW[s] = weight;
+    this.sRange[s] = range;
+  }
+
+  alloc(x, y, z, c, intensity, range, flicker) {
+    if (!this.nFree) return -1;
+    const i = this.freeList[--this.nFree];
+    this.eGen[i]++;
+    this.ex[i] = x; this.ey[i] = y; this.ez[i] = z;
+    // store the hue at full brightness; the intensity says how bright
+    const k = 1 / Math.max(c.r, c.g, c.b, 1e-4);
+    this.er[i] = c.r * k; this.eg[i] = c.g * k; this.eb[i] = c.b * k;
+    this.ePeak[i] = intensity;
+    this.eRange[i] = range;
+    this.eFlick[i] = flicker;
+    this.eAge[i] = 0;
+    return i;
+  }
+
+  kill(i) {
+    this.eState[i] = 0;
+    this.freeList[this.nFree++] = i;
+  }
+
+  /** Current intensity of emitter i. */
+  level(i) {
+    const a = this.eAge[i];
+    const at = this.eAttack[i];
+    let k = at > 0 && a < at ? a / at : 1;
+    if (this.eState[i] === 1 && a > this.eDecay[i]) {
+      const u = Math.min(1, (a - this.eDecay[i]) / Math.max(1e-3, this.eLife[i] - this.eDecay[i]));
+      k *= (1 - u) * (1 - u);
+    }
+    const f = this.eFlick[i];
+    if (f > 0) k *= 1 + f * (0.6 * Math.sin(this.time * 31 + i * 2.1) + 0.4 * Math.sin(this.time * 17.3 + i));
+    return this.ePeak[i] * k;
+  }
+
+  /** Score one candidate (strength × weight, how near the focus, incumbency) and append it. */
+  candidate(nc, key, I, w, x, z, fx, fy, fr, ref) {
+    let rel = 1;
+    if (Number.isFinite(fx) && Number.isFinite(fy)) {
+      const d = Math.hypot(x - fx, z - fy);
+      rel = d <= fr ? 1 : d >= 2 * fr ? 0 : 2 - d / fr;
+    }
+    if (rel <= 0) return nc;
+    let score = I * w * rel;
+    for (let j = 0; j < this.count; j++) {
+      if (this.key[j] === key) {
+        score *= 1.35;
+        break;
+      }
+    }
+    this.cKey[nc] = key;
+    this.cScore[nc] = score;
+    this.cI[nc] = I;
+    this.cRef[nc] = ref;
+    return nc + 1;
+  }
+
+  /**
+   * Age the emitters, consume this frame's sources and drive the lights.
+   * @param {number} dt seconds
+   * @param {number} fx camera focus (sim x; NaN = no preference)
+   * @param {number} fy camera focus (sim y)
+   * @param {number} fr radius around the focus where everything is relevant
+   * @param {number} scale intensity multiplier (0 = lights off, e.g. low quality)
+   */
+  update(dt, fx, fy, fr, scale) {
+    this.time += dt;
+    let nc = 0;
+    for (let i = 0; i < EMITTERS; i++) {
+      const st = this.eState[i];
+      if (!st) continue;
+      this.eAge[i] += dt;
+      if (st === 1 && this.eAge[i] >= this.eLife[i]) {
+        this.kill(i);
+        continue;
+      }
+      const I = this.level(i);
+      if (I > 0.02) nc = this.candidate(nc, this.eGen[i] * EMITTERS + i, I, 1, this.ex[i], this.ez[i], fx, fy, fr, i);
+    }
+    for (let s = 0; s < this.ns; s++) nc = this.candidate(nc, SOURCE_KEY + this.sKey[s], this.sI[s], this.sW[s], this.sx[s], this.sz[s], fx, fy, fr, -1 - s);
+    const N = this.count;
+    // the N best candidates, best first
+    let t = 0;
+    for (let c = 0; c < nc; c++) {
+      const sc = this.cScore[c];
+      if (t === N && (N === 0 || sc <= this.cScore[this.top[t - 1]])) continue;
+      let k = t < N ? t++ : t - 1;
+      while (k > 0 && this.cScore[this.top[k - 1]] < sc) {
+        this.top[k] = this.top[k - 1];
+        k--;
+      }
+      this.top[k] = c;
+    }
+    // lights keep their source when it is still wanted; the rest go to the dimmest free lights
+    for (let j = 0; j < N; j++) this.want[j] = -1;
+    for (let k = 0; k < t; k++) {
+      const key = this.cKey[this.top[k]];
+      for (let j = 0; j < N; j++) {
+        if (this.key[j] === key) {
+          this.want[j] = this.top[k];
+          this.top[k] = -1;
+          break;
+        }
+      }
+    }
+    for (let k = 0; k < t; k++) {
+      const c = this.top[k];
+      if (c < 0) continue;
+      let best = -1;
+      for (let j = 0; j < N; j++) if (this.want[j] < 0 && (best < 0 || this.cur[j] < this.cur[best])) best = j;
+      if (best >= 0) this.want[best] = c;
+    }
+    const follow = 1 - Math.exp(-dt * FADE_RATE);
+    const out = Math.exp(-dt * FADE_RATE);
+    let lit = 0;
+    for (let j = 0; j < N; j++) {
+      const c = this.want[j];
+      if (c >= 0 && this.key[j] === this.cKey[c]) {
+        this.place(j, c);
+        this.cur[j] += (this.cI[c] - this.cur[j]) * follow;
+      } else if (this.cur[j] > 0.05) {
+        this.cur[j] *= out; // hand-over: the old source fades out where it was
+      } else if (c >= 0) {
+        this.key[j] = this.cKey[c];
+        this.place(j, c);
+        this.cur[j] += (this.cI[c] - this.cur[j]) * follow;
+      } else {
+        this.cur[j] = 0;
+        this.key[j] = -1;
+      }
+      this.lights[j].intensity = this.cur[j] * scale;
+      if (this.cur[j] * scale > 0.01) lit++;
+    }
+    this.lit = lit;
+    this.ns = 0;
+  }
+
+  place(j, c) {
+    const l = this.lights[j];
+    const ref = this.cRef[c];
+    if (ref >= 0) {
+      l.position.set(this.ex[ref], this.ey[ref], this.ez[ref]);
+      l.color.setRGB(this.er[ref], this.eg[ref], this.eb[ref]);
+      l.distance = this.eRange[ref];
+    } else {
+      const s = -1 - ref;
+      l.position.set(this.sx[s], this.sy[s], this.sz[s]);
+      l.color.setRGB(this.sr[s], this.sg[s], this.sb[s]);
+      l.distance = this.sRange[s];
+    }
+  }
+
+  /** Drop every emitter and source; the lights go dark at once. */
+  clear() {
+    for (let i = 0; i < EMITTERS; i++) if (this.eState[i]) this.kill(i);
+    this.ns = 0;
+    for (let j = 0; j < this.count; j++) {
+      this.cur[j] = 0;
+      this.key[j] = -1;
+      this.lights[j].intensity = 0;
+    }
+    this.lit = 0;
+  }
+
+  dispose() {
+    for (const l of this.lights) {
+      l.removeFromParent();
+      l.dispose();
+    }
+    this.lights.length = 0;
+    this.count = 0;
+  }
 }

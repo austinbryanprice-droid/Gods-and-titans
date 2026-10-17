@@ -228,7 +228,8 @@ export class GameRenderer {
     this.rings = new RingLayer(this.overlayRoot);
     this.stars = new StarLayer(this.groundFxRoot);
     this.status = new StatusLayer(this.overlayRoot);
-    this.fires = new FireLayer(this.groundFxRoot);
+    // burning buildings offer their flickering light to the VFX light pool
+    this.fires = new FireLayer(this.groundFxRoot, undefined, this.vfx.lights);
     this.bars = new BarLayer(this.overlayRoot);
     this.markers = new MarkerLayer(this.overlayRoot);
     this.texts = new FloatingTextLayer(this.overlayRoot);
@@ -917,7 +918,8 @@ export class GameRenderer {
     } else this.camera.setShake(0, 0);
     this.camera.update(dt);
     _vp.multiplyMatrices(this.threeCamera.projectionMatrix, this.threeCamera.matrixWorldInverse);
-    this.vfx.setFocus(this.camera.target.x, this.camera.target.y);
+    // the zoom too: the VFX lights go to what is on screen
+    this.vfx.setFocus(this.camera.target.x, this.camera.target.y, this.camera.distance);
 
     const fresh = vs.snapshotCount !== this.lastSnapshot;
     if (fresh) {

@@ -4,12 +4,16 @@
 // particle count is capped and degrades gracefully under load, and update()
 // allocates nothing. Positions are sim coords: (x east, y south) → Three
 // (x, ground + h, y). See DESIGN.md section 8.
+//
+// Colors are linear and hot cores go past 1 (HDR) so post.js blooms them; the
+// brightest flashes, meteors and fireball heads also light the world around
+// them through a small fixed pool of point lights (`lights`, LightPool).
 import * as THREE from 'three';
 import { PROJECTILE_SPEED } from '../config.js';
 import { CELL, makeAtlasTexture } from './vfx-textures.js';
 import { getPalette, COLORS } from './vfx-palette.js';
 import {
-  ParticleLayer, GlowBatch, createDecalPool, createRibbonPool, createFlarePool, createPillarPool, createDomePool,
+  ParticleLayer, GlowBatch, LightPool, createDecalPool, createRibbonPool, createFlarePool, createPillarPool, createDomePool,
   disposePool, RIBBON_MAX,
 } from './vfx-layers.js';
 import { createProjectileBatches, PROJECTILE_SPECS } from './vfx-projectiles.js';
@@ -17,11 +21,23 @@ import { SHAPES, INTERNAL, STYLE, boltPath, BOLT_N } from './vfx-shapes.js';
 
 const TAU = Math.PI * 2;
 const rnd = (a, b) => a + Math.random() * (b - a);
+/**
+ * Point lights: intensities at the call sites are relative, LIGHT_GAIN turns
+ * them into candela (the scene is in full daylight: a light has to be strong
+ * to show). LIGHT_PER_FLARE: intensity per unit of flare size (flareFx);
+ * LIGHT_LIFT: flashes light from at least this high above the ground, so they
+ * make a soft pool instead of a hot spot on whoever stands there.
+ */
+const LIGHT_GAIN = 2.6;
+const LIGHT_PER_FLARE = 3.2;
+const LIGHT_LIFT = 2;
 
+// lights: point lights in the pool, fixed for the system's life (the count is
+// part of every lit shader); a later switch to 'low' only turns them down to 0
 const QUALITY = {
-  low: { particles: 1600, mult: 0.5 },
-  medium: { particles: 3000, mult: 0.8 },
-  high: { particles: 4000, mult: 1 },
+  low: { particles: 1600, mult: 0.5, lights: 0 },
+  medium: { particles: 3000, mult: 0.8, lights: 4 },
+  high: { particles: 4000, mult: 1, lights: 4 },
 };
 
 /** Max ribbons one effect can own (chain hops). */
@@ -70,6 +86,7 @@ class Fx {
     this.k0 = 0; this.k1 = 0; this.k2 = 0; this.k3 = 0; this.k4 = 0; this.k5 = 0;
     this.follow = null;
     this.flag = false;
+    this.light = -1;
   }
 }
 
@@ -96,6 +113,7 @@ class Proj {
     this.burstR = 0;
     this.track = null;
     this.magic = false;
+    this.light = -1;
   }
 }
 
@@ -111,6 +129,7 @@ const _c = new THREE.Color();
 const WHITE = new THREE.Color(1, 1, 1);
 const _track = { x: 0, y: 0, h: 0, hidden: false };
 const BOLT = new Float32Array(BOLT_N * 3);
+const _lc = { r: 1, g: 1, b: 1 };
 
 /**
  * VFX for the game renderer.
@@ -123,7 +142,8 @@ export class VFXSystem {
   /**
    * @param {THREE.Scene} scene
    * @param {(x:number, y:number) => number} getHeight ground height at sim (x, y)
-   * @param {{ quality?: 'low'|'medium'|'high', maxParticles?: number }} [options]
+   * @param {{ quality?: 'low'|'medium'|'high', maxParticles?: number, lights?: number }} [options]
+   *   lights: point lights in the pool (default per quality: 0 on low, else 4)
    */
   constructor(scene, getHeight, options = {}) {
     this.scene = scene;
@@ -147,6 +167,8 @@ export class VFXSystem {
     const pb = createProjectileBatches(this.root);
     this.batches = pb.batches;
     this.projMaterials = pb.materials;
+    /** Dynamic point lights (also fed by the renderer's burning buildings). */
+    this.lights = new LightPool(this.root, Number.isFinite(options.lights) ? options.lights : QUALITY[this.quality].lights);
     this.effects = [];
     this.fxPool = [];
     this.projectiles = [];
@@ -156,6 +178,7 @@ export class VFXSystem {
     this.time = 0;
     this.focusX = NaN;
     this.focusY = NaN;
+    this.focusR = 20;
     this.budget = 1;
     this.disposed = false;
   }
@@ -372,6 +395,7 @@ export class VFXSystem {
     this.alpha.update(dt);
     this.glows.flush();
     for (const k in this.batches) this.batches[k].flush();
+    this.lights.update(dt, this.focusX, this.focusY, this.focusR, this.quality === 'low' ? 0 : 1);
     // camera shake decays exponentially
     if (this.shake > 0) {
       this.shake *= Math.exp(-4.5 * dt);
@@ -389,6 +413,7 @@ export class VFXSystem {
     this.alpha.clear();
     this.glows.clear();
     for (const k in this.batches) this.batches[k].clear();
+    this.lights.clear();
     this.shake = 0;
   }
 
@@ -407,21 +432,29 @@ export class VFXSystem {
     disposePool(this.domes);
     for (const k in this.batches) this.batches[k].dispose();
     for (const m of this.projMaterials) m.dispose();
+    this.lights.dispose();
     this.atlas.dispose();
     this.root.removeFromParent();
   }
 
-  /** 'low' | 'medium' | 'high': scales particle counts (the cap is fixed at construction). */
+  /**
+   * 'low' | 'medium' | 'high': scales particle counts (the cap and the number of
+   * lights are fixed at construction; on 'low' the lights are turned down to 0).
+   */
   setQuality(q) {
     if (!QUALITY[q]) return;
     this.quality = q;
     this.mult = QUALITY[q].mult;
   }
 
-  /** Optional: camera ground target, so far-away shakes are attenuated. */
-  setFocus(x, y) {
+  /**
+   * Optional: camera ground target (and zoom distance), so far-away shakes are
+   * attenuated and the lights go to what is on screen.
+   */
+  setFocus(x, y, dist) {
     this.focusX = x;
     this.focusY = y;
+    if (Number.isFinite(dist) && dist > 0) this.focusR = Math.max(10, dist * 0.8);
   }
 
   /** Request camera shake (world units) from an event at (x, y). */
@@ -449,6 +482,7 @@ export class VFXSystem {
       pillars: this.pillars.active,
       domes: this.domes.active,
       instances: Object.values(this.batches).reduce((s, b) => s + b.active, 0),
+      lights: this.lights.lit,
       budget: this.budget,
       shake: this.shake,
     };
@@ -553,6 +587,7 @@ export class VFXSystem {
     if (e.g0 >= 0) this.glows.free(e.g0);
     if (e.g1 >= 0) this.glows.free(e.g1);
     if (e.g2 >= 0) this.glows.free(e.g2);
+    if (e.light >= 0) this.lights.release(e.light);
     for (let i = 0; i < e.nslots; i++) this.batches.crescent.free(e.slots[i]);
     if (e.rock >= 0) this.batches.rock.free(e.rock);
     e.reset();
@@ -611,8 +646,9 @@ export class VFXSystem {
     return e;
   }
 
-  /** Billboard flash at world (x, wy, z): size0 → size1 over life. */
+  /** Billboard flash at world (x, wy, z): size0 → size1 over life. Big ones light their surroundings. */
   flareFx(x, wy, z, size0, size1, life, c, core, alpha, rays = 0, fin = 0.12) {
+    if (size1 >= 1.5) this.flashLight(x, wy, z, c, core, LIGHT_PER_FLARE * alpha * size1, 2.4 + 1.5 * size1, life * 1.6 + 0.1, fin);
     const f = this.flares.acquire();
     if (!f) {
       // fall back to a point glow
@@ -638,6 +674,31 @@ export class VFXSystem {
     f.mesh.position.set(x, wy, z);
     e.spin = rays > 0 ? rnd(-0.8, 0.8) : 0;
     return e;
+  }
+
+  /**
+   * Point-light flash at world (x, wy, z), raised to light the ground around it;
+   * its color leans from c toward the white-hot core.
+   */
+  flashLight(x, wy, z, c, core, intensity, range, life, attack = 0.04) {
+    if (!this.lights.count) return -1;
+    this.lightColor(c, core, 0.3);
+    return this.lights.flash(x, Math.max(wy, this.ground(x, z) + LIGHT_LIFT), z, _lc, intensity * LIGHT_GAIN, range, life, attack);
+  }
+
+  /** A held point light (see LightPool.hold); let it go with this.lights.release(handle). */
+  holdLight(x, wy, z, c, core, intensity, range, attack = 0.08, flicker = 0) {
+    if (!this.lights.count) return -1;
+    this.lightColor(c, core, 0.3);
+    return this.lights.hold(x, wy, z, _lc, intensity * LIGHT_GAIN, range, attack, flicker);
+  }
+
+  /** c leaned toward core by k, into the shared scratch color. */
+  lightColor(c, core, k) {
+    _lc.r = c.r + (core.r - c.r) * k;
+    _lc.g = c.g + (core.g - c.g) * k;
+    _lc.b = c.b + (core.b - c.b) * k;
+    return _lc;
   }
 
   /** Column of light at ground (x, y). */
@@ -751,9 +812,13 @@ export class VFXSystem {
         r.reset().color(pal.glow, pal.core);
         r.u.uWidth.value = (p.kind === 'bolt' ? 0.34 : p.kind === 'sunray' ? 0.36 : p.kind === 'moonbeam' ? 0.3 : 0.16) * big;
         r.u.uFade.value.set(0.5, 0.04);
+        r.u.uHot.value = p.kind === 'bolt' ? 4 : spec.trail === 'ray' ? 3 : 1.6;
         p.rib = r;
       }
     }
+    // fireballs and big (ability) orbs light the ground under their flight
+    if (p.kind === 'fireball') p.light = this.holdLight(ax, ah, ay, pal.mid, pal.core, 4.5 * big, 3.5 + 1.5 * big, 0.06, 0.18);
+    else if (p.kind === 'orb' && big > 1.2) p.light = this.holdLight(ax, ah, ay, pal.glow, pal.core, 3.2 * big, 3 + 1.5 * big, 0.08, 0.06);
     p.spin = spec.spin * rnd(0.7, 1.3) * (Math.random() < 0.5 ? -1 : 1);
     p.roll = Math.random() * TAU;
     if (p.kind === 'rock') {
@@ -835,8 +900,11 @@ export class VFXSystem {
     if (p.glow >= 0) {
       const flick = 0.85 + 0.15 * Math.sin(this.time * 40 + p.roll * 7);
       const g = (p.kind === 'arrow' ? 0.32 : spec.glow) * p.big;
-      this.glows.set(p.glow, x, h, z, g * flick, p.kind === 'fireball' ? pal.core : pal.glow, p.kind === 'skull' ? 0.8 : 1, CELL.GLOW);
+      // the head burns white-hot (HDR) so it blooms; magic arrow / spear tips a little less
+      const heat = p.kind === 'arrow' || p.kind === 'spear' ? 0.9 : p.kind === 'skull' ? 1.1 : 1.8;
+      this.glows.set(p.glow, x, h, z, g * flick, p.kind === 'fireball' ? pal.core : pal.glow, p.kind === 'skull' ? 0.8 : 1, CELL.GLOW, 0, heat);
     }
+    if (p.light >= 0) this.lights.move(p.light, x, h + 0.25, z);
     if (p.rib) this.layProjRibbon(p, u);
     if (dt > 0) this.projTrail(p, x, h, z, dt);
     if (u >= 1) {
@@ -998,6 +1066,7 @@ export class VFXSystem {
       case 'zap':
         this.add.add(x, h, z, 0, 0, 0, 0.15, 1.0, 1.4, pal.glow, 1, CELL.GLOW);
         this.burst(this.add, x, h, z, 10, 2, 5, -1, 3, 0.12, 0.25, 0.16, 0.03, pal.core, pal.glow, 1, CELL.SPARK, 6, 1);
+        this.flashLight(x, h, z, pal.glow, pal.core, 7, 4.5, 0.2, 0.02);
         break;
       case 'rock': {
         const gz = this.ground(x, z);
@@ -1012,7 +1081,8 @@ export class VFXSystem {
         break;
       }
       case 'explode':
-        this.add.add(x, h, z, 0, 0, 0, 0.25, 1.2 * big, 2.0 * big, pal.core, 0.95, CELL.GLOW);
+        this.flashLight(x, h, z, pal.mid, pal.core, 9 * big, 4 + 2 * big, 0.45, 0.03);
+        this.add.setHeat(this.add.add(x, h, z, 0, 0, 0, 0.25, 1.2 * big, 2.0 * big, pal.core, 0.95, CELL.GLOW), 1.6);
         this.burst(this.add, x, h, z, 12 * big, 0.8, 2.5, 0.3, 1.8, 0.3, 0.5, 0.55 * big, 0.2, pal.mid, pal.alt, 0.7, CELL.FLAME, -1, 2.5);
         this.burst(this.add, x, h, z, 8, 2, 4.5, 1, 3, 0.4, 0.7, 0.13, 0.04, COLORS.ember, pal.alt, 1, CELL.SPARK, 7, 0.5);
         this.burst(this.alpha, x, h, z, 4 * big, 0.3, 0.8, 0.4, 1, 0.7, 1.1, 0.5 * big, 1.3 * big, pal.smoke, null, 0.35, CELL.SMOKE, -0.3, 1.5);
@@ -1072,6 +1142,7 @@ export class VFXSystem {
   releaseProj(p) {
     if (p.slot >= 0) p.batch.free(p.slot);
     if (p.glow >= 0) this.glows.free(p.glow);
+    if (p.light >= 0) this.lights.release(p.light, 0.12);
     if (p.rib) this.ribbons.release(p.rib);
     p.reset();
     this.projPool.push(p);
