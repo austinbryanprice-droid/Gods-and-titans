@@ -6,7 +6,7 @@
 // frame scaled by the real radius). Hand frame: origin = palm center; items are
 // modelled along +Y and a mount rotation points them where they belong.
 import {
-  C, mixC, shadeC, tintC, lumaC, TEAM,
+  C, mixC, shadeC, tintC, lumaC, withMat, TEAM,
   box, cyl, cone, ico, dodeca, octa, tetra, torus, dome, slab, taper, seg, T, mirrorZ,
 } from './unit-geo.js';
 
@@ -23,42 +23,72 @@ const HAIR = {
   aztec_tezcatlipoca: '#101014', japanese_oni: '#1a1210',
 };
 
-/** Color palette for a unit visual (THREE.Colors, linear). */
+const _hsl = { h: 0, s: 0, l: 0 };
+
+/**
+ * Surface class for an accent color worn as metal (weapons, armor, jewelry,
+ * helmets): gold / bronze / copper hues are gold, greys and pale tints steel
+ * or silver, very dark greys iron; any other hue reads as glossy enamel.
+ */
+export function accentMetalClass(c) {
+  C(c).convertLinearToSRGB().getHSL(_hsl);
+  const hue = _hsl.h * 360;
+  if (_hsl.l < 0.3 && _hsl.s < 0.3) return 'iron';
+  if (_hsl.s < 0.22 || _hsl.l > 0.86) return hue >= 30 && hue <= 62 && _hsl.s > 0.5 ? 'gold' : 'metal';
+  if (hue >= 18 && hue <= 62) return 'gold';
+  return 'lacquer';
+}
+
+/** Surface class of a visual's skin: skin, fur, scales or feathers by its head. */
+function skinClass(v) {
+  const head = v.head || 'human';
+  if (head === 'crocodile' || head === 'dragon' || head === 'serpent') return 'scales';
+  if (head === 'bird' || head === 'falcon' || v.body === 'bird') return 'feather';
+  if (['human', 'demon', 'skull', 'none'].includes(head)) return 'skin';
+  return 'fur';
+}
+
+/**
+ * Color palette for a unit visual (THREE.Colors, linear). Every entry carries
+ * its surface class (unit-geo.js MATS); accentMetal is the accent as worn on
+ * blades, armor, jewelry and helmets.
+ */
 export function makePalette(unitType) {
   const v = unitType.visual;
   const c = v.colors || {};
-  const skin = C(c.skin || '#d8b090');
-  const primary = C(c.primary || '#888888');
-  const secondary = C(c.secondary || '#444444');
-  const accent = C(c.accent || '#ffd84a');
+  const skin = withMat(c.skin || '#d8b090', skinClass(v));
+  const primary = withMat(c.primary || '#888888', 'cloth');
+  const secondary = withMat(c.secondary || '#444444', 'cloth');
+  const accent = withMat(c.accent || '#ffd84a', 'trim');
   const hairHex = c.hair || HAIR[unitType.id];
-  const hair = hairHex ? C(hairHex) : shadeC(skin, 0.22);
-  const glow = v.aura ? C(v.aura) : accent;
-  const eyeGlow = v.extras.includes('eye_glow') ? (v.aura ? tintC(v.aura, 0.25) : tintC(accent, 0.2)) : null;
+  const hair = withMat(hairHex ? C(hairHex) : shadeC(skin, 0.22), 'hair');
+  const glow = withMat(v.aura ? C(v.aura) : accent, 'gem');
+  const eyeGlow = v.extras.includes('eye_glow') ? withMat(v.aura ? tintC(v.aura, 0.25) : tintC(accent, 0.2), 'gem') : null;
   // second tone for creature backs/manes: primary when it differs, else darker skin
   const dif = Math.abs(lumaC(primary) - lumaC(skin)) + Math.abs(primary.r - skin.r) + Math.abs(primary.b - skin.b);
   const back = dif > 0.06 ? primary : shadeC(skin, 0.6);
   return {
     skin, primary, secondary, accent, hair, glow, eyeGlow, back,
+    accentMetal: withMat(accent, accentMetalClass(accent)),
     skinDark: shadeC(skin, 0.7),
     skinLight: tintC(skin, 0.35),
     belly: mixC(skin, tintC(secondary, 0.3), 0.55),
-    eye: C('#1b120c'),
-    eyeWhite: C('#f2efe6'),
-    mouth: C('#4a1a18'),
-    white: C('#f4f0e6'),
-    bone: C('#e6dcc0'),
-    horn: mixC(accent, '#e6dcc0', 0.45),
-    beak: C('#e3b240'),
-    nose: C('#2a1c1a'),
-    metal: C('#b8bec8'),
-    darkMetal: C('#4a4c54'),
-    wood: C('#7a5230'),
-    woodDark: C('#4e3420'),
-    leather: C('#6a4528'),
+    eye: withMat('#1b120c', 'gloss'),
+    eyeWhite: withMat('#f2efe6', 'gloss'),
+    mouth: withMat('#4a1a18', 'skin'),
+    white: withMat('#f4f0e6', 'bone'),
+    bone: withMat('#e6dcc0', 'bone'),
+    horn: withMat(mixC(accent, '#e6dcc0', 0.45), 'bone'),
+    beak: withMat('#e3b240', 'bone'),
+    nose: withMat('#2a1c1a', 'gloss'),
+    metal: withMat('#b8bec8', 'metal'),
+    darkMetal: withMat('#4a4c54', 'iron'),
+    wood: withMat('#7a5230', 'wood'),
+    woodDark: withMat('#4e3420', 'wood'),
+    leather: withMat('#6a4528', 'leather'),
     fire: C('#ff7a1a'),
     fireHot: C('#ffd84a'),
-    fur: mixC(tintC(primary, 0.35), '#d9cbb0', 0.55),
+    fur: withMat(mixC(tintC(primary, 0.35), '#d9cbb0', 0.55), 'fur'),
   };
 }
 
@@ -71,7 +101,7 @@ function eyes(b, pal, x, y, z, s = 1, color) {
   const g = pal.eyeGlow;
   const geo = box(0.1 * s, 0.17 * s, 0.17 * s);
   T(geo, [x, y, z]);
-  b.addSym(geo, g || color || pal.eye, { glow: g ? 1 : 0 });
+  b.addSym(geo, g || color || pal.eye, { glow: g ? 1 : 0, mat: 'gloss' });
 }
 
 function jawMorph(b, opts, pivot, angle = -0.45) {
@@ -272,7 +302,7 @@ function headBirdlike(b, pal, v, opts, falcon) {
   const skull = dodeca(0.92);
   T(skull, [0, 0.02, 0], [0, 0, 0], [1.05, 1, 0.92]);
   b.add(skull, feather);
-  const beakColor = falcon ? shadeC(pal.beak, 0.85) : lumaC(feather) < 0.3 ? C('#3a3a42') : pal.beak;
+  const beakColor = falcon ? shadeC(pal.beak, 0.85) : lumaC(feather) < 0.3 ? withMat('#3a3a42', 'bone') : pal.beak;
   if (falcon) {
     const throat = dodeca(0.6);
     T(throat, [0.3, -0.45, 0]);
@@ -436,7 +466,7 @@ function headReptile(b, pal, v, opts, kind) {
   b.addSym(fang, pal.white);
   const tongue = box(0.5, 0.04, 0.08);
   T(tongue, [1.25, -0.3, 0]);
-  b.add(tongue, C('#c0283a'));
+  b.add(tongue, withMat('#c0283a', 'gloss'));
   return { top: 0.45, front: 1.1, brow: 0.35, ears: 0.6, hair: false };
 }
 
@@ -500,7 +530,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
   const top = anchor.top;
   const animal = opts.animal;
   const back = animal ? -0.1 : 0;
-  const metal = pal.accent;
+  const metal = pal.accentMetal;
   switch (kind) {
     case 'crown': {
       const band = cyl(0.88, 0.82, 0.32, 8, true);
@@ -514,7 +544,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       }
       const gem = octa(0.17);
       T(gem, [back + 0.86, top - 0.1, 0]);
-      b.add(gem, pal.secondary, { glow: 0.5 });
+      b.add(gem, pal.secondary, { glow: 0.5, mat: 'gem' });
       break;
     }
     case 'laurel': {
@@ -562,7 +592,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
         for (let i = 0; i < 3; i++) {
           const f = box(0.85 - i * 0.18, 0.16, 0.06);
           T(f, [back - 0.35, top - 0.15 + i * 0.22, 1.08], [0.15, 0, 0.55 + i * 0.2]);
-          b.addSym(f, pal.white);
+          b.addSym(f, pal.white, { mat: 'feather' });
         }
       }
       break;
@@ -604,7 +634,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
         const a = (i - 2) * 0.32;
         const f = slab([[0, 0], [0.22, 0.6], [0.12, 1.5], [0, 1.75], [-0.12, 1.5], [-0.22, 0.6]], 0.08);
         T(f, [back - 0.25, top - 0.2, Math.sin(a) * 0.6], [a * 0.9, PI / 2, 0]);
-        b.add(f, cols[i % 3]);
+        b.add(f, cols[i % 3], { mat: 'feather' });
       }
       break;
     }
@@ -639,7 +669,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       b.add(tail, pal.secondary);
       const ura = cone(0.16, 0.4, 4);
       T(ura, [back + 1.08, top - 0.45, 0]);
-      b.add(ura, pal.accent, { glow: 0.3 });
+      b.add(ura, pal.accentMetal, { glow: 0.3 });
       break;
     }
     case 'halo': {
@@ -649,7 +679,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       break;
     }
     case 'antlers': {
-      const col = mixC(pal.accent, pal.bone, 0.4);
+      const col = withMat(mixC(pal.accent, pal.bone, 0.4), 'bone');
       const A = [back - 0.1, top - 0.2, 0.42];
       const B = [back - 0.35, top + 0.9, 1.05];
       const D = [back - 0.75, top + 1.75, 1.15];
@@ -683,7 +713,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       b.add(panel, tintC(pal.secondary, 0.25));
       const circ = cyl(1.12, 1.12, 0.12, 8, true);
       T(circ, [back, top - 0.45, 0]);
-      b.add(circ, pal.accent);
+      b.add(circ, pal.accentMetal);
       break;
     }
     case 'tiara': {
@@ -695,7 +725,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       b.add(peak, metal);
       const gem = octa(0.16);
       T(gem, [back + 0.98, top - 0.3, 0]);
-      b.add(gem, pal.secondary, { glow: 0.7 });
+      b.add(gem, pal.secondary, { glow: 0.7, mat: 'gem' });
       break;
     }
     case 'flame': {
@@ -714,20 +744,20 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       b.add(band, pal.secondary);
       const gem = octa(0.18);
       T(gem, [back + 0.85, top + 0.15, 0]);
-      b.add(gem, pal.secondary, { glow: 0.6 });
+      b.add(gem, pal.secondary, { glow: 0.6, mat: 'gem' });
       break;
     }
     case 'headdress': {
       const band = cyl(0.98, 0.94, 0.3, 8, true);
       T(band, [back, top - 0.3, 0]);
-      b.add(band, pal.accent);
+      b.add(band, pal.accentMetal);
       const cols = [pal.accent, pal.secondary, pal.primary, pal.secondary];
       const n = 9;
       for (let i = 0; i < n; i++) {
         const a = (i / (n - 1) - 0.5) * PI * 0.95;
         const f = slab([[0, 0], [0.3, 0.9], [0.18, 2.1], [0, 2.4], [-0.18, 2.1], [-0.3, 0.9]], 0.1);
         T(f, [back - 0.45 - Math.cos(a) * 0.1, top - 0.25, Math.sin(a) * 0.75], [a * 0.95, PI / 2, -0.25]);
-        b.add(f, cols[i % cols.length]);
+        b.add(f, cols[i % cols.length], { mat: 'feather' });
       }
       const gem = octa(0.25);
       T(gem, [back + 0.95, top - 0.25, 0]);
@@ -805,7 +835,7 @@ function fire(b, pal, y, h, r = 0.06) {
 /** Add a weapon (main hand) in the grip frame. size scales the item. */
 export function addWeapon(b, pal, kind, size = 1, opts = {}) {
   const s = size;
-  const metal = pal.accent;
+  const metal = pal.accentMetal;
   const shaft = opts.shaftColor || pal.wood;
   switch (kind) {
     case 'sword': {
@@ -827,7 +857,7 @@ export function addWeapon(b, pal, kind, size = 1, opts = {}) {
       b.add(seg([0, -0.14 * s, 0], [0, 0.06 * s, 0], 0.022 * s, 0.022 * s, 4), C('#2a2230'));
       const tsuba = cyl(0.05 * s, 0.05 * s, 0.015 * s, 6);
       T(tsuba, [0, 0.07 * s, 0]);
-      b.add(tsuba, C('#c8a040'));
+      b.add(tsuba, withMat('#c8a040', 'gold'));
       const pts = [[0, 0.08], [0.012, 0.3], [0.035, 0.52], [0.07, 0.72]];
       for (let i = 0; i < 3; i++) {
         const g = taper(0.05 * s, (pts[i + 1][1] - pts[i][1]) * s * 1.02, 0.016 * s, i === 2 ? 0.4 : 0.92, 1);
@@ -1061,7 +1091,7 @@ export function addWeapon(b, pal, kind, size = 1, opts = {}) {
       }
       const string = box(0.006 * s, 0.8 * s, 0.006 * s);
       T(string, [-0.035 * s, 0, 0]);
-      b.add(string, pal.white);
+      b.add(string, pal.white, { mat: 'cloth' });
       break;
     }
     default:
@@ -1077,13 +1107,13 @@ export function addOffhand(b, pal, kind, size = 1, opts = {}) {
       // shield sits on the outside of the forearm; caller frames it
       const face = cyl(0.19 * s, 0.19 * s, 0.035 * s, 8);
       T(face, [0, 0, 0], [PI / 2, 0, 0]);
-      b.add(face, opts.teamShield === false ? pal.secondary : TEAM(1));
+      b.add(face, opts.teamShield === false ? pal.secondary : TEAM(1), { mat: 'painted' });
       const rim = cyl(0.205 * s, 0.205 * s, 0.045 * s, 8, true);
       T(rim, [0, 0, 0], [PI / 2, 0, 0]);
-      b.add(rim, pal.accent);
+      b.add(rim, pal.accentMetal);
       const boss = octa(0.055 * s);
       T(boss, [0, 0, -0.02 * s], [0, 0, 0], [1, 1, 0.6]);
-      b.add(boss, pal.accent);
+      b.add(boss, pal.accentMetal);
       break;
     }
     case 'orb': {
@@ -1095,10 +1125,10 @@ export function addOffhand(b, pal, kind, size = 1, opts = {}) {
     case 'book': {
       const cover = box(0.035 * s, 0.17 * s, 0.13 * s);
       T(cover, [0, 0.08 * s, 0]);
-      b.add(cover, pal.secondary);
+      b.add(cover, pal.secondary, { mat: 'leather' });
       const pages = box(0.04 * s, 0.155 * s, 0.11 * s);
       T(pages, [0.008 * s, 0.08 * s, 0]);
-      b.add(pages, pal.white);
+      b.add(pages, pal.white, { mat: 'cloth' });
       break;
     }
     case 'lantern': {
@@ -1108,10 +1138,10 @@ export function addOffhand(b, pal, kind, size = 1, opts = {}) {
       b.add(frame, tintC(pal.glow, 0.3), { glow: 1 });
       const cap = cone(0.07 * s, 0.05 * s, 4);
       T(cap, [0, 0.1 * s, 0], [PI, PI / 4, 0]);
-      b.add(cap, pal.accent);
+      b.add(cap, pal.accentMetal);
       const bot = box(0.09 * s, 0.02 * s, 0.09 * s);
       T(bot, [0, 0.21 * s, 0]);
-      b.add(bot, pal.accent);
+      b.add(bot, pal.accentMetal);
       break;
     }
     case 'torch':
@@ -1135,10 +1165,10 @@ export function addOffhand(b, pal, kind, size = 1, opts = {}) {
       b.add(seg([0, -0.02 * s, 0], [0, 0.08 * s, 0], 0.016 * s, 0.016 * s, 4), pal.woodDark);
       const disc = cyl(0.11 * s, 0.11 * s, 0.025 * s, 10);
       T(disc, [0, 0.18 * s, 0], [0, 0, PI / 2]);
-      b.add(disc, opts.dark ? C('#202028') : tintC(pal.glow, 0.45), { glow: opts.dark ? 0.2 : 1 });
+      b.add(disc, opts.dark ? withMat('#202028', 'gloss') : tintC(pal.glow, 0.45), { glow: opts.dark ? 0.2 : 1 });
       const rim = torus(0.11 * s, 0.016 * s, 3, 10);
       T(rim, [0, 0.18 * s, 0], [0, PI / 2, 0]);
-      b.add(rim, pal.accent);
+      b.add(rim, pal.accentMetal);
       break;
     }
     case 'shell': {

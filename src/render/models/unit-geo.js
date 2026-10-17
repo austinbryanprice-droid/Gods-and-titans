@@ -1,8 +1,10 @@
 // Geometry helpers for the procedural unit models: low-poly primitives, color
 // helpers and PartBuilder, which merges colored pieces into one vertex-colored
-// BufferGeometry (attributes: position, normal, color, aFx) with optional
+// BufferGeometry (attributes: position, normal, color, aFx, aAo) with optional
 // relative morph targets. aFx.x > 0 marks team-colored vertices (value = shade),
-// aFx.y is the self-glow amount (0..1).
+// aFx.y is the self-glow amount (0..1), aFx.zw the surface's roughness and
+// metalness (from its material class, see MATS); aAo is baked ambient
+// occlusion (1 = open, see bakeAO).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -18,18 +20,60 @@ const UP = new THREE.Vector3(0, 1, 0);
 export const WHITE = new THREE.Color(1, 1, 1);
 export const BLACK = new THREE.Color(0, 0, 0);
 
-/** Team color marker for PartBuilder.add (shade multiplies the team color). */
-export function TEAM(shade = 1) {
-  return { team: shade };
+/**
+ * Surface classes: [roughness, metalness]. A color carries its class as a
+ * `mat` tag (see withMat) through C / mixC / shadeC / tintC; PartBuilder.add
+ * takes it from opts.mat, else the color's tag, else 'cloth'.
+ */
+export const MATS = {
+  cloth: [0.9, 0],
+  trim: [0.62, 0], // embroidery, ornaments, feathers of a headdress
+  painted: [0.48, 0], // painted wood and lacquered pads
+  lacquer: [0.3, 0], // glossy enamel (colored "metal" accents)
+  skin: [0.62, 0],
+  fur: [0.95, 0],
+  feather: [0.82, 0],
+  scales: [0.46, 0],
+  hair: [0.66, 0],
+  leather: [0.55, 0],
+  wood: [0.82, 0],
+  bone: [0.5, 0], // bone, horn, teeth, beaks, chitin
+  gloss: [0.32, 0], // eyes, wet noses, obsidian
+  gem: [0.24, 0],
+  // stylized metal: some diffuse left so it never goes black away from the sky
+  metal: [0.36, 0.72], // steel, silver
+  gold: [0.3, 0.76], // gold, bronze, copper
+  iron: [0.52, 0.6], // dark, worn iron
+};
+
+/** Team color marker for PartBuilder.add (shade multiplies the team color; mat = surface class). */
+export function TEAM(shade = 1, mat = 'cloth') {
+  return { team: shade, mat };
 }
 
-/** Parse a CSS color (hex string, number or THREE.Color) into a new THREE.Color. */
+/** Parse a CSS color (hex string, number or THREE.Color) into a new THREE.Color (keeps a `mat` tag). */
 export function C(c) {
-  return c instanceof THREE.Color ? c.clone() : new THREE.Color(c);
+  if (c instanceof THREE.Color) {
+    const out = c.clone();
+    if (c.mat) out.mat = c.mat;
+    return out;
+  }
+  return new THREE.Color(c);
 }
-/** Linear blend of two colors. */
+/** Copy of a color tagged with a surface class (MATS key). */
+export function withMat(c, mat) {
+  const out = C(c);
+  out.mat = mat;
+  return out;
+}
+/** Linear blend of two colors (keeps the tag of the dominant one). */
 export function mixC(a, b, t) {
-  return C(a).lerp(C(b), t);
+  const A = C(a);
+  const B = C(b);
+  const mat = t < 0.5 ? A.mat || B.mat : B.mat || A.mat;
+  const out = A.lerp(B, t);
+  if (mat) out.mat = mat;
+  return out;
 }
 /** Darken (k < 1) or brighten (k > 1) a color. */
 export function shadeC(c, k) {
@@ -269,7 +313,7 @@ export class PartBuilder {
 
   /**
    * Add a piece. color: THREE.Color | css string | TEAM(shade).
-   * opts: { glow: 0..1, morph: { name: (v, out) => void } }
+   * opts: { glow: 0..1, mat: MATS key (overrides the color's tag), morph: { name: (v, out) => void } }
    */
   add(geo, color, opts = {}) {
     if (!geo) return null;
@@ -277,7 +321,8 @@ export class PartBuilder {
     if (this.matrix.determinant() < 0) flipWinding(geo);
     const team = color && typeof color === 'object' && 'team' in color ? color.team : 0;
     const c = team ? WHITE : C(color);
-    this.items.push({ geo, color: c, team, glow: opts.glow || 0, morph: opts.morph || null });
+    const mat = MATS[opts.mat] || MATS[team ? color.mat : c.mat] || MATS.cloth;
+    this.items.push({ geo, color: c, team, glow: opts.glow || 0, mat, morph: opts.morph || null });
     return geo;
   }
 
@@ -318,16 +363,20 @@ export class PartBuilder {
       const g = it.geo;
       const n = g.attributes.position.count;
       const col = new Float32Array(n * 3);
-      const fx = new Float32Array(n * 2);
+      const fx = new Float32Array(n * 4);
+      const ao = new Float32Array(n).fill(1);
       for (let i = 0; i < n; i++) {
         col[i * 3] = it.color.r;
         col[i * 3 + 1] = it.color.g;
         col[i * 3 + 2] = it.color.b;
-        fx[i * 2] = it.team;
-        fx[i * 2 + 1] = it.glow;
+        fx[i * 4] = it.team;
+        fx[i * 4 + 1] = it.glow;
+        fx[i * 4 + 2] = it.mat[0];
+        fx[i * 4 + 3] = it.mat[1];
       }
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      g.setAttribute('aFx', new THREE.BufferAttribute(fx, 2));
+      g.setAttribute('aFx', new THREE.BufferAttribute(fx, 4));
+      g.setAttribute('aAo', new THREE.BufferAttribute(ao, 1));
       geos.push(g);
     }
     const merged = mergeGeometries(geos, false);
@@ -382,4 +431,163 @@ export function topY(g) {
   let m = -Infinity;
   for (let i = 0; i < p.count; i++) m = Math.max(m, p.getY(i));
   return m;
+}
+
+const _ma = new THREE.Vector3();
+const _mb = new THREE.Vector3();
+const _mc = new THREE.Vector3();
+
+/**
+ * Bake ambient occlusion into the aAo attribute of a model's geometries.
+ * entries: each geometry where it sits in a typical pose (matrix: model
+ * space, feet on y = 0; positions: optional posed vertex positions, e.g. with
+ * the elbow bent, in place of the geometry's own). A geometry listed more than
+ * once (mirrored legs, two axles) gets the mean over its instances. Three
+ * terms, multiplied per vertex:
+ *  - crevices: every emitting triangle is a small disc occluder (Bunnell's
+ *    form-factor approximation A·cosθr·cosθe / (πd² + A)). Both cosines are
+ *    clamped, so the faces of one convex piece never occlude each other: a
+ *    vertex only darkens where pieces meet (arm on torso, belt on tunic, hair
+ *    on skull) or one part hangs over another. Discs seen from behind count
+ *    half (open domes and cones have no inner faces).
+ *  - ground: side faces darken toward the feet (fades out on faces that look
+ *    up at the sky); opts.ground scales it (0 for flyers).
+ *  - underside: faces turned down are a little darker.
+ * @param {{ geo: THREE.BufferGeometry, matrix?: THREE.Matrix4, positions?: THREE.BufferAttribute, emit?: boolean, receive?: boolean }[]} entries
+ * @param {{ ground?: number, strength?: number }} [opts]
+ */
+export function bakeAO(entries, { ground = 1, strength = 0.4 } = {}) {
+  // emitters: center, unit normal, area, reach (beyond it a disc adds < ~1%)
+  let nTri = 0;
+  for (const e of entries) if (e.emit !== false) nTri += e.geo.attributes.position.count / 3;
+  const posOf = (e) => e.positions || e.geo.attributes.position;
+  const E = new Float32Array(nTri * 8);
+  let end = 0;
+  for (const e of entries) {
+    if (e.emit === false) continue;
+    const pos = posOf(e);
+    for (let i = 0; i < pos.count; i += 3) {
+      triangle(pos, i, e.matrix);
+      const cx = (_ma.x + _mb.x + _mc.x) / 3;
+      const cy = (_ma.y + _mb.y + _mc.y) / 3;
+      const cz = (_ma.z + _mb.z + _mc.z) / 3;
+      _mb.sub(_ma);
+      _mc.sub(_ma);
+      _ma.crossVectors(_mb, _mc);
+      const len = _ma.length();
+      if (len < 1e-9) continue;
+      E[end] = cx;
+      E[end + 1] = cy;
+      E[end + 2] = cz;
+      E[end + 3] = _ma.x / len;
+      E[end + 4] = _ma.y / len;
+      E[end + 5] = _ma.z / len;
+      E[end + 6] = len / 2;
+      E[end + 7] = Math.sqrt(len / 2 / 0.03);
+      end += 8;
+    }
+  }
+  const near = new Int32Array(nTri); // emitters within reach of the current receiver triangle
+  const sums = new Map(); // geo → { acc, n }
+  for (const e of entries) {
+    if (e.receive === false) continue;
+    const pos = posOf(e);
+    let rec = sums.get(e.geo);
+    if (!rec) {
+      rec = { acc: new Float32Array(pos.count), n: 0 };
+      sums.set(e.geo, rec);
+    }
+    rec.n++;
+    const acc = rec.acc;
+    for (let i = 0; i < pos.count; i += 3) {
+      triangle(pos, i, e.matrix);
+      const ax = _ma.x, ay = _ma.y, az = _ma.z;
+      const bx = _mb.x, by = _mb.y, bz = _mb.z;
+      const qx = _mc.x, qy = _mc.y, qz = _mc.z;
+      // face normal (flat shading: one per triangle)
+      let nx = (by - ay) * (qz - az) - (bz - az) * (qy - ay);
+      let ny = (bz - az) * (qx - ax) - (bx - ax) * (qz - az);
+      let nz = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);
+      const nl = Math.hypot(nx, ny, nz);
+      if (nl < 1e-12) {
+        acc[i] += 1;
+        acc[i + 1] += 1;
+        acc[i + 2] += 1;
+        continue;
+      }
+      nx /= nl;
+      ny /= nl;
+      nz /= nl;
+      // candidate emitters: in front of the face (the three samples share its
+      // plane, so this is the per-sample cosθr > 0 test done once) and in
+      // reach of some point of the triangle
+      const tx = (ax + bx + qx) / 3;
+      const ty = (ay + by + qy) / 3;
+      const tz = (az + bz + qz) / 3;
+      const tr = Math.sqrt(Math.max(
+        (ax - tx) ** 2 + (ay - ty) ** 2 + (az - tz) ** 2,
+        (bx - tx) ** 2 + (by - ty) ** 2 + (bz - tz) ** 2,
+        (qx - tx) ** 2 + (qy - ty) ** 2 + (qz - tz) ** 2,
+      )) + 0.004;
+      let nn = 0;
+      for (let j = 0; j < end; j += 8) {
+        const dx = E[j] - tx;
+        const dy = E[j + 1] - ty;
+        const dz = E[j + 2] - tz;
+        if (nx * dx + ny * dy + nz * dz <= 0.003) continue;
+        const r = E[j + 7] + tr;
+        if (dx * dx + dy * dy + dz * dz <= r * r) near[nn++] = j;
+      }
+      for (let v = 0; v < 3; v++) {
+        // sample a little off the face so coplanar neighbours do not count
+        const px = (v === 0 ? ax : v === 1 ? bx : qx) + nx * 0.003;
+        const py = (v === 0 ? ay : v === 1 ? by : qy) + ny * 0.003;
+        const pz = (v === 0 ? az : v === 1 ? bz : qz) + nz * 0.003;
+        let occ = 0;
+        for (let k = 0; k < nn; k++) {
+          const j = near[k];
+          const dx = E[j] - px;
+          const dy = E[j + 1] - py;
+          const dz = E[j + 2] - pz;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          const A = E[j + 6];
+          if (d2 * 0.03 > A) continue; // would add less than ~1%
+          const cr = nx * dx + ny * dy + nz * dz;
+          if (cr <= 0) continue;
+          let ce = -(E[j + 3] * dx + E[j + 4] * dy + E[j + 5] * dz);
+          if (ce < 0) ce *= -0.5;
+          // (n·d)(−m·d) / d² = cosθr·cosθe, so no square root is needed
+          occ += (A * cr * ce) / (d2 * (Math.PI * d2 + A) + 1e-12);
+        }
+        const cav = 1 - strength * (1 - Math.exp(-0.9 * occ));
+        const h = Math.min(1, Math.max(0, py / 0.28));
+        const low = 1 - h * h * (3 - 2 * h);
+        const gr = 1 - ground * 0.2 * low * (1 - Math.max(0, ny));
+        const under = 1 - 0.12 * Math.max(0, -ny);
+        acc[i + v] += Math.max(0.22, cav * gr * under);
+      }
+    }
+  }
+  for (const [geo, rec] of sums) {
+    let attr = geo.attributes.aAo;
+    if (!attr || attr.count !== rec.acc.length) {
+      attr = new THREE.BufferAttribute(new Float32Array(rec.acc.length), 1);
+      geo.setAttribute('aAo', attr);
+    }
+    const a = attr.array;
+    for (let i = 0; i < a.length; i++) a[i] = rec.acc[i] / rec.n;
+    attr.needsUpdate = true;
+  }
+}
+
+/** Triangle i..i+2 of a position attribute into _ma, _mb, _mc (optionally transformed). */
+function triangle(pos, i, matrix) {
+  _ma.fromBufferAttribute(pos, i);
+  _mb.fromBufferAttribute(pos, i + 1);
+  _mc.fromBufferAttribute(pos, i + 2);
+  if (matrix) {
+    _ma.applyMatrix4(matrix);
+    _mb.applyMatrix4(matrix);
+    _mc.applyMatrix4(matrix);
+  }
 }
