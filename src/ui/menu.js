@@ -1,0 +1,952 @@
+// Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
+// as an HTML overlay in #menu-root over an animated night-sky backdrop.
+//
+//   const menu = createMenu({ root, onStart })   // onStart(launch) when a lobby starts
+//   showMenu(screen = 'title')  /  hideMenu()
+//
+// launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
+// Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
+// the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES } from '../config.js';
+import { PANTHEON_LIST } from '../data/index.js';
+import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
+import { sfx } from '../audio/sfx.js';
+import { h, setChildren, copyText } from './menu-dom.js';
+import { createMenuBackdrop } from './menu-fx.js';
+import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow } from './menu-pantheons.js';
+import { renderHowToContent } from './menu-howto.js';
+import * as M from './menu-model.js';
+
+let instance = null;
+
+/** Show the menu (after a match, or from anywhere). */
+export function showMenu(screen = 'title', opts = {}) {
+  if (instance) instance.show(screen, opts);
+}
+
+/** Hide the menu (the game is taking over the screen). */
+export function hideMenu() {
+  if (instance) instance.hide();
+}
+
+function urlParams() {
+  try {
+    return new URLSearchParams(globalThis.location ? location.search : '');
+  } catch {
+    return new URLSearchParams('');
+  }
+}
+
+/** Remove a query parameter from the address bar without reloading. */
+function dropUrlParam(name) {
+  try {
+    const url = new URL(location.href);
+    if (!url.searchParams.has(name)) return;
+    url.searchParams.delete(name);
+    history.replaceState(history.state, '', url.toString());
+  } catch {
+    // ignore
+  }
+}
+
+const unsubAll = (list) => {
+  for (const off of list.splice(0)) {
+    try {
+      if (typeof off === 'function') off();
+    } catch {
+      // ignore
+    }
+  }
+};
+
+function closeLobby(lobby) {
+  if (!lobby) return;
+  try {
+    if (typeof lobby.close === 'function') lobby.close();
+    else if (typeof lobby.leave === 'function') lobby.leave();
+    else if (typeof lobby.destroy === 'function') lobby.destroy();
+  } catch (err) {
+    console.warn('[menu] closing the lobby failed', err);
+  }
+}
+
+/**
+ * Build the menu inside `root`.
+ * @param {{ root: HTMLElement, onStart: (launch: object) => void }} opts
+ */
+export function createMenu({ root, onStart }) {
+  const params = urlParams();
+  const useMock = params.get('mockLobby') === '1';
+  const tOverride = params.get('transport');
+  const onlineTransport = tOverride === 'local' || tOverride === 'peer' ? tOverride : 'peer';
+  let lobbyModule = null;
+
+  root.classList.add('mw-root');
+  setChildren(root);
+  const sky = h('div.mw-sky', { 'aria-hidden': 'true' });
+  const screenLayer = h('div.mw-screens');
+  const toasts = h('div.mw-toasts', { role: 'status', 'aria-live': 'polite' });
+  root.append(sky, h('div.mw-vignette', { 'aria-hidden': 'true' }), screenLayer, toasts);
+  const backdrop = createMenuBackdrop(sky);
+
+  let current = null; // { name, cleanup, onEscape }
+  let launchedLobby = null; // lobby of the running match; closed when the menu returns
+
+  // Button clicks get a soft click sound (delegated).
+  root.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('button');
+    if (b && !b.disabled && !b.classList.contains('mw-silent')) sfx.play('click');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (root.hidden || e.key !== 'Escape' || !current || !current.onEscape) return;
+    if (root.querySelector('.mw-overlay, .mw-popover')) return;
+    e.preventDefault();
+    current.onEscape();
+  });
+
+  function loadLobby() {
+    if (!lobbyModule) {
+      lobbyModule = (useMock ? import('./menu-mock.js') : import('../net/lobby.js')).catch((err) => {
+        lobbyModule = null;
+        console.error('[menu] lobby module failed to load', err);
+        throw new Error('The multiplayer module could not be loaded. Please reload the page.');
+      });
+    }
+    return lobbyModule;
+  }
+
+  function toast(text, kind = 'error', ms = 6000) {
+    const el = h('div.mw-toast', { class: `is-${kind}` }, h('span.mw-toast-icon', kind === 'error' ? '⚠' : '✦'), h('span', text));
+    toasts.appendChild(el);
+    if (kind === 'error') sfx.play('error');
+    setTimeout(() => {
+      el.classList.add('is-leaving');
+      setTimeout(() => el.remove(), 300);
+    }, ms);
+  }
+
+  function busy(text, onCancel) {
+    const el = h('div.mw-overlay.mw-busy',
+      h('div.mw-busy-box.mw-panel',
+        h('div.mw-spinner', { 'aria-hidden': 'true' }),
+        h('div.mw-busy-text', text),
+        onCancel ? h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => {
+          el.remove();
+          onCancel();
+        } }, 'Cancel') : null,
+      ));
+    root.appendChild(el);
+    return () => el.remove();
+  }
+
+  function go(name, opts = {}) {
+    if (current && current.cleanup) {
+      try {
+        current.cleanup();
+      } catch (err) {
+        console.warn('[menu] screen cleanup failed', err);
+      }
+    }
+    root.querySelectorAll('.mw-overlay, .mw-popover').forEach((el) => el.remove());
+    const build = SCREENS[name] || SCREENS.title;
+    const screen = build(opts);
+    current = { name, ...screen };
+    // Each screen sits in its own scroller so tall content scrolls on small windows.
+    setChildren(screenLayer, h('div.mw-screen', screen.el));
+    root.dataset.screen = name;
+    // the full sky show on the title; a quieter one behind panels full of controls
+    backdrop.setMode(name === 'title' ? 'full' : 'calm');
+    if (screen.focus) setTimeout(() => screen.focus.focus && screen.focus.focus({ preventScroll: true }), 60);
+  }
+
+  // ------------------------------------------------------------ actions
+
+  async function playVsAI() {
+    const done = busy('Preparing the battlefield…');
+    try {
+      const mod = await loadLobby();
+      const name = getSettings().name;
+      const lobby = await mod.LobbyHost.create({ transport: 'none', name });
+      // Co-op preset, trimmed to one human against one AI on a small map.
+      const safe = (fn) => {
+        try {
+          fn();
+        } catch (err) {
+          console.warn('[menu] lobby setup step failed', err);
+        }
+      };
+      safe(() => lobby.applyPreset('coop'));
+      const slots = lobby.state?.slots || [];
+      const me = Math.max(0, slots.findIndex((s) => s && s.kind === 'host'));
+      let aiPlaced = false;
+      slots.forEach((s, i) => {
+        if (i === me) return;
+        if (!aiPlaced) {
+          aiPlaced = true;
+          safe(() => lobby.setSlot(i, { kind: 'ai', difficulty: 'normal', team: 2 }));
+        } else safe(() => lobby.setSlot(i, { kind: 'closed' }));
+      });
+      safe(() => lobby.setMapSize('small'));
+      done();
+      go('lobby', { lobby, role: 'host', transport: 'none' });
+    } catch (err) {
+      done();
+      toast(err?.message || 'Could not create the game.');
+    }
+  }
+
+  async function hostOnline() {
+    let cancelled = false;
+    const done = busy('Opening a room on the network…', () => (cancelled = true));
+    try {
+      const mod = await loadLobby();
+      const lobby = await mod.LobbyHost.create({ transport: onlineTransport, name: getSettings().name });
+      done();
+      if (cancelled) return closeLobby(lobby);
+      go('lobby', { lobby, role: 'host', transport: onlineTransport });
+    } catch (err) {
+      done();
+      if (!cancelled) toast(err?.message || 'Could not open an online room.');
+    }
+  }
+
+  // ------------------------------------------------------------ screens
+
+  const SCREENS = {
+    title: titleScreen,
+    lobby: lobbyScreen,
+    join: joinScreen,
+    howto: howToScreen,
+    settings: settingsScreen,
+  };
+
+  function titleScreen() {
+    const counts = {
+      gods: PANTHEON_LIST.reduce((n, p) => n + p.gods.length, 0),
+      creatures: PANTHEON_LIST.reduce((n, p) => n + p.creatures.length, 0),
+    };
+    const mainBtn = (label, sub, onclick, extra = '') => h('button.mw-btn.mw-btn--menu', { type: 'button', class: extra, onclick },
+      h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
+      h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
+      h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
+    const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    const nameEl = h('strong', getSettings().name);
+    const off = onSettingsChange((s) => (nameEl.textContent = s.name));
+    const el = h('div.mw-title-screen',
+      h('header.mw-hero',
+        h('div.mw-crest', { 'aria-hidden': 'true' },
+          PANTHEON_LIST.map((p, i) => h('span.mw-crest-emblem', { title: p.name, style: { '--i': String(i), '--n': String(PANTHEON_LIST.length) } }, pantheonEmblem(p.id))),
+          h('span.mw-crest-core', '✦'),
+        ),
+        h('h1.mw-logo', { 'data-text': GAME_TITLE.toUpperCase() }, GAME_TITLE.toUpperCase()),
+        h('div.mw-subtitle', h('span.mw-rule'), h('span', GAME_SUBTITLE), h('span.mw-rule')),
+        h('p.mw-tagline', 'Raise a city of the faithful. Pray. Summon the gods. Unleash the titans.'),
+      ),
+      h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
+        playBtn,
+        mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
+        mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
+        h('div.mw-nav-row',
+          h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
+          h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('settings') }, 'Settings'),
+        ),
+      ),
+      h('footer.mw-title-foot',
+        h('span.mw-foot-item', 'Playing as ', nameEl, ' · ', h('button.mw-link', { type: 'button', onclick: () => go('settings') }, 'change')),
+        h('span.mw-foot-item.mw-foot-stats', `${PANTHEON_LIST.length} pantheons · ${counts.gods} gods · ${PANTHEON_LIST.length} titans · ${counts.creatures} mythical creatures`),
+        h('span.mw-foot-item', `v${GAME_VERSION}`),
+      ),
+    );
+    return { el, focus: playBtn, cleanup: off };
+  }
+
+  // ---------------------------------------------------------- lobby
+
+  /** The four god icons of a pantheon, or a hint for Random. */
+  function godIcons(id) {
+    const sum = summaryFor(id);
+    if (!sum) return h('span.mw-pbtn-hint', 'Revealed when the battle begins');
+    return sum.gods.map((g) => h('span', { title: g.name }, g.icon));
+  }
+
+  function lobbyScreen({ lobby, role, transport }) {
+    const isHost = role === 'host';
+    const online = transport !== 'none';
+    const subs = [];
+    let alive = true;
+    let leaving = false;
+    const st = () => lobby.state || { slots: [], mapSize: 'small' };
+    const myIndex = () => {
+      if (!isHost) return Number.isInteger(lobby.mySlot) ? lobby.mySlot : -1;
+      const i = st().slots.findIndex((s) => s && s.kind === 'host');
+      return i < 0 ? 0 : i;
+    };
+    const patchSlot = (i, p) => {
+      try {
+        if (isHost) lobby.setSlot(i, p);
+        else if (i === myIndex()) lobby.setMine(p);
+      } catch (err) {
+        toast(err?.message || 'Could not change that.');
+      }
+    };
+    const canEditPantheon = (i, s) => (i === myIndex()) || (isHost && s.kind === 'ai');
+    const canEditTeam = (i, s) => M.isFilled(s) && (isHost || i === myIndex());
+
+    // ---- slot rows ----
+    const rows = [];
+    const rowSig = [];
+    const slotList = h('div.mw-slots', { role: 'list' });
+    for (let i = 0; i < M.SLOT_COUNT; i++) {
+      const row = h('div.mw-slot', { role: 'listitem' });
+      rows.push(row);
+      rowSig.push('');
+      slotList.appendChild(row);
+    }
+
+    function openColorPicker(i, anchor) {
+      root.querySelectorAll('.mw-popover').forEach((p) => p.remove());
+      const s = st().slots[i];
+      const taken = M.blockedColors(st(), i, isHost);
+      const pop = h('div.mw-popover', { role: 'menu' },
+        PLAYER_COLORS.map((c, ci) => h('button.mw-color-opt', {
+          type: 'button',
+          class: [ci === s.color ? 'is-current' : '', taken.has(ci) ? 'is-taken' : ''].join(' '),
+          style: { '--c': c },
+          title: taken.has(ci) ? 'Taken by another player' : 'Choose this color',
+          'aria-label': taken.has(ci) ? 'Color taken' : 'Choose this color',
+          disabled: taken.has(ci),
+          onclick: () => {
+            patchSlot(i, { color: ci });
+            close();
+          },
+        })),
+      );
+      const close = () => {
+        pop.remove();
+        document.removeEventListener('pointerdown', outside, true);
+        document.removeEventListener('keydown', onKey, true);
+      };
+      const outside = (e) => {
+        if (!pop.contains(e.target) && e.target !== anchor) close();
+      };
+      const onKey = (e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          close();
+        }
+      };
+      root.appendChild(pop);
+      const r = anchor.getBoundingClientRect();
+      const rr = root.getBoundingClientRect();
+      pop.style.left = `${Math.max(8, r.left - rr.left)}px`;
+      pop.style.top = `${r.bottom - rr.top + 6}px`;
+      document.addEventListener('pointerdown', outside, true);
+      document.addEventListener('keydown', onKey, true);
+      subs.push(close);
+    }
+
+    function renderRow(i) {
+      const state = st();
+      const s = state.slots[i] || { kind: 'closed' };
+      const me = myIndex();
+      const sig = JSON.stringify([s, me]);
+      if (sig === rowSig[i]) return;
+      rowSig[i] = sig;
+      const row = rows[i];
+      const filled = M.isFilled(s);
+      row.className = `mw-slot is-${s.kind}${i === me ? ' is-me' : ''}`;
+      row.style.setProperty('--c', M.slotColor(s));
+
+      // color swatch
+      const swatch = h('button.mw-swatch', {
+        type: 'button',
+        title: canEditPantheon(i, s) ? 'Change color' : 'Player color',
+        'aria-label': `Player ${i + 1} color`,
+        disabled: !filled || !canEditPantheon(i, s),
+        onclick: (e) => openColorPicker(i, e.currentTarget),
+      });
+
+      // kind / name
+      let who;
+      if (isHost && i !== me && s.kind !== 'host') {
+        const opts = M.slotKindOptions(s, i, { myIndex: me, online });
+        const value = M.slotKindValue(s, i, me);
+        who = h('select.mw-select.mw-select--who', {
+          'aria-label': `Slot ${i + 1}`,
+          onchange: (e) => {
+            const p = M.kindPatch(e.target.value);
+            if (!p) return;
+            if (s.kind === 'human' && p.kind !== 'human' && typeof lobby.kick === 'function' && p.kind === 'open') {
+              try {
+                lobby.kick(i);
+                return;
+              } catch {
+                // fall through to setSlot
+              }
+            }
+            patchSlot(i, p);
+          },
+        }, opts.map((o) => h('option', { value: o.value, selected: o.value === value }, o.label)));
+        who.value = value;
+      } else {
+        const label = i === me ? `${s.name || getSettings().name}` : M.slotName(s);
+        const tag = s.kind === 'host' && i !== me ? 'Host' : i === me ? 'You' : s.kind === 'ai' ? 'AI' : null;
+        who = h('div.mw-who', h('span.mw-who-name', label), tag ? h('span.mw-tag', tag) : null);
+      }
+
+      // pantheon
+      let pantheon = null;
+      if (filled) {
+        const editable = canEditPantheon(i, s);
+        pantheon = h('button.mw-pbtn', {
+          type: 'button',
+          disabled: !editable,
+          title: editable ? 'Choose a pantheon' : pantheonLabel(s.pantheon),
+          onclick: () => openPantheonPicker({
+            host: root,
+            current: s.pantheon,
+            title: i === me ? 'Choose your pantheon' : `Pantheon for ${M.slotName(s)}`,
+            onChoose: (id) => patchSlot(i, { pantheon: id }),
+          }),
+        },
+        h('span.mw-pbtn-emblem', { 'aria-hidden': 'true' }, pantheonEmblem(s.pantheon)),
+        h('span.mw-pbtn-text',
+          h('span.mw-pbtn-name', pantheonLabel(s.pantheon)),
+          h('span.mw-pbtn-gods', { 'aria-hidden': 'true' }, godIcons(s.pantheon))),
+        editable ? h('span.mw-pbtn-caret', { 'aria-hidden': 'true' }, '▸') : null);
+      } else {
+        pantheon = h('div.mw-slot-empty', s.kind === 'open' ? h('span.mw-waiting', 'Waiting for a player to join…') : h('span', 'Slot closed'));
+      }
+
+      // team
+      let team = null;
+      if (filled) {
+        if (canEditTeam(i, s)) {
+          team = h('select.mw-select.mw-select--team', {
+            'aria-label': `Team for slot ${i + 1}`,
+            onchange: (e) => patchSlot(i, { team: Number(e.target.value) }),
+          }, [1, 2, 3, 4].map((t) => h('option', { value: String(t), selected: t === s.team }, `Team ${t}`)));
+          team.value = String(s.team);
+        } else team = h('div.mw-team-static', `Team ${s.team}`);
+      } else team = h('div.mw-team-static.is-empty', '');
+
+      const status = h('span.mw-slot-status', {
+        title: s.kind === 'human' ? 'Connected' : s.kind === 'host' ? 'Host' : '',
+      }, s.kind === 'human' || s.kind === 'host' ? '●' : '');
+
+      setChildren(row, h('span.mw-slot-num', String(i + 1)), swatch, who, pantheon, team, status);
+    }
+
+    // ---- presets & map ----
+    const presetBtns = [
+      ['coop', 'Co-op vs AI', 'All humans together against AI opponents'],
+      ['1v1', '1v1', 'One against one on a small map'],
+      ['2v2', '2v2', 'Two teams of two'],
+      ['ffa', 'Free-for-all', 'Every player for themselves'],
+    ].map(([id, label, title]) => h('button.mw-chip-btn', { type: 'button', title, dataset: { preset: id }, onclick: () => {
+      try {
+        lobby.applyPreset(id);
+      } catch (err) {
+        toast(err?.message || 'Could not apply that preset.');
+      }
+    } }, label));
+    const mapBtns = Object.entries(MAP_SIZES).map(([id, n]) => h('button.mw-seg', {
+      type: 'button',
+      dataset: { size: id },
+      onclick: () => {
+        try {
+          lobby.setMapSize(id);
+        } catch (err) {
+          toast(err?.message || 'Could not change the map size.');
+        }
+      },
+    }, h('span', id === 'small' ? 'Small' : 'Medium'), h('small', `${n}×${n}`)));
+    const mapStatic = h('div.mw-map-static');
+    const options = h('div.mw-lobby-options',
+      isHost ? h('div.mw-opt-group',
+        h('div.mw-label', 'Presets'),
+        h('div.mw-chip-row', presetBtns),
+      ) : null,
+      h('div.mw-opt-group',
+        h('div.mw-label', 'Map'),
+        isHost ? h('div.mw-segmented', mapBtns) : mapStatic,
+      ),
+    );
+
+    // ---- side panel ----
+    let side;
+    let chatLog = null;
+    let chatInput = null;
+    let preview = null;
+    let previewId = null;
+    if (online) {
+      // The code is shown and copied cleaned to the room-code alphabet (a client gets it from the host).
+      const code = M.cleanRoomCode(lobby.roomCode || st().roomCode || '');
+      const copyBtn = (label, getText, okText) => {
+        const b = h('button.mw-btn.mw-btn--small', { type: 'button', onclick: async () => {
+          const ok = await copyText(getText());
+          b.classList.toggle('is-done', ok);
+          const prev = b.textContent;
+          b.textContent = ok ? okText : 'Copy failed';
+          setTimeout(() => {
+            b.textContent = prev;
+            b.classList.remove('is-done');
+          }, 1600);
+        } }, label);
+        return b;
+      };
+      chatLog = h('ul.mw-chat-log', { 'aria-live': 'polite' });
+      chatInput = h('input.mw-input.mw-chat-input', {
+        type: 'text',
+        maxLength: 200,
+        placeholder: 'Say something to the lobby…',
+        'aria-label': 'Chat message',
+        onkeydown: (e) => {
+          if (e.key === 'Enter') sendChat();
+        },
+      });
+      const sendChat = () => {
+        const text = chatInput.value.trim();
+        if (!text) return;
+        try {
+          lobby.sendChat(text);
+          chatInput.value = '';
+        } catch (err) {
+          toast(err?.message || 'Could not send the message.');
+        }
+      };
+      side = h('aside.mw-lobby-side',
+        h('section.mw-panel.mw-room',
+          h('div.mw-label', 'Room code'),
+          h('div.mw-room-code', { 'aria-label': `Room code ${code.split('').join(' ')}` }, code.split('').map((ch) => h('span', ch))),
+          h('div.mw-room-actions',
+            copyBtn('Copy Code', () => code, 'Code copied ✓'),
+            copyBtn('Copy Invite Link', () => M.inviteLink(location.href, code), 'Link copied ✓'),
+          ),
+          isHost
+            ? h('ol.mw-room-steps',
+              h('li', h('strong', 'Easiest: '), 'Copy Invite Link and send it to your friends. Opening it takes them straight into this room.'),
+              h('li', h('strong', 'Or: '), `tell them the code ${code}. They choose Join Online Game on the title screen and type it in.`),
+              h('li', 'Keep this lobby open. Joined players appear in the list; then press Start Battle.'))
+            : h('p.mw-hint', 'You are in the host\'s room. To bring more friends, send them the invite link or this code (Join Online Game → enter the code).'),
+          M.customServerNote(location.href) ? h('p.mw-hint.mw-room-server', M.customServerNote(location.href)) : null,
+        ),
+        h('section.mw-panel.mw-chat',
+          h('div.mw-label', 'Chat'),
+          chatLog,
+          h('div.mw-chat-row', chatInput, h('button.mw-btn.mw-btn--small', { type: 'button', onclick: sendChat }, 'Send')),
+        ),
+      );
+    } else {
+      preview = h('div.mw-preview-body');
+      side = h('aside.mw-lobby-side',
+        h('section.mw-panel.mw-preview',
+          h('div.mw-label', 'Your pantheon'),
+          preview,
+        ),
+      );
+    }
+
+    function renderPreview() {
+      if (!preview) return;
+      const s = st().slots[myIndex()];
+      const id = s ? s.pantheon : 'random';
+      if (id === previewId) return;
+      previewId = id;
+      const sum = summaryFor(id);
+      if (!sum) {
+        setChildren(preview,
+          h('div.mw-preview-head', h('span.mw-preview-emblem', pantheonEmblem('random')), h('div', h('div.mw-preview-name', 'Random'), h('div.mw-preview-culture', 'Let the Fates decide'))),
+          h('p.mw-preview-desc', 'A pantheon will be drawn by lot when the battle begins. Click your pantheon in the player list to choose one of the ten mythologies.'),
+          h('div.mw-random-icons', PANTHEON_LIST.map((p) => pantheonEmblem(p.id)).join(' ')),
+        );
+        return;
+      }
+      setChildren(preview,
+        h('div.mw-preview-head', { style: { '--p-accent': sum.colors.accent || '#d4af37' } },
+          h('span.mw-preview-emblem', sum.emblem),
+          h('div', h('div.mw-preview-name', sum.name), h('div.mw-preview-culture', sum.culture))),
+        h('p.mw-preview-desc', { title: sum.description }, sum.description),
+        h('div.mw-pcard-label', 'Gods'),
+        h('ul.mw-pcard-gods', sum.gods.map((g) => unitRow(g, 'god'))),
+        h('div.mw-pcard-label', 'Titan'),
+        h('ul.mw-pcard-small', sum.titan ? unitRow(sum.titan, 'god') : null),
+        h('div.mw-pcard-label', 'Creatures'),
+        h('div.mw-preview-chips',
+          sum.creatures.map((c) => h('span.mw-chip', { title: c.description }, `${c.icon} ${c.name}`, c.air ? h('span.mw-air', { title: 'Flying' }, '✈') : null)),
+        ),
+      );
+    }
+
+    // ---- footer ----
+    const matchup = h('div.mw-matchup');
+    const reason = h('div.mw-start-reason');
+    const startBtn = isHost ? h('button.mw-btn.mw-btn--primary.mw-btn--start', { type: 'button', onclick: startGame }, 'Start Battle') : null;
+    const footer = h('footer.mw-lobby-foot',
+      matchup,
+      h('div.mw-start-wrap',
+        reason,
+        startBtn || h('div.mw-wait-host', h('span.mw-dots', { 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), 'Waiting for the host to start the battle'),
+      ),
+    );
+
+    function renderFooter() {
+      const parts = M.matchupSummary(st());
+      setChildren(matchup, parts.length ? parts.map((p, k) => [
+        k ? h('span.mw-vs', 'vs') : null,
+        h('span.mw-team',
+          h('span.mw-team-label', `Team ${p.team}`),
+          p.names.map((n, j) => h('span.mw-team-name', { style: { '--c': p.colors[j] } }, n))),
+      ]) : h('span.mw-hint', 'No players yet.'));
+      if (startBtn) {
+        const status = M.startStatus(lobby);
+        startBtn.disabled = !status.ok;
+        reason.textContent = status.ok ? 'All set. May the gods favor you.' : status.reason;
+        reason.classList.toggle('is-ok', status.ok);
+      }
+    }
+
+    function renderOptions() {
+      const size = st().mapSize;
+      mapBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.size === size));
+      presetBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.preset === st().preset));
+      mapStatic.textContent = `${size === 'medium' ? 'Medium' : 'Small'} (${MAP_SIZES[size] || '?'}×${MAP_SIZES[size] || '?'})`;
+    }
+
+    function renderAll() {
+      if (!alive) return;
+      for (let i = 0; i < M.SLOT_COUNT; i++) renderRow(i);
+      renderOptions();
+      renderPreview();
+      renderFooter();
+    }
+
+    function addChat(a, b) {
+      if (!alive || !chatLog) return;
+      const m = M.normalizeChat(a, b);
+      if (!m.text) return;
+      const line = m.system
+        ? h('li.mw-chat-line.is-system', m.text)
+        : h('li.mw-chat-line', h('span.mw-chat-from', `${m.from}:`), ' ', h('span.mw-chat-text', m.text));
+      const nearBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+      chatLog.appendChild(line);
+      while (chatLog.children.length > 200) chatLog.firstChild.remove();
+      if (nearBottom) chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    async function startGame() {
+      if (!startBtn || startBtn.disabled) return;
+      startBtn.disabled = true;
+      try {
+        const res = await lobby.start();
+        if (!res || !res.setup) throw new Error('The lobby did not produce a game setup.');
+        alive = false;
+        launchedLobby = lobby;
+        sfx.play('horn');
+        onStart({ role: 'host', setup: res.setup, myIndex: res.myIndex, conns: res.conns || new Map(), lobby });
+      } catch (err) {
+        startBtn.disabled = false;
+        toast(err?.message || 'Could not start the game.');
+        renderFooter();
+      }
+    }
+
+    function leave() {
+      if (leaving) return;
+      leaving = true;
+      alive = false;
+      closeLobby(lobby);
+      go('title');
+    }
+
+    // ---- wire the lobby ----
+    const safeOn = (method, cb) => {
+      if (typeof lobby[method] !== 'function') return;
+      try {
+        subs.push(lobby[method](cb));
+      } catch (err) {
+        console.warn(`[menu] lobby.${method} failed`, err);
+      }
+    };
+    safeOn('onChange', () => renderAll());
+    safeOn('onChat', addChat);
+    if (!isHost) {
+      safeOn('onStart', (info) => {
+        if (!alive) return;
+        alive = false;
+        launchedLobby = lobby;
+        sfx.play('horn');
+        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby });
+      });
+      safeOn('onKicked', (why) => {
+        if (!alive) return;
+        alive = false;
+        go('join', { code: M.cleanRoomCode(lobby.roomCode || st().roomCode), error: M.cleanMessage(typeof why === 'string' ? why : why?.reason, 'You left the lobby.') });
+      });
+    }
+
+    const el = h('div.mw-lobby',
+      h('header.mw-lobby-head',
+        h('button.mw-btn.mw-btn--ghost.mw-btn--back', { type: 'button', onclick: leave }, '‹ Leave'),
+        h('div.mw-lobby-titles',
+          h('h2.mw-h2', 'Prepare for Battle'),
+          h('div.mw-lobby-mode', M.lobbyModeLabel(role, transport)),
+        ),
+        h('div.mw-head-spacer'),
+      ),
+      h('main.mw-lobby-main',
+        h('section.mw-panel.mw-players',
+          h('div.mw-slot-head',
+            h('span'), h('span'), h('span.mw-label', 'Player'), h('span.mw-label', 'Pantheon'), h('span.mw-label', 'Team'), h('span'),
+          ),
+          slotList,
+        ),
+        h('section.mw-panel.mw-options-panel', options),
+      ),
+      side,
+      footer,
+    );
+    renderAll();
+    if (online && isHost && chatLog && chatLog.children.length === 0) {
+      addChat(null, `Room ${M.cleanRoomCode(lobby.roomCode)} is open. Send your friends the invite link, or the code for Join Online Game.`);
+    }
+    return {
+      el,
+      onEscape: leave,
+      cleanup: () => {
+        alive = false;
+        unsubAll(subs);
+      },
+    };
+  }
+
+  // ---------------------------------------------------------- join
+
+  function joinScreen({ code = '', error = null } = {}) {
+    let attempt = 0;
+    const nameInput = h('input.mw-input', {
+      type: 'text',
+      maxLength: 20,
+      value: getSettings().name,
+      autocomplete: 'nickname',
+      'aria-label': 'Your name',
+      onchange: () => saveSettings({ name: nameInput.value }),
+    });
+    const codeInput = h('input.mw-input.mw-code-input', {
+      type: 'text',
+      value: M.cleanRoomCode(code),
+      placeholder: '•••••',
+      spellcheck: 'false',
+      autocomplete: 'off',
+      autocapitalize: 'characters',
+      'aria-label': 'Room code',
+      oninput: () => {
+        const clean = M.cleanRoomCode(codeInput.value);
+        if (clean !== codeInput.value) codeInput.value = clean;
+        joinBtn.disabled = !M.isCompleteRoomCode(clean);
+        setStatus(null);
+      },
+      onkeydown: (e) => {
+        if (e.key === 'Enter') join();
+      },
+    });
+    const status = h('div.mw-join-status', { role: 'status', 'aria-live': 'polite' });
+    const joinBtn = h('button.mw-btn.mw-btn--primary', { type: 'button', onclick: () => join() }, 'Join Game');
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => back() }, 'Back');
+    joinBtn.disabled = !M.isCompleteRoomCode(codeInput.value);
+
+    function setStatus(kind, text, extra) {
+      status.className = `mw-join-status${kind ? ` is-${kind}` : ''}`;
+      if (!kind) return setChildren(status);
+      if (kind === 'busy') setChildren(status, h('div.mw-spinner.mw-spinner--small', { 'aria-hidden': 'true' }), h('span', text), extra || null);
+      else setChildren(status, h('span.mw-status-icon', kind === 'error' ? '⚠' : '✦'), h('span', text));
+    }
+
+    function setBusy(on) {
+      nameInput.disabled = on;
+      codeInput.disabled = on;
+      joinBtn.disabled = on || !M.isCompleteRoomCode(codeInput.value);
+      joinBtn.textContent = on ? 'Connecting…' : 'Join Game';
+    }
+
+    function back() {
+      attempt++;
+      dropUrlParam('join');
+      go('title');
+    }
+
+    async function join() {
+      const roomCode = M.cleanRoomCode(codeInput.value);
+      if (!M.isCompleteRoomCode(roomCode)) {
+        setStatus('error', 'Enter the 5-character room code from the host.');
+        sfx.play('error');
+        codeInput.focus();
+        return;
+      }
+      const name = saveSettings({ name: nameInput.value }).name;
+      nameInput.value = name;
+      const my = ++attempt;
+      setBusy(true);
+      const cancel = h('button.mw-link', { type: 'button', onclick: () => {
+        attempt++;
+        setBusy(false);
+        setStatus(null);
+      } }, 'Cancel');
+      setStatus('busy', `Connecting to room ${roomCode}…`, cancel);
+      try {
+        const mod = await loadLobby();
+        const lobby = await mod.LobbyClient.join({ transport: onlineTransport, roomCode, name });
+        if (my !== attempt) {
+          closeLobby(lobby);
+          return;
+        }
+        dropUrlParam('join');
+        sfx.play('select');
+        go('lobby', { lobby, role: 'client', transport: onlineTransport });
+      } catch (err) {
+        if (my !== attempt) return;
+        setBusy(false);
+        setStatus('error', M.friendlyJoinError(err, roomCode));
+        sfx.play('error');
+      }
+    }
+
+    if (error) setStatus('error', M.friendlyJoinError(error, M.cleanRoomCode(code)));
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-form-panel.mw-join',
+        h('h2.mw-h2', 'Join Online Game'),
+        h('p.mw-panel-sub', 'Ask the host for the 5-character room code shown in their lobby (letters and digits).'),
+        h('label.mw-field', h('span.mw-label', 'Your name'), nameInput),
+        h('label.mw-field', h('span.mw-label', 'Room code'), codeInput),
+        status,
+        h('div.mw-form-actions', backBtn, joinBtn),
+        h('p.mw-hint', 'Tip: opening a friend\'s invite link fills in the code for you. Pasting the whole link here works too.'),
+      ),
+    );
+    return { el, focus: M.isCompleteRoomCode(codeInput.value) ? joinBtn : codeInput, onEscape: back, cleanup: () => attempt++ };
+  }
+
+  // ---------------------------------------------------------- how to play
+
+  function howToScreen() {
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const el = h('div.mw-center-screen.mw-wide-screen',
+      h('section.mw-panel.mw-howto-panel',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'How to Play'), h('span.mw-head-spacer')),
+        h('div.mw-scroll', renderHowToContent()),
+      ),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
+  }
+
+  // ---------------------------------------------------------- settings
+
+  function settingsScreen() {
+    const s = getSettings();
+    const nameInput = h('input.mw-input', {
+      type: 'text',
+      maxLength: 20,
+      value: s.name,
+      'aria-label': 'Player name',
+      onchange: () => {
+        nameInput.value = saveSettings({ name: nameInput.value }).name;
+      },
+    });
+    const volValue = h('output.mw-range-value', `${Math.round(s.volume * 100)}%`);
+    const volume = h('input.mw-range', {
+      type: 'range',
+      min: '0',
+      max: '100',
+      step: '1',
+      value: String(Math.round(s.volume * 100)),
+      'aria-label': 'Volume',
+      oninput: () => {
+        saveSettings({ volume: Number(volume.value) / 100 });
+        volValue.textContent = `${volume.value}%`;
+        volume.style.setProperty('--fill', `${volume.value}%`);
+      },
+    });
+    volume.style.setProperty('--fill', `${volume.value}%`);
+    const testSounds = ['horn', 'heal', 'lightning', 'summon_god', 'building_complete'];
+    let testIdx = 0;
+    const testBtn = h('button.mw-btn.mw-btn--small.mw-silent', { type: 'button', onclick: () => {
+      sfx.unlock();
+      sfx.setVolume(getSettings().volume);
+      const n = testSounds[testIdx++ % testSounds.length];
+      if (!sfx.play(n)) setTimeout(() => sfx.play(n), 60);
+    } }, '♪ Test sound');
+
+    const qualities = [
+      ['low', 'Low', 'No shadows, fewer particles. For older laptops.'],
+      ['medium', 'Medium', 'Shadows and full effects. Recommended.'],
+      ['high', 'High', 'Sharper shadows and the most particles.'],
+    ];
+    const qDesc = h('div.mw-field-note');
+    const qBtns = qualities.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { q: id }, onclick: () => {
+      saveSettings({ quality: id });
+      renderQ();
+    } }, label));
+    const renderQ = () => {
+      const q = getSettings().quality;
+      qBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.q === q));
+      qDesc.textContent = qualities.find((x) => x[0] === q)?.[2] || '';
+    };
+    renderQ();
+
+    const toggle = (key, label, note, invert = false) => {
+      const input = h('input', { type: 'checkbox', checked: invert ? !getSettings()[key] : !!getSettings()[key], onchange: () => saveSettings({ [key]: invert ? !input.checked : input.checked }) });
+      return h('label.mw-toggle', input, h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')), h('span.mw-toggle-text', h('span', label), note ? h('small', note) : null));
+    };
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-form-panel.mw-settings',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'Settings'), h('span.mw-head-spacer')),
+        h('label.mw-field', h('span.mw-label', 'Player name'), nameInput, h('span.mw-field-note', 'Shown to other players in online lobbies.')),
+        h('div.mw-field', h('span.mw-label', 'Volume'),
+          h('div.mw-range-row', volume, volValue, testBtn)),
+        h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
+        h('div.mw-field', h('span.mw-label', 'Gameplay'),
+          toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
+          toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),
+          toggle('tipsDismissed', 'Getting-started tips', 'Show the new-player checklist in your next game.', true),
+        ),
+        h('p.mw-hint.mw-saved-note', '✓ Settings are saved automatically in this browser.'),
+      ),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
+  }
+
+  // ------------------------------------------------------------ public
+
+  const menu = {
+    root,
+    go,
+    toast,
+    /** Show a screen. Closes the last match's lobby unless opts.keepLobby. */
+    show(screen = 'title', opts = {}) {
+      if (launchedLobby && !opts.keepLobby) {
+        closeLobby(launchedLobby);
+        launchedLobby = null;
+      }
+      root.hidden = false;
+      backdrop.start();
+      go(screen, opts);
+    },
+    hide() {
+      root.hidden = true;
+      backdrop.stop();
+      root.querySelectorAll('.mw-overlay, .mw-popover').forEach((el) => el.remove());
+    },
+    get screen() {
+      return current ? current.name : null;
+    },
+  };
+  instance = menu;
+
+  const joinCode = params.get('join');
+  root.hidden = false;
+  backdrop.start();
+  if (joinCode) go('join', { code: joinCode });
+  else go('title');
+  return menu;
+}

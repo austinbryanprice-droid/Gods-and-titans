@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unit Model Gallery — Mythic War</title>
+  <!--
+    Visual check page for src/render/models/unit-models.js.
+    URL params:
+      state=idle|move|attack|gather|return|build|pray|cast|dead|cycle   animation state (default idle)
+      filter=greek,gods,syn-heads,zeus …   comma list: pantheon id, 'mortals', class (god/titan/creature/minion),
+                                           'real' (all data units), 'synthetic' or syn-bodies|syn-heads|syn-quadheads|
+                                           syn-headgear|syn-weapons|syn-offhands|syn-extras, or an id substring. Default: real.
+      focus=greek_zeus     close-up on one unit (also works with filter)
+      zoom=1.5             magnify (camera distance / zoom)
+      team=0..7|mix        team color (PLAYER_COLORS index), mix = cycle per unit
+      facing=30            facing in degrees (sim convention, 0 = east, 90 = south toward the camera)
+      t=1.25               freeze time (seconds) — no animation loop; use window.renderAt(t) for frames
+      phase=0.4            fixed attackPhase (else a 1.2 s loop)
+      carry=g|w            cargo for workers (return state)
+      labels=0             hide name labels
+      cols=12              units per row
+      stress=300           performance test: N random units walking, FPS shown
+      shadows=1            enable shadow maps
+      sheet=1              contact sheet: every unit in its own close-up cell (camera framed on the model)
+      film=0,0.1,0.2       film strip: one row per unit, one column per time (continuous simulation)
+      real=1               only data units (drops the synthetic test units from the filter result)
+      pitch=56             camera pitch in degrees
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #26301f; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; }
+    #labels { position: absolute; inset: 0; pointer-events: none; }
+    .lbl { position: absolute; transform: translate(-50%, 0); color: #fff; font-size: 11px; white-space: nowrap;
+      text-shadow: 0 1px 2px #000, 0 0 3px #000; padding: 0 2px; }
+    .lbl.god { color: #ffe27a; font-weight: 600; }
+    .lbl.titan { color: #ff9a6a; font-weight: 700; }
+    .grp { position: absolute; color: #cfe8ff; font-size: 13px; font-weight: 700; text-shadow: 0 1px 3px #000; transform: translate(-100%, -50%); }
+    #panel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); color: #eee; font-size: 12px; padding: 6px 8px; border-radius: 6px; }
+    #panel select, #panel input { font-size: 12px; }
+    #stats { position: absolute; top: 6px; right: 8px; color: #fff; font: 12px monospace; text-shadow: 0 1px 2px #000; text-align: right; }
+  </style>
+</head>
+<body>
+  <div id="labels"></div>
+  <div id="panel">
+    state <select id="state"></select>
+    filter <input id="filter" size="18">
+    team <select id="team"></select>
+    zoom <input id="zoom" type="range" min="0.3" max="4" step="0.1" style="width:80px">
+  </div>
+  <div id="stats"></div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { buildUnitModel, getUnitModelInfo } from '../src/render/models/unit-models.js';
+    import { UNITS, MORTALS, PANTHEON_LIST } from '../src/data/index.js';
+    import { BODIES, HEADS, HEADGEAR, WEAPONS, OFFHANDS, EXTRAS } from '../src/data/schema.js';
+    import { PLAYER_COLORS } from '../src/config.js';
+
+    const Q = new URLSearchParams(location.search);
+    const STATES = ['idle', 'move', 'attack', 'gather', 'return', 'build', 'pray', 'cast', 'dead', 'cycle'];
+    const state0 = Q.get('state') || 'idle';
+    const filterStr = Q.get('filter') || 'real';
+    const focus = Q.get('focus');
+    const zoom = Number(Q.get('zoom') || 1);
+    const teamQ = Q.get('team') ?? '0';
+    const facing = (Number(Q.get('facing') ?? 30) * Math.PI) / 180;
+    const frozen = Q.has('t') || Q.has('film') ? Number(Q.get('t') || 0) : null;
+    const fixedPhase = Q.has('phase') ? Number(Q.get('phase')) : null;
+    const carryQ = Q.get('carry') || 'g';
+    const showLabels = Q.get('labels') !== '0';
+    const colsQ = Q.has('cols') ? Number(Q.get('cols')) : null;
+    const stress = Number(Q.get('stress') || 0);
+    const film = Q.has('film') ? Q.get('film').split(',').map(Number).filter((x) => Number.isFinite(x)) : null;
+    const sheet = Q.get('sheet') === '1' || !!film;
+    const pitchDeg = Number(Q.get('pitch') || 56);
+
+    // ---- controls ----
+    const ui = { state: document.getElementById('state'), filter: document.getElementById('filter'), team: document.getElementById('team'), zoom: document.getElementById('zoom') };
+    for (const s of STATES) ui.state.add(new Option(s, s, false, s === state0));
+    ['mix', ...PLAYER_COLORS.map((_, i) => String(i))].forEach((v) => ui.team.add(new Option(v === 'mix' ? 'mix' : `${v} ${PLAYER_COLORS[v]}`, v, false, v === teamQ)));
+    ui.filter.value = filterStr;
+    ui.zoom.value = zoom;
+    const reload = () => {
+      const p = new URLSearchParams(location.search);
+      p.set('state', ui.state.value); p.set('filter', ui.filter.value); p.set('team', ui.team.value); p.set('zoom', ui.zoom.value);
+      location.search = p.toString();
+    };
+    ui.state.onchange = reload; ui.team.onchange = reload; ui.zoom.onchange = reload;
+    ui.filter.onkeydown = (e) => { if (e.key === 'Enter') reload(); };
+    if (Q.get('panel') === '0') document.getElementById('panel').style.display = 'none';
+
+    // ---- synthetic unit types covering every vocabulary value ----
+    const SYN_COLORS = { skin: '#d8a880', primary: '#6a4aa8', secondary: '#e0c060', accent: '#c8ccd4' };
+    function syn(group, id, name, visual, opt = {}) {
+      return {
+        id: `syn_${group}_${id}`, name, group: `syn-${group}`, class: opt.class || 'creature', pantheon: 'synthetic',
+        air: !!opt.air, speed: 2.6, radius: 0.4,
+        attack: { damage: 10, range: opt.proj ? 5 : 0.5, cooldown: 1.4, projectile: opt.proj || null },
+        visual: { body: 'humanoid', scale: 1.15, colors: { ...SYN_COLORS, ...(opt.colors || {}) }, head: 'human', headgear: 'none', weapon: 'none', offhand: 'none', extras: [], aura: null, ...visual },
+      };
+    }
+    const synthetic = [];
+    const bodyDefaults = {
+      humanoid: { head: 'human', weapon: 'sword', offhand: 'shield', headgear: 'helmet' },
+      giant: { head: 'human', weapon: 'club', extras: ['fur'], scale: 2 },
+      quadruped: { head: 'wolf', extras: ['tail'] },
+      centaur: { head: 'human', weapon: 'bow', extras: ['beard'], proj: 'arrow' },
+      serpent: { head: 'serpent', scale: 1.4 },
+      naga: { head: 'human', weapon: 'trident', headgear: 'crown' },
+      bird: { head: 'bird', air: true },
+      insect: { head: 'none', extras: ['shell'] },
+      spirit: { head: 'skull', headgear: 'hood', extras: ['eye_glow'], aura: '#9fd8ff' },
+      hydra: { head: 'serpent', heads: 5, scale: 1.8 },
+      dragon: { head: 'dragon', extras: ['wings', 'spikes'], scale: 1.6 },
+      elephant: { head: 'elephant', headgear: 'headdress', extras: ['rider'], scale: 1.6 },
+      beast_biped: { head: 'monkey', weapon: 'staff', extras: ['tail', 'fur'] },
+      ram: { head: 'none' },
+    };
+    for (const b of BODIES) {
+      const d = bodyDefaults[b] || {};
+      synthetic.push(syn('bodies', b, b, { body: b, head: d.head || 'human', headgear: d.headgear || 'none', weapon: d.weapon || 'none', offhand: d.offhand || 'none', extras: d.extras || [], heads: d.heads, scale: d.scale || 1.15, aura: d.aura || null }, { air: d.air, proj: d.proj }));
+    }
+    synthetic.push(syn('bodies', 'dragon_east', 'dragon (wingless)', { body: 'dragon', head: 'dragon', headgear: 'antlers', offhand: 'orb', extras: ['mane', 'tail'], scale: 1.8 }, { air: true }));
+    synthetic.push(syn('bodies', 'scorpion', 'insect + human', { body: 'insect', head: 'human', weapon: 'spear', headgear: 'helmet', extras: ['tail'], scale: 1.3 }));
+    synthetic.push(syn('bodies', 'pegasus', 'quadruped + wings', { body: 'quadruped', head: 'horse', extras: ['wings', 'mane', 'tail'], scale: 1.3 }, { air: true, colors: { skin: '#f4f4f8', primary: '#f4f4f8', secondary: '#bcd4f0' } }));
+    for (const h of HEADS) synthetic.push(syn('heads', h, h, { head: h, scale: 1.3, extras: h === 'human' ? ['beard'] : [] }));
+    for (const h of ['jackal', 'fox', 'wolf', 'cat', 'lion', 'bull', 'boar', 'ram', 'horse', 'crocodile', 'dragon', 'elephant', 'monkey', 'human', 'bird', 'falcon', 'serpent']) {
+      synthetic.push(syn('quadheads', h, `${h} (quad)`, { body: 'quadruped', head: h, extras: ['tail'], scale: 1.2 }));
+    }
+    for (const g of HEADGEAR) synthetic.push(syn('headgear', g, g, { headgear: g, scale: 1.3, extras: ['long_hair'] }));
+    for (const w of WEAPONS) synthetic.push(syn('weapons', w, w, { weapon: w, scale: 1.3 }, { proj: ['bow', 'staff', 'lightning_bolt', 'discus', 'fan', 'harp', 'cauldron'].includes(w) ? 'orb' : null }));
+    for (const o of OFFHANDS) synthetic.push(syn('offhands', o, o, { offhand: o, weapon: 'sword', scale: 1.3 }));
+    const quadExtras = new Set(['rider', 'mane', 'shell', 'spikes', 'fur', 'flames', 'chains', 'jewelry', 'armor', 'wings', 'tail', 'aura_ring', 'eye_glow']);
+    for (const e of EXTRAS) {
+      synthetic.push(syn('extras', e, e, { extras: [e], weapon: e === 'multi_arms' ? 'trident' : 'none', scale: 1.3, aura: e === 'aura_ring' ? '#ffd84a' : null }));
+      if (quadExtras.has(e)) synthetic.push(syn('extras', `${e}_q`, `${e} (quad)`, { body: 'quadruped', head: e === 'rider' ? 'horse' : 'lion', extras: [e, 'tail'], scale: 1.2 }));
+    }
+
+    // ---- real units, grouped ----
+    const real = [];
+    for (const u of Object.values(MORTALS)) real.push({ ...u, group: 'mortals' });
+    for (const p of PANTHEON_LIST) {
+      for (const u of [...p.gods, p.titan, ...p.creatures, ...(p.minions || [])]) real.push({ ...u, group: p.id });
+    }
+    const all = [...real, ...synthetic];
+    const tokens = filterStr.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const match = (u) => tokens.some((t) =>
+      t === 'all' || (t === 'real' && u.pantheon !== 'synthetic') || (t === 'synthetic' && u.pantheon === 'synthetic') ||
+      u.group === t || u.class === t || (t === 'mortals' && !u.pantheon) || u.id.toLowerCase().includes(t));
+    const realOnly = Q.get('real') === '1';
+    let list = stress ? [] : all.filter((u) => match(u) && (!realOnly || u.pantheon !== 'synthetic'));
+    if (focus) list = list.length ? list.filter((u) => u.id === focus || u.id.includes(focus)) : all.filter((u) => u.id.includes(focus));
+    if (stress) {
+      const pool = real;
+      for (let i = 0; i < stress; i++) list.push({ ...pool[(i * 7919) % pool.length], group: 'stress' });
+    }
+
+    // ---- scene ----
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = Q.get('shadows') === '1';
+    document.body.prepend(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#7fa0c0');
+    const hemi = new THREE.HemisphereLight(0xdfe9ff, 0x4a5a32, 1.25);
+    scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff0d8, 2.3);
+    sun.position.set(-30, 60, 40);
+    sun.castShadow = renderer.shadowMap.enabled;
+    scene.add(sun);
+
+    // layout: rows per group
+    const footprint = (u) => {
+      const v = u.visual;
+      const s = v.scale || 1;
+      const long = ['serpent', 'dragon', 'hydra', 'elephant', 'quadruped', 'centaur', 'insect', 'bird', 'ram'].includes(v.body);
+      return { w: Math.max(1.35, s * (long ? 1.6 : v.body === 'giant' ? 1.0 : 0.95) + 0.5 + (v.extras?.includes('wings') ? s * 0.6 : 0)), d: Math.max(1.6, s * (long ? 1.7 : 1.0) + 0.9) };
+    };
+    const groups = [];
+    for (const u of list) {
+      let g = groups.find((x) => x.name === u.group);
+      if (!g) groups.push((g = { name: u.group, units: [] }));
+      g.units.push(u);
+    }
+    const maxCols = colsQ || (stress ? Math.ceil(Math.sqrt(stress)) : 12);
+    const placed = [];
+    let z = 0;
+    let maxX = 0;
+    const groupLabels = [];
+    for (const g of groups) {
+      let x = 0;
+      let rowD = 0;
+      let col = 0;
+      const startZ = z;
+      for (const u of g.units) {
+        const f = footprint(u);
+        if (col >= maxCols) {
+          z += rowD;
+          x = 0;
+          rowD = 0;
+          col = 0;
+        }
+        placed.push({ u, x: x + f.w / 2, z: z + f.d * 0.55 });
+        x += f.w;
+        rowD = Math.max(rowD, f.d + (u.air ? 1.2 : 0));
+        maxX = Math.max(maxX, x);
+        col++;
+      }
+      groupLabels.push({ name: g.name, x: -0.3, z: startZ + 0.8 });
+      z += rowD + 0.6;
+    }
+    const W = maxX;
+    const D = z;
+    // ground with a tile grid (1 tile = 1 unit)
+    const gw = Math.ceil(W + 8);
+    const gd = Math.ceil(D + 8);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), new THREE.MeshLambertMaterial({ color: '#5d8a3e' }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(W / 2, 0, D / 2);
+    ground.receiveShadow = true;
+    scene.add(ground);
+    const grid = new THREE.GridHelper(Math.max(gw, gd), Math.max(gw, gd), 0x4a7232, 0x4a7232);
+    grid.position.set(W / 2, 0.005, D / 2);
+    grid.material.opacity = 0.35;
+    grid.material.transparent = true;
+    scene.add(grid);
+
+    // models
+    const models = [];
+    const labelsEl = document.getElementById('labels');
+    placed.forEach((p, i) => {
+      const color = teamQ === 'mix' || stress ? PLAYER_COLORS[i % PLAYER_COLORS.length] : PLAYER_COLORS[Number(teamQ) % PLAYER_COLORS.length];
+      let model;
+      try {
+        model = buildUnitModel(p.u, color);
+      } catch (e) {
+        console.error('build failed', p.u.id, e);
+        return;
+      }
+      model.root.position.set(p.x, 0, p.z);
+      model.root.rotation.y = -facing;
+      scene.add(model.root);
+      const entry = { model, p, color, phase: (i * 0.37) % 1.2 };
+      if (showLabels && !stress) {
+        const el = document.createElement('div');
+        el.className = `lbl ${p.u.class}`;
+        const info = getUnitModelInfo(p.u);
+        el.textContent = `${p.u.name}`;
+        el.title = `${p.u.id} • ${info.triangles} tris • ${info.meshes} meshes • h ${info.height.toFixed(2)}`;
+        labelsEl.appendChild(el);
+        entry.label = el;
+      }
+      models.push(entry);
+    });
+    if (showLabels && !stress) {
+      for (const g of groupLabels) {
+        const el = document.createElement('div');
+        el.className = 'grp';
+        el.textContent = g.name;
+        labelsEl.appendChild(el);
+        g.el = el;
+      }
+    }
+
+    // camera: ~56° pitch, looking north (toward −Z)
+    const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 2000);
+    const pitch = (pitchDeg * Math.PI) / 180;
+    let target = new THREE.Vector3(W / 2, 0, D / 2);
+    let dist;
+    if (focus && placed.length) {
+      const p = placed[0];
+      const s = p.u.visual.scale || 1;
+      const h = (p.u.air ? 2.2 : 0) + s * 0.6;
+      target = new THREE.Vector3(p.x, h * 0.75, p.z);
+      dist = (3.2 + s * 2.2) / zoom;
+    } else {
+      const aspect = innerWidth / innerHeight;
+      const fovV = (camera.fov * Math.PI) / 180;
+      const needW = (W + 2) / (2 * Math.tan(fovV / 2) * aspect);
+      const needD = (D * Math.sin(pitch) + 2) / (2 * Math.tan(fovV / 2));
+      dist = Math.max(needW, needD, 6) / zoom;
+    }
+    camera.position.set(target.x, target.y + dist * Math.sin(pitch), target.z + dist * Math.cos(pitch));
+    camera.lookAt(target);
+    if (sun.castShadow) {
+      sun.shadow.mapSize.set(2048, 2048);
+      const c = sun.shadow.camera;
+      c.left = -W; c.right = W; c.top = D; c.bottom = -D; c.far = 300;
+      sun.target.position.copy(target);
+      scene.add(sun.target);
+    }
+
+    const tmp = new THREE.Vector3();
+    function placeLabels() {
+      if (!showLabels || stress) return;
+      const w = innerWidth;
+      const h = innerHeight;
+      for (const m of models) {
+        if (!m.label) continue;
+        tmp.set(m.p.x, 0, m.p.z).project(camera);
+        m.label.style.left = `${((tmp.x + 1) / 2) * w}px`;
+        m.label.style.top = `${((1 - tmp.y) / 2) * h + 4}px`;
+        m.label.style.display = tmp.z < 1 && Math.abs(tmp.x) < 1.1 && Math.abs(tmp.y) < 1.1 ? '' : 'none';
+      }
+      for (const g of groupLabels) {
+        if (!g.el) continue;
+        tmp.set(g.x, 0, g.z).project(camera);
+        g.el.style.left = `${((tmp.x + 1) / 2) * w}px`;
+        g.el.style.top = `${((1 - tmp.y) / 2) * h}px`;
+      }
+    }
+
+    function stateAt(t) {
+      if (state0 !== 'cycle') return state0;
+      return STATES[Math.floor(t / 2.5) % (STATES.length - 1)];
+    }
+
+    let lastT = null;
+    function step(t) {
+      const dt = lastT === null ? 1 / 60 : Math.max(0, Math.min(0.1, t - lastT));
+      lastT = t;
+      const st = stateAt(t);
+      for (const m of models) {
+        let s = st;
+        const ex = { moving: s === 'move' || s === 'return', level: 3, carry: s === 'return' ? carryQ : (s === 'gather' ? carryQ : 0), gather: carryQ };
+        if (stress) {
+          s = 'move';
+          ex.moving = true;
+        }
+        if (s === 'attack') {
+          if (fixedPhase !== null) ex.attackPhase = fixedPhase;
+          else {
+            const x = (t + m.phase) % 1.2;
+            ex.attackPhase = x < 0.5 ? x / 0.5 : undefined;
+          }
+        }
+        if (s === 'dead') {
+          // restart the death animation every 3 s
+          const cyc = Math.floor((t + 0.0001) / 3);
+          if (m.deadCycle !== cyc) {
+            m.deadCycle = cyc;
+            m.model.animate('idle', t, 0, {});
+          }
+        }
+        m.model.animate(s, t, dt, ex);
+      }
+    }
+
+    // contact sheet: one close-up cell per model; film strip: one row per
+    // model, one column per time in ?film=
+    const cell = { cols: 1, rows: 1, w: 0, h: 0 };
+    const box = new THREE.Box3();
+    const sheetCam = new THREE.PerspectiveCamera(30, 1, 0.05, 500);
+    function layoutSheet() {
+      const n = Math.max(1, models.length);
+      const aspect = innerWidth / innerHeight;
+      if (film) {
+        cell.cols = film.length;
+        cell.rows = n;
+      } else {
+        cell.cols = colsQ || Math.max(1, Math.round(Math.sqrt(n * aspect)));
+        cell.rows = Math.ceil(n / cell.cols);
+      }
+      cell.w = Math.floor(innerWidth / cell.cols);
+      cell.h = Math.floor(innerHeight / cell.rows);
+      models.forEach((m, i) => {
+        if (!m.label) return;
+        const col = film ? 0 : i % cell.cols;
+        const row = film ? i : Math.floor(i / cell.cols);
+        m.label.style.left = `${col * cell.w + (film ? 60 : cell.w / 2)}px`;
+        m.label.style.top = `${(row + 1) * cell.h - 16}px`;
+      });
+      for (const g of groupLabels) if (g.el) g.el.style.display = 'none';
+    }
+    function renderCell(m, col, row) {
+      const cx = col * cell.w;
+      const cy = innerHeight - (row + 1) * cell.h;
+      for (const o of models) o.model.root.visible = o === m;
+      if (!m.bounds) {
+        m.model.root.updateMatrixWorld(true);
+        box.makeEmpty();
+        m.model.root.traverseVisible((o) => {
+          if (o.isMesh && o.name !== 'aura' && o.name !== 'shadow') box.expandByObject(o, true);
+        });
+        m.bounds = { size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()) };
+      }
+      const { size, center } = m.bounds;
+      const radius = Math.max(0.35, 0.5 * Math.hypot(size.x, size.y * 1.1, size.z));
+      const halfFov = (sheetCam.fov * Math.PI) / 360;
+      const d = (radius * 0.92) / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * (cell.w / cell.h)))) / zoom;
+      sheetCam.aspect = cell.w / cell.h;
+      sheetCam.updateProjectionMatrix();
+      sheetCam.position.set(center.x, center.y + d * Math.sin(pitch), center.z + d * Math.cos(pitch));
+      sheetCam.lookAt(center);
+      renderer.setViewport(cx, cy, cell.w, cell.h);
+      renderer.setScissor(cx, cy, cell.w - 2, cell.h - 2);
+      renderer.render(scene, sheetCam);
+    }
+    function sheetBegin() {
+      renderer.setScissorTest(true);
+      renderer.setClearColor(scene.background);
+    }
+    function sheetEnd() {
+      for (const o of models) o.model.root.visible = true;
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, innerWidth, innerHeight);
+    }
+    function renderSheet() {
+      sheetBegin();
+      models.forEach((m, i) => renderCell(m, i % cell.cols, Math.floor(i / cell.cols)));
+      sheetEnd();
+    }
+    /** Film strip: simulate continuously through the ?film times, one column each. */
+    function renderFilm() {
+      lastT = null;
+      let cur = film[0] - 0.6;
+      sheetBegin();
+      film.forEach((tf, col) => {
+        while (cur < tf) {
+          step(cur);
+          cur += 1 / 60;
+        }
+        step(tf);
+        cur = tf + 1 / 60;
+        models.forEach((m, row) => renderCell(m, col, row));
+      });
+      sheetEnd();
+    }
+
+    function render() {
+      if (film) {
+        renderFilm();
+        return;
+      }
+      if (sheet) {
+        renderSheet();
+        return;
+      }
+      renderer.render(scene, camera);
+      placeLabels();
+    }
+
+    /** Render the scene at time t (seconds), simulating from t - 0.6 for smoothing to settle. */
+    window.renderAt = (t, warm = 0.6) => {
+      lastT = null;
+      const steps = Math.max(1, Math.round(warm * 60));
+      for (let i = steps; i >= 0; i--) step(t - i / 60);
+      render();
+      return true;
+    };
+    window.galleryModels = models;
+    window.galleryInfo = () => models.map((m) => ({ id: m.p.u.id, ...getUnitModelInfo(m.p.u) }));
+
+    if (sheet) layoutSheet();
+    if (film) window.renderFilm = renderFilm;
+    addEventListener('resize', () => {
+      renderer.setSize(innerWidth, innerHeight);
+      if (sheet) layoutSheet();
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      render();
+    });
+
+    const stats = document.getElementById('stats');
+    if (frozen !== null) {
+      window.renderAt(frozen);
+      window.galleryReady = true;
+    } else {
+      let frames = 0;
+      let fpsT = performance.now();
+      const loop = () => {
+        const now = performance.now();
+        step(now / 1000);
+        render();
+        frames++;
+        if (now - fpsT > 1000) {
+          stats.textContent = `${models.length} units • ${(frames * 1000 / (now - fpsT)).toFixed(0)} fps • ${renderer.info.render.calls} draws • ${renderer.info.render.triangles} tris`;
+          frames = 0;
+          fpsT = now;
+        }
+        requestAnimationFrame(loop);
+      };
+      loop();
+      window.galleryReady = true;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Render Harness — Mythic War</title>
+  <!--
+    Visual check page for src/render/game-renderer.js: runs a real local game
+    (createWorld + ViewState, no HUD, no AI) with scripted commands and a free
+    camera. URL params:
+      scenario=base|battle|fog|construction|creeps|trees|perf|pantheon   (default base)
+                    pantheon: every unit (mortals, creatures, minions, gods, titan) and
+                    building (City town center, titan gate, construction stages) of the
+                    first pantheon; harness.focus.base / .army / .sites are camera spots
+      seed=12345  size=small|medium  my=0 (-1 = spectator, sees all)
+      pantheons=greek,norse,...  players=2      quality=low|medium|high
+      t=20          simulate this many seconds before showing
+      manual=1      no animation loop; window.harness.advance(sec) / render() drive it (screenshots)
+      cam=x,y,dist  camera target and zoom distance
+      sel=army|workers|buildings|all|none   initial selection (rings + bars)
+      bars=1        show all health bars      placement=house@tx,ty  placement ghost
+      units=300     unit count for scenario=perf
+    Keys: WASD / arrows pan, wheel zoom, middle-drag pan, left click / drag select,
+    right click move (on an enemy: attack), B placement ghost, Alt (hold) or H all bars,
+    Space center on selection, P pause, T toggle stats.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #050605; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+    #panel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.6); color: #eee; font-size: 12px; padding: 6px 8px; border-radius: 6px; z-index: 2; }
+    #panel select, #panel button { font-size: 12px; }
+    #stats { position: absolute; top: 6px; right: 8px; color: #fff; font: 12px/1.35 monospace; text-shadow: 0 1px 2px #000; text-align: right; white-space: pre; z-index: 2; }
+    #box { position: absolute; border: 1px solid #5f5; background: rgba(80,255,80,.08); pointer-events: none; display: none; z-index: 2; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="panel">
+    scenario <select id="scenario"></select>
+    <button id="reload">reload</button>
+    <label><input type="checkbox" id="spect"> reveal all</label>
+  </div>
+  <div id="stats"></div>
+  <div id="box"></div>
+  <script type="module">
+    import { createWorld } from '../src/sim/world.js';
+    import { ViewState } from '../src/game/view-state.js';
+    import { GameRenderer } from '../src/render/game-renderer.js';
+    import { PLAYER_COLORS, DT, TERRAIN } from '../src/config.js';
+    import { UNITS, PANTHEONS, PANTHEON_LIST, BUILDINGS } from '../src/data/index.js';
+
+    const Q = new URLSearchParams(location.search);
+    const SCENARIOS = ['base', 'battle', 'fog', 'construction', 'creeps', 'trees', 'perf', 'pantheon'];
+    const scenario = SCENARIOS.includes(Q.get('scenario')) ? Q.get('scenario') : 'base';
+    const manual = Q.get('manual') === '1';
+    const quality = Q.get('quality') || 'medium';
+    const seed = Number(Q.get('seed') || 12345);
+    const defaults = {
+      base: { size: 'small', players: 2, pantheons: 'greek,norse' },
+      battle: { size: 'medium', players: 4, pantheons: 'greek,norse,japanese,aztec' },
+      fog: { size: 'small', players: 2, pantheons: 'egyptian,celtic' },
+      construction: { size: 'small', players: 2, pantheons: 'chinese,hindu' },
+      creeps: { size: 'small', players: 2, pantheons: 'mesopotamian,west_african' },
+      trees: { size: 'small', players: 2, pantheons: 'norse,greek' },
+      perf: { size: 'medium', players: 4, pantheons: 'greek,norse,egyptian,japanese' },
+      pantheon: { size: 'small', players: 2, pantheons: 'greek,norse' },
+    }[scenario];
+    const nPlayers = Number(Q.get('players') || defaults.players);
+    const pantheons = (Q.get('pantheons') || defaults.pantheons).split(',');
+    const myIndex = Q.has('my') ? Number(Q.get('my')) : 0;
+
+    // ---------------------------------------------------------------- world
+    const teams = nPlayers === 4 ? [1, 2, 1, 2] : nPlayers === 3 ? [1, 2, 3] : [1, 2];
+    const setup = {
+      version: '0.1.0', seed, mapSize: Q.get('size') || defaults.size,
+      players: Array.from({ length: nPlayers }, (_, i) => ({
+        index: i, name: i === 0 ? 'Austin' : `Player ${i + 1}`, team: teams[i] ?? i + 1,
+        pantheon: pantheons[i % pantheons.length], color: PLAYER_COLORS[i], kind: i === 0 ? 'human' : 'ai', difficulty: 'normal',
+      })),
+    };
+    const world = createWorld(setup);
+    const map = world.mapData;
+    const vs = new ViewState({ setup, mapData: map, myIndex: Q.get('reveal') === '1' ? -1 : myIndex, interpDelayMs: 50 });
+    let vnow = 1000; // virtual clock (ms) driving the view state
+    vs.pushSnapshot(world.getSnapshot(), vnow);
+
+    const canvas = document.getElementById('c');
+    const renderer = new GameRenderer(canvas, { viewState: vs, setup, quality });
+    window.renderer = renderer;
+    window.world = world;
+    window.vs = vs;
+
+    const cmd = (p, c) => world.issueCommand(p, c);
+    const unitsOf = (p, cls) => world.unitsOf(p).filter((u) => !cls || u.def.class === cls);
+    const tcOf = (p) => world.buildingsOf(p).find((b) => b.type === 'town_center');
+    const mineOf = (p) => world.mineList[p];
+
+    // ---------------------------------------------------------------- scenarios
+    const scripts = [];
+    function economy(p, { wood = 2, build = ['house', 'barracks'] } = {}) {
+      const ws = unitsOf(p, 'worker');
+      const tc = tcOf(p);
+      const mine = mineOf(p);
+      const gold = ws.slice(0, ws.length - wood);
+      if (mine) cmd(p, { type: 'gather', units: gold.map((u) => u.id), target: mine.id });
+      const choppers = ws.slice(ws.length - wood);
+      const tree = world.map.nearestForest(tc.x, tc.y, 20, true);
+      if (tree) cmd(p, { type: 'gather', units: choppers.map((u) => u.id), tx: tree.tx, ty: tree.ty });
+      build.forEach((type, k) => {
+        const w = gold[k];
+        if (!w) return;
+        const spot = world.findPlacement(p, type, tc.x + (k % 2 ? 6 : -6), tc.y + 5, 14);
+        if (spot) cmd(p, { type: 'build', units: [w.id], building: type, tx: spot.tx, ty: spot.ty });
+      });
+      cmd(p, { type: 'train', building: tc.id, unit: 'worshipper' });
+      cmd(p, { type: 'train', building: tc.id, unit: 'worshipper' });
+      cmd(p, { type: 'rally', building: tc.id, x: mine ? mine.x : tc.x, y: mine ? mine.y : tc.y + 5, target: mine ? mine.id : undefined });
+    }
+
+    function army(p, x, y, { gods = 2, titan = false, creatures = 3, warriors = 4, archers = 4, priests = 1 } = {}) {
+      const pan = PANTHEONS[world.players[p].pantheon];
+      const list = [];
+      const add = (t, n) => { for (let i = 0; i < n; i++) list.push(t); };
+      add('warrior', warriors);
+      add('archer', archers);
+      add('priest', priests);
+      pan.creatures.forEach((c, i) => add(c.id, Math.max(1, creatures - i)));
+      pan.gods.slice(0, gods).forEach((g) => add(g.id, 1));
+      if (titan) add(pan.titan.id, 1);
+      const out = [];
+      const cols = Math.ceil(Math.sqrt(list.length));
+      list.forEach((t, i) => {
+        const u = world.spawnUnit(p, t, x + ((i % cols) - cols / 2) * 1.3, y + (Math.floor(i / cols) - cols / 2) * 1.3, { silent: true });
+        if (!u) return;
+        if (u.def.class === 'god') world.gainXp(u, 2000);
+        out.push(u);
+      });
+      return out;
+    }
+
+    function castLoop(p) {
+      // every second, each god of p casts a ready ability at the nearest enemy
+      scripts.push((tick) => {
+        if (tick % 20 !== p * 3) return;
+        for (const g of unitsOf(p, 'god').concat(unitsOf(p, 'titan'))) {
+          const enemies = world.queryRadius(g.x, g.y, 9, (e) => e.kind === 'unit' && !e.dead && world.areEnemies(p, e.owner));
+          if (!enemies.length) continue;
+          enemies.sort((a, b) => Math.hypot(a.x - g.x, a.y - g.y) - Math.hypot(b.x - g.x, b.y - g.y));
+          const t = enemies[0];
+          const ready = g.def.abilities.filter((a) => !g.cooldowns[a.id] && g.level >= (a.unlockLevel || 1) && !a.autocast);
+          if (!ready.length) continue;
+          const ab = ready[(tick / 20 + g.id) % ready.length | 0];
+          const c = { type: 'cast', unit: g.id, ability: ab.id };
+          if (ab.target === 'point') { c.x = t.x; c.y = t.y; }
+          else if (ab.target === 'enemy' || ab.target === 'unit') c.target = t.id;
+          else if (ab.target === 'ally') c.target = g.id;
+          cmd(p, c);
+        }
+      });
+    }
+
+    /** Top-left tile of the free w × h rectangle of passable, building-free ground nearest (x, y). */
+    function openArea(w, h, x, y, maxR = 30) {
+      const m = world.map;
+      const W = m.width;
+      const H = m.height;
+      // prefix sums of blocked tiles (impassable, or under a building / mine)
+      const blocked = new Uint8Array(W * H);
+      for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) if (!m.isPassable(tx, ty)) blocked[ty * W + tx] = 1;
+      for (const e of world.entities.values()) {
+        if (e.kind === 'unit' || e.dead) continue;
+        for (let j = -1; j <= e.size; j++) for (let i = -1; i <= e.size; i++) {
+          const tx = e.tx + i;
+          const ty = e.ty + j;
+          if (tx >= 0 && ty >= 0 && tx < W && ty < H) blocked[ty * W + tx] = 1;
+        }
+      }
+      const S = new Int32Array((W + 1) * (H + 1));
+      for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+        S[(ty + 1) * (W + 1) + tx + 1] = blocked[ty * W + tx] + S[ty * (W + 1) + tx + 1] + S[(ty + 1) * (W + 1) + tx] - S[ty * (W + 1) + tx];
+      }
+      const sum = (tx, ty) => S[(ty + h) * (W + 1) + tx + w] - S[ty * (W + 1) + tx + w] - S[(ty + h) * (W + 1) + tx] + S[ty * (W + 1) + tx];
+      let best = null;
+      let bd = Infinity;
+      for (let ty = Math.max(1, Math.floor(y - maxR)); ty <= Math.min(H - h - 1, y + maxR); ty++) {
+        for (let tx = Math.max(1, Math.floor(x - maxR)); tx <= Math.min(W - w - 1, x + maxR); tx++) {
+          const d = Math.hypot(tx + w / 2 - x, ty + h / 2 - y);
+          if (d < bd && sum(tx, ty) === 0) { bd = d; best = { tx, ty, w, h }; }
+        }
+      }
+      return best;
+    }
+    const focus = {};
+
+    const setupScenario = {
+      pantheon() {
+        // player 0: the whole pantheon at the default camera; a few workers mine (2 at
+        // a time, the rest wait their turn at the mine edge) and chop
+        const p = 0;
+        const pan = PANTHEONS[world.players[p].pantheon];
+        const tc = tcOf(p);
+        tc.tier = 3;
+        world.players[p].tier = 3;
+        const ws = unitsOf(p, 'worker');
+        const mine = mineOf(p);
+        if (mine) cmd(p, { type: 'gather', units: ws.slice(0, 4).map((u) => u.id), target: mine.id });
+        const tree = world.map.nearestForest(tc.x, tc.y, 20, true);
+        if (tree) cmd(p, { type: 'gather', units: ws.slice(4).map((u) => u.id), tx: tree.tx, ty: tree.ty });
+        for (let i = 0; i < 2; i++) {
+          const w = world.spawnUnit(p, 'worshipper', tc.x + 2, tc.y + 3, { silent: true });
+          if (w && mine) cmd(p, { type: 'gather', units: [w.id], target: mine.id });
+        }
+        const placed = {};
+        const put = (type, dx, dy, bp = 1) => {
+          const spot = world.findPlacement(p, type, tc.x + dx, tc.y + dy, 12);
+          if (!spot) return null;
+          const b = world.createBuilding(p, type, spot.tx, spot.ty, bp >= 1, true);
+          if (bp < 1) { b.buildProgress = bp; b.hp = b.maxHp * (0.1 + 0.9 * bp); }
+          (placed[type] = placed[type] || []).push(b);
+          return b;
+        };
+        put('house', -6, -1);
+        put('house', -6, 2.5);
+        put('barracks', 6.5, -1);
+        put('shrine', -6.5, 6);
+        put('temple', 6.5, 4.5);
+        put('tower', 1, 8);
+        put('storehouse', -2.5, 8);
+        put('titan_gate', 6, 10);
+        const sites = [put('house', -9, 12, 0.1), put('barracks', -4, 13, 0.45), put('temple', 1.5, 13.5, 0.8)].filter(Boolean);
+        focus.base = { x: tc.x + 0.5, y: tc.y + 3.5 };
+        if (sites.length) focus.sites = { x: sites.reduce((a, b) => a + b.x, 0) / sites.length, y: sites.reduce((a, b) => a + b.y, 0) / sites.length + 1 };
+        // the army: mortals, creatures + minions, gods + titan in rows on open ground
+        const rows = [
+          ['worshipper', 'warrior', 'archer', 'priest', 'battering_ram'],
+          [...pan.creatures.map((c) => c.id), ...(pan.minions || []).map((m) => m.id)],
+          [...pan.gods.map((g) => g.id), pan.titan.id],
+        ];
+        const area = openArea(20, 13, tc.x, tc.y + 22, 40) || openArea(16, 11, tc.x, tc.y + 22, 48) || { tx: Math.floor(tc.x - 8), ty: Math.floor(tc.y + 16), w: 16, h: 11 };
+        const cx = area.tx + area.w / 2;
+        const gap = 1.1;
+        let y = area.ty + 1;
+        for (const row of rows) {
+          const defs = row.map((t) => UNITS[t]).filter(Boolean);
+          const width = defs.reduce((a, d) => a + d.radius * 2 + gap, 0);
+          let x = cx - width / 2;
+          let rowR = 0;
+          for (const d of defs) rowR = Math.max(rowR, d.radius);
+          y += rowR + 0.4;
+          for (const d of defs) {
+            x += d.radius + gap / 2;
+            const u = world.spawnUnit(p, d.id, x, y, { silent: true, facing: Math.PI / 2 - 0.45 });
+            if (u && u.def.class === 'god') world.gainXp(u, 2000);
+            if (u) cmd(p, { type: 'hold', units: [u.id] });
+            x += d.radius + gap / 2;
+          }
+          y += rowR + 1.6;
+        }
+        focus.army = { x: cx, y: area.ty + area.h / 2 };
+        focus.placed = placed;
+      },
+      base() {
+        for (let p = 0; p < nPlayers; p++) economy(p);
+      },
+      trees() {
+        for (let p = 0; p < nPlayers; p++) {
+          const tc = tcOf(p);
+          for (let i = 0; i < 6; i++) world.spawnUnit(p, 'worshipper', tc.x + 3, tc.y + 3, { silent: true });
+          economy(p, { wood: 9, build: ['storehouse'] });
+        }
+      },
+      fog() {
+        economy(0);
+        economy(1);
+        // a scout walks across the map and back so explored-but-unseen ground and a remembered enemy base show
+        const scout = world.spawnUnit(0, 'warrior', tcOf(0).x + 3, tcOf(0).y + 4, { silent: true });
+        const e = tcOf(1);
+        cmd(0, { type: 'move', units: [scout.id], x: e.x - 6, y: e.y - 2 });
+        cmd(0, { type: 'move', units: [scout.id], x: tcOf(0).x + 8, y: tcOf(0).y + 10, queue: true });
+      },
+      construction() {
+        economy(0, { build: [] });
+        const tc = tcOf(0);
+        const types = ['house', 'barracks', 'shrine', 'temple', 'tower', 'storehouse', 'titan_gate'];
+        const stages = [0.08, 0.35, 0.65, 0.92, 1, 1, 0.5];
+        types.forEach((t, i) => {
+          const spot = world.findPlacement(0, t, tc.x + ((i % 4) - 1.5) * 5.5, tc.y + 6 + Math.floor(i / 4) * 5, 16);
+          if (!spot) return;
+          const b = world.createBuilding(0, t, spot.tx, spot.ty, stages[i] >= 1, true);
+          if (stages[i] < 1) {
+            b.buildProgress = stages[i];
+            b.hp = b.maxHp * (0.1 + 0.9 * stages[i]);
+          }
+        });
+        // a damaged enemy building nearby, and a second town center grown to tier 3
+        const spot = world.findPlacement(1, 'barracks', tc.x + 9, tc.y - 3, 14);
+        if (spot) { const b = world.createBuilding(1, 'barracks', spot.tx, spot.ty, true, true); b.hp = b.maxHp * 0.4; }
+        const tc2 = tcOf(1);
+        if (tc2) tc2.tier = 3;
+      },
+      creeps() {
+        economy(0);
+        const tc = tcOf(0);
+        const units = army(0, tc.x + 4, tc.y + 7, { gods: 2, creatures: 2, warriors: 4, archers: 3 });
+        const camps = (world.mapData.camps || []).slice().sort((a, b) => Math.hypot(a.x - tc.x, a.y - tc.y) - Math.hypot(b.x - tc.x, b.y - tc.y));
+        if (camps[0]) cmd(0, { type: 'attackMove', units: units.map((u) => u.id), x: camps[0].x, y: camps[0].y });
+        castLoop(0);
+      },
+      battle() {
+        for (let p = 0; p < nPlayers; p++) economy(p, { build: ['house'] });
+        const cx = map.width / 2;
+        const cy = map.height / 2;
+        const sides = [];
+        for (let p = 0; p < nPlayers; p++) {
+          const west = setup.players[p].team === 1;
+          const off = (p >> 1) * 6 - 3;
+          const units = army(p, cx + (west ? -11 : 11), cy + off, { gods: 2, titan: p < 2, creatures: 3, warriors: 4, archers: 4 });
+          sides.push({ p, units, west });
+          castLoop(p);
+        }
+        for (const s of sides) cmd(s.p, { type: 'attackMove', units: s.units.map((u) => u.id), x: cx + (s.west ? 8 : -8), y: cy });
+      },
+      perf() {
+        const target = Number(Q.get('units') || 300);
+        const per = Math.ceil(target / nPlayers);
+        const cx = map.width / 2;
+        const cy = map.height / 2;
+        for (let p = 0; p < nPlayers; p++) {
+          const west = setup.players[p].team === 1;
+          const pan = PANTHEONS[world.players[p].pantheon];
+          const types = ['warrior', 'archer', 'warrior', 'priest', ...pan.creatures.map((c) => c.id), pan.gods[0].id];
+          const units = [];
+          for (let i = 0; i < per; i++) {
+            const t = i < 1 ? pan.gods[0].id : i < 2 ? pan.gods[1].id : types[i % (types.length - 1)];
+            const row = Math.floor(i / 12);
+            const u = world.spawnUnit(p, t, cx + (west ? -14 - row * 1.2 : 14 + row * 1.2), cy - 14 + (p >> 1) * 15 + (i % 12) * 1.15, { silent: true });
+            if (u) units.push(u);
+          }
+          cmd(p, { type: 'attackMove', units: units.map((u) => u.id), x: cx + (west ? 12 : -12), y: cy });
+          castLoop(p);
+        }
+      },
+    };
+    setupScenario[scenario]();
+
+    // ---------------------------------------------------------------- loop
+    let tickN = 0;
+    let simAcc = 0;
+    let paused = false;
+    const forcedFx = new Map(); // unit id → status codes shown regardless of the sim (status shots)
+    let emulateMw = false; // harness.emulateMineWait(true): fill `mw` from the sim (mine shot)
+    function simTick() {
+      for (const s of scripts) s(tickN);
+      world.tick();
+      tickN++;
+      vs.pushSnapshot(world.getSnapshot(), vnow);
+      for (const [id, fx] of forcedFx) {
+        const e = vs.entities.get(id);
+        if (e) e.fx = fx;
+      }
+      // stand-in for the requested unit key `mw` (waiting for a gold-mine slot;
+      // notes/interface-requests.md [renderfix → simfix]) until the sim sends it
+      if (emulateMw) {
+        for (const u of world.entities.values()) {
+          const o = u.order;
+          if (u.kind !== 'unit' || !o || o.type !== 'gather' || !o.mine) continue;
+          const e = vs.entities.get(u.id);
+          if (e && !('mw' in e) && o.phase === 'wait') e.mw = 1;
+        }
+      }
+    }
+    const perf = { n: 0, sum: 0, max: 0, hist: [] };
+    function frame(dtMs) {
+      vnow += dtMs;
+      if (!paused) {
+        simAcc += dtMs;
+        while (simAcc >= DT * 1000) {
+          simAcc -= DT * 1000;
+          simTick();
+        }
+      }
+      vs.update(vnow);
+      handleKeys(dtMs / 1000);
+      renderer.update(dtMs / 1000);
+      const ms = renderer.getStats().updateMs;
+      perf.n++;
+      perf.sum += ms;
+      perf.max = Math.max(perf.max, ms);
+      perf.hist.push(ms);
+      if (perf.hist.length > 240) perf.hist.shift();
+    }
+
+    // ---------------------------------------------------------------- input
+    const keys = new Set();
+    addEventListener('keydown', (e) => {
+      keys.add(e.key.toLowerCase());
+      if (e.key === 'Alt') { renderer.setShowAllBars(true); e.preventDefault(); }
+      if (e.key === 'h') { barsOn = !barsOn; renderer.setShowAllBars(barsOn); }
+      if (e.key === 'p') paused = !paused;
+      if (e.key === 't') statsOn = !statsOn;
+      if (e.key === 'b') { placing = placing ? null : 'house'; if (!placing) renderer.hidePlacement(); }
+      if (e.key === ' ') centerSelection();
+    });
+    addEventListener('keyup', (e) => {
+      keys.delete(e.key.toLowerCase());
+      if (e.key === 'Alt') renderer.setShowAllBars(barsOn);
+    });
+    let barsOn = Q.get('bars') === '1';
+    renderer.setShowAllBars(barsOn);
+    let statsOn = true;
+    let placing = null;
+    function handleKeys(dt) {
+      const s = 28 * dt;
+      if (keys.has('arrowleft') || keys.has('a')) renderer.camera.scroll(-s, 0);
+      if (keys.has('arrowright') || keys.has('d')) renderer.camera.scroll(s, 0);
+      if (keys.has('arrowup') || keys.has('w')) renderer.camera.scroll(0, -s);
+      if (keys.has('arrowdown') || keys.has('s')) renderer.camera.scroll(0, s);
+    }
+    let selection = [];
+    function select(ids) {
+      selection = ids;
+      renderer.setSelection(ids);
+    }
+    function centerSelection() {
+      const e = selection.map((id) => vs.getEntity(id)).filter(Boolean);
+      if (!e.length) return;
+      renderer.camera.centerOn(e.reduce((a, b) => a + b.x, 0) / e.length, e.reduce((a, b) => a + b.y, 0) / e.length);
+    }
+    canvas.addEventListener('wheel', (e) => { renderer.camera.zoomBy(-Math.sign(e.deltaY)); e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    let drag = null;
+    const box = document.getElementById('box');
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button === 1) drag = { mode: 'pan', x: e.clientX, y: e.clientY };
+      else if (e.button === 0) {
+        if (placing) {
+          const p = renderer.screenToWorld(e.clientX, e.clientY);
+          const ws = selection.map((id) => world.getEntity(id)).filter((u) => u && u.def && u.def.class === 'worker');
+          if (p && ws.length) {
+            const s = BUILDINGS[placing].size;
+            cmd(myIndex, { type: 'build', units: ws.map((u) => u.id), building: placing, tx: Math.floor(p.x - s / 2 + 0.5), ty: Math.floor(p.y - s / 2 + 0.5) });
+          }
+          placing = null;
+          renderer.hidePlacement();
+          return;
+        }
+        drag = { mode: 'box', x: e.clientX, y: e.clientY };
+      } else if (e.button === 2) {
+        const p = renderer.screenToWorld(e.clientX, e.clientY);
+        const target = renderer.pickEntity(e.clientX, e.clientY);
+        const own = selection.filter((id) => (vs.getEntity(id) || {}).o === myIndex && (vs.getEntity(id) || {}).k === 'u');
+        if (!p || !own.length) return;
+        const te = target && vs.getEntity(target);
+        const enemy = te && vs.isEnemy(te.o);
+        cmd(myIndex, { type: 'smart', units: own, x: p.x, y: p.y, target: target || undefined, queue: e.shiftKey });
+        renderer.showCommandMarker(p.x, p.y, enemy ? 'attack' : te && te.k === 'm' ? 'gather' : 'move');
+      }
+    });
+    addEventListener('pointermove', (e) => {
+      if (drag && drag.mode === 'pan') {
+        renderer.camera.panPixels(e.clientX - drag.x, e.clientY - drag.y);
+        drag.x = e.clientX;
+        drag.y = e.clientY;
+      } else if (drag && drag.mode === 'box') {
+        const x0 = Math.min(drag.x, e.clientX);
+        const y0 = Math.min(drag.y, e.clientY);
+        Object.assign(box.style, { display: 'block', left: `${x0}px`, top: `${y0}px`, width: `${Math.abs(e.clientX - drag.x)}px`, height: `${Math.abs(e.clientY - drag.y)}px` });
+      }
+      renderer.setHover(renderer.pickEntity(e.clientX, e.clientY));
+      if (placing) {
+        const p = renderer.screenToWorld(e.clientX, e.clientY);
+        if (p) showGhost(placing, p.x, p.y);
+      }
+    });
+    addEventListener('pointerup', (e) => {
+      if (drag && drag.mode === 'box') {
+        box.style.display = 'none';
+        const moved = Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 6;
+        if (moved) {
+          const ids = renderer.entitiesInRect(drag.x, drag.y, e.clientX, e.clientY);
+          const own = ids.filter((id) => (vs.getEntity(id) || {}).o === myIndex);
+          select(own.length ? own : ids.slice(0, 1));
+        } else {
+          const id = renderer.pickEntity(e.clientX, e.clientY);
+          select(id ? [id] : []);
+        }
+      }
+      drag = null;
+    });
+    addEventListener('resize', () => renderer.resize(innerWidth, innerHeight));
+
+    function tileValidity(type, tx, ty) {
+      const s = BUILDINGS[type].size;
+      const tiles = [];
+      for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) tiles.push(world.map.isBuildable(tx + i, ty + j));
+      return tiles;
+    }
+    function showGhost(type, x, y) {
+      const s = BUILDINGS[type].size;
+      const tx = Math.floor(x - s / 2 + 0.5);
+      const ty = Math.floor(y - s / 2 + 0.5);
+      const valid = world.canPlaceBuilding(myIndex, type, tx, ty);
+      renderer.showPlacement(type, tx, ty, !!(valid === true || (valid && valid.ok)), tileValidity(type, tx, ty));
+    }
+
+    // ---------------------------------------------------------------- panel
+    const scSel = document.getElementById('scenario');
+    for (const s of SCENARIOS) scSel.append(new Option(s, s, s === scenario, s === scenario));
+    const go = () => { Q.set('scenario', scSel.value); if (document.getElementById('spect').checked) Q.set('reveal', '1'); else Q.delete('reveal'); location.search = Q.toString(); };
+    scSel.onchange = go;
+    document.getElementById('reload').onclick = go;
+    document.getElementById('spect').checked = Q.get('reveal') === '1';
+    const statsEl = document.getElementById('stats');
+    let fpsT = performance.now();
+    let fpsN = 0;
+    let fps = 0;
+    function showStats() {
+      if (!statsOn) { statsEl.textContent = ''; return; }
+      const s = renderer.getStats();
+      const h = perf.hist;
+      const avg = h.length ? h.reduce((a, b) => a + b, 0) / h.length : 0;
+      const units = [...vs.entities.values()].filter((e) => e.k === 'u').length;
+      statsEl.textContent = `${scenario}  t=${world.time.toFixed(1)}s  units ${units}\n`
+        + `update ${avg.toFixed(2)} ms (max ${Math.max(0, ...h).toFixed(2)})  fps ${fps.toFixed(0)}\n`
+        + `draw calls ${s.drawCalls}  tris ${(s.triangles / 1000).toFixed(0)}k  entities ${s.entities}`;
+    }
+
+    // ---------------------------------------------------------------- harness API (screenshots)
+    function applyInitial() {
+      if (Q.has('cam')) {
+        const [x, y, d] = Q.get('cam').split(',').map(Number);
+        renderer.camera.centerOn(x, y);
+        if (d) renderer.camera.setDistance(d, true);
+      }
+      const sel = Q.get('sel');
+      if (sel && sel !== 'none') {
+        const own = [...vs.entities.values()].filter((e) => e.o === myIndex || sel === 'all');
+        const pick = sel === 'army' ? own.filter((e) => e.k === 'u' && UNITS[e.t] && UNITS[e.t].class !== 'worker')
+          : sel === 'workers' ? own.filter((e) => e.k === 'u' && UNITS[e.t] && UNITS[e.t].class === 'worker')
+            : sel === 'buildings' ? own.filter((e) => e.k === 'b') : own;
+        select(pick.map((e) => e.id));
+      }
+      if (Q.has('placement')) {
+        const [type, at] = Q.get('placement').split('@');
+        const [x, y] = at.split(',').map(Number);
+        showGhost(type, x, y);
+      }
+    }
+
+    window.harness = {
+      world, vs, renderer, setup,
+      /** simulate sec seconds at fps frames per second (deterministic, no rendering) */
+      advance(sec, fps = 30) {
+        const n = Math.max(1, Math.round(sec * fps));
+        for (let i = 0; i < n; i++) frame(1000 / fps);
+      },
+      render() { renderer.render(); showStats(); },
+      select,
+      selectWhere(fn) { select([...vs.entities.values()].filter(fn).map((e) => e.id)); },
+      camera(x, y, d) { renderer.camera.centerOn(x, y); if (d) renderer.camera.setDistance(d, true); renderer.camera.update(0); },
+      showGhost,
+      focus,
+      /** Show these status codes on a unit (every snapshot), e.g. ['buff', 'shield']; null clears. */
+      forceStatus(id, fx) { if (fx) forcedFx.set(id, fx); else forcedFx.delete(id); },
+      emulateMineWait(on) { emulateMw = !!on; },
+      perf() {
+        const h = perf.hist;
+        const sorted = [...h].sort((a, b) => a - b);
+        return { frames: perf.n, avg: perf.sum / Math.max(1, perf.n), recentAvg: h.reduce((a, b) => a + b, 0) / Math.max(1, h.length), p95: sorted[Math.floor(sorted.length * 0.95)] || 0, max: perf.max };
+      },
+      resetPerf() { perf.n = 0; perf.sum = 0; perf.max = 0; perf.hist.length = 0; },
+      unitCount() { return [...vs.entities.values()].filter((e) => e.k === 'u').length; },
+      ready: false,
+    };
+
+    const pre = Number(Q.get('t') || 0);
+    if (pre > 0) window.harness.advance(pre, 20);
+    applyInitial();
+    if (manual) {
+      window.harness.advance(0.05);
+      window.harness.render();
+      window.harness.ready = true;
+    } else {
+      let last = performance.now();
+      const loop = (now) => {
+        const dt = Math.min(100, now - last);
+        last = now;
+        frame(dt);
+        renderer.render();
+        fpsN++;
+        if (now - fpsT > 500) { fps = (fpsN * 1000) / (now - fpsT); fpsN = 0; fpsT = now; showStats(); }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+      window.harness.ready = true;
+    }
+  </script>
+</body>
+</html>

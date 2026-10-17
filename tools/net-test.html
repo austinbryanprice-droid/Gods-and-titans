@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mythic War — network test harness</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font: 13px/1.45 system-ui, sans-serif; background: #15171c; color: #dfe3ea; }
+    header { padding: 10px 16px; background: #1f232b; border-bottom: 1px solid #2d333d; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    header h1 { font-size: 15px; margin: 0; color: #f2d27a; }
+    header .pill { padding: 2px 8px; border-radius: 10px; background: #2d333d; }
+    main { display: grid; grid-template-columns: 384px 1fr; gap: 16px; padding: 16px; }
+    canvas { width: 384px; height: 384px; image-rendering: pixelated; border: 1px solid #2d333d; background: #000; }
+    #stats { margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
+    #stats b { color: #9aa4b2; font-weight: 500; }
+    #log { height: 384px; overflow: auto; background: #0f1115; border: 1px solid #2d333d; padding: 8px; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+    #log .ok { color: #7fd88f; } #log .err { color: #ff8080; } #log .chat { color: #9fd8ff; }
+    #slots { margin-top: 10px; border-collapse: collapse; width: 100%; }
+    #slots td { padding: 2px 6px; border-bottom: 1px solid #262b33; }
+    .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; }
+  </style>
+  <script src="../vendor/peerjs.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Mythic War · net test</h1>
+    <span class="pill" id="role">idle</span>
+    <span class="pill" id="room">no room</span>
+    <span class="pill" id="status">waiting</span>
+  </header>
+  <main>
+    <section>
+      <canvas id="map" width="48" height="48"></canvas>
+      <div id="stats"></div>
+      <table id="slots"></table>
+    </section>
+    <section><div id="log"></div></section>
+  </main>
+<script type="module">
+import { LobbyHost, LobbyClient } from '../src/net/lobby.js';
+import { HostSession, ClientSession } from '../src/net/session.js';
+import { fakeWorldFactory, makeFakeMap } from '../src/net/fake-world.js';
+import { generateMap, mapHash } from '../src/sim/mapgen.js';
+import { PLAYER_COLORS, TERRAIN } from '../src/config.js';
+import { GAME_TIMEOUT_MS } from '../src/net/protocol.js';
+
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+
+/** JSON with sorted keys, so equal snapshots hash equally regardless of key order. */
+function canonical(v) {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  return JSON.stringify(v);
+}
+function fnv(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+const T = {
+  role: null,
+  lobby: null,
+  client: null,
+  session: null,
+  hashes: {},
+  fullChars: 0,
+  maxFrameChars: 0,
+  chunkedMessages: 0,
+  chat: [],
+  errors: [],
+  done: false,
+  lastTick: -1,
+  log(msg, cls = '') {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = `${new Date().toISOString().slice(11, 23)}  ${msg}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  },
+  setStatus(s) {
+    $('status').textContent = s;
+  },
+};
+window.netTest = T;
+window.addEventListener('error', (e) => T.errors.push(String(e.message)));
+window.addEventListener('unhandledrejection', (e) => T.errors.push(String(e.reason && e.reason.message || e.reason)));
+
+function showLobby(state) {
+  $('room').textContent = state.roomCode ? `room ${state.roomCode}` : 'offline';
+  $('slots').innerHTML = state.slots.map((s, i) => `<tr><td>${i}</td><td><span class="sw" style="background:${PLAYER_COLORS[s.color]}"></span></td>
+    <td>${s.kind}</td><td>${s.name || ''}</td><td>${s.pantheon}</td><td>team ${s.team}</td></tr>`).join('');
+}
+
+function watchConn(conn) {
+  // Count chunked messages received on this connection (first chunk frames: '~seq,0,count|…').
+  const recv = conn._receive.bind(conn);
+  conn._receive = (f) => {
+    if (typeof f === 'string') {
+      T.maxFrameChars = Math.max(T.maxFrameChars, f.length);
+      if (f[0] === '~' && f.slice(1, f.indexOf('|')).split(',')[1] === '0') T.chunkedMessages++;
+    }
+    recv(f);
+  };
+}
+
+function record(snap) {
+  T.hashes[snap.tick] = fnv(canonical(snap));
+  T.lastTick = snap.tick;
+}
+
+// ---------------------------------------------------------------- drawing
+
+const PALETTE = {
+  [TERRAIN.GRASS]: [74, 128, 60], [TERRAIN.DIRT]: [120, 98, 64], [TERRAIN.WATER]: [40, 92, 160],
+  [TERRAIN.FOREST]: [30, 92, 40], [TERRAIN.ROCK]: [110, 110, 112], [TERRAIN.SAND]: [196, 178, 120],
+};
+const cv = $('map');
+const ctx = cv.getContext('2d');
+function draw() {
+  const s = T.session;
+  if (s) {
+    const vs = s.viewState;
+    vs.update(performance.now());
+    const w = vs.width;
+    if (cv.width !== w || cv.height !== vs.height) {
+      cv.width = w;
+      cv.height = vs.height;
+    }
+    const img = ctx.createImageData(w, vs.height);
+    for (let i = 0; i < w * vs.height; i++) {
+      const [r, g, b] = PALETTE[vs.map.terrain[i]] || PALETTE[0];
+      const k = vs.visible[i] ? 1 : vs.explored[i] ? 0.55 : 0.12;
+      img.data[i * 4] = r * k; img.data[i * 4 + 1] = g * k; img.data[i * 4 + 2] = b * k; img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    for (const e of vs.entities.values()) {
+      if (!vs.isEntityVisible(e)) continue;
+      ctx.fillStyle = e.o >= 0 ? (s.setup.players[e.o] || {}).color || '#fff' : '#f2d27a';
+      const size = e.k === 'u' ? 1 : 2;
+      ctx.fillRect(Math.floor(e.ix) - (size >> 1), Math.floor(e.iy) - (size >> 1), size, size);
+    }
+    $('stats').innerHTML = `<b>tick</b><span>${vs.tick}</span><b>entities</b><span>${vs.entities.size}</span>
+      <b>last seen</b><span>${vs.lastSeen.size}</span><b>trees felled</b><span>${vs.felledAll.length}</span>
+      <b>ping</b><span>${s.pingMs ?? '–'} ms</span><b>first full</b><span>${(T.fullChars / 1024).toFixed(1)} KB</span>
+      <b>chunked msgs</b><span>${T.chunkedMessages}</span><b>resyncs</b><span>${s.resyncs ?? 0}</span>`;
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------------------------------------------------------------- host
+
+/** Open a lobby. Returns the room code. */
+T.host = async ({ transport = 'peer', name = 'Host' } = {}) => {
+  T.role = 'host';
+  $('role').textContent = `host · ${transport}`;
+  T.lobby = await LobbyHost.create({ transport, name });
+  T.lobby.onChange(showLobby);
+  T.lobby.onChat((l) => {
+    T.chat.push(l);
+    T.log(`${l.system ? '*' : `<${l.name}>`} ${l.text}`, 'chat');
+  });
+  showLobby(T.lobby.state);
+  T.log(`lobby open, room ${T.lobby.roomCode}`, 'ok');
+  T.setStatus('lobby');
+  return T.lobby.roomCode;
+};
+
+T.lobbyState = () => (T.lobby ? T.lobby.state : T.client && T.client.state);
+
+/** Gather order for my worshippers toward the gold mine nearest my town center (real World only). */
+function gatherCommand(vs, me) {
+  const ents = [...vs.entities.values()];
+  const tc = ents.find((e) => e.o === me && e.t === 'town_center');
+  const workers = ents.filter((e) => e.o === me && e.t === 'worshipper').map((e) => e.id);
+  let best = null;
+  for (const e of ents) {
+    if (e.k !== 'm' || !tc) continue;
+    const d = Math.hypot(e.x - tc.x, e.y - tc.y);
+    if (!best || d < best.d) best = { id: e.id, d };
+  }
+  return best && workers.length ? { type: 'gather', units: workers, target: best.id } : null;
+}
+T.gatherCommand = gatherCommand;
+
+/**
+ * Start the game and stop ticking after `ticks` ticks. world: 'fake' streams a
+ * FakeWorld with `units` units; 'real' runs the real simulation (src/sim/world.js).
+ * Resolves when the host is done.
+ */
+T.startGame = async ({ world = 'fake', units = 600, ticks = 300 } = {}) => {
+  const { setup, myIndex, conns } = T.lobby.start();
+  for (const c of conns.values()) {
+    const send = c.send.bind(c);
+    c.send = (msg) => {
+      if (msg.t === 'full') {
+        const n = JSON.stringify(msg).length;
+        if (!T.fullChars) T.fullChars = n;
+        T.log(`sent full snapshot tick ${msg.snap.tick}: ${(n / 1024).toFixed(1)} KB`, 'ok');
+      }
+      return send(msg);
+    };
+  }
+  const createWorld = world === 'real' ? (await import('../src/sim/world.js')).createWorld : fakeWorldFactory({ units, buildings: 10, churn: 2 });
+  // The real simulation gets the real AI, so a player who leaves is taken over by one that plays.
+  const createAI = world === 'real' ? (await import('../src/ai/ai.js')).createAI : () => ({ tick() {} });
+  const s = new HostSession({ setup, myIndex, conns, createWorld, createAI });
+  T.session = s;
+  return new Promise((resolve) => {
+    s.viewState.on('snapshot', (snap) => {
+      record(snap);
+      if (world === 'real' && snap.tick === 2) {
+        const cmd = gatherCommand(s.viewState, myIndex);
+        if (cmd) s.sendCommand(cmd);
+      }
+      if (snap.tick >= ticks && !T.done) {
+        T.done = true;
+        T.log(`reached tick ${snap.tick}, ${s.snapshotsSent} snapshots sent`, 'ok');
+        T.setStatus('done');
+        // Keep the connections open (no stop) so the client can finish; Playwright closes the page.
+        s.ticker.stop();
+        resolve({ tick: snap.tick, sent: s.snapshotsSent, fullChars: T.fullChars, mapHash: setup.mapHash });
+      }
+    });
+    s.onChat((l) => T.log(`${l.system ? '*' : `<${l.name}>`} ${l.text}`, 'chat'));
+    record(s.lastSnap);
+    s.start();
+    T.setStatus('playing');
+    T.log(`game started (${world} world): seed ${setup.seed}, ${setup.players.length} players, map ${setup.mapHash}`, 'ok');
+  });
+};
+
+// ---------------------------------------------------------------- client
+
+/** Join a lobby; on start, build a ClientSession and record every reconstructed snapshot. */
+T.join = async ({ transport = 'peer', code, name = 'Guest', resyncAt = -1, world = 'fake' } = {}) => {
+  T.role = 'client';
+  $('role').textContent = `client · ${transport}`;
+  T.client = await LobbyClient.join({ transport, roomCode: code, name });
+  watchConn(T.client.conn);
+  T.client.onChange(showLobby);
+  T.client.onChat((l) => {
+    T.chat.push(l);
+    T.log(`${l.system ? '*' : `<${l.name}>`} ${l.text}`, 'chat');
+  });
+  T.client.onKicked((r) => T.log(`kicked: ${r}`, 'err'));
+  showLobby(T.client.state);
+  T.log(`joined room ${code} as slot ${T.client.mySlot}`, 'ok');
+  T.setStatus('lobby');
+  T.client.onStart(({ setup, myIndex, conn }) => {
+    // This browser must generate the same map as the host's.
+    T.mapHashOk = mapHash(generateMap({ seed: setup.seed, mapSize: setup.mapSize, playerCount: setup.players.length })) === setup.mapHash;
+    const s = world === 'real'
+      ? new ClientSession({ setup, myIndex, conn })
+      : new ClientSession({ setup: { ...setup, mapHash: undefined }, myIndex, conn, generateMap: () => makeFakeMap(48, 48) });
+    T.session = s;
+    T.myIndex = myIndex;
+    let resynced = false;
+    let ordered = false;
+    s.viewState.on('snapshot', (snap) => {
+      record(snap);
+      if (!resynced && resyncAt >= 0 && snap.tick >= resyncAt) {
+        resynced = true;
+        T.log(`requesting resync at tick ${snap.tick}`);
+        s.requestResync();
+      }
+      if (world === 'real' && !ordered && snap.tick >= 2) {
+        ordered = true;
+        const cmd = gatherCommand(s.viewState, myIndex);
+        if (cmd) {
+          s.sendCommand(cmd);
+          T.log(`sent gather for ${cmd.units.length} worshippers`);
+        }
+      }
+    });
+    s.onEnd((e) => {
+      T.ended = e.reason;
+      T.log(`session ended: ${e.reason}`, 'err');
+    });
+    s.start();
+    T.setStatus('playing');
+    T.log(`game started as player ${myIndex}${s.mapMismatch ? ' (MAP MISMATCH)' : ''}`, s.mapMismatch ? 'err' : 'ok');
+  });
+  return T.client.mySlot;
+};
+
+/**
+ * Block this page's main thread for `ms` (a long GC, a shader compile, a
+ * background tab), with this side's connections set to time out after
+ * `timeoutMs` of silence. Messages and Worker pulses queue up meanwhile; the
+ * connections must survive it (silence is measured in time the page ran). The
+ * normal game timeout is restored 2 s after the stall.
+ */
+T.stallFor = (ms, timeoutMs) => {
+  const conns = T.role === 'host' ? [...T.session.clients.values()].map((c) => c.conn) : [T.session.conn];
+  for (const c of conns) c.setTimeoutMs(timeoutMs);
+  T.log(`stalling the main thread for ${ms} ms (connection timeout ${timeoutMs} ms)`);
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) { /* busy */ }
+  setTimeout(() => {
+    for (const c of conns) if (c.open) c.setTimeoutMs(GAME_TIMEOUT_MS);
+    T.log(`stall over; connections ${conns.every((c) => c.open) ? 'still open' : 'CLOSED'}`, conns.every((c) => c.open) ? 'ok' : 'err');
+  }, 2000);
+  return { stalledMs: Math.round(performance.now() - t0), conns: conns.length };
+};
+
+/** A join that is expected to fail: resolves with { message, ms, menuText }. */
+T.failJoin = async ({ code = 'ABCDE', name = 'Lost' } = {}) => {
+  const { friendlyJoinError } = await import('../src/ui/menu-model.js');
+  const t0 = performance.now();
+  try {
+    await LobbyClient.join({ transport: 'peer', roomCode: code, name });
+    return { message: 'joined?!', ms: Math.round(performance.now() - t0) };
+  } catch (err) {
+    const ms = Math.round(performance.now() - t0);
+    T.log(`join failed after ${ms} ms: ${err.message}`, 'err');
+    return { message: err.message, ms, menuText: friendlyJoinError(err, code) };
+  }
+};
+
+const q = new URLSearchParams(location.search);
+T.log(`page ready${q.get('peerHost') ? ` (PeerJS server ${q.get('peerHost')}:${q.get('peerPort')}${q.get('peerPath') || ''})` : ''}`);
+T.ready = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,293 @@
+// Tests for the procedural building models (src/render/models/building-models.js):
+// every building type × roster pantheon × tier builds inside its footprint and
+// the triangle / mesh budgets, every DESIGN 4.7 style value is supported, the
+// construction / tier / animation / dispose lifecycle works, geometry and
+// materials are cached, and the gold mine reacts to its remaining amount.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { register } from 'node:module';
+
+// Map the browser import map ('three', 'three/addons/…') onto the vendored copy.
+const VENDOR = new URL('../../vendor/three/', import.meta.url).href;
+register(`data:text/javascript,${encodeURIComponent(`
+export async function resolve(spec, ctx, next) {
+  if (spec === 'three') return { url: ${JSON.stringify(`${VENDOR}three.module.js`)}, shortCircuit: true };
+  if (spec.startsWith('three/addons/')) return { url: ${JSON.stringify(VENDOR + 'addons/')} + spec.slice(13), shortCircuit: true };
+  return next(spec, ctx);
+}`)}`);
+
+const THREE = await import('three');
+const {
+  buildBuildingModel, buildGoldMineModel, getBuildingModelInfo, getGoldMineInfo, setBuildingTime, clearBuildingCaches, PLINTH,
+} = await import('../../src/render/models/building-models.js');
+const { BUILDINGS, PANTHEON_LIST, GOLD_MINE } = await import('../../src/data/index.js');
+const { PLAYER_COLORS } = await import('../../src/config.js');
+
+const TRI_BUDGET = 3000;
+const MESH_BUDGET = 6;
+const ROOFS = ['gable', 'flat', 'pagoda', 'pyramid', 'dome', 'thatch_cone', 'stepped', 'shikhara', 'curved', 'longhouse'];
+const WALLS = ['marble', 'timber', 'sandstone', 'stone', 'mudbrick', 'brick', 'lacquer'];
+const ORNAMENTS = ['columns', 'carvings', 'obelisks', 'torii', 'lanterns', 'serpents', 'knots', 'winged_bulls', 'spikes', 'banners'];
+const COLORS = { wall: '#c8b89a', roof: '#8a4a3a', trim: '#3a5a8a', accent: '#d4af37' };
+
+/** [type, tier] for every model the game can show. */
+const VARIANTS = Object.keys(BUILDINGS).flatMap((t) => (t === 'town_center' ? [[t, 1], [t, 2], [t, 3]] : [[t, 1]]));
+
+const color = (c) => (typeof c === 'number' ? c : c.hex ?? c.color ?? c);
+const teamColors = PLAYER_COLORS.map(color);
+
+function meshesOf(root) {
+  const out = [];
+  root.traverse((o) => { if (o.isMesh) out.push(o); });
+  return out;
+}
+
+function trianglesOf(root, visibleOnly = true) {
+  let n = 0;
+  root.traverse((o) => {
+    if (!o.isMesh || (visibleOnly && !o.visible)) return;
+    const g = o.geometry;
+    n += (g.index ? g.index.count : g.attributes.position.count) / 3;
+  });
+  return n;
+}
+
+function assertFinite(geo, label) {
+  const p = geo.attributes.position.array;
+  for (let i = 0; i < p.length; i++) if (!Number.isFinite(p[i])) assert.fail(`${label}: non-finite vertex`);
+}
+
+test('building data has the types the models know about', () => {
+  for (const t of ['town_center', 'house', 'barracks', 'storehouse', 'shrine', 'temple', 'tower', 'titan_gate']) {
+    assert.ok(BUILDINGS[t], `missing building ${t}`);
+  }
+  assert.ok(PANTHEON_LIST.length >= 10, 'expected the 10 roster pantheons');
+});
+
+test('every type × pantheon × tier fits its footprint and the budgets', () => {
+  for (const p of PANTHEON_LIST) {
+    for (const [type, tier] of VARIANTS) {
+      const label = `${p.id}/${type}${tier}`;
+      const info = getBuildingModelInfo(type, p, tier);
+      const size = BUILDINGS[type].size;
+      assert.equal(info.size, size, `${label}: size`);
+      assert.ok(info.triangles > 50 && info.triangles <= TRI_BUDGET, `${label}: ${info.triangles} triangles`);
+      assert.ok(info.meshes >= 2 && info.meshes <= MESH_BUDGET, `${label}: ${info.meshes} meshes`);
+      assert.ok(info.constructionMeshes <= MESH_BUDGET, `${label}: ${info.constructionMeshes} meshes while building`);
+      assert.ok(info.fit === 1, `${label}: model had to be shrunk to ${info.fit.toFixed(3)} to fit`);
+      assert.ok(info.extent <= size / 2 - 0.1 + 0.006, `${label}: reaches ${info.extent.toFixed(3)} from center`);
+      assert.ok(info.height > 1 && info.height < 6, `${label}: height ${info.height}`);
+    }
+  }
+});
+
+test('town center tiers are clearly different and grow', () => {
+  for (const p of PANTHEON_LIST) {
+    const [a, b, c] = [1, 2, 3].map((t) => getBuildingModelInfo('town_center', p, t));
+    assert.ok(b.triangles > a.triangles && c.triangles > b.triangles, `${p.id}: tiers should add detail (${a.triangles}/${b.triangles}/${c.triangles})`);
+    assert.ok(c.height >= a.height, `${p.id}: the city should not be lower than the village`);
+  }
+});
+
+test('every DESIGN 4.7 style value builds (sampled combinations) without NaNs', () => {
+  const combos = [];
+  ROOFS.forEach((roof, i) => {
+    combos.push({ roof, wall: WALLS[i % WALLS.length], ornament: ORNAMENTS[i % ORNAMENTS.length] });
+    combos.push({ roof, wall: WALLS[(i + 3) % WALLS.length], ornament: ORNAMENTS[(i + 5) % ORNAMENTS.length] });
+  });
+  WALLS.forEach((wall, i) => combos.push({ roof: ROOFS[(i * 3) % ROOFS.length], wall, ornament: ORNAMENTS[(i * 7) % ORNAMENTS.length] }));
+  ORNAMENTS.forEach((ornament, i) => combos.push({ roof: ROOFS[(i * 7 + 1) % ROOFS.length], wall: WALLS[(i * 2) % WALLS.length], ornament }));
+  for (const style of combos) {
+    const p = { id: 'syn', style, colors: COLORS };
+    for (const [type, tier] of VARIANTS) {
+      const label = `${style.roof}/${style.wall}/${style.ornament} ${type}${tier}`;
+      const info = getBuildingModelInfo(type, p, tier);
+      assert.ok(info.triangles <= TRI_BUDGET, `${label}: ${info.triangles} triangles`);
+      assert.ok(info.fit === 1, `${label}: fit ${info.fit}`);
+      const m = buildBuildingModel(type, p, '#3070e0', tier);
+      for (const mesh of meshesOf(m.root)) assertFinite(mesh.geometry, label);
+      m.dispose();
+    }
+    clearBuildingCaches();
+  }
+});
+
+test('missing or partial pantheon styles fall back to a neutral look', () => {
+  for (const p of [null, undefined, {}, { style: { roof: 'nonsense' } }, { colors: { wall: '#fff' } }]) {
+    for (const [type, tier] of VARIANTS) {
+      const m = buildBuildingModel(type, p, 0xff0000, tier);
+      assert.ok(m.root.isObject3D);
+      assert.ok(trianglesOf(m.root) > 50);
+      m.dispose();
+    }
+  }
+});
+
+test('team color drives the team material and is visible on every building', () => {
+  const p = PANTHEON_LIST[0];
+  for (const [type, tier] of VARIANTS) {
+    const m = buildBuildingModel(type, p, teamColors[1] ?? '#2f6fe0', tier);
+    const team = meshesOf(m.root).filter((o) => o.name === 'building-team');
+    assert.equal(team.length, 1, `${type}${tier}: one team mesh`);
+    const c = new THREE.Color(teamColors[1] ?? '#2f6fe0');
+    assert.ok(team[0].material.color.equals(c), `${type}: team material color`);
+    assert.ok(trianglesOf(team[0]) >= 12, `${type}: team parts are substantial`);
+    m.dispose();
+  }
+  const a = buildBuildingModel('house', p, '#ff0000');
+  const b = buildBuildingModel('barracks', p, '#ff0000');
+  const c = buildBuildingModel('house', p, '#00ff00');
+  const ta = meshesOf(a.root).find((o) => o.name === 'building-team').material;
+  const tb = meshesOf(b.root).find((o) => o.name === 'building-team').material;
+  const tc = meshesOf(c.root).find((o) => o.name === 'building-team').material;
+  assert.equal(ta, tb, 'team materials are shared per color');
+  assert.notEqual(ta, tc);
+  for (const m of [a, b, c]) m.dispose();
+});
+
+test('geometry is cached per (type, style, tier) and shared between instances', () => {
+  const p = PANTHEON_LIST[1];
+  const a = buildBuildingModel('temple', p, '#ff0000');
+  const b = buildBuildingModel('temple', p, '#0000ff');
+  const ga = meshesOf(a.root).map((o) => o.geometry);
+  const gb = meshesOf(b.root).map((o) => o.geometry);
+  assert.deepEqual(ga, gb, 'same geometry objects');
+  const body = (m) => meshesOf(m.root).find((o) => o.name === 'building-body').material;
+  assert.equal(body(a), body(b), 'body material is shared');
+  a.dispose();
+  b.dispose();
+});
+
+test('construction: progress clips the structure, shows a scaffold and restores on completion', () => {
+  for (const p of PANTHEON_LIST.slice(0, 4)) {
+    for (const [type, tier] of VARIANTS) {
+      const m = buildBuildingModel(type, p, '#e04040', tier);
+      const done = meshesOf(m.root).map((o) => o.material);
+      const full = trianglesOf(m.root);
+      m.setProgress(0);
+      let meshes = meshesOf(m.root);
+      const scaffold = meshes.find((o) => o.name === 'building-scaffold');
+      assert.ok(scaffold && scaffold.visible, `${type}: scaffold while building`);
+      assert.ok(meshes.length <= MESH_BUDGET, `${type}: ${meshes.length} meshes while building`);
+      const body = meshes.find((o) => o.name === 'building-body');
+      const cut0 = body.material.userData.uCut.value;
+      assert.ok(cut0 > PLINTH && cut0 < m.height * 0.2, `${type}: barely started (${cut0})`);
+      assert.equal(body.castShadow, false);
+      m.setProgress(0.5);
+      const cut5 = body.material.userData.uCut.value;
+      assert.ok(cut5 > cut0 && cut5 < m.height, `${type}: half way (${cut5})`);
+      m.setProgress(0.8);
+      assert.ok(body.material.userData.uCut.value > cut5);
+      const glow = meshes.find((o) => o.name === 'building-glow');
+      if (glow) assert.equal(glow.visible, false, `${type}: fires stay unlit until finished`);
+      m.setProgress(1);
+      meshes = meshesOf(m.root);
+      assert.ok(!meshes.some((o) => o.name === 'building-scaffold'), `${type}: scaffold removed`);
+      assert.deepEqual(meshes.map((o) => o.material), done, `${type}: finished materials restored`);
+      assert.equal(trianglesOf(m.root), full);
+      m.setProgress(NaN);
+      m.setProgress(2);
+      m.dispose();
+    }
+  }
+});
+
+test('setTier swaps the town center model in place', () => {
+  const p = PANTHEON_LIST[2];
+  const m = buildBuildingModel('town_center', p, '#40a0e0', 1);
+  const h1 = m.height;
+  const t1 = trianglesOf(m.root);
+  m.setTier(3);
+  const t3 = trianglesOf(m.root);
+  assert.ok(t3 > t1, 'city has more detail than the village');
+  assert.ok(m.height >= h1);
+  m.setProgress(0.3);
+  m.setTier(2);
+  assert.ok(meshesOf(m.root).some((o) => o.name === 'building-scaffold'), 'construction state survives a tier change');
+  m.setProgress(1);
+  m.setTier(2);
+  m.setTier(99);
+  assert.equal(trianglesOf(m.root), t3, 'tiers clamp to 3');
+  const house = buildBuildingModel('house', p, '#40a0e0');
+  const th = trianglesOf(house.root);
+  house.setTier(3);
+  assert.equal(trianglesOf(house.root), th, 'setTier is a no-op for other buildings');
+  m.dispose();
+  house.dispose();
+});
+
+test('titan gate has an animated vortex; animate and setBuildingTime are safe everywhere', () => {
+  for (const p of PANTHEON_LIST) {
+    const m = buildBuildingModel('titan_gate', p, '#a040e0');
+    const vortex = meshesOf(m.root).find((o) => o.name === 'building-vortex');
+    assert.ok(vortex, `${p.id}: vortex`);
+    m.animate(0);
+    const r0 = vortex.rotation.z;
+    m.animate(2.5);
+    assert.notEqual(vortex.rotation.z, r0, 'vortex swirls');
+    assert.ok(vortex.scale.x > 0.5 && vortex.scale.y > 0.5);
+    m.setProgress(0.4);
+    assert.equal(vortex.visible, false, 'no portal while building');
+    m.setProgress(1);
+    assert.equal(vortex.visible, true);
+    m.dispose();
+  }
+  for (const [type, tier] of VARIANTS) {
+    const m = buildBuildingModel(type, PANTHEON_LIST[3], '#ffffff', tier);
+    m.animate(1.234);
+    m.dispose();
+  }
+  setBuildingTime(42);
+});
+
+test('dispose detaches the model and keeps shared caches usable', () => {
+  const scene = new THREE.Group();
+  const p = PANTHEON_LIST[4];
+  const m = buildBuildingModel('barracks', p, '#ffaa00');
+  scene.add(m.root);
+  m.setProgress(0.5);
+  m.dispose();
+  assert.equal(m.root.parent, null);
+  const again = buildBuildingModel('barracks', p, '#ffaa00');
+  assert.ok(trianglesOf(again.root) > 100);
+  again.dispose();
+  clearBuildingCaches();
+  const fresh = buildBuildingModel('barracks', p, '#ffaa00');
+  assert.ok(trianglesOf(fresh.root) > 100, 'rebuilds after clearing caches');
+  fresh.dispose();
+});
+
+test('models sit on their origin: foundation below, nothing far underground', () => {
+  for (const [type, tier] of VARIANTS) {
+    const m = buildBuildingModel(type, PANTHEON_LIST[5], '#ffffff', tier);
+    const box = new THREE.Box3().setFromObject(m.root);
+    assert.ok(box.min.y < -0.3 && box.min.y > -1, `${type}: foundation reaches below ground (${box.min.y})`);
+    assert.ok(Math.abs(box.max.y - m.height) < 0.6, `${type}: height ${m.height} matches bounds ${box.max.y}`);
+    m.dispose();
+  }
+});
+
+test('gold mine: 3×3 fit, budget and remaining-gold levels', () => {
+  const info = getGoldMineInfo();
+  assert.equal(info.size, GOLD_MINE.size);
+  assert.ok(info.triangles <= TRI_BUDGET);
+  const mine = buildGoldMineModel();
+  const box = new THREE.Box3().setFromObject(mine.root);
+  const lim = GOLD_MINE.size / 2 - 0.1 + 0.01;
+  assert.ok(Math.max(-box.min.x, box.max.x, -box.min.z, box.max.z) <= lim, 'mine fits its footprint');
+  assert.ok(meshesOf(mine.root).length <= MESH_BUDGET);
+  const gold = meshesOf(mine.root).find((o) => o.name === 'mine-gold');
+  const tri = () => (gold.visible ? trianglesOf(gold, false) : 0);
+  mine.setAmountFraction(1);
+  const full = tri();
+  mine.setAmountFraction(0.5);
+  const half = tri();
+  mine.setAmountFraction(0.05);
+  const low = tri();
+  mine.setAmountFraction(0);
+  assert.equal(tri(), 0, 'no gold left, no veins');
+  assert.ok(full > half && half > low && low > 0, `gold shrinks (${full}/${half}/${low})`);
+  mine.setAmountFraction(NaN);
+  mine.animate(3);
+  mine.dispose();
+});
