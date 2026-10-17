@@ -144,7 +144,7 @@ Gold mines are 3×3 resource entities placed by the map.
 **Effect common fields:** `at: 'target' | 'self'` (center: the target unit/point, or the caster),
 `radius` (0 = only the target unit itself), `affects` (`enemies` default for harmful effects,
 `allies` default for helpful ones; `self` = caster only; `all`), `delay` (seconds, optional),
-`maxTargets` (optional).
+`maxTargets` (optional; keeps the cast's target unit first, then the nearest to the center).
 
 | type | fields | meaning |
 |---|---|---|
@@ -358,7 +358,10 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 
 ### 6.2 Commands (`world.issueCommand(playerIndex, cmd)`)
 All unit ids must belong to `playerIndex`; invalid ids are dropped. `queue: true` appends
-(shift-click) instead of replacing the current order. `issueCommand` copies each command
+(shift-click) instead of replacing the current order, except that an open-ended order at the
+end of the queue (gather, pray, hold, follow) is replaced by the queued one, as with a WC3/SC2
+harvest order, and a Return Cargo there deposits and then runs it instead of resuming
+gathering. `issueCommand` copies each command
 through `normalizeCommand` (src/sim/commands.js): unknown types and malformed objects are
 dropped, `units` becomes ≤ 512 distinct positive integer ids, x/y are clamped to the map, at
 most 256 commands per player per tick are kept. An exception inside one command is caught and

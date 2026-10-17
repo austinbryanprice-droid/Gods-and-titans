@@ -1,6 +1,7 @@
 // Client-side building placement check (DESIGN 5.3), used for the green / red
 // ghost while placing a building. Mirrors the sim's canPlace() with only what
-// the local player knows: the map with felled trees, explored tiles, gold mines,
+// the local player knows: the terrain as seen (trees felled in the fog still
+// stand until seen), explored tiles, gold mines,
 // own / allied buildings, enemy buildings that are visible or remembered, and
 // visible enemy / neutral ground units. Pure: runs in Node tests.
 import { TERRAIN, DROPOFF_MINE_GAP } from '../config.js';
@@ -24,8 +25,12 @@ function distPointRect(px, py, x0, y0, x1, y1) {
 }
 
 /** Footprints that block placement: [{ tx, ty, size, mine }]. */
-function knownFootprints(vs) {
+function knownFootprints(vs, planned) {
   const out = [];
+  for (const p of planned || []) {
+    const def = p && BUILDINGS[p.b];
+    if (def) out.push({ tx: p.tx, ty: p.ty, size: def.size, mine: false });
+  }
   for (const e of vs.entities.values()) {
     if (e.k === 'm') {
       out.push({ tx: e.tx, ty: e.ty, size: GOLD_MINE.size, mine: true });
@@ -52,11 +57,13 @@ function knownFootprints(vs) {
  * @param {string} buildingTypeId
  * @param {number} tx
  * @param {number} ty
+ * @param {{ b: string, tx: number, ty: number }[]} [planned] my own buildings ordered but not placed yet
+ *   (Shift-queued in this placement, workers' pending builds): they block like buildings
  * @returns {{ valid: boolean, tiles: boolean[], size: number, message: string|null }} tiles: size×size
  *   row-major, true = this tile is fine; message: null when valid, TOO_CLOSE_TO_MINE when the mine gap
  *   is the only problem (the sim reports the same text), else CANT_BUILD
  */
-export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
+export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned = null) {
   const def = typeof buildingTypeId === 'string' && Object.hasOwn(BUILDINGS, buildingTypeId) ? BUILDINGS[buildingTypeId] : null;
   if (!def || !Number.isFinite(tx) || !Number.isFinite(ty)) return { valid: false, tiles: [], size: 0, message: CANT_BUILD };
   tx = Math.floor(tx);
@@ -64,6 +71,7 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
   const s = def.size;
   const tiles = new Array(s * s).fill(true);
   const map = vs.map;
+  const terrain = vs.seenTerrain || map.terrain;
   const W = map.width;
   const H = map.height;
 
@@ -75,7 +83,7 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
       let ok = x >= 0 && y >= 0 && x < W && y < H;
       if (ok) {
         const i = y * W + x;
-        ok = WALKABLE.has(map.terrain[i]);
+        ok = WALKABLE.has(terrain[i]);
         if (ok && vs.explored && !vs.revealAll) ok = vs.explored[i] === 1;
       }
       if (!ok) tiles[dy * s + dx] = false;
@@ -86,7 +94,7 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty) {
   const gapped = !!def.dropOff;
   let otherProblem = tiles.some((ok) => !ok);
   let mineProblem = false;
-  for (const f of knownFootprints(vs)) {
+  for (const f of knownFootprints(vs, planned)) {
     const fx1 = f.tx + f.size;
     const fy1 = f.ty + f.size;
     const reach = gapped && f.mine ? MINE_GAP : 0;

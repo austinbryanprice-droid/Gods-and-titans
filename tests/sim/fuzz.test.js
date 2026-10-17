@@ -185,6 +185,8 @@ function fuzzWorld() {
   for (let p = 0; p < 2; p++) {
     const tc = w.buildingsOf(p)[0];
     for (let i = 0; i < 4; i++) spawn(w, p, i % 2 ? 'archer' : 'warrior', tc.x + 3 + i * 0.8, tc.y + 3);
+    // A wounded enemy scout next to the army, so every run has a fight to the death.
+    spawn(w, 1 - p, 'warrior', tc.x + 4, tc.y + 6).hp = 1;
     spawn(w, p, p ? 'norse_thor' : 'greek_zeus', tc.x + 3, tc.y + 4.5);
     spawn(w, p, 'priest', tc.x + 4, tc.y + 4.5);
     w.players[p].gold = 5000;

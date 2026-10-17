@@ -1,14 +1,17 @@
 // Client-side view of the game (DESIGN 7), used identically on the host and
 // on clients: the latest ViewSnapshot plus smooth interpolated positions, the
-// fog of war for my team, last-seen enemy buildings, the map with felled trees
-// removed, and an event bus fed by each snapshot's events. Runs in Node too.
+// fog of war for my team, last-seen enemy buildings and gold mines, the map
+// with felled trees removed (and the terrain as I have seen it, where trees
+// felled out of sight still stand), and an event bus fed by each snapshot's
+// events. Runs in Node too.
 import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
-import { UNITS, BUILDINGS } from '../data/index.js';
+import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
 const HISTORY = 8; // position samples kept per unit
 const SNAP_DIST = 4; // tiles; a jump this big between samples (blink) is not interpolated
 const DEFAULT_SIGHT = 6;
+const CLOCK_WINDOW = 20; // snapshots (~1 s): if all of them came late, the playback clock follows
 const KEEP_KEYS = new Set(['ix', 'iy', 'if']);
 
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -49,10 +52,18 @@ export class ViewState {
     this.width = this.map.width;
     this.height = this.map.height;
     this.mapVersion = 0; // bumped whenever a tree falls
+    // Terrain as I have seen it (minimap, placement ghost, tree orders): a tree felled
+    // out of my sight stays forest here until I see its tile (as the 3D view does).
+    this.seenTerrain = Uint8Array.from(this.map.terrain);
+    this.seenVersion = 0; // bumped whenever seenTerrain changes
+    this.unseenFells = new Set(); // tile indices felled out of sight, still forest in seenTerrain
     this.visible = new Uint8Array(this.width * this.height);
     this.explored = new Uint8Array(this.width * this.height);
     this.entities = new Map();
     this.lastSeen = new Map();
+    // Gold mine id → { x, y, tx, ty, amt }: where it is (mines never move; kept after it
+    // collapses) and its gold when last in sight (the map's starting gold until then).
+    this.mineMemory = new Map();
     this.players = [];
     this.me = null;
     const sp = setup && setup.players && setup.players[myIndex];
@@ -70,6 +81,8 @@ export class ViewState {
     this.listeners = new Map();
     this.hist = new Map(); // unit id → { t, x, y, f: Float64Array(HISTORY), n, head }
     this.clockOffset = null; // local ms − sim ms of the newest snapshot (minimum-latency estimate)
+    this.windowMin = Infinity; // smallest local ms − sim ms in the current CLOCK_WINDOW snapshots
+    this.windowCount = 0;
     this.lastPushMs = 0;
     this.sightCache = new Map();
     this.sources = [];
@@ -173,8 +186,33 @@ export class ViewState {
     return this.footprintVisible(tx, ty, size, e.k === 'm' ? this.explored : this.visible);
   }
 
+  /** Is any of a gold mine's footprint in sight now? */
+  mineInSight(e) {
+    if (this.revealAll) return true;
+    const m = this.mineMemory.get(e.id);
+    return m ? this.footprintVisible(m.tx, m.ty, GOLD_MINE.size) : this.isEntityVisible(e);
+  }
+
+  /** Gold left in a mine as far as I know: live while it is in sight, else as last seen. */
+  mineGold(e) {
+    const m = this.mineMemory.get(e.id);
+    return m ? m.amt : e.amt;
+  }
+
   getEntity(id) {
     return this.entities.get(id) || null;
+  }
+
+  /**
+   * An entity as the local player knows it: the live view while it is own,
+   * allied or in sight; the remembered copy of an enemy building in the fog
+   * (also once it was destroyed out of sight); else null. Snapshots carry the
+   * whole world, so anything shown about others' things should come from here.
+   */
+  knownEntity(id) {
+    const e = this.entities.get(id);
+    if (e && this.isEntityVisible(e)) return e;
+    return this.lastSeen.get(id) || null;
   }
 
   sightOf(e) {
@@ -211,7 +249,7 @@ export class ViewState {
     const felledAll = (extra && extra.felledAll) || snap.felledAll;
     if (felledAll) {
       for (const [tx, ty] of felledAll) {
-        if (this.fellTree(tx, ty)) synthetic.push({ type: 'treeFelled', tx, ty, sync: true });
+        if (this.fellTree(tx, ty, true)) synthetic.push({ type: 'treeFelled', tx, ty, sync: true });
       }
     }
     if (snap.felled) {
@@ -221,10 +259,18 @@ export class ViewState {
     }
 
     // Playback clock: sim time is mapped to local time with the smallest observed latency.
+    // A late snapshot (jitter) barely moves it; when every snapshot of the last second came
+    // late (the sim paused or stalled, latency went up), it moves to the smallest of them.
     const simMs = (snap.time || 0) * 1000;
     const target = now - simMs;
     if (this.clockOffset === null || Math.abs(target - this.clockOffset) > 1000 || target < this.clockOffset) this.clockOffset = target;
     else this.clockOffset += Math.min(target - this.clockOffset, 2);
+    this.windowMin = Math.min(this.windowMin, target);
+    if (++this.windowCount >= CLOCK_WINDOW) {
+      if (this.windowMin > this.clockOffset) this.clockOffset = this.windowMin;
+      this.windowMin = Infinity;
+      this.windowCount = 0;
+    }
     this.lastPushMs = now;
 
     // Entities: keep one persistent view object per id.
@@ -274,10 +320,19 @@ export class ViewState {
 
     this.updateVisibility();
     this.updateLastSeen();
+    this.updateMines();
+    this.updateSeenTerrain();
 
     for (const ev of synthetic) this.fire(ev);
     for (const ev of events) this.fire(ev);
     this.emit('snapshot', snap);
+  }
+
+  /** Re-anchor the playback clock on the next snapshot (after a pause: sim time stood still). */
+  resetClock() {
+    this.clockOffset = null;
+    this.windowMin = Infinity;
+    this.windowCount = 0;
   }
 
   fire(ev) {
@@ -285,8 +340,12 @@ export class ViewState {
     this.emit('*', ev);
   }
 
-  /** Turn a forest tile into grass. Returns true if it was still a tree. */
-  fellTree(tx, ty) {
+  /**
+   * Turn a forest tile into grass. Returns true if it was still a tree.
+   * In seenTerrain it falls once its tile is in sight (sync: at once, for trees
+   * felled before a full snapshot, which the 3D view removes at once too).
+   */
+  fellTree(tx, ty, sync = false) {
     if (tx < 0 || ty < 0 || tx >= this.width || ty >= this.height) return false;
     const i = ty * this.width + tx;
     if (this.map.terrain[i] !== TERRAIN.FOREST && this.map.wood[i] === 0) return false;
@@ -296,8 +355,24 @@ export class ViewState {
     if (wasTree) {
       this.felledAll.push([tx, ty]);
       this.mapVersion++;
+      this.unseenFells.add(i);
+      if (sync) this.seeTile(i);
     }
     return wasTree;
+  }
+
+  seeTile(i) {
+    this.unseenFells.delete(i);
+    if (this.seenTerrain[i] !== this.map.terrain[i]) {
+      this.seenTerrain[i] = this.map.terrain[i];
+      this.seenVersion++;
+    }
+  }
+
+  /** Trees felled out of sight fall in seenTerrain once their tiles are in sight. */
+  updateSeenTerrain() {
+    if (!this.unseenFells.size) return;
+    for (const i of this.unseenFells) if (this.visible[i] === 1) this.seeTile(i);
   }
 
   updateVisibility() {
@@ -328,6 +403,22 @@ export class ViewState {
       const size = (BUILDINGS[ls.t] && BUILDINGS[ls.t].size) || 2;
       // Forget a remembered building once we can see that it is gone (or no longer an enemy's).
       if ((!cur || !this.isEnemy(cur.o)) && this.footprintVisible(ls.tx, ls.ty, size)) this.lastSeen.delete(id);
+    }
+  }
+
+  /** Remember where each gold mine is, and its gold while it is in sight. */
+  updateMines() {
+    for (const v of this.entities.values()) {
+      if (v.k !== 'm') continue;
+      let m = this.mineMemory.get(v.id);
+      if (!m) {
+        const tx = v.tx ?? Math.floor(v.x - GOLD_MINE.size / 2);
+        const ty = v.ty ?? Math.floor(v.y - GOLD_MINE.size / 2);
+        const start = (this.map.mines || []).find((mm) => mm.tx === tx && mm.ty === ty);
+        m = { x: v.x, y: v.y, tx, ty, amt: start ? start.amount : v.amt };
+        this.mineMemory.set(v.id, m);
+      }
+      if (this.revealAll || this.footprintVisible(m.tx, m.ty, GOLD_MINE.size)) m.amt = v.amt;
     }
   }
 

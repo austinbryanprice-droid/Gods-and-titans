@@ -275,3 +275,25 @@ test('GameRenderer: hundreds of units stay cheap, dispose empties the scene', ()
   r.render();
   assert.equal(vs.listeners.get('*').size, 0, 'view-state listener removed');
 });
+
+test('GameRenderer: resize picks up a new devicePixelRatio (capped by quality); shadows use PCF', async () => {
+  const THREE = await import('three');
+  const had = 'window' in globalThis;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    for (const [quality, cap] of [['low', 1], ['medium', 1.5], ['high', 2]]) {
+      const { r, webgl } = makeMatch({ quality });
+      assert.equal(webgl.pixelRatio, 1);
+      assert.equal(webgl.shadowMap.type, THREE.PCFShadowMap, 'PCFSoftShadowMap is gone from three');
+      globalThis.window.devicePixelRatio = 2; // browser zoom, or the window moved to a HiDPI screen
+      r.resize(W, H);
+      assert.equal(webgl.pixelRatio, Math.min(2, cap), quality);
+      globalThis.window.devicePixelRatio = 1;
+      r.resize(W, H);
+      assert.equal(webgl.pixelRatio, 1);
+      r.dispose();
+    }
+  } finally {
+    if (!had) delete globalThis.window;
+  }
+});

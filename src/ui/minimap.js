@@ -113,10 +113,11 @@ export class Minimap {
     if (this.pings.length > 8) this.pings.shift();
   }
 
-  /** Paint the terrain layer from the view's map (felled trees are grass). */
+  /** Paint the terrain layer as I have seen it (felled trees are grass once seen). */
   paintTerrain() {
     const { W, H } = this;
     const map = this.vs.map;
+    const terrain = this.vs.seenTerrain || map.terrain;
     const heights = map.heights;
     const ctx = this.terrain.getContext('2d');
     const img = ctx.createImageData(W, H);
@@ -124,7 +125,7 @@ export class Minimap {
     for (let ty = 0; ty < H; ty++) {
       for (let tx = 0; tx < W; tx++) {
         const i = ty * W + tx;
-        const t = map.terrain[i];
+        const t = terrain[i];
         const base = BASE[t] || BASE[TERRAIN.GRASS];
         let shade = 1;
         if (heights && heights.length === (W + 1) * (H + 1)) {
@@ -140,7 +141,7 @@ export class Minimap {
       }
     }
     ctx.putImageData(img, 0, 0);
-    this.terrainVersion = this.vs.mapVersion;
+    this.terrainVersion = this.vs.seenVersion;
   }
 
   /** Fog image: unexplored dark, explored-but-unseen dimmed, visible clear. */
@@ -250,7 +251,7 @@ export class Minimap {
       this.needsFit = false;
       this.fit();
     }
-    if (this.vs.mapVersion !== this.terrainVersion && now - this.lastTerrain > TERRAIN_REPAINT_MS) {
+    if (this.vs.seenVersion !== this.terrainVersion && now - this.lastTerrain > TERRAIN_REPAINT_MS) {
       this.lastTerrain = now;
       this.paintTerrain();
       this.lastDraw = -Infinity;

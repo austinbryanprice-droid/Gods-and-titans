@@ -41,11 +41,11 @@ export class Selection {
     return this.ids.includes(id);
   }
 
-  /** Living view entities of the selection, in order. */
+  /** View entities of the selection as I know them (a fogged enemy building is its remembered copy), in order. */
   entities() {
     const out = [];
     for (const id of this.ids) {
-      const e = this.vs.entities.get(id);
+      const e = this.vs.knownEntity(id);
       if (e) out.push(e);
     }
     return out;
@@ -55,7 +55,7 @@ export class Selection {
   primary() {
     const g = this.activeGroup();
     const id = g ? g.ids[0] : this.ids[0];
-    return id !== undefined ? this.vs.entities.get(id) || null : null;
+    return id !== undefined ? this.vs.knownEntity(id) : null;
   }
 
   /** True if the selection holds the local player's own things. */
@@ -130,7 +130,7 @@ export class Selection {
     for (const id of ids) {
       if (seen.has(id)) continue;
       seen.add(id);
-      const e = vs.entities.get(id);
+      const e = vs.knownEntity(id);
       if (e) list.push(e);
     }
     let next;
@@ -190,22 +190,17 @@ export class Selection {
 
   /**
    * Drop entities that died, changed owner, or (foreign ones) went into the fog.
-   * Cheap enough to call every frame.
+   * Remembered enemy buildings stay selected until seen gone, even when they
+   * were destroyed in the fog. Cheap enough to call every frame.
    */
   prune() {
     if (!this.ids.length) return;
     const vs = this.vs;
     let keep = null;
     for (let i = 0; i < this.ids.length; i++) {
-      const id = this.ids[i];
-      const e = vs.entities.get(id);
-      let ok = !!e;
-      if (ok && e.o !== vs.myIndex) {
-        // Remembered enemy buildings stay selectable for info until seen gone.
-        ok = vs.isEntityVisible(e) || (e.k === 'b' && vs.lastSeen && vs.lastSeen.has(id));
-      }
+      const ok = !!vs.knownEntity(this.ids[i]);
       if (!ok && !keep) keep = this.ids.slice(0, i);
-      else if (ok && keep) keep.push(id);
+      else if (ok && keep) keep.push(this.ids[i]);
     }
     if (keep) {
       this.ids = keep;

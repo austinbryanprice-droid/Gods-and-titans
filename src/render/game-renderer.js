@@ -119,7 +119,7 @@ export class GameRenderer {
     this.renderer = webgl || new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance', stencil: false });
     this.renderer.setClearColor(0x050605, 1);
     this.renderer.shadowMap.enabled = Q.shadows;
-    this.renderer.shadowMap.type = this.quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // (three r186 dropped PCFSoftShadowMap)
     this.renderer.shadowMap.autoUpdate = true;
     this.applyPixelRatio();
 
@@ -199,6 +199,7 @@ export class GameRenderer {
     this.lastHit = new Map(); // dst id → time of the last hit spark
     this.pendingHits = []; // delayed melee sparks
     this.pendingFell = new Map(); // tile index → [tx, ty] felled out of sight
+    this.plannedBuilds = [];
     this.fieldShown = new Set(); // ground-zone ids that have a visual
     this.recentZones = []; // lasting effects spawned from events: { x, y, t }
     this.events = [];
@@ -369,24 +370,27 @@ export class GameRenderer {
 
   // ------------------------------------------------------------------ public API
 
-  /** Resize the drawing buffer to w × h CSS pixels. */
+  /** Resize the drawing buffer to w × h CSS pixels (at the current devicePixelRatio, capped by quality). */
   resize(w, h) {
     this.viewW = Math.max(1, Math.floor(w));
     this.viewH = Math.max(1, Math.floor(h));
+    this.applyPixelRatio(); // browser zoom or another screen changes devicePixelRatio
     this.renderer.setSize(this.viewW, this.viewH, !!(this.canvas && this.canvas.style));
     this.camera.setViewport(this.viewW, this.viewH);
   }
 
-  /** Change quality live (pixel ratio, shadows, VFX density). Antialiasing stays as created. */
+  /**
+   * Change quality live (pixel ratio, shadows, VFX density). Antialiasing stays as
+   * created (a context's attributes are fixed): it applies from the next match,
+   * which draws on a fresh canvas (Game).
+   */
   setQuality(q) {
     if (!QUALITY[q] || q === this.quality) return;
     this.quality = q;
     const Q = QUALITY[q];
-    this.applyPixelRatio();
     this.resize(this.viewW, this.viewH);
     const was = this.renderer.shadowMap.enabled;
     this.renderer.shadowMap.enabled = Q.shadows;
-    this.renderer.shadowMap.type = q === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.sun.castShadow = Q.shadows;
     if (Q.shadows) {
       this.sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize);
@@ -415,6 +419,11 @@ export class GameRenderer {
 
   setHover(id) {
     this.hoverId = id || null;
+  }
+
+  /** Builds ordered in the current Shift placement ([{ b, tx, ty }]), drawn like pending orders. */
+  setPlannedBuilds(list) {
+    this.plannedBuilds = list ? list.slice() : [];
   }
 
   setShowAllBars(on) {
@@ -632,6 +641,11 @@ export class GameRenderer {
             opts.follow = (out) => {
               const e = this.vs.entities.get(fid);
               if (!e) return false;
+              // Snapshots carry every unit: never track one into the fog.
+              if (!this.vs.isEntityVisible(e)) {
+                out.hidden = true;
+                return false;
+              }
               out.x = e.ix ?? e.x;
               out.y = e.iy ?? e.y;
               return true;
@@ -834,10 +848,11 @@ export class GameRenderer {
         }
       }
     }
-    // pending build orders of my workers
+    // pending build orders of my workers (and the ones Shift-queued in the current placement)
     const orders = this._orders || (this._orders = []);
     orders.length = 0;
     for (const e of vs.entities.values()) if (e.k === 'u' && e.bo && e.o === vs.myIndex) orders.push(e.bo);
+    for (const bo of this.plannedBuilds) orders.push(bo);
     this.placement.setOrders(orders);
     // forget stale bookkeeping
     if (this.frame % 4 === 0) {
@@ -1184,9 +1199,10 @@ export class GameRenderer {
       }
       m.tag = tag;
       m.e = e;
-      if (e.amt !== m.amt) {
-        m.amt = e.amt;
-        m.model.setAmountFraction((e.amt || 0) / m.initial);
+      const amt = vs.mineGold(e); // as last seen while fogged
+      if (amt !== m.amt) {
+        m.amt = amt;
+        m.model.setAmountFraction((amt || 0) / m.initial);
       }
     }
     for (const m of this.mines.values()) {
@@ -1632,6 +1648,10 @@ export class GameRenderer {
     if (this.ownsWebgl) {
       this.renderer.renderLists.dispose();
       this.renderer.dispose();
+      // Free the GPU context now (each match gets a fresh canvas and context).
+      const gl = this.renderer.getContext();
+      const lose = gl && gl.getExtension && gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
     }
     this.events.length = 0;
     this.pendingHits.length = 0;

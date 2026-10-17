@@ -216,3 +216,52 @@ test('start needs two teams and connected humans', async () => {
   assert.equal(host.canStart(), false);
   host.close();
 });
+
+test('lobby caps connections waiting to say HELLO; joined players still join, leave and rejoin', async () => {
+  const { joinRoom } = await import('../../src/net/transport.js');
+  const { MSG, REASONS } = await import('../../src/net/protocol.js');
+  const { MAX_WAITING_MEMBERS } = await import('../../src/net/lobby.js');
+  const host = await LobbyHost.create({ transport: 'loopback', name: 'Host' });
+
+  // Connections that open but never say HELLO (what a connection-flood looks like).
+  const waiters = [];
+  for (let i = 0; i < MAX_WAITING_MEMBERS; i++) {
+    waiters.push(await joinRoom({ transport: 'loopback', roomCode: host.roomCode }));
+  }
+  await waitFor(() => host.members.size === MAX_WAITING_MEMBERS, 2000, 'waiters accepted');
+
+  // One more is turned away at once with BUSY and becomes no member (no timer / limiters held).
+  const extra = await joinRoom({ transport: 'loopback', roomCode: host.roomCode });
+  const extraMsgs = [];
+  let extraClosed = false;
+  extra.onMessage((m) => extraMsgs.push(m));
+  extra.onClose(() => { extraClosed = true; });
+  await waitFor(() => extraMsgs.some((m) => m.t === MSG.KICK && m.reason === REASONS.BUSY), 2000, 'busy kick');
+  await waitFor(() => extraClosed, 2000, 'extra closed');
+  assert.equal(host.members.size, MAX_WAITING_MEMBERS, 'the refused connection held no member');
+
+  // A waiting connection can still complete HELLO and take the open slot.
+  waiters[0].send({ t: MSG.HELLO, name: 'Joe', version: host.version });
+  await waitFor(() => host.state.slots[1].kind === 'human' && host.state.slots[1].name === 'Joe', 2000, 'Joe joined');
+  assert.ok(host.members.size <= MAX_WAITING_MEMBERS + 1);
+
+  // With a member now joined, the waiting count dropped, so a fresh connection is accepted again.
+  const after = await joinRoom({ transport: 'loopback', roomCode: host.roomCode });
+  const afterMsgs = [];
+  after.onMessage((m) => afterMsgs.push(m));
+  await sleep(30);
+  assert.ok(!afterMsgs.some((m) => m.t === MSG.KICK && m.reason === REASONS.BUSY), 'a new connection is not refused as busy');
+
+  // Free the idle connections, then the joined player leaves: the slot opens and
+  // a fresh client can rejoin it (the cap never blocks a legitimate flow).
+  for (const w of waiters.slice(1)) w.close();
+  extra.close();
+  after.close();
+  await waitFor(() => host.members.size <= 1, 2000, 'idle connections cleared');
+  waiters[0].close();
+  await waitFor(() => host.state.slots[1].kind === 'open', 2000, 'slot freed on leave');
+  const rejoin = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Joe2' });
+  assert.equal(rejoin.mySlot, 1, 'a player can rejoin the freed slot');
+  rejoin.leave();
+  host.close();
+});

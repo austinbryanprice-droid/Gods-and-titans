@@ -141,7 +141,7 @@ export class Overlays {
     }
     let quitHint = 'Return to the main menu.';
     if (!over) {
-      if (game.session && game.session.isHost && game.session.clients && game.session.clients.size) quitHint = 'The game ends for every player.';
+      if (this.hostingOthers()) quitHint = 'The game ends for every player.';
       else if (game.session && !game.session.isHost) quitHint = 'An AI will take over your army.';
       else quitHint = 'The battle will be lost.';
     }
@@ -164,6 +164,12 @@ export class Overlays {
     this.current.onHide = () => game.setPaused(false);
     setTimeout(() => resume.focus({ preventScroll: true }), 0);
     return wrap;
+  }
+
+  /** True on a host with other players connected: the game runs here, so leaving ends it for them. */
+  hostingOthers() {
+    const s = this.game.session;
+    return !!(s && s.isHost && s.clients && s.clients.size);
   }
 
   closeMenu() {
@@ -228,16 +234,25 @@ export class Overlays {
     this.show('gameover', node, () => this.hide());
   }
 
-  /** The local player lost but the game goes on (allies still fighting). */
+  /** The local player lost but the game goes on (allies or other players still fighting). */
   showDefeated() {
     this.defeatShown = true;
+    const vs = this.game.viewState;
+    const allies = (vs.players || []).some((p) => p.i !== vs.myIndex && !p.defeated && p.team === vs.myTeam);
+    // On a host the game itself runs on this page: leaving it ends the game for everyone else.
+    const hosting = this.hostingOthers();
+    const leave = () => {
+      if (!this.hostingOthers()) return this.game.quitToMenu();
+      this.confirm('Quit to Menu?', 'The game ends for every player.', 'Quit', () => this.game.quitToMenu(), () => this.showDefeated());
+    };
     const node = el('div', 'mw-panel hud-opanel hud-gameover is-defeat',
       el('div', 'hud-go-crest', '💀'),
       el('h2', 'mw-h2 hud-go-title', 'Defeat'),
-      el('div', 'hud-osub', 'You have been defeated. Your allies fight on.'),
+      el('div', 'hud-osub', allies ? 'You have been defeated. Your allies fight on.' : 'You have been defeated. The battle goes on without you.'),
+      hosting ? el('p', 'hud-otext', 'You are the host: leaving ends the game for every player.') : null,
       el('div', 'hud-obtns',
         btn('Keep Watching', 'mw-btn--primary', () => this.hide()),
-        btn('Return to Menu', 'mw-btn--ghost', () => this.game.quitToMenu())));
+        btn('Return to Menu', 'mw-btn--ghost', leave)));
     this.show('defeated', node, () => this.hide());
   }
 

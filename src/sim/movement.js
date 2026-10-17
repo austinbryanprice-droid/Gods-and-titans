@@ -121,7 +121,12 @@ function approachPoint(u, rect) {
  */
 export function moveToRect(world, u, tx, ty, size, key) {
   const cur = u.mv;
-  if (cur && cur.kind === 'rect' && cur.key === key) return cur;
+  if (cur && cur.kind === 'rect' && cur.key === key) {
+    // An arrival only stands while the unit is still next to the footprint
+    // (it may have been pushed away since): otherwise walk there again.
+    const r = cur.rect;
+    if (!cur.arrived || cur.failed || distPointRect(u.x, u.y, r.x0, r.y0, r.x1, r.y1) <= u.radius + 0.15) return cur;
+  }
   const m = newMv(world, u, 'rect');
   m.key = key;
   m.rect = { x0: tx, y0: ty, x1: tx + size, y1: ty + size };

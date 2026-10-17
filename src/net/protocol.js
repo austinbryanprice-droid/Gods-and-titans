@@ -53,6 +53,7 @@ export const FRAME_BYE = 'b';
 /** Kick / end reasons shown to players. */
 export const REASONS = {
   FULL: 'The game is full.',
+  BUSY: 'The host is busy with other connections. Try again in a moment.',
   STARTED: 'The game has already started.',
   HOST_CLOSED: 'The host closed the lobby.',
   REMOVED: 'You were removed from the lobby by the host.',
