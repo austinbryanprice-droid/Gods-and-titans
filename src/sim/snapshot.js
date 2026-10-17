@@ -33,6 +33,9 @@ function unitView(u) {
     const b = pendingBuild(u);
     if (b) v.bo = { b: b.b, tx: b.tx, ty: b.ty };
   }
+  // waiting its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
+  const o = u.order;
+  if (o && o.type === 'gather' && o.phase === 'wait') v.mw = 1;
   return v;
 }
 

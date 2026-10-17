@@ -133,7 +133,7 @@ function givePray(world, u, b, queue, state) {
   if (u.order && u.order.type === 'pray' && u.order.building === b.id && !queue) return true;
   const slot = reservePrayerSlot(world, b, u);
   if (slot < 0) {
-    if (!state.fullReported) world.error(u.owner, 'This shrine is full.');
+    if (!state.fullReported) world.error(u.owner, `This ${(b.def && b.def.name) || 'shrine'} is full.`);
     state.fullReported = true;
     return false;
   }
@@ -221,7 +221,7 @@ function castCommand(world, player, cmd) {
   if (!u || u.dead || u.kind !== 'unit' || u.owner !== player) return;
   const ab = findAbility(u, cmd.ability);
   if (!ab) return;
-  if (!isUnlocked(u, ab)) return world.error(player, 'That god is not unlocked yet.');
+  if (!isUnlocked(u, ab)) return world.error(player, `That ability unlocks at level ${ab.unlockLevel || 1}.`);
   if (cooldownLeft(u, ab) > 0 && !cmd.queue) return world.error(player, 'That ability is not ready.');
   const tgt = resolveCastTarget(world, u, ab, cmd.x, cmd.y, cmd.target);
   if (!tgt) return;

@@ -295,7 +295,8 @@ class UnitModel {
     // animation state
     this.seed = ((seedCounter++ * 2654435761) % 1000) / 1000 * 6.283;
     this.target = {};
-    this.cur = {};
+    this.cur = null; // current (blended) pose, created on the first frame (unit-anim.js blendPose)
+    this.blendFns = null;
     this.walkPhase = this.seed;
     this.wavePhase = this.seed;
     this.wheelAngle = 0;

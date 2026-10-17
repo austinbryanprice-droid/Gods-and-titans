@@ -129,7 +129,7 @@ test('faith accrues from praying worshippers; shrine full error', () => {
   w.events.length = 0;
   w.issueCommand(0, { type: 'smart', units: [ws[5].id], target: shrine.id, x: shrine.x, y: shrine.y });
   w.tick();
-  assert.deepEqual(errorsOf(w.events), ['This shrine is full.']);
+  assert.deepEqual(errorsOf(w.events), ['This Shrine is full.']);
   // Praying continues until another order; a new order frees the slot.
   w.issueCommand(0, { type: 'move', units: [ws[0].id], x: 20, y: 20 });
   w.tick();
@@ -141,6 +141,21 @@ test('faith accrues from praying worshippers; shrine full error', () => {
   const snap = w.getSnapshot();
   const view = snap.entities.find((e) => e.id === shrine.id);
   assert.equal(typeof view.pr, 'number');
+});
+
+test('a full Temple is named in the error', () => {
+  const w = makeWorld();
+  place(w, 0, 'shrine', 20, 20);
+  const temple = place(w, 0, 'temple', 12, 12);
+  const ws = [...workers(w)];
+  ws.push(spawn(w, 0, 'worshipper', 12, 17));
+  assert.equal(ws.length, 6);
+  w.issueCommand(0, { type: 'pray', units: ws.slice(0, 5).map((u) => u.id), target: temple.id });
+  w.tick();
+  w.events.length = 0;
+  w.issueCommand(0, { type: 'pray', units: [ws[5].id], target: temple.id });
+  w.tick();
+  assert.deepEqual(errorsOf(w.events), ['This Temple is full.']);
 });
 
 test('temple prays at 0.7 faith/s per worshipper', () => {
@@ -282,9 +297,14 @@ test('gold: a miner that leaves frees its slot for the next waiter; mn in the sn
   assert.equal(view().mn, 2);
   const waiter = ws.find((u) => u.order.phase === 'wait');
   const miner = ws.find((u) => u.order.phase === 'work');
+  // unit key mw: 1 only while waiting its turn
+  const uview = (u) => w.getSnapshot().entities.find((e) => e.id === u.id);
+  assert.equal(uview(waiter).mw, 1);
+  assert.ok(!('mw' in uview(miner)));
   w.issueCommand(0, { type: 'move', units: [miner.id], x: 30, y: 30 });
   run(w, 0.15);
   assert.equal(waiter.order.phase, 'work');
+  assert.ok(!('mw' in uview(waiter)));
   assert.equal(activeMiners(w, mine), 2);
   // Killing a miner frees its slot too.
   w.killEntity(waiter, null);

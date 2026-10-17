@@ -251,8 +251,9 @@ Pop used = pop of living units + pop of everything queued in production.
   footprint, the free one nearest its drop-off, kept for the whole order), mines `MINE_TIME`
   (1.5 s), carries `CARRY_AMOUNT` (10) to the nearest completed drop-off (Town Center or
   Storehouse), repeats. At most `MINE_SLOTS` (2) workers mine a mine at once (any owner);
-  the others wait at their spot (state `gather`) and take a freed slot first come, first
-  served. One mine therefore yields at most `MINE_SLOTS × 10 / MINE_TIME` ≈ 13.3 gold/s:
+  the others wait at their spot (state `gather`, view key `mw: 1`) and take a freed slot
+  first come, first served. One mine therefore yields at most
+  `MINE_SLOTS × 10 / MINE_TIME` ≈ 13.3 gold/s:
   about 3 gold/s per worker at a start mine, saturated by 5–6 workers. A mine at 0 is
   removed (`resourceDepleted` event); its workers move to the nearest mine within 16 tiles.
 - **Wood:** each forest tile holds `TREE_WOOD` (50). A worker stands next to a tree and chops
@@ -260,7 +261,8 @@ Pop used = pop of living units + pop of everything queued in production.
   nearest other tree. A depleted tree tile becomes grass (`treeFelled` event) and is passable.
 - **Faith:** a worshipper ordered to pray at a completed Shrine/Temple (smart-click or Pray)
   walks to it and kneels next to it while slots are free (`prayerSlots`), generating
-  `faithRate` faith/s (Shrine 0.5, Temple 0.7). If full → error "This shrine is full".
+  `faithRate` faith/s (Shrine 0.5, Temple 0.7). If full → error `This Shrine is full.` /
+  `This Temple is full.` (the building's name).
   Praying continues until another order.
 - Gathering/returning workers do not collide with other units (they pass through).
 
@@ -301,6 +303,18 @@ Pop used = pop of living units + pop of everything queued in production.
 - Auto-acquire: idle and attack-moving non-worker units attack enemies within acquisition
   range `max(sight × 0.75, range + 1)`. Priority: closest enemy unit that can attack, then
   other units, then buildings. Hold position: attack only what is in range, never move.
+- **Melee surround** (`src/sim/surround.js`): a ground melee attacker within `SURROUND_DIST`
+  (7) of its target's edge claims its own free spot on a ring around it (radius rT + rU +
+  0.25 for units; a rounded rectangle at rU + 0.25 around a building's footprint). Standing
+  units and other attackers' claims block arcs; the attacker walks around the ring to its spot
+  instead of pushing through the crowd, re-checks it every 12 ticks, and marks a spot bad for
+  3 s when it makes no progress. With no free spot it waits outside the crowd (counts as blocked).
+- **Re-targeting** (attack-move and auto-acquired attacks, on their scan tick): after
+  `RETARGET_TICKS` (1 s) approaching, switch to an enemy already in range of the same or better
+  priority; after 1 s blocked, switch to any enemy in range or the nearest reachable one. An
+  unreachable target is skipped for 2 s on attack-move. Explicit `attack` orders keep their
+  target. Melee acquisition keeps the category priority but, within the best category, takes
+  the one of the 4 closest with the cheapest free spot; surrounded targets are skipped.
 - Units with `canHitAir: false` cannot target air units. Air units ignore terrain and do not
   collide with ground units.
 - When a unit is attacked while idle, it fights back (workers too, unless gathering/praying).
@@ -344,7 +358,11 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 
 ### 6.2 Commands (`world.issueCommand(playerIndex, cmd)`)
 All unit ids must belong to `playerIndex`; invalid ids are dropped. `queue: true` appends
-(shift-click) instead of replacing the current order.
+(shift-click) instead of replacing the current order. `issueCommand` copies each command
+through `normalizeCommand` (src/sim/commands.js): unknown types and malformed objects are
+dropped, `units` becomes ≤ 512 distinct positive integer ids, x/y are clamped to the map, at
+most 256 commands per player per tick are kept. An exception inside one command is caught and
+counted in `world.perf.commandErrors`.
 ```js
 { type: 'move',       units: [ids], x, y, queue }
 { type: 'attackMove', units, x, y, queue }
@@ -372,11 +390,12 @@ Units that cannot do the resolved action just move.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
-`Can't build there.` `Requires Town.` `Requires City.` `Requires a Shrine.` `Requires a Temple.`
-`Production queue is full.` `You already have that god.` `You can only have 3 gods.`
+`Can't build there.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
+`Requires a <Building>.` (e.g. `Requires a Shrine.`) `Production queue is full.`
+`The Town Center is growing.` `You already have that god.` `You can only have 3 gods.`
 `Your next god requires Town.` `Your next god requires City.` `You already have a Titan.`
-`That ability is not ready.` `Target out of range.` `This shrine is full.`
-`That god is not unlocked yet.` (ability above level)
+`That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
+`Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
 
 ### 6.3 ViewSnapshot (`world.getSnapshot()`)
 Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to integers.
@@ -388,6 +407,7 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
               stats: { gathered, unitsTrained, kills, losses, buildings } }],
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
+  reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
   gameOver: null | { winningTeam },
@@ -407,6 +427,7 @@ EntityView = {
   fx,             // status codes: subset of ['stun','slow','shield','invuln','buff','debuff','dot']
   ex,             // seconds until a summoned minion expires (omitted if permanent)
   bo,             // pending build order for workers: { b: typeId, tx, ty } (omitted otherwise)
+  mw,             // 1 while a worker waits its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
   // buildings:
   tx, ty,         // footprint top-left tile
   bp,             // build progress 0..1 (1 = complete)
@@ -426,7 +447,9 @@ EntityView = {
 { type: 'hit',     dst, amount, src }
 { type: 'death',   id, t, o, x, y, k }                               // k: 'u' | 'b'
 { type: 'cast',    src, ability, x, y, target }
-{ type: 'effect',  el, shape, x, y, r, fx?, fy?, points?, duration } // VFX request; points for chain
+{ type: 'effect',  el, shape, x, y, r, fx?, fy?, points?, duration, src, ability, delay? }
+                   // VFX request; fx/fy for lines, points for chains, delay (s) when > 0
+{ type: 'bounty',  player, amount, x, y }                            // creep-kill gold
 { type: 'spawn',   id, t, o }                                        // unit trained/summoned/revived
 { type: 'construction', id, t, o }                                   // building placed
 { type: 'buildingComplete', id, t, o }
@@ -449,6 +472,7 @@ EntityView = {
 `world.tickCount`, `world.time`, `world.rng`, `world.getEntity(id)`, `world.unitsOf(i)`,
 `world.buildingsOf(i)`, `world.queryRadius(x, y, r, filter)`, `world.areEnemies(a, b)`
 (owner indices), `world.canPlaceBuilding(i, typeId, tx, ty)`,
+`world.placementError(i, typeId, tx, ty)` → `"Can't build there." | "Too close to a gold mine." | null`,
 `world.findPlacement(i, typeId, nearX, nearY, maxR)` → `{tx, ty} | null`,
 `world.canAfford(i, cost)`, `world.hasBuilding(i, typeId, completedOnly = true)`,
 `world.isGameOver()`, `world.winningTeam`.
@@ -482,19 +506,51 @@ tx, ty, size, amount`.
 - Transports (`src/net/transport.js`) share one connection interface:
   `conn = { id, send(msg), onMessage(cb), onClose(cb), close() }`.
   - `peer` (PeerJS): host peer id = `PEER_ID_PREFIX + roomCode`; room code = 5 chars from
-    `ROOM_CODE_ALPHABET`, regenerated if the id is taken. ICE: Google + Cloudflare STUN.
-    Server overridable by URL params `?peerHost=&peerPort=&peerPath=&peerSecure=0|1` (tests use
-    a local `peer` server). Optional TURN via `?turn=turn:host:port&turnUser=&turnPass=`.
-  - `local` (BroadcastChannel `mythicwar-<code>`): two tabs in one browser (testing).
+    `ROOM_CODE_ALPHABET`, regenerated if the id is taken. Default broker: the public PeerJS
+    cloud (0.peerjs.com:443, path '/', secure) with ICE = Google + Cloudflare STUN + the PeerJS
+    public TURN (eu-0/us-0.turn.peerjs.com:3478). URL params: `?turn=url1,url2&turnUser=&turnPass=`
+    adds a TURN server, `?relay=1` forces relay-only ICE, `?peerHost=&peerPort=&peerPath=&peerSecure=0|1`
+    selects a self-hosted broker (then no PeerJS TURN; tests use a local `peer` server).
+    Invite links carry these params.
+  - `local` (BroadcastChannel `mythicwar-<code>`, `?transport=local`): two tabs in one browser (testing).
   - `loopback` (in-memory pair) for Node tests.
+  - Join errors (`PEER_MESSAGES`, transport.js): broker unreachable within `JOIN_TIMEOUT_MS`
+    (15 s) → "Couldn't reach the matchmaking server (host). Check your internet connection and
+    try again."; data channel not open within `CONNECT_TIMEOUT_MS` (15 s), ICE failed or channel
+    error → "Couldn't connect to the host. You may be behind a strict firewall; try another
+    network."; unknown room → "Room X was not found. Check the code and that the host is still
+    in the lobby."
+- **Frames and liveness** (protocol.js, transport.js): JSON frames, large messages split into
+  chunk frames `~id,index,count|payload` (`CHUNK_SIZE` 16000, at most 64 KB each), heartbeat
+  `h` every 2 s when idle, `b` on a clean close. Silence is counted in time the page actually
+  ran: each heartbeat pulse adds at most `MAX_PULSE_GAP_MS` (1 s), any received frame resets it,
+  so a main-thread stall or background tab never times a peer out before its queued messages
+  are read. Timeout: `TIMEOUT_MS` 15 s in the lobby, `GAME_TIMEOUT_MS` 30 s in game
+  (`conn.setTimeoutMs`, sessions' `connTimeoutMs`).
+- **Untrusted input**: a reassembled message may be at most 1 MB from a client and 32 MB from
+  the host; more than 100 malformed frames in 10 s closes with 'protocol-error'. Token buckets
+  per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `resync` at most one
+  per second (deferred); in the lobby `lobby` patches 5/10, `chat` 1/5, `ping` 4/8, one `hello`.
+  The host rebuilds every client command from a whitelist (src/net/sanitize.js: 17 types, typed
+  fields, unit lists deduped and capped at 256, coordinates clamped, type ids own keys of the
+  data tables, `player` never from the client). Names ≤ 20 and chat ≤ 200 code points with
+  control/bidi characters stripped. Clients validate what the host sends: lobby states, the
+  GameSetup (else kicked with "invalid game setup"), snapshots (`isValidSnapshot`), deltas
+  (apply failure → `resync`), chat, and end/kick reasons (≤ 300 chars, else 'host-quit').
 - Messages are JSON objects with `t`:
   - client→host: `hello {name, version}`, `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
     `delta {d}`, `chat {from, text}`, `pong {ts}`, `kick {reason}`, `end {reason}`
-- Delta codec (`src/net/delta.js`): host keeps the last snapshot sent to each client and
-  sends only changed EntityView fields, new entities in full, removed ids, players when
-  changed, all events and felled trees. Client reconstructs the full ViewSnapshot. Order is
-  guaranteed (reliable channel). `resync` → host sends `full` (also includes `felledAll`, every tree felled so far).
+- Delta codec (`src/net/delta.js`, wire format v2; the header comment lists every key): host
+  keeps the last snapshot sent to each client and sends only changes: movement as integer
+  hundredth deltas in flat columns (`m`, `mf` with facing), other changed or added EntityView
+  fields as per-path columns `c` (dotted paths into nested objects), removed keys `cr`, a
+  whole-value fallback `cx`, new entities in full, removed ids, players when changed, events
+  packed by shape (`EVENT_SHAPES` order is wire format), felled trees; `tick` is omitted when
+  it is the previous one + 1. Exact: `apply(prev, encode(prev, next))` deep-equals `next`, so
+  new EntityView keys need no codec change. About 13–14 KB/s per client on average in an
+  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). Order is guaranteed (reliable
+  channel). `resync` → host sends `full` (also includes `felledAll`, every tree felled so far).
 - Lobby (`src/net/lobby.js`):
   ```js
   const host = await LobbyHost.create({ transport: 'peer'|'local'|'none', name });
@@ -517,7 +573,9 @@ tx, ty, size, amount`.
     `ViewState`, sends deltas. A client that disconnects becomes an AI (Normal) and a system chat
     line is shown. Single-player = HostSession with no conns.
   - `ClientSession({ setup, myIndex, conn })`: decodes full/delta into its `ViewState`;
-    `sendCommand(cmd)` → `{t:'cmd', cmd}`. Host leaving → `onEnd({ reason: 'host-left' })`.
+    `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
+    `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
+    'host-left' (connection lost), 'host-quit', 'game-over', or the host's sanitized reason.
   - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), onChat(cb), onEnd(cb), start(), stop() }`.
 - `ViewState` (`src/game/view-state.js`, used identically on host and client):
   ```js
@@ -549,10 +607,14 @@ r.pickEntity(sx, sy) → id | null             // visible entity under the curso
 r.entitiesInRect(x0, y0, x1, y1) → [ids]     // units whose projected position is inside the screen rect
 r.worldToScreen(x, y, h = 0) → { sx, sy, onScreen }
 r.setSelection(ids); r.setHover(id | null);
-r.showPlacement(buildingTypeId, tx, ty, valid); r.hidePlacement();
+r.showPlacement(buildingTypeId, tx, ty, valid, tiles?); r.hidePlacement();
 r.showCommandMarker(x, y, 'move' | 'attack' | 'gather');
+r.showFloatingText(x, y, text, color?, h?); r.setShowAllBars(on); r.setQuality(q); r.getStats();
 r.dispose();
 ```
+`pickEntity` first syncs building and mine views to the latest snapshot, so a building placed
+between two frames is clickable at once. Units coming into sight are built within a 3 ms
+per-frame budget, so a revealed army appears over a few frames.
 - Models: `src/render/models/unit-models.js` exports `buildUnitModel(unitType, teamColor) → UnitModel`
   (`{ root: THREE.Group, height, animate(state, timeSec, dt, extra) }`, where `state` is the
   EntityView `st` plus `'dead'` for the death animation; `extra = { moving, attackPhase (0..1 after an attack event), level }`)
@@ -570,6 +632,20 @@ r.dispose();
   Terrain: vertex-colored grid using `heights`, water plane with gentle animated color.
   Fog of war: explored-but-not-visible areas darkened (~45%), unexplored near-black; enemy units
   hidden when not visible; enemy buildings shown as last seen.
+- Vision-edge fade (`src/render/unit-fade.js`): enemy and neutral units that come into sight
+  after load fade in over `FADE_SECONDS` (0.25 s) and fade out the same way when they leave
+  it (own and allied units, and everything visible at load, never fade). A fading-out unit is
+  drawn but cannot be picked. Fading meshes swap to cached material variants quantized to 8
+  levels (`alphaHash` for opaque materials, scaled opacity for transparent ones); shadows are
+  off while a unit is see-through.
+- Status markers (`src/render/status-markers.js`, `StatusLayer`: instanced, procedural
+  glyphs): icons above the health bar in the order buff, debuff, slow, dot; a rimmed bubble
+  around shielded units; slow keeps a frosty ground ring, invulnerability a double gold ring,
+  stun its stars. Flyers' selection/hover/status rings are drawn at flying height.
+- Workers whose view has `mw` (waiting at a full gold mine) are animated idle, facing the
+  mine. Construction sites are clipped at their build height and show a dark plank interior
+  (back faces, and horizontal surfaces just below the cut) instead of the finished
+  building's walls and ceiling.
 - Selection rings colored: own green, ally yellow-green, enemy red, neutral yellow.
   Health bars over damaged/selected/hovered units (all with Alt held).
 
@@ -588,10 +664,20 @@ r.dispose();
   tooltips with cost/description, cooldown overlays, disabled when unaffordable/locked).
   God portraits top-left (click selects, double-click centers). Messages (errors, alerts,
   "Kronos is being summoned!"), chat (Enter), game-over overlay with stats, menu (surrender, quit).
+- Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
+  build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
+  ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
+  (src/settings.js), and Settings or the F10 menu can turn them back on. Hidden for spectators
+  and defeated players.
+- Info panel (`src/ui/hud-info.js`): a selected gold mine shows "Gold left", "Miners n/2"
+  (snapshot `mn` / `MINE_SLOTS`), how many of your Worshippers work there, and the
+  2-at-once rule. A worker's state line reads "Gathering gold", "Chopping wood", or "Waiting
+  its turn at the gold mine" (view key `mw`).
 - `input.js`: left click select, drag box select, shift add/remove, double-click selects same
   type on screen, Ctrl+1–9 groups, 1–9 recall (double tap centers), right-click smart command
   (shift queues), hotkeys from the command card, targeting modes (attack-move A, ability
-  targeting, build placement with ghost; Esc cancels; right-click cancels targeting), camera:
+  targeting, build placement with ghost (a refused click shows the client-side
+  `checkPlacement(...).message`); Esc cancels; right-click cancels targeting), camera:
   edge scroll, arrow keys, mouse wheel zoom, middle-drag pan, minimap click/drag, Space centers
   on selection or last alert, F1–F3 select gods, Alt shows all health bars.
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.

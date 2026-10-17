@@ -25,6 +25,8 @@ const OPTIONAL = {
   pr: (r) => r.int(0, 5),
   amt: (r) => r.int(0, 12000),
   rp: (r) => (r.chance(0.3) ? null : [r.int(0, 9000) / 100, r.int(0, 9000) / 100]),
+  mn: (r) => r.int(0, 2),
+  mw: () => 1,
 };
 const OPT_KEYS = Object.keys(OPTIONAL);
 
@@ -229,6 +231,58 @@ test('delta round-trips real World snapshots', async () => {
     prev = next;
   }
   assert.ok(deltaChars / 300 < 4000, `average delta ${Math.round(deltaChars / 300)} chars`);
+});
+
+test('delta carries the waiting-miner key mw exactly (added, kept, removed) into the ViewState', async () => {
+  const { createWorld } = await import('../../src/sim/world.js');
+  const { generateMap } = await import('../../src/sim/mapgen.js');
+  const { ViewState } = await import('../../src/game/view-state.js');
+  const setup = {
+    version: '0.1.0', seed: 99, mapSize: 'small',
+    players: [
+      { index: 0, name: 'A', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
+      { index: 1, name: 'B', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'human', difficulty: null },
+    ],
+  };
+  const world = createWorld(setup);
+  const mapData = generateMap({ seed: setup.seed, mapSize: setup.mapSize, playerCount: 2 });
+  const vs = new ViewState({ setup, mapData, myIndex: 0 });
+  const tc = world.buildingsOf(0).find((b) => b.type === 'town_center');
+  for (let i = 0; i < 4; i++) world.spawnUnit(0, 'worshipper', tc.x + (i - 1.5), tc.y + 3, { silent: true });
+  const crew = world.unitsOf(0).filter((u) => u.type === 'worshipper');
+  assert.equal(crew.length, 9);
+  const mine = world.mineList.reduce((a, m) => (Math.hypot(m.x - tc.x, m.y - tc.y) < Math.hypot(a.x - tc.x, a.y - tc.y) ? m : a));
+  world.issueCommand(0, { type: 'gather', units: crew.map((u) => u.id), target: mine.id });
+  let prev = world.getSnapshot();
+  let client = json(prev);
+  vs.pushSnapshot(client, 0);
+  let added = 0;
+  let removed = 0;
+  let maxWaiting = 0;
+  for (let t = 0; t < 40 * 20; t++) {
+    world.tick();
+    const next = world.getSnapshot();
+    client = apply(client, JSON.parse(JSON.stringify(encode(prev, next))));
+    assert.deepStrictEqual(client, json(next), `tick ${next.tick}`);
+    vs.pushSnapshot(client, t * 50);
+    let waiting = 0;
+    for (const u of crew) {
+      const wait = !!(u.order && u.order.type === 'gather' && u.order.phase === 'wait');
+      const e = next.entities.find((x) => x.id === u.id);
+      const pe = prev.entities.find((x) => x.id === u.id);
+      if (wait) {
+        waiting++;
+        assert.equal(e.mw, 1, `tick ${next.tick}: worker ${u.id} waits`);
+      } else assert.ok(!('mw' in e), `tick ${next.tick}: worker ${u.id} (${u.order && u.order.phase}) has no mw`);
+      if (wait && !(pe && 'mw' in pe)) added++;
+      if (!wait && pe && 'mw' in pe) removed++;
+      assert.equal(vs.getEntity(u.id).mw, wait ? 1 : undefined, 'the ViewState mirrors mw');
+    }
+    maxWaiting = Math.max(maxWaiting, waiting);
+    prev = next;
+  }
+  assert.ok(maxWaiting >= 3, `waiting at once ${maxWaiting}`);
+  assert.ok(added > 10 && removed > 10, `mw added ${added}, removed ${removed}`);
 });
 
 // ---- edge cases of the compact format (notes/decisions.md [netfix]) ----

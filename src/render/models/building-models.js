@@ -413,6 +413,20 @@ if (aAnim.y > 0.0) {
 }
 #endif`;
 
+// Construction sites are cut open at the build height; what shows through the cut
+// is the inside (back faces) of walls and roofs. Team trim keeps its darkened
+// colour; the body's inside becomes dark wooden boards (about 0.22 wide, along x),
+// and so do horizontal tops in the last 0.3 below the cut (the course being laid,
+// e.g. a wall top that a roof will cover), so a cut-open building reads as a
+// building site rather than a finished flat roof in its wall or roof colour.
+// Floors and foundations (below PLINTH + 0.15) keep their colour.
+const TEAM_INSIDE_GLSL = 'if (!gl_FrontFacing) diffuseColor.rgb *= 0.45;';
+const SITE_INSIDE_GLSL = `{
+  vec3 boards = vec3(0.13, 0.068, 0.028) * (0.72 + 0.28 * step(0.5, fract(vBldX * 4.5)));
+  if (!gl_FrontFacing) diffuseColor.rgb = boards;
+  else if (vBldY > uCut - 0.3 && vBldY > ${(PLINTH + 0.15).toFixed(2)} && abs(dFdx(vBldY)) + abs(dFdy(vBldY)) < 1e-5) diffuseColor.rgb = boards;
+}`;
+
 /** Patch a built-in material: animated vertices (team: waving, glow: flicker) and construction clipping. */
 function patchShader(mat, anim, clip) {
   mat.onBeforeCompile = (sh) => {
@@ -428,12 +442,12 @@ function patchShader(mat, anim, clip) {
     }
     if (clip) {
       sh.uniforms.uCut = mat.userData.uCut;
-      common += '\nvarying float vBldY;';
-      begin += '\nvBldY = position.y;';
+      common += '\nvarying float vBldY;\nvarying float vBldX;';
+      begin += '\nvBldY = position.y;\nvBldX = position.x;';
       fs = fs
-        .replace('#include <common>', '#include <common>\nvarying float vBldY;\nuniform float uCut;')
+        .replace('#include <common>', '#include <common>\nvarying float vBldY;\nvarying float vBldX;\nuniform float uCut;')
         .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vBldY > uCut) discard;')
-        .replace('#include <color_fragment>', '#include <color_fragment>\nif (!gl_FrontFacing) diffuseColor.rgb *= 0.45;');
+        .replace('#include <color_fragment>', `#include <color_fragment>\n${anim === 'team' ? TEAM_INSIDE_GLSL : SITE_INSIDE_GLSL}`);
     }
     vs = vs.replace('#include <common>', `#include <common>${common}`).replace('#include <begin_vertex>', `#include <begin_vertex>${begin}`);
     sh.vertexShader = vs;

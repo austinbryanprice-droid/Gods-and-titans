@@ -106,7 +106,7 @@ export function updateCastOrder(world, u, o) {
     if (o.timer > 1e-9) return false;
   }
   if (!isUnlocked(u, ab)) {
-    world.error(u.owner, 'That god is not unlocked yet.');
+    world.error(u.owner, `That ability unlocks at level ${ab.unlockLevel || 1}.`);
     return true;
   }
   if (cooldownLeft(u, ab) > 0) {

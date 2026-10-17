@@ -742,6 +742,7 @@ export class Decal {
    */
   layout(getHeight, cx, cy, rOut, rIn = 0, a0 = 0, aLen = TAU, lift = 0.06, flatY = null) {
     const full = aLen >= TAU - 1e-4;
+    const flat = flatY !== null;
     const W = DECAL_A + 1;
     const pos = this.pos;
     const polar = this.polar;
@@ -765,7 +766,10 @@ export class Decal {
         const wy = cy + s * rad;
         const k = j * W + i;
         pos[k * 3] = wx;
-        pos[k * 3 + 1] = flatY === null ? getHeight(wx, wy) + lift : flatY;
+        // two separate stores: a `flatY === null ? h : flatY` select merged a
+        // number with a maybe-null value and boxed every sampled height
+        if (flat) pos[k * 3 + 1] = flatY;
+        else pos[k * 3 + 1] = getHeight(wx, wy) + lift;
         pos[k * 3 + 2] = wy;
         polar[k * 2] = i / DECAL_A;
         polar[k * 2 + 1] = nr;

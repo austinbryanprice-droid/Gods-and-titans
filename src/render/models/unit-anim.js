@@ -60,17 +60,140 @@ function blend(cur, tgt, dt, rate = 22) {
   }
 }
 
+// Pose key groups with explicit (named-property) blends: generic keyed access
+// boxes every number it reads or writes, named access does not.
+const POSE_GROUPS = {
+  arms: {
+    keys: ['aRz', 'aRx', 'aRe', 'aRp', 'aLz', 'aLx', 'aLe', 'aLp', 'tRz', 'tRy', 'tRx'],
+    blend(c, t, k) {
+      c.aRz += (t.aRz - c.aRz) * k; c.aRx += (t.aRx - c.aRx) * k; c.aRe += (t.aRe - c.aRe) * k; c.aRp += (t.aRp - c.aRp) * k;
+      c.aLz += (t.aLz - c.aLz) * k; c.aLx += (t.aLx - c.aLx) * k; c.aLe += (t.aLe - c.aLe) * k; c.aLp += (t.aLp - c.aLp) * k;
+      c.tRz += (t.tRz - c.tRz) * k; c.tRy += (t.tRy - c.tRy) * k; c.tRx += (t.tRx - c.tRx) * k;
+    },
+  },
+  human: {
+    keys: ['pY', 'pX', 'lRz', 'lRk', 'lLz', 'lLk', 'cape', 'fold'],
+    blend(c, t, k) {
+      c.pY += (t.pY - c.pY) * k; c.pX += (t.pX - c.pX) * k;
+      c.lRz += (t.lRz - c.lRz) * k; c.lRk += (t.lRk - c.lRk) * k; c.lLz += (t.lLz - c.lLz) * k; c.lLk += (t.lLk - c.lLk) * k;
+      c.cape += (t.cape - c.cape) * k; c.fold += (t.fold - c.fold) * k;
+    },
+  },
+  quad: {
+    keys: ['bY', 'bX', 'bRz', 'bRx', 'hRz', 'hRy', 'jaw', 'tailA', 'wing', 'fold'],
+    blend(c, t, k) {
+      c.bY += (t.bY - c.bY) * k; c.bX += (t.bX - c.bX) * k; c.bRz += (t.bRz - c.bRz) * k; c.bRx += (t.bRx - c.bRx) * k;
+      c.hRz += (t.hRz - c.hRz) * k; c.hRy += (t.hRy - c.hRy) * k; c.jaw += (t.jaw - c.jaw) * k;
+      c.tailA += (t.tailA - c.tailA) * k; c.wing += (t.wing - c.wing) * k; c.fold += (t.fold - c.fold) * k;
+    },
+  },
+  legs: {
+    keys: ['gFL', 'kFL', 'gFR', 'kFR', 'gBL', 'kBL', 'gBR', 'kBR'],
+    blend(c, t, k) {
+      c.gFL += (t.gFL - c.gFL) * k; c.kFL += (t.kFL - c.kFL) * k; c.gFR += (t.gFR - c.gFR) * k; c.kFR += (t.kFR - c.kFR) * k;
+      c.gBL += (t.gBL - c.gBL) * k; c.kBL += (t.kBL - c.kBL) * k; c.gBR += (t.gBR - c.gBR) * k; c.kBR += (t.kBR - c.kBR) * k;
+    },
+  },
+  bird: {
+    keys: ['wing', 'bRz', 'bX', 'bY', 'fold'],
+    blend(c, t, k) {
+      c.wing += (t.wing - c.wing) * k; c.bRz += (t.bRz - c.bRz) * k; c.bX += (t.bX - c.bX) * k; c.bY += (t.bY - c.bY) * k;
+      c.fold += (t.fold - c.fold) * k;
+    },
+  },
+  serpent: {
+    keys: ['st', 'jaw', 'lunge', 'ga', 'wing', 'fold'],
+    blend(c, t, k) {
+      c.st += (t.st - c.st) * k; c.jaw += (t.jaw - c.jaw) * k; c.lunge += (t.lunge - c.lunge) * k; c.ga += (t.ga - c.ga) * k;
+      c.wing += (t.wing - c.wing) * k; c.fold += (t.fold - c.fold) * k;
+    },
+  },
+  insect: {
+    keys: ['ga', 'la', 'lb', 'st', 'bX', 'bRz'],
+    blend(c, t, k) {
+      c.ga += (t.ga - c.ga) * k; c.la += (t.la - c.la) * k; c.lb += (t.lb - c.lb) * k; c.st += (t.st - c.st) * k;
+      c.bX += (t.bX - c.bX) * k; c.bRz += (t.bRz - c.bRz) * k;
+    },
+  },
+  ram: {
+    keys: ['lx'],
+    blend(c, t, k) {
+      c.lx += (t.lx - c.lx) * k;
+    },
+  },
+};
+
+/** The key groups a model's target pose is made of (null for an unknown kind). */
+function poseGroupsFor(m) {
+  const G = POSE_GROUPS;
+  switch (m.kind) {
+    case 'humanoid':
+    case 'naga':
+    case 'spirit': return [G.arms, G.human];
+    case 'quadruped': return [G.quad, G.legs];
+    case 'centaur': return [G.quad, G.legs, G.arms];
+    case 'bird': return [G.bird];
+    case 'serpent':
+    case 'hydra':
+    case 'dragon': return [G.serpent];
+    case 'insect': return m.rig.humanTop ? [G.insect, G.arms] : [G.insect];
+    case 'ram': return [G.ram];
+    default: return null;
+  }
+}
+
+/** The explicit blends for T when its keys are exactly those groups' keys, else null (generic blend). */
+function poseBlender(m, T) {
+  const groups = poseGroupsFor(m);
+  if (!groups) return null;
+  const keys = new Set();
+  for (const g of groups) for (const k of g.keys) keys.add(k);
+  const own = Object.keys(T);
+  if (own.length !== keys.size || !own.every((k) => keys.has(k))) return null;
+  return groups.map((g) => g.blend);
+}
+
+/**
+ * Blend the model's current pose toward the target pose T (same result as
+ * blend()). The first call starts the current pose as a same-shape copy of T.
+ * T and cur keep a fixed set of keys and stay fast-mode objects: deleting keys,
+ * or adding many keys one by one through keyed stores, turns an object into a
+ * dictionary that allocates a heap number for every number stored.
+ */
+function blendPose(m, T, dt, rate) {
+  if (m.cur === null) {
+    m.cur = { ...T };
+    m.blendFns = poseBlender(m, T);
+    return;
+  }
+  const fns = m.blendFns;
+  if (fns === null) {
+    blend(m.cur, T, dt, rate);
+    return;
+  }
+  const k = dt > 0 ? 1 - Math.exp(-rate * Math.min(dt, 0.25)) : 1;
+  for (let i = 0; i < fns.length; i++) fns[i](m.cur, T, k);
+}
+
 // Attack phase curve helpers -------------------------------------------------
 
-/** Windup (0..w), strike (w..s), recover (s..1). Returns { wind, hit, rec } 0..1. */
+const PHASES = { wind: 0, hit: 0, rec: 0 };
+
+/**
+ * Windup (0..w), strike (w..s), recover (s..1). Returns { wind, hit, rec } 0..1,
+ * or null without an attack phase. The result object is shared: read it before
+ * the next phases() call.
+ */
 function phases(p, w = 0.3, s = 0.5) {
   if (p === undefined || p === null) return null;
-  return {
-    wind: p < w ? smooth(p / w) : 1,
-    hit: p < w ? 0 : p < s ? smooth((p - w) / (s - w)) : 1,
-    rec: p < s ? 0 : smooth((p - s) / (1 - s)),
-  };
+  PHASES.wind = p < w ? smooth(p / w) : 1;
+  PHASES.hit = p < w ? 0 : p < s ? smooth((p - w) / (s - w)) : 1;
+  PHASES.rec = p < s ? 0 : smooth((p - s) / (1 - s));
+  return PHASES;
 }
+
+const PUNCH_INFO = { style: 'punch' };
+const NO_INFO = {};
 
 // ---------------------------------------------------------------------------
 // Humanoid upper body (arms + torso) shared by humanoid, naga, spirit,
@@ -96,7 +219,7 @@ function restArms(T, rig) {
 }
 
 function attackUpper(T, rig, m, ap, ranged) {
-  const info = rig.info || { style: 'punch' };
+  const info = rig.info || PUNCH_INFO;
   let style = info.style;
   if (ranged && style !== 'bow') {
     if (style === 'swing' || style === 'thrust' || style === 'punch' || style === 'claw') style = m.rangedStyle;
@@ -105,13 +228,14 @@ function attackUpper(T, rig, m, ap, ranged) {
   const restE = T.aRe;
   switch (style) {
     case 'swing': {
-      const ready = { z: 0.85, e: Math.max(restE, 0.9) };
+      const readyZ = 0.85;
+      const readyE = Math.max(restE, 0.9);
       if (!P) {
-        T.aRz = ready.z; T.aRe = ready.e; T.tRy = -0.1;
+        T.aRz = readyZ; T.aRe = readyE; T.tRy = -0.1;
       } else {
-        const z = lerp(lerp(ready.z, 2.75, P.wind), 0.15, P.hit);
-        T.aRz = lerp(z, ready.z, P.rec);
-        T.aRe = lerp(lerp(lerp(ready.e, 1.1, P.wind), 0.1, P.hit), ready.e, P.rec);
+        const z = lerp(lerp(readyZ, 2.75, P.wind), 0.15, P.hit);
+        T.aRz = lerp(z, readyZ, P.rec);
+        T.aRe = lerp(lerp(lerp(readyE, 1.1, P.wind), 0.1, P.hit), readyE, P.rec);
         T.aRx = -0.15 - 0.25 * P.wind * (1 - P.hit);
         T.tRy = lerp(lerp(-0.1, -0.4, P.wind), 0.3, P.hit) * (1 - P.rec) + -0.1 * P.rec;
         T.tRz = -0.22 * P.hit * (1 - P.rec) + 0.05 * P.wind * (1 - P.hit);
@@ -187,11 +311,10 @@ function attackUpper(T, rig, m, ap, ranged) {
     default: {
       // punch / claw: alternate fists
       const right = m.punchSide > 0;
-      const pz = (hit, wind) => lerp(lerp(0.6, -0.3, wind), 1.45, hit);
       if (!P) {
         T.aRz = 0.7; T.aRe = 1.3; T.aLz = 0.7; T.aLe = 1.3;
       } else {
-        const z = pz(P.hit, P.wind) * (1 - P.rec) + 0.7 * P.rec;
+        const z = lerp(lerp(0.6, -0.3, P.wind), 1.45, P.hit) * (1 - P.rec) + 0.7 * P.rec;
         const e = lerp(lerp(1.3, 1.5, P.wind), 0.1, P.hit) * (1 - P.rec) + 1.3 * P.rec;
         if (right) { T.aRz = z; T.aRe = e; T.aLz = 0.7; T.aLe = 1.3; } else { T.aLz = z; T.aLe = e; T.aRz = 0.7; T.aRe = 1.3; }
         T.tRy = (right ? 1 : -1) * lerp(-0.25, 0.3, P.hit) * (1 - P.rec);
@@ -203,7 +326,7 @@ function attackUpper(T, rig, m, ap, ranged) {
 
 /** True when the right hand holds an item gripped across the fist (staff, sword…). */
 function holdsCrossGrip(rig) {
-  return !!rig && rig.weapon && rig.weapon !== 'none' && rig.weapon !== 'bow' && (rig.info || {}).grip === 'fwd';
+  return !!rig && rig.weapon && rig.weapon !== 'none' && rig.weapon !== 'bow' && (rig.info || NO_INFO).grip === 'fwd';
 }
 
 /** Hold a cross-gripped item upright in front of the chest. */
@@ -225,7 +348,7 @@ function castUpper(T, t, rig) {
 
 function walkArms(T, rig, phi, amp) {
   const s = Math.sin(phi);
-  const info = rig.info || {};
+  const info = rig.info || NO_INFO;
   const heldR = info.grip === 'pole' || rig.rightElbow >= 0.85 ? 0.12 : info.grip === 'fist' ? 1 : 0.45;
   const heldL = rig.leftElbow >= 0.85 ? 0.15 : rig.weapon === 'bow' ? 0.6 : 0.8;
   T.aRz += -amp * s * heldR;
@@ -350,15 +473,23 @@ function applyArms(m, P) {
 
 // ---------------------------------------------------------------------------
 
+// leg phase offsets (fraction of a cycle) for FL, FR, BL, BR
+const GALLOP_OFFS = [0, 0.13, 0.55, 0.68];
+const WALK_OFFS = [0, 0.5, 0.75, 0.25];
+const legSwing = (phi, off, amp) => amp * Math.sin(phi + off * PI * 2);
+const legKnee = (phi, off, amp, tuck) => (tuck ? 1.2 : 0.1 + 0.95 * Math.max(0, Math.cos(phi + off * PI * 2)) ** 1.3 * (amp > 0.05 ? 1 : 0));
+
 function quadLegs(m, T, gait, phi, amp, tuck) {
-  const offs = gait === 'gallop' ? { FL: 0, FR: 0.13, BL: 0.55, BR: 0.68 } : { FL: 0, BR: 0.25, FR: 0.5, BL: 0.75 };
-  for (const k of ['FL', 'FR', 'BL', 'BR']) {
-    const a = phi + offs[k] * PI * 2;
-    const s = Math.sin(a);
-    const c = Math.cos(a);
-    T['g' + k] = amp * s;
-    T['k' + k] = tuck ? 1.2 : 0.1 + 0.95 * Math.max(0, c) ** 1.3 * (amp > 0.05 ? 1 : 0);
-  }
+  const o = gait === 'gallop' ? GALLOP_OFFS : WALK_OFFS;
+  // named stores keep the pose object's shape fixed (see blendPose)
+  T.gFL = legSwing(phi, o[0], amp);
+  T.kFL = legKnee(phi, o[0], amp, tuck);
+  T.gFR = legSwing(phi, o[1], amp);
+  T.kFR = legKnee(phi, o[1], amp, tuck);
+  T.gBL = legSwing(phi, o[2], amp);
+  T.kBL = legKnee(phi, o[2], amp, tuck);
+  T.gBR = legSwing(phi, o[3], amp);
+  T.kBR = legKnee(phi, o[3], amp, tuck);
 }
 
 function quadPose(m, T, state, t) {
@@ -430,6 +561,12 @@ function quadPose(m, T, state, t) {
   }
 }
 
+function quadLeg(leg, swing, bend) {
+  if (!leg) return;
+  leg.rotation.z = swing;
+  knee(leg, bend);
+}
+
 function applyQuad(m, P) {
   const p = m.parts;
   if (p.body) {
@@ -444,12 +581,10 @@ function applyQuad(m, P) {
     inf(p.head, 'jaw', P.jaw);
     inf(p.head, 'ear', 0.5 + 0.5 * Math.sin(m.time * 1.3 + m.seed));
   }
-  for (const k of ['FL', 'FR', 'BL', 'BR']) {
-    const leg = p['leg' + k];
-    if (!leg) continue;
-    leg.rotation.z = P['g' + k];
-    knee(leg, P['k' + k]);
-  }
+  quadLeg(p.legFL, P.gFL, P.kFL);
+  quadLeg(p.legFR, P.gFR, P.kFR);
+  quadLeg(p.legBL, P.gBL, P.kBL);
+  quadLeg(p.legBR, P.gBR, P.kBR);
   if (m.kind === 'centaur') {
     inf(p.body, 'cape', m.moving ? 0.6 : 0.1);
     applyArms(m, P);
@@ -464,8 +599,10 @@ function applyQuad(m, P) {
  */
 export function animateModel(m, state, t, dt, ex) {
   const kind = m.kind;
+  // Target pose. Every model writes the same set of keys each frame, so T is
+  // only overwritten, never cleared: deleting its keys made it a dictionary-mode
+  // object whose number stores all allocated (~240 KB per frame with 270 units).
   const T = m.target;
-  for (const k in T) delete T[k];
   m.time = t;
   // locomotion phase
   if (m.moving) {
@@ -479,7 +616,7 @@ export function animateModel(m, state, t, dt, ex) {
     case 'humanoid': {
       humanoidPose(m, T, state, t, ex);
       T.fold = restingWings(m, state);
-      blend(m.cur, T, dt, 20);
+      blendPose(m, T, dt, 20);
       applyHumanoid(m, m.cur);
       const torso = m.parts.torso;
       if (torso) {
@@ -512,7 +649,7 @@ export function animateModel(m, state, t, dt, ex) {
         T.pY = (T.pY || 0) + 0.012 * Math.sin(m.wavePhase * 0.5);
       }
       T.fold = restingWings(m, state);
-      blend(m.cur, T, dt, 18);
+      blendPose(m, T, dt, 18);
       applyHumanoid(m, m.cur);
       const tail = m.parts.tail || m.parts.wisp;
       m.waveA(tail, m.moving ? 1 : 0.35);
@@ -527,7 +664,7 @@ export function animateModel(m, state, t, dt, ex) {
     case 'quadruped':
     case 'centaur': {
       quadPose(m, T, state, t);
-      blend(m.cur, T, dt, 20);
+      blendPose(m, T, dt, 20);
       applyQuad(m, m.cur);
       inf(m.parts.body, 'fl', flick);
       break;
@@ -550,7 +687,7 @@ export function animateModel(m, state, t, dt, ex) {
       }
       if (state === 'dead') T.wing = -0.5;
       T.fold = restingWings(m, state);
-      blend(m.cur, T, dt, 26);
+      blendPose(m, T, dt, 26);
       const body = m.parts.body;
       body.position.set(m.cur.bX, m.cur.bY, 0);
       body.rotation.z = m.cur.bRz;
@@ -588,7 +725,7 @@ export function animateModel(m, state, t, dt, ex) {
       if (state === 'cast') T.wing = 0.85;
       if (state === 'dead') { T.st = 0; T.wing = -0.4; }
       T.fold = restingWings(m, state);
-      blend(m.cur, T, dt, 22);
+      blendPose(m, T, dt, 22);
       inf(body, 'st', m.cur.st);
       inf(body, 'jaw', m.cur.jaw);
       inf(body, 'ga', m.cur.ga);
@@ -624,7 +761,7 @@ export function animateModel(m, state, t, dt, ex) {
         else if (state === 'cast') castUpper(T, t, m.rig);
         else if (m.moving) walkArms(T, m.rig, phi, 0.3);
       }
-      blend(m.cur, T, dt, 24);
+      blendPose(m, T, dt, 24);
       inf(body, 'ga', m.cur.ga);
       inf(body, 'la', m.cur.la);
       inf(body, 'lb', m.cur.lb);
@@ -655,7 +792,7 @@ export function animateModel(m, state, t, dt, ex) {
         lx = P ? (-0.22 * P.wind + 0.4 * P.hit) * (1 - P.rec) : -0.1;
       }
       T.lx = lx;
-      blend(m.cur, T, dt, 24);
+      blendPose(m, T, dt, 24);
       if (p.log) {
         p.log.position.x = m.cur.lx;
         p.log.rotation.z = -m.cur.lx * 0.35;

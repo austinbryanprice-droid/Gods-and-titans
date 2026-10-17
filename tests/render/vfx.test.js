@@ -212,6 +212,22 @@ test('a broken height function does not poison positions', () => {
   vfx.dispose();
 });
 
+test('decals follow the terrain, or sit at a fixed height when flatY is given', async () => {
+  const { createDecalPool, disposePool } = await import('../../src/render/vfx-layers.js');
+  const root = new THREE.Group();
+  const pool = createDecalPool(root, 2);
+  const d = pool.acquire();
+  d.layout(hills, 10, 12, 3, 1, 0.5, 2, 0.07);
+  for (let k = 0; k < d.pos.length; k += 3) {
+    assert.ok(Math.abs(d.pos[k + 1] - (hills(d.pos[k], d.pos[k + 2]) + 0.07)) < 1e-5, 'vertex on the terrain');
+    const r = Math.hypot(d.pos[k] - 10, d.pos[k + 2] - 12);
+    assert.ok(r > 1 - 1e-4 && r < 3 + 1e-4, `vertex at radius ${r}`);
+  }
+  d.layout(hills, 10, 12, 3, 0, 0, Math.PI * 2, 0, 4.25);
+  for (let k = 0; k < d.pos.length; k += 3) assert.equal(d.pos[k + 1], 4.25);
+  disposePool(pool);
+});
+
 test('particle cap holds under extreme load and the budget degrades', () => {
   const { vfx } = make({ maxParticles: 600 });
   let minBudget = 1;

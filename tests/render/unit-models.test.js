@@ -134,6 +134,30 @@ test('every data unit animates every state without NaNs', () => {
   }
 });
 
+test('pose objects keep a fixed key set and explicit blends cover every model', () => {
+  // unit-anim.js never deletes pose keys (dictionary-mode objects allocate on
+  // every number store): each frame must write the same keys, and every model
+  // kind's keys must match one of its POSE_GROUPS (else it falls back to the
+  // slower generic blend).
+  for (const u of Object.values(UNITS)) {
+    const m = buildUnitModel(u, PLAYER_COLORS[1]);
+    let keys = null;
+    let t = 3;
+    for (const st of STATES) {
+      for (let i = 0; i < 6; i++) {
+        t += 1 / 30;
+        m.animate(st, t, 1 / 30, { moving: i % 2 === 1, attackPhase: st === 'attack' ? i / 6 : undefined, carry: st === 'return' ? 'g' : 0, gather: i % 3 ? 'g' : 'w' });
+        const k = Object.keys(m.target).join(',');
+        if (keys === null) keys = k;
+        assert.equal(k, keys, `${u.id}: target pose keys changed in state ${st}`);
+        assert.equal(Object.keys(m.cur).join(','), keys, `${u.id}: current pose keys differ from the target's`);
+      }
+    }
+    assert.ok(Array.isArray(m.blendFns), `${u.id} (${m.kind}) uses the generic blend; add its keys to POSE_GROUPS in unit-anim.js`);
+    m.dispose();
+  }
+});
+
 test('proportions: humanoid scale 1 is about 1.1 tall, worshipper about 0.95', () => {
   const warrior = buildUnitModel(UNITS.warrior, PLAYER_COLORS[0]);
   assert.ok(warrior.height > 1.0 && warrior.height < 1.3, `warrior ${warrior.height}`);

@@ -109,7 +109,7 @@ test('god abilities lock by level and scale with level', () => {
   const w2 = godDef.abilities.find((a) => a.unlockLevel === 2);
   w.events.length = 0;
   cast(w, g, w2.id, { x: 21, y: 20, target: g.id });
-  assert.deepEqual(errorsOf(w.events), ['That god is not unlocked yet.']);
+  assert.deepEqual(errorsOf(w.events), [`That ability unlocks at level ${w2.unlockLevel}.`]);
   // scaling: a test god with a damage Q
   const scaled = defineUnit({ class: 'god', abilities: [ab('t_scale', [{ type: 'damage', amount: 100, radius: 1 }])], attack: null });
   const g2 = spawn(w, 0, scaled, 30, 30);
