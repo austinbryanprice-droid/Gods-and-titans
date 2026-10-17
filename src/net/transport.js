@@ -13,6 +13,7 @@
 //   local    — BroadcastChannel `mythicwar-<code>`: tabs of one browser (testing)
 //   loopback — in-memory, for Node tests
 //   none     — no network (single player)
+import { MAX_PLAYERS } from '../config.js';
 import {
   CHUNK_SIZE, HEARTBEAT_MS, TIMEOUT_MS, JOIN_TIMEOUT_MS, CONNECT_TIMEOUT_MS, FRAME_HEARTBEAT, FRAME_BYE,
   MAX_PULSE_GAP_MS, MAX_HOST_MESSAGE_CHARS, MAX_CLIENT_MESSAGE_CHARS, MAX_FRAME_ERRORS, ERROR_WINDOW_MS,
@@ -325,6 +326,13 @@ export class FramedConn {
 
 // ---------------------------------------------------------------- host endpoint
 
+// A room never needs more than a handful of links (MAX_PLAYERS - 1 clients, a
+// few rejoins whose old link has not timed out yet, kicks that are closing);
+// beyond these ceilings new connections are closed at once, so a flood of them
+// cannot grow the host's memory without bound.
+export const MAX_HOST_CONNECTIONS = MAX_PLAYERS * 4;
+export const MAX_PENDING_HANDSHAKES = MAX_PLAYERS * 2; // PeerJS links still negotiating WebRTC
+
 /** Accepts incoming connections for one room. */
 class HostEndpoint {
   constructor(transport) {
@@ -335,6 +343,12 @@ class HostEndpoint {
     this.handlers = [];
     this.pending = [];
     this.cleanup = [];
+    this.pendingOpen = 0; // incoming PeerJS connections whose data channel is not open yet
+  }
+
+  /** True while another not-yet-open incoming connection may be negotiated. */
+  acceptsPending() {
+    return this.pendingOpen < MAX_PENDING_HANDSHAKES && this.conns.size + this.pendingOpen < MAX_HOST_CONNECTIONS;
   }
 
   /**
@@ -354,6 +368,10 @@ class HostEndpoint {
   _accept(conn) {
     if (this.closed) {
       conn.close('closed');
+      return;
+    }
+    if (this.conns.size >= MAX_HOST_CONNECTIONS) {
+      conn.close('too-many-connections');
       return;
     }
     // Everything a client sends is small; refuse huge frames from untrusted peers.
@@ -603,6 +621,22 @@ function waitPeerOpen(peer, timeoutMs) {
   });
 }
 
+// The only PeerJS serialization the game uses: the pass-through one, so every
+// frame reaches FramedConn / FrameDecoder (size, shape and flood limits) as the
+// string it was sent as. PeerJS picks the serializer the CONNECTING side asks
+// for, and its binary / json serializers decode each message before any of our
+// limits run, so the host must refuse those connections itself.
+export const PEER_SERIALIZATION = 'raw';
+
+/** Close an incoming PeerJS connection (or call) we do not want, before its data channel exists. */
+function refusePeerConnection(dc) {
+  try {
+    dc.close();
+  } catch {
+    // not something PeerJS can close; nothing of ours is attached to it
+  }
+}
+
 function wrapDataConnection(dc) {
   const conn = new FramedConn({
     id: dc.peer,
@@ -647,16 +681,37 @@ async function hostPeer(ep, opts) {
     ep.roomCode = code;
     ep.peer = peer;
     peer.on('connection', (dc) => {
-      if (ep.closed) {
-        dc.close();
+      // Checked when PeerJS announces the connection, before its data channel
+      // exists: a refused connection never receives a byte. `serialization` is
+      // set by the serializer class PeerJS instantiated, not copied from the offer.
+      if (ep.closed || !dc || dc.serialization !== PEER_SERIALIZATION) {
+        refusePeerConnection(dc);
         return;
       }
-      const timer = setTimeout(() => dc.close(), JOIN_TIMEOUT_MS);
+      if (!ep.acceptsPending()) {
+        refusePeerConnection(dc);
+        return;
+      }
+      ep.pendingOpen++;
+      let pending = true;
+      const settle = () => {
+        if (pending) ep.pendingOpen--;
+        pending = false;
+      };
+      dc.on('close', settle);
+      dc.on('error', settle);
+      const timer = setTimeout(() => {
+        settle();
+        refusePeerConnection(dc);
+      }, JOIN_TIMEOUT_MS);
       dc.on('open', () => {
         clearTimeout(timer);
+        settle();
         ep._accept(wrapDataConnection(dc));
       });
     });
+    // The game never uses media calls; drop them so they hold nothing on the host.
+    peer.on('call', refusePeerConnection);
     peer.on('disconnected', () => {
       // Lost the signaling server: existing games keep working, but reconnect so new players can still join.
       if (!ep.closed && !peer.destroyed) setTimeout(() => !ep.closed && !peer.destroyed && peer.reconnect(), 1500);
@@ -681,10 +736,14 @@ async function joinPeer(code, opts) {
     peer.destroy();
     throw friendlyPeerError(err, code, params);
   }
+  // A client only talks to the host: other peers who learn its id (lobby states
+  // carry them) get no connection, so nothing they send is ever decoded here.
+  peer.on('connection', refusePeerConnection);
+  peer.on('call', refusePeerConnection);
   // 2. The direct WebRTC link to the host. Unknown room → 'peer-unavailable' at once;
   // ICE that never connects (strict NAT / firewall, no TURN) → PEER_MESSAGES.webrtc
   // after CONNECT_TIMEOUT_MS at the latest.
-  const dc = peer.connect(peerIdFor(code), { reliable: true, serialization: 'raw' });
+  const dc = peer.connect(peerIdFor(code), { reliable: true, serialization: PEER_SERIALIZATION });
   const connectMs = opts.connectTimeoutMs ?? opts.timeoutMs ?? CONNECT_TIMEOUT_MS;
   try {
     await new Promise((resolve, reject) => {
