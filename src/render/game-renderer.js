@@ -195,7 +195,7 @@ export class GameRenderer {
 
     // ---- world layers
     this.fow = new FogOfWar(this.width, this.height);
-    this.terrain = createTerrain(this.map);
+    this.terrain = createTerrain(this.map, { quality: this.quality });
     scene.add(this.terrain.group);
     this.heightFn = (x, y) => heightAt(this.map, x, y);
     this.buildForest();
@@ -474,6 +474,7 @@ export class GameRenderer {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
     });
     setCloudShadows(Q.clouds);
+    this.terrain.setQuality(q);
     this.vfx.setQuality(Q.vfx);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
