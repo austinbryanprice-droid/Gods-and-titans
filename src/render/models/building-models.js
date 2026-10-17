@@ -93,10 +93,10 @@ const SURF = {
   slateTile: surf(CLS.TILE, 0.58),
   turf: surf(CLS.TURF, 0.97),
   thatch: surf(CLS.THATCH, 0.95),
-  // metals keep half their diffuse color: at RTS distance most facets mirror
-  // only the dim ground or sky, and fully metallic trim would read dark
-  metal: surf(CLS.METAL, 0.42, 0.55),
-  gold: surf(CLS.GOLD, 0.34, 0.5),
+  // trim metals stay partly diffuse: seen from above most facets mirror the
+  // blue sky, and fully metallic gold would read olive rather than gold
+  metal: surf(CLS.METAL, 0.42, 0.5),
+  gold: surf(CLS.GOLD, 0.36, 0.3),
   cloth: surf(CLS.CLOTH, 0.92),
   lacquer: surf(CLS.LACQUER, 0.3),
   rock: surf(CLS.ROCK, 0.86),
