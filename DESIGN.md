@@ -401,7 +401,7 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `Can't build there.` `Trees in the way.` `Another building is in the way.` `A gold mine is in the way.`
 `Something is in the way.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
 `Requires a <Building>.` (e.g. `Requires a Shrine.`) `Production queue is full.`
-`The Town Center is growing.` `You already have that god.` `You can only have 3 gods.`
+`Your settlement is already growing.` `You already have that god.` `You can only have 3 gods.`
 `Your next god requires Town.` `Your next god requires City.` `You already have a Titan.`
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
