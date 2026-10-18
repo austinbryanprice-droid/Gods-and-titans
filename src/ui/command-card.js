@@ -33,7 +33,7 @@ const BARRACKS_KEYS = { warrior: 'W', archer: 'A', priest: 'P', battering_ram: '
 const CREATURE_KEYS = ['Q', 'W', 'E'];
 const GOD_KEYS = ['Q', 'W', 'E', 'R'];
 const PASSIVE_ICONS = {
-  aura: '🔆', regen: '💚', lifesteal: '🩸', cleave: '🪓', thorns: '🌵', evasion: '💨', critical: '💥', onHitSlow: '🐌', onHitDot: '☠️',
+  aura: '🔆', regen: '💚', lifesteal: '🧛', cleave: '🔪', thorns: '🌵', evasion: '💨', critical: '💥', onHitSlow: '🐌', onHitDot: '☠️',
 };
 const TARGET_TEXT = { none: 'No target', point: 'Targets an area', unit: 'Targets a unit', ally: 'Targets an ally', enemy: 'Targets an enemy' };
 
@@ -152,7 +152,7 @@ export function trainCheck(vs, unitId, buildings) {
   const ready = buildings.filter((b) => isComplete(b));
   if (!ready.length) return out('disabled', null);
   const free = ready.filter((b) => !(b.q || []).some((q) => q.u === 'tier_up'));
-  if (!free.length) return out('disabled', 'The Town Center is growing.');
+  if (!free.length) return out('disabled', 'Your settlement is already growing.');
   if (free.every((b) => (b.q || []).length >= MAX_QUEUE)) return out('disabled', 'Production queue is full.');
   if (def.class === 'god') {
     if (hasGodAliveOrQueued(vs, unitId)) return out('locked', 'You already have that god.');

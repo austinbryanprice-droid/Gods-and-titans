@@ -188,7 +188,7 @@ export class InfoView {
       }
       if (def.popProvided && e.o === vs.myIndex) s.parts.popp = stat('🏠', 'Housing');
     } else if (e.k === 'm') {
-      s.parts.gold = stat('🪙', 'Gold left', 'is-wide');
+      s.parts.gold = stat('💰', 'Gold left', 'is-wide');
       s.parts.miners = stat('⛏️', 'Miners', 'is-wide');
       s.parts.mineNote = el('div', 'hi-note');
       extra.append(s.parts.mineNote, el('div', 'hi-note is-dim', `Up to ${MINE_SLOTS} Worshippers mine at once, ${MINE_TIME} s per ${CARRY_AMOUNT} gold; the others wait their turn.`));
@@ -320,7 +320,7 @@ export class InfoView {
       if (sig !== p.statusSig) {
         p.statusSig = sig;
         p.status.textContent = '';
-        if (e.c) p.status.appendChild(el('span', 'hi-chip is-carry', e.c === 'g' ? '🪙' : '🪵'));
+        if (e.c) p.status.appendChild(el('span', 'hi-chip is-carry', e.c === 'g' ? '💰' : '🌲'));
         for (const code of fx) {
           const [icon, label] = STATUS[code] || ['❔', code];
           const chip = el('span', `hi-chip is-${code}`, icon);

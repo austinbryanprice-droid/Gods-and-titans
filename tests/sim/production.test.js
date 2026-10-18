@@ -135,7 +135,7 @@ test('tier up requires a Shrine, blocks training, raises tier', () => {
   assert.deepEqual(cmd(w, { type: 'upgradeTier', building: tc.id }), []);
   assert.equal(w.players[0].gold, 5000 - 300);
   assert.equal(tc.queue[0].u, 'tier_up');
-  assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), ['The Town Center is growing.']);
+  assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), ['Your settlement is already growing.']);
   const ev = runCollect(w, 61);
   assert.deepEqual(eventsOf(ev, 'tierUp').map((e) => [e.player, e.tier]), [[0, 2]]);
   assert.equal(w.players[0].tier, 2);

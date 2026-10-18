@@ -9,7 +9,7 @@ import { UNITS } from '../data/index.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText } from './hud-data.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
@@ -71,8 +71,8 @@ export class Hud {
       n.title = title;
       return { n, v };
     };
-    this.rGold = res('is-gold', '🪙', 'Gold');
-    this.rWood = res('is-wood', '🪵', 'Wood');
+    this.rGold = res('is-gold', '💰', 'Gold');
+    this.rWood = res('is-wood', '🌲', 'Wood');
     this.rFaith = res('is-faith', '✨', 'Faith — earned by worshippers praying at Shrines and Temples');
     this.rFaithRate = el('small', 'hud-res-rate');
     this.rFaith.n.appendChild(this.rFaithRate);
@@ -122,6 +122,9 @@ export class Hud {
     });
     this.mismatch = el('div', 'hud-mismatch', '⚠ Map mismatch: please reload the page (Ctrl+Shift+R) so both players run the same version.');
     this.mismatch.hidden = true;
+    // Shown while the host has gone quiet (clients only; see stallText).
+    this.stall = el('div', 'hud-stall');
+    this.stall.hidden = true;
 
     // Bottom console: minimap | selection | command card.
     this.miniCanvas = el('canvas', 'hud-minimap-canvas');
@@ -136,7 +139,7 @@ export class Hud {
       el('div', 'hud-bottom-card', this.cardGrid));
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.mismatch, this.banner, this.msgs, this.errorEl, this.chatBox, this.idleBtn, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.idleBtn, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
     for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.chatBox, this.tip]) {
@@ -216,12 +219,21 @@ export class Hud {
     }
     setText(this.clock, formatClock(vs.time));
     const s = game.session;
+    const stall = stallText(s);
     if (s && !s.isHost) {
       const ms = s.pingMs;
       setText(this.ping, ms === null || ms === undefined ? '📶 …' : `📶 ${ms} ms`);
-      setClass(this.ping, 'is-bad', ms > 250);
+      setClass(this.ping, 'is-bad', ms > 250 || !!stall);
       setHidden(this.ping, false);
     } else setHidden(this.ping, true);
+    setText(this.stall, stall);
+    setHidden(this.stall, !stall);
+    if (!this.leadShown) {
+      // The lobby's Random is drawn at Start: name the pantheon once, as the game opens.
+      this.leadShown = true;
+      const lead = leadText(vs);
+      if (lead) this.message(lead, 'good');
+    }
 
     if (now - this.lastGods >= GODS_REFRESH_MS) {
       this.lastGods = now;

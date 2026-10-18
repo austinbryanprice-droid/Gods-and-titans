@@ -379,8 +379,9 @@ export function friendlyJoinError(err, code) {
   // already plain; a custom server name inside them must not trip the rules below.
   if (/^Couldn't (reach the matchmaking server|connect to the host)\b/.test(msg)) return msg;
   if (/not found|peer-unavailable|could not connect to peer/i.test(msg)) return `Room not found: no game is waiting with code ${code || 'that code'}. Check the code and make sure the host is still in the lobby.`;
-  if (/version/i.test(msg)) return msg.startsWith('Version mismatch') ? msg : `Version mismatch: ${msg}`;
-  if (/full/i.test(msg)) return 'That game is full.';
+  // The host's kick reason names both builds ("v0.1.0+1a2b3c4d": version plus a build fingerprint): say it in plain words.
+  if (/version/i.test(msg)) return 'You and the host are running different versions of the game. Reload this page (Ctrl+F5) and try again.';
+  if (/full/i.test(msg)) return 'That game is full. Ask the host to open a slot.';
   if (/already (has )?started/i.test(msg)) return 'That game has already started.';
   if (/timeout|timed out/i.test(msg)) return 'The connection timed out. Check the code and your internet connection, then try again.';
   return msg;

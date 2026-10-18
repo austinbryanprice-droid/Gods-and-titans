@@ -754,6 +754,7 @@ export function createMenu({ root, onStart }) {
 
   function joinScreen({ code = '', error = null } = {}) {
     let attempt = 0;
+    let joinAbort = null; // AbortController of the attempt in flight (cancels the PeerJS peer / handshake)
     const nameInput = h('input.mw-input', {
       type: 'text',
       maxLength: 20,
@@ -812,8 +813,15 @@ export function createMenu({ root, onStart }) {
       joinBtn.textContent = on ? 'Connecting…' : 'Join Game';
     }
 
+    function abortJoin() {
+      const ctrl = joinAbort;
+      joinAbort = null;
+      if (ctrl) ctrl.abort();
+    }
+
     function back() {
       attempt++;
+      abortJoin();
       dropUrlParam('join');
       go('title');
     }
@@ -829,16 +837,21 @@ export function createMenu({ root, onStart }) {
       const name = saveSettings({ name: nameInput.value }).name;
       nameInput.value = name;
       const my = ++attempt;
+      abortJoin();
+      const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      joinAbort = ctrl;
       setBusy(true);
       const cancel = h('button.mw-link', { type: 'button', onclick: () => {
         attempt++;
+        abortJoin();
         setBusy(false);
         setStatus(null);
       } }, 'Cancel');
       setStatus('busy', `Connecting to room ${roomCode}…`, cancel);
       try {
         const mod = await loadLobby();
-        const lobby = await mod.LobbyClient.join({ transport: onlineTransport, roomCode, name });
+        const lobby = await mod.LobbyClient.join({ transport: onlineTransport, roomCode, name, signal: ctrl ? ctrl.signal : undefined });
+        if (joinAbort === ctrl) joinAbort = null;
         if (my !== attempt) {
           closeLobby(lobby);
           return;
@@ -847,8 +860,10 @@ export function createMenu({ root, onStart }) {
         sfx.play('select');
         go('lobby', { lobby, role: 'client', transport: onlineTransport });
       } catch (err) {
+        if (joinAbort === ctrl) joinAbort = null;
         if (my !== attempt) return;
         setBusy(false);
+        if (err && err.type === 'aborted') return setStatus(null); // cancelled: not an error
         setStatus('error', M.friendlyJoinError(err, roomCode));
         sfx.play('error');
       }
@@ -866,7 +881,7 @@ export function createMenu({ root, onStart }) {
         h('p.mw-hint', 'Tip: opening a friend\'s invite link fills in the code for you. Pasting the whole link here works too.'),
       ),
     );
-    return { el, focus: M.isCompleteRoomCode(codeInput.value) ? joinBtn : codeInput, onEscape: back, cleanup: () => attempt++ };
+    return { el, focus: M.isCompleteRoomCode(codeInput.value) ? joinBtn : codeInput, onEscape: back, cleanup: () => { attempt++; abortJoin(); } };
   }
 
   // ---------------------------------------------------------- how to play

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import * as M from '../../src/ui/menu-model.js';
 import { PANTHEON_LIST } from '../../src/data/index.js';
 import { PLAYER_COLORS } from '../../src/config.js';
+import { versionMismatchReason } from '../../src/net/protocol.js';
 
 const slot = (kind, extra = {}) => ({ kind, name: '', pantheon: 'random', team: 1, color: 0, difficulty: 'normal', peerId: null, ...extra });
 
@@ -133,11 +134,18 @@ test('every pantheon has an emblem, a summary with 4 gods, a titan and 3 creatur
   }
 });
 
+test('friendlyJoinError turns the lobby version-mismatch reason (with build fingerprints) into plain words', () => {
+  const reason = versionMismatchReason('0.1.0+1a2b3c4d', '0.1.0+9f8e7d6c');
+  const msg = M.friendlyJoinError(new Error(reason), 'ABCDE');
+  assert.equal(msg, 'You and the host are running different versions of the game. Reload this page (Ctrl+F5) and try again.');
+  assert.doesNotMatch(msg, /1a2b3c4d|9f8e7d6c|0\.1\.0/);
+});
+
 test('friendlyJoinError maps transport errors to clear messages', () => {
   assert.match(M.friendlyJoinError(new Error('Room ABCDE was not found. Check the code.'), 'ABCDE'), /^Room not found/);
   assert.match(M.friendlyJoinError(new Error('Room ABCDE was not found in this browser.'), 'ABCDE'), /^Room not found/);
-  assert.match(M.friendlyJoinError(new Error('Version mismatch: the host runs v0.1.0 but you have v0.0.9.')), /^Version mismatch/);
-  assert.equal(M.friendlyJoinError(new Error('The game is full.')), 'That game is full.');
+  assert.match(M.friendlyJoinError(new Error('Version mismatch: the host runs v0.1.0 but you have v0.0.9.')), /different versions of the game/);
+  assert.equal(M.friendlyJoinError(new Error('The game is full.')), 'That game is full. Ask the host to open a slot.');
   assert.match(M.friendlyJoinError('The host did not answer. Check the room code and try again.'), /did not answer/);
   assert.match(M.friendlyJoinError(null), /Could not join/);
 });

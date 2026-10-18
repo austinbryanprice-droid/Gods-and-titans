@@ -23,21 +23,24 @@ const HOTKEYS = [
     [kbd('S'), 'Stop'],
     [kbd('H'), 'Hold position'],
     [keys('Q', 'W', 'E', 'R'), 'God and creature abilities'],
+    [kbd('Hotkey'), 'While aiming or placing, another command hotkey replaces the pending order'],
   ]],
   ['Worshippers', [
     [kbd('G'), 'Gather gold or wood'],
     [kbd('B'), 'Build menu: H House · B Barracks · S Shrine · O Storehouse · T Tower · E Temple · G Titan Gate · C Town Center'],
     [kbd('P'), 'Pray at a Shrine or Temple'],
     [kbd('C'), 'Return carried gold or wood'],
+    [kbd('Shift'), 'Hold Shift while placing buildings to keep placing more; let go to finish'],
   ]],
   ['Buildings', [
     [kbd('W'), 'Town Center: Worshipper · Barracks: Warrior'],
+    [kbd('Shift', 'W'), 'Shift with any train hotkey or button queues up to 5 at once'],
     [kbd('U'), 'Town Center: grow to Town, then City'],
     [keys('A', 'P', 'R'), 'Barracks: Archer · Priest · Battering Ram'],
     [keys('Q', 'W', 'E'), 'Shrine: creatures · Temple: gods (R for the fourth)'],
     [kbd('T'), 'Titan Gate: summon the Titan'],
     [kbd('Y'), 'Set rally point'],
-    [kbd('Esc'), 'Cancel construction / targeting'],
+    [kbd('Esc'), 'Cancel construction / targeting; with a producer selected, take back its last queued unit'],
   ]],
   ['Camera & groups', [
     [kbd('Ctrl', '1–9'), 'Assign a control group'],
@@ -45,14 +48,21 @@ const HOTKEYS = [
     [kbd('F1–F3'), 'Select your gods'],
     [kbd('Space'), 'Center on selection or the last alert'],
     [kbd('Tab'), 'Next unit type in a mixed selection'],
-    [kbd('.'), 'Next idle worshipper (Shift: all of them)'],
+    [kbd('.'), 'Next idle worshipper (Shift or Ctrl: select all of them)'],
     [kbd('Backspace'), 'Jump to your Town Center'],
     [kbd('Alt'), 'Show every health bar'],
     [kbd('Enter'), 'Chat'],
     [kbd('F10'), 'Game menu (pauses a game against the AI)'],
-    [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera; mouse wheel zooms'],
+    [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera'],
+    [kbd('Mouse wheel'), 'Zoom in and out (smoothly on a trackpad)'],
   ]],
 ];
+
+// "your Village Hall, then a Town Hall and a City Palace": what the Town Center is called on screen at each tier.
+const TOWN_CENTER_NAMES = (() => {
+  const [village, town, city] = BUILDINGS.town_center.tierNames;
+  return `your ${village}, which becomes a ${town} and then a ${city}`;
+})();
 
 const TIER_WORDS = ['the Village', 'a Town', 'a City'];
 const NTH = ['first', 'second', 'third', 'fourth'];
@@ -77,7 +87,7 @@ export function renderHowToContent() {
   const rules = h('div.mw-howto-rules',
     h('p.mw-lead', 'Lead a people devoted to their gods. Your worshippers gather, build and pray; your prayers call down creatures, gods and a colossal titan. Destroy every building of the enemy to win.'),
     step(1, '⛏️', 'Gather gold and wood',
-      `You start with a Town Center, ${START_WORKERS} Worshippers, ${START_RESOURCES.gold} gold and ${START_RESOURCES.wood} wood. Select worshippers (drag a box around them) and right-click a gold mine or the forest. They carry ${CARRY_AMOUNT} at a time back to the Town Center or a Storehouse.`,
+      `You start with a Town Center (${TOWN_CENTER_NAMES}), ${START_WORKERS} Worshippers, ${START_RESOURCES.gold} gold and ${START_RESOURCES.wood} wood. Select worshippers (drag a box around them) and right-click a gold mine or the forest. They carry ${CARRY_AMOUNT} at a time back to the Town Center or a Storehouse.`,
       `Only ${MINE_SLOTS} worshippers can dig in a gold mine at once (${MINE_TIME} seconds per trip); the others wait their turn, so 5–6 on one mine is plenty. Send the rest to the forest or to pray. Town Centers and Storehouses must be built at least ${DROPOFF_MINE_GAP} tiles away from a gold mine.`),
     step(2, '🙏', 'Pray for Faith',
       `Build a Shrine, then right-click it with worshippers (or press P). Every kneeling worshipper earns Faith each second (Shrine ${faithRate('shrine')}/s, Temple ${faithRate('temple')}/s) until you give them another order. Faith is what summons the divine.`),
@@ -100,6 +110,7 @@ export function renderHowToContent() {
         h('tr', h('td', kbd('Drag')), h('td', 'Box-select units')),
         h('tr', h('td', kbd('Shift', 'Click')), h('td', 'Add to or remove from the selection')),
         h('tr', h('td', kbd('Double-click')), h('td', 'Select every unit of that type on screen')),
+        h('tr', h('td', kbd('Ctrl', 'Click')), h('td', 'The same, with a single click')),
         h('tr', h('td', kbd('Shift', 'Right-click')), h('td', 'Queue orders')),
       ),
     ),

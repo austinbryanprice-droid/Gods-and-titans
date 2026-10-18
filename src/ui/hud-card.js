@@ -133,8 +133,8 @@ export class CardView {
       const add = (cls, icon, v) => {
         if (v) row.appendChild(el('span', `ht-res ${cls}`, el('i', 'ht-res-i', icon), fmt(v)));
       };
-      add('is-gold', '🪙', c.gold);
-      add('is-wood', '🪵', c.wood);
+      add('is-gold', '💰', c.gold);
+      add('is-wood', '🌲', c.wood);
       add('is-faith', '✨', c.faith);
       add('is-pop', '👥', c.pop);
       if (c.time) row.appendChild(el('span', 'ht-res is-time', el('i', 'ht-res-i', '⏳'), `${Math.round(c.time)}s`));
