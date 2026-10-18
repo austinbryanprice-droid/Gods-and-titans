@@ -147,7 +147,7 @@ test('with the HUD up the failure screen says what went wrong in plain words and
   const layer = document.createElement('div');
   hudRoot.appendChild(layer);
   const exits = [];
-  const game = { errors: [], disposed: false, viewState: {}, releasePlayers() {}, quitToMenu: () => exits.push(1) };
+  const game = { errors: [], disposed: false, viewState: {}, releasePlayers() {}, setLoading() {}, quitToMenu: () => exits.push(1) };
   game.hud = { overlays: new Overlays(layer, game) };
   Game.prototype.fail.call(game, new Error('THREE.WebGLRenderer: Error creating WebGL context.'));
   const text = hudRoot.textContent;
