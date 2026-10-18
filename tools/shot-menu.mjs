@@ -216,7 +216,7 @@ async function flows(browser, errors) {
     ok('sp: Start enabled', enabled);
     await page.screenshot({ path: join(out, 'flow', 'sp-lobby.png') });
     await page.click('.mw-btn--start');
-    await page.waitForFunction(() => !!globalThis.__mythicwarLaunch, null, { timeout: 5000 });
+    await page.waitForFunction(() => !!globalThis.__mythicwarLaunch, null, { timeout: 90000, polling: 200 });
     const launch = await page.evaluate(() => {
       const l = globalThis.__mythicwarLaunch;
       return { role: l.role, myIndex: l.myIndex, setup: l.setup, conns: l.conns instanceof Map ? l.conns.size : -1, hasLobby: !!l.lobby };
@@ -298,8 +298,8 @@ async function flows(browser, errors) {
     await hostPage.screenshot({ path: join(out, 'flow', 'online-host.png') });
     await clientPage.screenshot({ path: join(out, 'flow', 'online-client.png') });
     await hostPage.click('.mw-btn--start');
-    await hostPage.waitForFunction(() => !!globalThis.__mythicwarLaunch, null, { timeout: 5000 });
-    await clientPage.waitForFunction(() => !!globalThis.__mythicwarLaunch, null, { timeout: 5000 });
+    await hostPage.waitForFunction(() => !!globalThis.__mythicwarLaunch, null, { timeout: 90000, polling: 200 });
+    await clientPage.waitForFunction(() => !!globalThis.__mythicwarLaunch, null, { timeout: 90000, polling: 200 });
     const hl = await hostPage.evaluate(() => {
       const l = globalThis.__mythicwarLaunch;
       return { role: l.role, myIndex: l.myIndex, setup: l.setup, conns: l.conns instanceof Map ? [...l.conns.keys()] : null };

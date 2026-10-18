@@ -49,7 +49,7 @@ export function issueTrain(world, player, b, unitId) {
   const def = getUnitType(unitId);
   if (!def) return;
   if (!producibleAt(b.type, p.pantheon).includes(unitId)) return;
-  if (b.queue.some((q) => q.u === 'tier_up')) return world.error(player, 'The Town Center is growing.');
+  if (b.queue.some((q) => q.u === 'tier_up')) return world.error(player, 'Your settlement is already growing.');
   if (b.queue.length >= MAX_QUEUE) return world.error(player, 'Production queue is full.');
   const fallen = def.class === 'god' ? p.fallen[unitId] : null;
   if (def.class === 'god') {

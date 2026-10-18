@@ -66,7 +66,7 @@ export default {
           ],
           vfx: { element: 'holy', shape: 'field' },
           ai: { use: 'heal' },
-          icon: '🫕',
+          icon: '🥘',
           description: 'Sets down the Cauldron of Plenty, from which no company ever went away unsatisfied: allies within 3.5 tiles heal 60 at once and 22 health per second for 8 seconds.',
         },
         {
@@ -145,7 +145,7 @@ export default {
           ],
           vfx: { element: 'death', shape: 'strike' },
           ai: { use: 'damage' },
-          icon: '🩸',
+          icon: '☠️',
           description: 'Foretells an enemy\'s death as the Washer at the Ford, dealing 60 damage, then 30 damage per second for 4 seconds, and stripping 3 armor for 6 seconds.',
         },
         {
@@ -203,7 +203,7 @@ export default {
         extras: ['feather_cloak', 'long_hair', 'eye_glow'],
         aura: '#a0283c',
       },
-      icon: '🪶',
+      icon: '🐦',
       description: 'Shape-shifting goddess of war, fate and sovereignty, who foretells doom, takes the form of a crow over the battlefield and drives armies to victory or ruin.',
     },
 
@@ -262,7 +262,7 @@ export default {
           ],
           vfx: { element: 'physical', shape: 'strike' },
           ai: { use: 'cc' },
-          icon: '🪨',
+          icon: '🌑',
           description: 'Slings the tathlum, the stone that drove out the eye of Balor, dealing 80 damage and stunning the target for 1.75 seconds.',
         },
         {

@@ -69,6 +69,21 @@ function findNaN(vfx) {
   return null;
 }
 
+test('the lazily filled mesh pools start with one hidden item, so the shader warm-up sees them', () => {
+  const { scene, vfx } = make();
+  for (const pool of [vfx.decals, vfx.ribbons, vfx.flares, vfx.pillars, vfx.domes]) {
+    assert.equal(pool.items.length, 1);
+    assert.equal(pool.freeItems.length, 1);
+    assert.equal(pool.items[0].mesh.visible, false);
+  }
+  assertIdle(vfx, 'fresh system');
+  vfx.spawnEffect({ el: 'holy', shape: 'shield', x: 5, y: 5, r: 2, duration: 1 });
+  assert.equal(vfx.domes.items.length, 1, 'the first dome is the primed one');
+  assert.ok(vfx.domes.items[0].mesh.visible);
+  vfx.dispose();
+  assert.equal(scene.children.length, 0);
+});
+
 test('covers every schema shape, projectile kind and element', () => {
   for (const s of VFX_SHAPES) assert.ok(SHAPES[s], `no handler for shape ${s}`);
   for (const k of KINDS) assert.ok(PROJECTILE_SPECS[k], `no spec for projectile ${k}`);

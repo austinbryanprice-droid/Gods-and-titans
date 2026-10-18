@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import * as M from '../../src/ui/menu-model.js';
 import { PANTHEON_LIST } from '../../src/data/index.js';
 import { PLAYER_COLORS } from '../../src/config.js';
+import { versionMismatchReason } from '../../src/net/protocol.js';
 
 const slot = (kind, extra = {}) => ({ kind, name: '', pantheon: 'random', team: 1, color: 0, difficulty: 'normal', peerId: null, ...extra });
 
@@ -15,6 +16,16 @@ test('cleanRoomCode accepts typed codes, lower case, spaces and invite links', (
   assert.equal(M.cleanRoomCode('O0I1'), ''); // ambiguous characters are not in the alphabet
   assert.ok(M.isCompleteRoomCode('K7QX2'));
   assert.ok(!M.isCompleteRoomCode('K7QX'));
+});
+
+test('cleanRoomCode finds the code inside a pasted sentence instead of mixing in letters from the words', () => {
+  assert.equal(M.cleanRoomCode('Join with code K7QX2'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('room code: K7QX2'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('come play K7QX2!'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('please K7QX2'), 'K7QX2'); // 'please' is made of valid letters too
+  assert.equal(M.cleanRoomCode('hello kqxzb'), 'KQXZB');
+  assert.equal(M.cleanRoomCode('K7QX2 2'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('k7 qx2'), 'K7QX2'); // a code typed in pieces still works
 });
 
 test('inviteLink keeps only join + network params', () => {
@@ -70,6 +81,19 @@ test('startStatus prefers startProblem(), falls back to canStart()', () => {
   assert.match(M.startBlockReason(alone), /opponent/);
 });
 
+test('startStatus says nobody has joined yet instead of quoting the team rule', () => {
+  const teams = 'Players must be on at least two different teams.';
+  const lone = { state: { slots: [slot('host'), slot('open', { team: 2 }), slot('closed'), slot('closed')] }, startProblem: () => teams };
+  assert.match(M.startStatus(lone, { online: true }).reason, /friend to join/);
+  assert.match(M.startStatus(lone, { online: false }).reason, /slot to AI/);
+  // two players on one team keep the lobby's own wording
+  const same = { state: { slots: [slot('host'), slot('ai'), slot('closed'), slot('closed')] }, startProblem: () => teams };
+  assert.equal(M.startStatus(same, { online: true }).reason, teams);
+  // other problems are never replaced
+  const waiting = { state: lone.state, startProblem: () => 'Waiting for Bob to connect.' };
+  assert.equal(M.startStatus(waiting, { online: true }).reason, 'Waiting for Bob to connect.');
+});
+
 test('matchup summary groups filled slots by team', () => {
   const state = { slots: [slot('host', { name: 'A', team: 2 }), slot('ai', { team: 1, difficulty: 'easy', color: 3 }), slot('open'), slot('human', { name: 'B', team: 2, color: 1 })] };
   const sum = M.matchupSummary(state);
@@ -110,11 +134,18 @@ test('every pantheon has an emblem, a summary with 4 gods, a titan and 3 creatur
   }
 });
 
+test('friendlyJoinError turns the lobby version-mismatch reason (with build fingerprints) into plain words', () => {
+  const reason = versionMismatchReason('0.1.0+1a2b3c4d', '0.1.0+9f8e7d6c');
+  const msg = M.friendlyJoinError(new Error(reason), 'ABCDE');
+  assert.equal(msg, 'You and the host are running different versions of the game. Reload this page (Ctrl+F5) and try again.');
+  assert.doesNotMatch(msg, /1a2b3c4d|9f8e7d6c|0\.1\.0/);
+});
+
 test('friendlyJoinError maps transport errors to clear messages', () => {
   assert.match(M.friendlyJoinError(new Error('Room ABCDE was not found. Check the code.'), 'ABCDE'), /^Room not found/);
   assert.match(M.friendlyJoinError(new Error('Room ABCDE was not found in this browser.'), 'ABCDE'), /^Room not found/);
-  assert.match(M.friendlyJoinError(new Error('Version mismatch: the host runs v0.1.0 but you have v0.0.9.')), /^Version mismatch/);
-  assert.equal(M.friendlyJoinError(new Error('The game is full.')), 'That game is full.');
+  assert.match(M.friendlyJoinError(new Error('Version mismatch: the host runs v0.1.0 but you have v0.0.9.')), /different versions of the game/);
+  assert.equal(M.friendlyJoinError(new Error('The game is full.')), 'That game is full. Ask the host to open a slot.');
   assert.match(M.friendlyJoinError('The host did not answer. Check the room code and try again.'), /did not answer/);
   assert.match(M.friendlyJoinError(null), /Could not join/);
 });

@@ -343,3 +343,19 @@ test('gold: enemy workers share the same slots of a mine', () => {
   }
   assert.ok(w.players[1].gold > 0 && w.players[0].gold > 400);
 });
+
+test('a carrier whose drop-off is walled in retries rarely instead of searching every tick', () => {
+  const rock = [{ x: 3, y: 3, w: 12, h: 1 }, { x: 3, y: 14, w: 12, h: 1 }, { x: 3, y: 3, w: 1, h: 12 }, { x: 14, y: 3, w: 1, h: 12 }];
+  const w = makeWorld({ map: { width: 96, height: 96, rock } });
+  for (const u of w.unitsOf(0).concat(w.unitsOf(1))) w.killEntity(u, null);
+  const u = spawn(w, 0, 'worshipper', 17, 8);
+  u.carry = 'g';
+  u.carryAmount = CARRY_AMOUNT;
+  const gold = w.players[0].gold;
+  w.issueCommand(0, { type: 'gather', units: [u.id], target: w.mineList[0].id });
+  const s0 = w.paths.stats.searches;
+  run(w, 20); // walks to the wall in about 5 s, then fails and retries every 2 s
+  assert.equal(u.carryAmount, CARRY_AMOUNT, 'cannot deliver');
+  assert.equal(w.players[0].gold, gold);
+  assert.ok(w.paths.stats.searches - s0 <= 14, `path searches ${w.paths.stats.searches - s0}`);
+});

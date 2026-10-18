@@ -126,8 +126,11 @@ test('every titan casts both of its abilities in a staged fight', () => {
 
 test('AI defends its base against a raid and rebuilds a lost Town Center', () => {
   const g = soloGame(3, 'egyptian', 'normal');
-  g.step(330);
   const { world, ai } = g;
+  // The raid appears 9 tiles from the Town Center: keep the army home (not out creeping) so the
+  // outcome does not hinge on where it happens to be at that second.
+  ai.ai.prof = { ...ai.ai.prof, creepFrom: Infinity };
+  g.step(330);
   const tc = world.buildingsOf(0).find((b) => b.type === 'town_center');
   assert.ok(tc);
   const side = tc.x < world.map.width / 2 ? -1 : 1;

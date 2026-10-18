@@ -92,9 +92,11 @@ test('build submenu: 8 buildings with costs, tier and requirement locks, Back', 
   assert.equal(byId(poor, 'build:house').reason, 'Not enough gold.');
   assert.equal(byId(poor, 'build:house').enabled, false);
 
-  // A non-worker selection has no build submenu.
+  // A non-worker selection has no build submenu: it gets its normal commands, never a blank card.
   const w = spawn(world, 0, 'warrior', 10, 14);
-  assert.ok(getCommandCard([w.id], viewOf(world), 'build').every((b) => b === null));
+  const warrior = getCommandCard([w.id], viewOf(world), 'build');
+  assert.ok(warrior.some((b) => b && b.id === 'stop'));
+  assert.ok(warrior.every((b) => !b || !b.id.startsWith('build')));
 });
 
 test('targeting and placement modes show only Cancel', () => {
@@ -138,7 +140,7 @@ test('Town Center: Worshipper, Grow (with requirement), Rally, queue count, grow
   run(world, 0.1);
   card = getCommandCard([tc.id], viewOf(world));
   assert.equal(card[0].state, 'disabled');
-  assert.equal(card[0].reason, 'The Town Center is growing.');
+  assert.equal(card[0].reason, 'Your settlement is already growing.');
   assert.equal(card[1].state, 'disabled');
 
   // Grown into a Town: next is City (needs a Temple), then no Grow button at all.

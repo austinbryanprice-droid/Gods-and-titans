@@ -26,6 +26,14 @@ export const TRANSPORTS = ['peer', 'local', 'loopback', 'none'];
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const later = typeof setImmediate === 'function' ? setImmediate : (fn) => setTimeout(fn, 0);
 
+/** The error a cancelled join rejects with (`signal` in joinRoom; `type` 'aborted'). */
+export function abortError() {
+  const e = new Error('Cancelled.');
+  e.name = 'AbortError';
+  e.type = 'aborted';
+  return e;
+}
+
 // ---------------------------------------------------------------- liveness
 
 const liveConns = new Set();
@@ -83,15 +91,18 @@ export class FramedConn {
    * @param {number} [o.maxFrameErrors] malformed frames tolerated per ERROR_WINDOW_MS (0 = any number)
    * @param {boolean} [o.autoPulse] false: nobody calls _heartbeat (tests drive it with their own clock)
    * @param {number} [o.maxPulseGapMs] most silence one late pulse can add (MAX_PULSE_GAP_MS)
+   * @param {() => number} [o.bufferedFn] bytes handed to the pipe that it has not sent yet (0 when unknown)
    */
   constructor({
     id, rawSend, rawClose = () => {}, chunkSize = CHUNK_SIZE, heartbeatMs = HEARTBEAT_MS, timeoutMs = TIMEOUT_MS, transport = '',
     maxMessageChars = MAX_HOST_MESSAGE_CHARS, maxFrameErrors = MAX_FRAME_ERRORS, autoPulse = true, maxPulseGapMs = MAX_PULSE_GAP_MS,
+    bufferedFn = null,
   }) {
     this.id = id || `conn-${++connSeq}`;
     this.transport = transport;
     this.rawSend = rawSend;
     this.rawClose = rawClose;
+    this.bufferedFn = bufferedFn;
     this.chunkSize = chunkSize;
     this.heartbeatMs = heartbeatMs;
     this.timeoutMs = timeoutMs;
@@ -113,6 +124,16 @@ export class FramedConn {
     this.silentMs = 0; // running time without a frame from the other side
     this.stats = { sentMsgs: 0, sentChars: 0, recvMsgs: 0, recvChars: 0, badFrames: 0 };
     if (heartbeatMs > 0 && autoPulse) trackConn(this);
+  }
+
+  /** Bytes queued for the other side and not yet sent: a slow link shows here (0 when the pipe cannot tell). */
+  get buffered() {
+    if (!this.bufferedFn) return 0;
+    try {
+      return this.bufferedFn() || 0;
+    } catch {
+      return 0;
+    }
   }
 
   /** Change how long the other side may stay silent (e.g. GAME_TIMEOUT_MS once a game starts). */
@@ -524,6 +545,14 @@ function joinLocal(code, opts) {
       ch.close();
       reject(new Error(`Room ${code} was not found in this browser.`));
     }, opts.timeoutMs ?? 3000);
+    if (opts.signal) {
+      opts.signal.addEventListener('abort', () => {
+        if (conn) return; // already joined: joinRoom closes the link
+        clearTimeout(timer);
+        ch.close();
+        reject(abortError());
+      }, { once: true });
+    }
     ch.onmessage = (e) => {
       const m = e.data;
       if (!m || m.to !== me) return;
@@ -580,6 +609,7 @@ export function brokerMessage(params) {
 }
 
 function friendlyPeerError(err, code, params) {
+  if (err && (err.name === 'AbortError' || err.type === 'aborted')) return err; // a cancelled join keeps its identity
   const type = err && err.type;
   let message;
   if (type === 'peer-unavailable') message = `Room ${code} was not found. Check the code and that the host is still in the lobby.`;
@@ -595,8 +625,16 @@ function friendlyPeerError(err, code, params) {
   return e;
 }
 
-function waitPeerOpen(peer, timeoutMs) {
+function waitPeerOpen(peer, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(abortError());
+    };
+    if (signal) {
+      if (signal.aborted) return reject(abortError());
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
     const timer = setTimeout(() => {
       cleanup();
       const e = new Error('timeout');
@@ -613,6 +651,7 @@ function waitPeerOpen(peer, timeoutMs) {
     };
     const cleanup = () => {
       clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
       peer.off('open', onOpen);
       peer.off('error', onError);
     };
@@ -642,6 +681,7 @@ function wrapDataConnection(dc) {
     id: dc.peer,
     transport: 'peer',
     rawSend: (f) => dc.send(f),
+    bufferedFn: () => (dc.dataChannel ? dc.dataChannel.bufferedAmount : 0),
     rawClose: () => {
       try {
         dc.close();
@@ -726,12 +766,14 @@ async function hostPeer(ep, opts) {
 }
 
 async function joinPeer(code, opts) {
+  const { signal } = opts;
   const Peer = await loadPeerJS();
+  if (signal && signal.aborted) throw abortError();
   const params = opts.params || readNetParams();
   // 1. Signaling server (broker): unreachable → PEER_MESSAGES.broker.
   const peer = new Peer(peerOptions(params));
   try {
-    await waitPeerOpen(peer, opts.timeoutMs ?? JOIN_TIMEOUT_MS);
+    await waitPeerOpen(peer, opts.timeoutMs ?? JOIN_TIMEOUT_MS, signal);
   } catch (err) {
     peer.destroy();
     throw friendlyPeerError(err, code, params);
@@ -747,15 +789,22 @@ async function joinPeer(code, opts) {
   const connectMs = opts.connectTimeoutMs ?? opts.timeoutMs ?? CONNECT_TIMEOUT_MS;
   try {
     await new Promise((resolve, reject) => {
+      const onAbort = () => fail(abortError());
       const fail = (err) => {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
         reject(err);
       };
       const timer = setTimeout(() => fail(Object.assign(new Error('webrtc'), { type: 'webrtc' })), connectMs);
       dc.on('open', () => {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
         resolve();
       });
+      if (signal) {
+        if (signal.aborted) onAbort();
+        else signal.addEventListener('abort', onAbort, { once: true });
+      }
       dc.on('error', (err) => fail(err && err.type ? err : Object.assign(new Error('webrtc'), { type: 'webrtc', cause: err })));
       dc.on('close', () => fail(Object.assign(new Error('webrtc'), { type: 'connection-closed' })));
       dc.on('iceStateChanged', (state) => {
@@ -800,14 +849,23 @@ export async function hostRoom(opts = {}) {
  * @param {string} opts.roomCode
  * @param {object} [opts.params]
  * @param {number} [opts.timeoutMs]
+ * @param {AbortSignal} [opts.signal] abort a join in progress: rejects with abortError(), nothing is left open
  * @returns {Promise<FramedConn>}
  */
 export async function joinRoom(opts = {}) {
   const transport = opts.transport || 'peer';
   const code = normalizeRoomCode(opts.roomCode);
   if (!code) throw new Error('Enter a room code.');
-  if (transport === 'peer') return joinPeer(code, opts);
-  if (transport === 'local') return joinLocal(code, opts);
-  if (transport === 'loopback') return joinLoopback(code, opts);
-  throw new Error(`Cannot join a room with transport '${transport}'.`);
+  const { signal } = opts;
+  if (signal && signal.aborted) throw abortError();
+  let conn;
+  if (transport === 'peer') conn = await joinPeer(code, opts);
+  else if (transport === 'local') conn = await joinLocal(code, opts);
+  else if (transport === 'loopback') conn = await joinLoopback(code, opts);
+  else throw new Error(`Cannot join a room with transport '${transport}'.`);
+  if (signal && signal.aborted) {
+    conn.close('aborted'); // cancelled just as the link opened: do not leave a half-joined player behind
+    throw abortError();
+  }
+  return conn;
 }

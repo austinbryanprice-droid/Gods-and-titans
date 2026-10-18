@@ -60,6 +60,24 @@ test('rally on a mine sends new workers to gather', () => {
   assert.equal(u.order.mine, mine.id);
 });
 
+test('a rally on a mine that runs dry moves on to the nearest mine', () => {
+  const w = makeWorld({ map: { mines: [{ tx: 13, ty: 6, amount: 3000 }, { tx: 20, ty: 12, amount: 12000 }, { tx: 40, ty: 40, amount: 12000 }] } });
+  const tc = tcOf(w);
+  const [a, b] = w.mineList;
+  cmd(w, { type: 'rally', building: tc.id, x: a.x, y: a.y, target: a.id });
+  w.depleteMine(a);
+  assert.equal(tc.rally.target, b.id);
+  assert.deepEqual(w.getSnapshot().entities.find((e) => e.id === tc.id).rp, [b.x, b.y]);
+  cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' });
+  const ev = runCollect(w, MORTALS.worshipper.buildTime + 0.2);
+  const u = w.getEntity(eventsOf(ev, 'spawn')[0].id);
+  assert.equal(u.order.type, 'gather');
+  assert.equal(u.order.mine, b.id);
+  // with no other mine in reach the rally stays where it was
+  w.depleteMine(b);
+  assert.equal(tc.rally.target, b.id);
+});
+
 test('rally on a tree sends new workers to chop', () => {
   const w = makeWorld({ map: { forest: [{ x: 2, y: 16, w: 4, h: 2 }] } });
   const tc = tcOf(w);
@@ -117,7 +135,7 @@ test('tier up requires a Shrine, blocks training, raises tier', () => {
   assert.deepEqual(cmd(w, { type: 'upgradeTier', building: tc.id }), []);
   assert.equal(w.players[0].gold, 5000 - 300);
   assert.equal(tc.queue[0].u, 'tier_up');
-  assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), ['The Town Center is growing.']);
+  assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), ['Your settlement is already growing.']);
   const ev = runCollect(w, 61);
   assert.deepEqual(eventsOf(ev, 'tierUp').map((e) => [e.player, e.tier]), [[0, 2]]);
   assert.equal(w.players[0].tier, 2);

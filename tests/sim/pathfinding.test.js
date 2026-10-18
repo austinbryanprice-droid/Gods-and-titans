@@ -211,6 +211,23 @@ test('stuck detection gives up on a move blocked by enemies', () => {
   assert.ok(u.x < 25);
 });
 
+test('a crowd queueing at a one-tile gap waits its turn instead of giving up the move', () => {
+  // a three-tile-thick wall with a single tile gap: 24 units take a while to file through
+  const w = makeWorld({ map: { width: 48, height: 48, rock: [{ x: 0, y: 24, w: 22, h: 3 }, { x: 23, y: 24, w: 25, h: 3 }] } });
+  clearUnits(w, 0);
+  clearUnits(w, 1);
+  const us = [];
+  for (let i = 0; i < 24; i++) us.push(spawn(w, 0, 'warrior', 14 + (i % 6) * 1.1, 10 + Math.floor(i / 6) * 1.1));
+  w.issueCommand(0, { type: 'move', units: us.map((u) => u.id), x: 24, y: 40 });
+  let gaveUp = 0;
+  for (let t = 0; t < 20 * 60; t++) {
+    w.tick();
+    for (const u of us) if (u.mv && u.mv.failed) gaveUp++;
+  }
+  assert.equal(gaveUp, 0, 'nobody abandoned the move while queueing');
+  assert.ok(us.every((u) => u.y > 27), 'everyone made it through the gap');
+});
+
 test('workers path to the reachable side of a mine', () => {
   const w = makeWorld({ map: { width: 48, height: 48, starts: [{ x: 6, y: 30 }, { x: 38, y: 38 }], mines: [{ tx: 20, ty: 10, amount: 5000 }, { tx: 40, ty: 30, amount: 5000 }], rock: [{ x: 18, y: 8, w: 7, h: 2 }, { x: 18, y: 8, w: 2, h: 7 }, { x: 23, y: 8, w: 2, h: 7 }] } });
   const u = w.unitsOf(0)[0];

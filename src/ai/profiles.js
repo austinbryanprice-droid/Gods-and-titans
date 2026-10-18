@@ -4,12 +4,16 @@ import { AI_THINK_INTERVAL } from '../config.js';
 
 const BASE = {
   think: AI_THINK_INTERVAL.normal,
-  workers: 22, // worshipper target
+  workers: 30, // most worshippers ever (the target is what the mines, wood and prayer slots need)
+  minersPerMine: 5, // gold workers per owned mine (+1 when its drop-off is farther than the minimum gap); 2 mine at once, 5–6 saturate it
   tcQueue: 1, // worshippers kept queued at a Town Center
   prayEarly: 3, // praying worshippers before a Temple stands
-  prayLate: 7, // praying worshippers once a Temple stands
-  prayTitan: 9, // while saving for the Titan
-  woodShare: 0.42, // share of non-praying workers on wood
+  prayLate: 9, // praying worshippers once a Temple stands (capped by the prayer slots)
+  prayTitan: 10, // while saving for the Titan
+  woodShare: 0.42, // share of non-praying workers on wood (early game, before the mines are full)
+  woodPerGold: 0.5, // woodcutters wanted per gold worker (bank-adjusted)
+  woodMin: 3,
+  woodMax: 8,
   houseBuffer: 6, // free pop kept ahead of the cap (+2 per production building)
   shrineAt: 30, // earliest Shrine (s)
   barracksWorkers: 9, // workers before the first Barracks
@@ -29,8 +33,9 @@ const BASE = {
   retreatRatio: 0.55, // local fight ratio that triggers a retreat
   creepRatio: 1.7,
   creepFrom: 150,
-  expandBelow: 4200, // main mine gold left that triggers an expansion
-  expandAt: Infinity, // expand by this time even if the main mine is fine
+  expandBelow: 3000, // owned mines' gold left that triggers one more expansion
+  expandAt: 330, // second mine from this time (the start mine alone caps at 13.3 gold/s)
+  expandAt2: 840, // third mine from this time
   towersMax: 2,
   godRetreat: 0.25, // god hp fraction that triggers a retreat
   godRejoin: 0.6,
@@ -46,7 +51,9 @@ export const PROFILES = {
   easy: {
     ...BASE,
     think: AI_THINK_INTERVAL.easy,
-    workers: 14,
+    workers: 15,
+    minersPerMine: 4,
+    woodMax: 5,
     prayEarly: 2,
     prayLate: 5,
     prayTitan: 7,
@@ -67,7 +74,9 @@ export const PROFILES = {
     retreatRatio: 0.3,
     creepRatio: 2.2,
     creepFrom: 300,
-    expandBelow: 2000,
+    expandBelow: 1500,
+    expandAt: 660,
+    expandAt2: Infinity,
     towersMax: 1,
     godRetreat: 0.12,
     godRejoin: 0.5,
@@ -81,11 +90,12 @@ export const PROFILES = {
   hard: {
     ...BASE,
     think: AI_THINK_INTERVAL.hard,
-    workers: 26,
+    workers: 34,
+    minersPerMine: 6,
     tcQueue: 2,
     prayEarly: 4,
-    prayLate: 8,
-    prayTitan: 10,
+    prayLate: 12,
+    prayTitan: 13,
     houseBuffer: 8,
     shrineAt: 20,
     barracksWorkers: 8,
@@ -103,8 +113,9 @@ export const PROFILES = {
     retreatRatio: 0.65,
     creepRatio: 1.45,
     creepFrom: 130,
-    expandBelow: 5500,
-    expandAt: 540,
+    expandBelow: 4000,
+    expandAt: 270,
+    expandAt2: 720,
     towersMax: 3,
     godRetreat: 0.3,
     godRejoin: 0.55,

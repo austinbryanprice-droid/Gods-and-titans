@@ -46,17 +46,21 @@ html, body {
 #game-root { position: absolute; inset: 0; }
 #game-canvas { display: block; width: 100%; height: 100%; }
 
-#boot-message {
+#boot-message, #start-message {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
+  padding: 0 1.5em;
+  text-align: center;
   font: 600 18px/1.4 var(--mw-font-display);
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--mw-gold);
   background: radial-gradient(ellipse at 50% 40%, #121a33, #05070d 70%);
 }
+/* between Start Battle and the first frame: covers the empty canvas, under the HUD (z 5) and the menu (z 20) */
+#start-message { z-index: 4; animation: mw-breathe 1.8s ease-in-out infinite; }
 
 /* ------------------------------------------------------------ menu root */
 
@@ -405,6 +409,17 @@ kbd {
   color: var(--mw-ink-dim);
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
 }
+.mw-notice {
+  margin: 0 0 0.4em;
+  padding: 0.7em 0.9em;
+  font-size: 0.88em;
+  line-height: 1.45;
+  text-align: center;
+  color: #ffd5c8;
+  border: 1px solid rgba(239, 122, 95, 0.6);
+  border-radius: 5px;
+  background: rgba(80, 24, 16, 0.55);
+}
 .mw-main-nav {
   grid-row: 2;
   display: flex;
@@ -463,18 +478,35 @@ kbd {
 
 /* ------------------------------------------------------------ lobby */
 
-.mw-lobby {
+/* The lobby grid plus its footer (the dock); the dock sticks to the bottom of the window so Start Battle stays in reach. */
+.mw-lobby-wrap {
   flex: 1 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.mw-lobby {
+  flex: 0 0 auto;
   width: 100%;
   max-width: 92em;
   margin: 0 auto;
-  padding: 1.4em 2em 1.4em;
+  padding: 1.4em 2em 1.1em;
   display: grid;
   grid-template-columns: minmax(0, 1.75fr) minmax(17em, 1fr);
-  grid-template-rows: auto auto auto;
-  grid-template-areas: 'head head' 'main side' 'foot foot';
-  align-content: center;
+  grid-template-rows: auto auto;
+  grid-template-areas: 'head head' 'main side';
   gap: 1.1em 1.3em;
+}
+.mw-lobby-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 92em;
+  margin: 0 auto;
+  padding: 0 2em 1.4em;
 }
 .mw-lobby-head { grid-area: head; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
 .mw-lobby-head .mw-btn--back { justify-self: start; }
@@ -722,7 +754,6 @@ kbd {
 
 /* footer */
 .mw-lobby-foot {
-  grid-area: foot;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -730,9 +761,9 @@ kbd {
   gap: 0.9em 2em;
   padding: 0.9em 1.25em;
   border-top: 1px solid var(--mw-line-soft);
-  background: linear-gradient(180deg, rgba(10, 12, 20, 0.7), rgba(10, 12, 20, 0.88));
+  background: linear-gradient(180deg, rgba(10, 12, 20, 0.93), rgba(10, 12, 20, 0.97)); /* near-opaque: it can float over scrolled content */
   border-radius: 6px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0.5em 1.2em rgba(0, 0, 0, 0.5);
 }
 .mw-matchup { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em 1em; min-width: 0; }
 .mw-team { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35em 0.7em; }
@@ -1150,6 +1181,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .mw-root *, .mw-root *::before, .mw-root *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  #start-message { animation: none; }
 }
 
 /* ------------------------------------------------------------ responsive */
@@ -1157,10 +1189,11 @@ kbd {
 @media (max-width: 1150px) {
   .mw-lobby {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
-    grid-template-areas: 'head' 'main' 'side' 'foot';
-    padding: 1.2em 1.2em;
+    grid-template-rows: auto auto auto;
+    grid-template-areas: 'head' 'main' 'side';
+    padding: 1.2em 1.2em 1em;
   }
+  .mw-lobby-dock { padding: 0 1.2em 1em; }
   .mw-lobby-side { flex-direction: row; flex-wrap: wrap; min-height: auto; }
   .mw-lobby-side > .mw-panel { flex: 1 1 20em; }
   .mw-chat { min-height: 14em; }

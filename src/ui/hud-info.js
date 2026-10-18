@@ -188,7 +188,7 @@ export class InfoView {
       }
       if (def.popProvided && e.o === vs.myIndex) s.parts.popp = stat('🏠', 'Housing');
     } else if (e.k === 'm') {
-      s.parts.gold = stat('🪙', 'Gold left', 'is-wide');
+      s.parts.gold = stat('💰', 'Gold left', 'is-wide');
       s.parts.miners = stat('⛏️', 'Miners', 'is-wide');
       s.parts.mineNote = el('div', 'hi-note');
       extra.append(s.parts.mineNote, el('div', 'hi-note is-dim', `Up to ${MINE_SLOTS} Worshippers mine at once, ${MINE_TIME} s per ${CARRY_AMOUNT} gold; the others wait their turn.`));
@@ -225,7 +225,8 @@ export class InfoView {
       s.parts.buildText = txt;
       return;
     }
-    if (e.o === vs.myIndex && e.q && e.q.length) {
+    const queueing = e.o === vs.myIndex && e.q && e.q.length;
+    if (queueing) {
       const q = e.q;
       const first = q[0];
       const big = el('button', 'hi-q-main');
@@ -254,12 +255,13 @@ export class InfoView {
       }
       extra.appendChild(el('div', 'hi-queue', big, el('div', 'hi-q-side', info, small)));
       s.parts.trainFill = bar.children[0];
-      return;
     }
+    // The prayer line stays while a god or creature is being summoned: that is when the Faith matters.
     if (def && def.prayerSlots > 0) {
       s.parts.pray = el('div', 'hi-note');
       extra.appendChild(s.parts.pray);
     }
+    if (queueing) return;
     if (e.t === 'town_center' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', 'Trains Worshippers. Gold and wood are delivered here.'));
     } else if (e.t === 'storehouse' && e.o === vs.myIndex) {
@@ -318,7 +320,7 @@ export class InfoView {
       if (sig !== p.statusSig) {
         p.statusSig = sig;
         p.status.textContent = '';
-        if (e.c) p.status.appendChild(el('span', 'hi-chip is-carry', e.c === 'g' ? '🪙' : '🪵'));
+        if (e.c) p.status.appendChild(el('span', 'hi-chip is-carry', e.c === 'g' ? '💰' : '🌲'));
         for (const code of fx) {
           const [icon, label] = STATUS[code] || ['❔', code];
           const chip = el('span', `hi-chip is-${code}`, icon);

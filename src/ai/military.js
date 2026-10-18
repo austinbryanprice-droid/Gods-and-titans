@@ -5,6 +5,7 @@
 import { newForce, addToForce, addBuildingToForce, addTypeToForce, fightRatio, forcePower } from './unit-info.js';
 import { teamTarget, clearTeamTarget } from './team.js';
 import { doneOf } from './scan.js';
+import { POP_MAX } from '../config.js';
 
 const THREAT_RANGE = 12; // enemy units this close to a building threaten the base
 const ROUTE_STEP = 10; // tiles between march waypoints
@@ -446,7 +447,8 @@ export function runMilitary(ai, s) {
         // about to join (then the big clash comes with it, a minute later at most).
         const rec = s.enemies.find((e) => e.index === target);
         const enemyTitanSoon = !!(rec && rec.titanSoon && rec.titanSoon.left <= 60);
-        const maxed = s.armyPop >= prof.armyCap * 0.9 && ratio >= 0.7 && !enemyTitanSoon;
+        // (Or the population cap itself: hard keeps more workers than the cap leaves room for, so its army never reaches armyCap * 0.9.)
+        const maxed = (s.armyPop >= prof.armyCap * 0.9 || s.p.popUsed >= POP_MAX - 2) && ratio >= 0.7 && !enemyTitanSoon;
         if ((popReady || timerReady || titanReady) && (ratio >= prof.attackRatio || maxed) && !titanSoon) ready = true;
         // Easy only sends small waves late; others commit when clearly ahead.
         if (!ready && ratio >= prof.attackRatio * 1.8 && s.armyPop >= wave * 0.5) ready = true;
@@ -591,7 +593,8 @@ function manageMilitia(ai, s, armyForce, c) {
   if (!prof.militia) return;
   const near = localForces(ai, th.x, th.y, 14);
   const ratio = fightRatio(near.mine, th.force);
-  if (ratio >= 1.1 || th.force.n === 0) return;
+  // Near parity the army and Town Center handle a raid; pulling workers then cost far more of them than it saved.
+  if (ratio >= 0.7 || th.force.n === 0) return;
   // The army is about to arrive and strong enough: workers keep working.
   if (c && dist(c, th) < 14 && fightRatio(armyForce, th.force) >= 1.3) return;
   // Would workers turn the fight? Only then call them, nearest first and no

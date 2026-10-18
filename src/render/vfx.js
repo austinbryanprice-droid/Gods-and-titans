@@ -204,6 +204,16 @@ export class VFXSystem {
     this.focusR = 20;
     this.budget = 1;
     this.disposed = false;
+    this.prewarm();
+  }
+
+  /**
+   * Create one hidden item in each lazily filled mesh pool, so the renderer's
+   * warm-up compile sees their shader programs. Otherwise the first nova,
+   * summon pillar or shield dome of a match links its programs mid-fight.
+   */
+  prewarm() {
+    for (const pool of [this.decals, this.ribbons, this.flares, this.pillars, this.domes]) pool.release(pool.acquire());
   }
 
   // ------------------------------------------------------------------ public API

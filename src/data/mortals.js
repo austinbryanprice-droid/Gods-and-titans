@@ -185,7 +185,7 @@ export const MORTALS = {
       extras: [],
       aura: null,
     },
-    icon: '🪵',
+    icon: '🐏',
     description: 'Siege engine that smashes buildings. Cannot attack units. Requires Town.',
   },
 };

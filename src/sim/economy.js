@@ -88,10 +88,9 @@ function returnStep(world, u) {
     return 'done';
   }
   const mv = moveToRect(world, u, drop.tx, drop.ty, drop.size, `e${drop.id}`);
-  if (mv.failed) {
-    stopMove(u);
-    return 'none';
-  }
+  // A failed walk stays on the unit (moveToRect retries it every 2 s), so a
+  // carrier whose drop-off is walled in does not search the map every tick.
+  if (mv.failed) return 'none';
   return 'walking';
 }
 

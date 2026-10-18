@@ -9,7 +9,7 @@ import { UNITS, BUILDINGS } from '../data/index.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { checkPlacement, footprintAt } from '../game/placement.js';
-import { buttonForKey, buildCheck, trainCheck } from './command-card.js';
+import { getCommandCard, buttonForKey, buildCheck, trainCheck } from './command-card.js';
 import { isComplete } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 
@@ -20,14 +20,20 @@ const PAN_SPEED = 26; // tiles per second for edge scroll and arrow keys
 const HOVER_MS = 60;
 const PLACE_CHECK_MS = 90;
 const ALERT_JUMP_MS = 20000;
+const WHEEL_STEP_PX = 100; // wheel delta that zooms one step
+const WHEEL_MAX_STEPS = 3; // cap for one event
 
 const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+// Inputs that take no typed text: a focused menu toggle or the volume slider must not swallow Esc / F10.
+const NON_TEXT_INPUTS = new Set(['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'file', 'image']);
 
 function isTyping(e) {
   const t = e.target;
   if (!t || !t.tagName) return false;
   const tag = t.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+  if (tag === 'INPUT') return !NON_TEXT_INPUTS.has(String(t.type || '').toLowerCase());
+  return tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
 }
 
 export class InputController {
@@ -155,6 +161,13 @@ export class InputController {
   cardMode() {
     if (this.mode.kind === 'target') return 'target';
     if (this.mode.kind === 'place') return 'place';
+    if (this.menu === 'build') {
+      // The build menu belongs to the worker subgroup: leave it when another type is
+      // active (the selection panel's unit icons change the selection without going through afterSelect).
+      const g = this.sel.activeGroup();
+      const d = g && UNITS[g.type];
+      if (!d || d.class !== 'worker') this.menu = 'root';
+    }
     return this.menu;
   }
 
@@ -298,9 +311,13 @@ export class InputController {
   onWheel(e) {
     e.preventDefault();
     if (this.hud.overlays.open || !this.renderer) return;
-    const dy = e.deltaY || 0;
+    let dy = e.deltaY || 0;
     if (dy === 0) return;
-    this.renderer.camera.zoomBy(dy < 0 ? 1 : -1);
+    // Scale by the size of the scroll (a notched wheel is ~100 per click = one step) so
+    // trackpads and free-spinning wheels, which send many tiny events, zoom gently.
+    if (e.deltaMode === 1) dy *= 33; // lines
+    else if (e.deltaMode === 2) dy *= 300; // pages
+    this.renderer.camera.zoomBy(Math.max(-WHEEL_MAX_STEPS, Math.min(WHEEL_MAX_STEPS, -dy / WHEEL_STEP_PX)));
   }
 
   drawBox(x0, y0, x1, y1) {
@@ -854,24 +871,27 @@ export class InputController {
     if (isTyping(e)) return;
     const key = e.key;
     if (key === 'Shift') this.shiftHeld = true;
+    // Holding a key fires keydown repeatedly: only arrows (scrolling) and train hotkeys
+    // (hold W to queue more) use that; everything else acts once per press.
+    const rep = e.repeat === true;
     const overlays = hud.overlays;
     if (overlays.open) {
       if (key === 'Escape' || key === 'F10') {
         e.preventDefault();
-        overlays.escape();
+        if (!rep) overlays.escape();
       } else if (key === 'Enter' && overlays.name === 'menu') {
         // let Enter activate the focused button
-      } else if (key.startsWith('F') && key.length <= 3) e.preventDefault();
+      } else if (/^F[1-3]$/.test(key)) e.preventDefault(); // browser help / search; F5, F11, F12 keep working
       return;
     }
     if (key === 'F10') {
       e.preventDefault();
-      overlays.openMenu();
+      if (!rep) overlays.openMenu();
       return;
     }
     if (key === 'Enter') {
       e.preventDefault();
-      hud.openChat();
+      if (!rep) hud.openChat();
       return;
     }
     if (key === 'Alt') {
@@ -889,7 +909,7 @@ export class InputController {
     }
     if (key === 'Tab') {
       e.preventDefault();
-      if (this.sel.cycleSubgroup(e.shiftKey ? -1 : 1)) {
+      if (!rep && this.sel.cycleSubgroup(e.shiftKey ? -1 : 1)) {
         this.menu = 'root';
         hud.refreshCard();
       }
@@ -897,16 +917,17 @@ export class InputController {
     }
     if (key === ' ' || e.code === 'Space') {
       e.preventDefault();
-      this.spaceJump();
+      if (!rep) this.spaceJump();
       return;
     }
     if (key === 'F1' || key === 'F2' || key === 'F3') {
       e.preventDefault();
-      this.selectGod(Number(key[1]) - 1, false, e.shiftKey);
+      if (!rep) this.selectGod(Number(key[1]) - 1, false, e.shiftKey);
       return;
     }
     if (key === 'Backspace') {
       e.preventDefault();
+      if (rep) return;
       const tc = [...this.vs.entities.values()].find((x) => x.k === 'b' && x.o === this.vs.myIndex && x.t === 'town_center');
       if (tc) this.renderer.camera.centerOn(tc.x, tc.y);
       return;
@@ -915,6 +936,7 @@ export class InputController {
     const m = /^(Digit|Numpad)([1-9])$/.exec(e.code || '');
     if (m) {
       e.preventDefault();
+      if (rep) return;
       const n = Number(m[2]);
       if (e.ctrlKey || e.metaKey) {
         if (this.sel.saveGroup(n)) hud.message(`Group ${n} assigned.`, 'info');
@@ -933,12 +955,14 @@ export class InputController {
     }
     if (key === '.' || e.code === 'NumpadDecimal' || e.code === 'Period') {
       e.preventDefault();
+      if (rep) return;
       this.cycleIdleWorker(e.shiftKey || e.ctrlKey);
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts alone
     if (key === 'Escape') {
       e.preventDefault();
+      if (rep) return;
       const card = hud.currentCard();
       const b = buttonForKey(card, 'Escape');
       if (b) {
@@ -956,11 +980,16 @@ export class InputController {
       return;
     }
     if (key.length === 1) {
-      const card = hud.currentCard();
-      const b = buttonForKey(card, key);
+      let b = buttonForKey(hud.currentCard(), key);
+      // While targeting or placing the card is only Cancel: another command hotkey
+      // replaces the pending order (WC3), so A then S stops instead of doing nothing.
+      const pending = this.mode.kind !== 'normal';
+      if (!b && pending) b = buttonForKey(getCommandCard(this.sel.forCard(), this.vs, this.menu), key);
       if (b) {
         e.preventDefault();
+        if (rep && !(b.enabled && b.action && b.action.kind === 'train')) return;
         hud.flashSlot(b.slot);
+        if (pending && b.enabled) this.cancelMode();
         this.activate(b, { shift: e.shiftKey });
       }
     }

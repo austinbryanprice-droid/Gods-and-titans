@@ -277,16 +277,21 @@ Pop used = pop of living units + pop of everything queued in production.
 - Placement: all footprint tiles in bounds, ground-passable (not forest/water/rock), no
   building/mine footprint overlap, no enemy units on it (own units are pushed out), and every
   drop-off (Town Center, Storehouse) keeps a gap of ≥ `DROPOFF_MINE_GAP` (3) empty tiles
-  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. Error: `Too close to a gold
-  mine.` when the gap is the only problem, else `Can't build there.`;
+  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. The error names the reason,
+  the first that applies of: water, rock or the map edge (`Can't build there.`), `Trees in the
+  way.`, `Another building is in the way.`, `A gold mine is in the way.`, `Something is in the
+  way.` (an enemy or neutral unit), `Too close to a gold mine.` (the gap alone);
   `world.placementError(i, typeId, tx, ty)` returns that text (null = valid) and
-  src/game/placement.js `checkPlacement(...).message` gives the same on the client.
+  src/game/placement.js `checkPlacement(...).message` gives the same on the client, which also
+  says `Unexplored ground.` first for any fogged tile (the sim does not know the fog, and the
+  text does not reveal what lies in it). Only the text depends on the reason, never validity.
 - `cancelBuild` on an unfinished building: removes it, refunds `CANCEL_BUILD_REFUND` (75%).
 
 ### 5.4 Production
 - `train` puts an item in the building's queue (max 5). Cost and population are reserved
   when queued (refunded on `cancelTrain`). Units spawn at the footprint edge nearest the rally
-  point and then follow the rally (rally on a mine/tree → worker gathers).
+  point and then follow the rally (rally on a mine/tree → worker gathers). When a rallied
+  mine runs dry the rally moves to the nearest mine within 16 tiles (if any).
 - Creatures need tier ≥ their tier. Gods: unique per player (no duplicates alive or queued),
   max `MAX_GODS` (3) alive+queued, and the n-th god needs tier `GOD_SLOT_TIER[n-1]`
   (1st Village, 2nd Town, 3rd City). Titan: max 1 alive+queued, needs Titan Gate (City).
@@ -393,9 +398,10 @@ Units that cannot do the resolved action just move.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
-`Can't build there.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
+`Can't build there.` `Trees in the way.` `Another building is in the way.` `A gold mine is in the way.`
+`Something is in the way.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
 `Requires a <Building>.` (e.g. `Requires a Shrine.`) `Production queue is full.`
-`The Town Center is growing.` `You already have that god.` `You can only have 3 gods.`
+`Your settlement is already growing.` `You already have that god.` `You can only have 3 gods.`
 `Your next god requires Town.` `Your next god requires City.` `You already have a Titan.`
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
@@ -475,7 +481,9 @@ EntityView = {
 `world.tickCount`, `world.time`, `world.rng`, `world.getEntity(id)`, `world.unitsOf(i)`,
 `world.buildingsOf(i)`, `world.queryRadius(x, y, r, filter)`, `world.areEnemies(a, b)`
 (owner indices), `world.canPlaceBuilding(i, typeId, tx, ty)`,
-`world.placementError(i, typeId, tx, ty)` → `"Can't build there." | "Too close to a gold mine." | null`,
+`world.placementError(i, typeId, tx, ty)` → the refusal text (5.3: `"Can't build there."`, `"Trees in the way."`,
+`"Another building is in the way."`, `"A gold mine is in the way."`, `"Something is in the way."`,
+`"Too close to a gold mine."`) `| null`,
 `world.findPlacement(i, typeId, nearX, nearY, maxR)` → `{tx, ty} | null`,
 `world.canAfford(i, cost)`, `world.hasBuilding(i, typeId, completedOnly = true)`,
 `world.isGameOver()`, `world.winningTeam`.
@@ -529,7 +537,13 @@ tx, ty, size, amount`.
   ran: each heartbeat pulse adds at most `MAX_PULSE_GAP_MS` (1 s), any received frame resets it,
   so a main-thread stall or background tab never times a peer out before its queued messages
   are read. Timeout: `TIMEOUT_MS` 15 s in the lobby, `GAME_TIMEOUT_MS` 30 s in game
-  (`conn.setTimeoutMs`, sessions' `connTimeoutMs`).
+  (`conn.setTimeoutMs`, sessions' `connTimeoutMs`). A client that has heard nothing from the
+  host for `STALL_NOTICE_MS` (3 s) reports it (`ClientSession.stalledMs` / `stalled`) so the HUD
+  can say so long before the 30 s timeout; its ping figure then reads "…". On the host,
+  a client whose data-channel send queue (`conn.buffered`) is over `MAX_CLIENT_BUFFER_BYTES`
+  (128 KB) is skipped for that tick instead of queueing more: the next delta is encoded
+  against what it last received, so it catches up in one step, with the skipped snapshots'
+  events and felled trees carried over (a full snapshot, once the queue drains, if too many).
 - **Untrusted input**: a reassembled message may be at most 1 MB from a client and 32 MB from
   the host; more than 100 malformed frames in 10 s closes with 'protocol-error'. Token buckets
   per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `resync` at most one
@@ -541,7 +555,11 @@ tx, ty, size, amount`.
   GameSetup (else kicked with "invalid game setup"), snapshots (`isValidSnapshot`), deltas
   (apply failure → `resync`), chat, and end/kick reasons (≤ 300 chars, else 'host-quit').
 - Messages are JSON objects with `t`:
-  - client→host: `hello {name, version}`, `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`, `resync {}`
+  - client→host: `hello {name, version}` (`version` is `PROTOCOL_VERSION` from
+    src/net/wire-version.js: `GAME_VERSION` plus an 8-digit fingerprint of the message names,
+    `EVENT_SHAPES`, the command whitelist and the unit / building / ability / pantheon ids, so
+    a stale tab after a deploy is refused with the "Version mismatch" text; it is only ever
+    compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
     `delta {d}`, `chat {from, text}`, `pong {ts}`, `kick {reason}`, `end {reason}`
 - Delta codec (`src/net/delta.js`, wire format v2; the header comment lists every key): host
@@ -567,7 +585,13 @@ tx, ty, size, amount`.
   LobbyState: `{ roomCode, mapSize, slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
-  Can start when ≥ 2 teams have players and every human slot is connected.
+  Can start when ≥ 2 teams have players and every human slot is connected. `state.preset`
+  stays lit through pantheon / color / name edits and players joining or leaving, and clears
+  when a slot's kind, team or AI difficulty changes. In the GameSetup, repeated names get a
+  number (`AI (Normal)`, `AI (Normal) 2`); lobby slots keep theirs. `LobbyClient.join` and
+  `joinRoom` take an optional `signal` (AbortSignal): aborting rejects with `abortError()` and
+  closes the half-open link. Closing the lobby after the start also closes any game connection
+  still open one second later (a game that failed to load must not leave players hanging).
 - Sessions:
   - `HostSession({ setup, myIndex, conns, createWorld, createAI })`: owns the World, runs the
     ticker (`src/net/ticker.js`, a Worker-driven metronome so ticks keep running in a background
@@ -577,7 +601,7 @@ tx, ty, size, amount`.
     line is shown. Single-player = HostSession with no conns.
   - `ClientSession({ setup, myIndex, conn })`: decodes full/delta into its `ViewState`;
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
-    `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
+    `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
     'host-left' (connection lost), 'host-quit', 'game-over', or the host's sanitized reason.
   - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), onChat(cb), onEnd(cb), start(), stop() }`.
 - `ViewState` (`src/game/view-state.js`, used identically on host and client):
@@ -694,9 +718,11 @@ per-frame budget, so a revealed army appears over a few frames.
   type on screen, Ctrl+1–9 groups, 1–9 recall (double tap centers), right-click smart command
   (shift queues), hotkeys from the command card, targeting modes (attack-move A, ability
   targeting, build placement with ghost (a refused click shows the client-side
-  `checkPlacement(...).message`); Esc cancels; right-click cancels targeting), camera:
-  edge scroll, arrow keys, mouse wheel zoom, middle-drag pan, minimap click/drag, Space centers
-  on selection or last alert, F1–F3 select gods, Alt shows all health bars.
+  `checkPlacement(...).message`); Esc cancels; right-click cancels targeting; another command
+  hotkey replaces the pending order), camera: edge scroll, arrow keys, mouse wheel zoom (one
+  step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan, minimap click/drag,
+  Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
+  Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.
   Hotkeys: units M move, S stop, H hold, A attack; workers + G gather, B build (submenu: House H,
   Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C), P pray,
@@ -706,7 +732,9 @@ per-frame budget, so a revealed army appears over a few frames.
 - `minimap.js`: 2D canvas: terrain colors, mines, trees, units/buildings as team-colored dots
   (visible only), fog, camera quad; click/drag moves camera, right-click issues smart move.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with
-  distance attenuation from `sfx.setListener(x, y)`.
+  distance attenuation from `sfx.setListener(x, y, scale)` (the camera target; `scale` follows the
+  zoom, 0.8 close to 1.8 far, and stretches the hearing range so a zoomed-out view still hears its
+  far side).
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
   tier_up, chop, mine, pray, horn.
@@ -715,9 +743,10 @@ per-frame budget, so a revealed army appears over a few frames.
 
 `createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
 thinks every `AI_THINK_INTERVAL[difficulty]` ticks. Reads world state, acts **only** through
-`world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers (to ~16/22/26 by
-difficulty), split them gold ~60% / wood ~25% / prayer the rest (more prayer once a Temple
-exists), build houses ahead of the pop cap, Barracks, Shrine, Temple, summon gods, tier up,
+`world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers up to what its
+mines, wood line and prayer slots can use (at most 15/30/34 by difficulty; a mine takes only
+2 miners at once, so it takes a second mine from about 5:30, hard 4:30, easy 11:00, and a
+third later), split them gold / wood / prayer (more prayer once a Temple exists), build houses ahead of the pop cap, Barracks, Shrine, Temple, summon gods, tier up,
 second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/creatures; defend
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
@@ -730,7 +759,9 @@ big fights); retreat badly hurt gods to base. Hard is fair (no resource cheats).
 ClientSession, then `new Game({ session, settings })`: creates GameRenderer on a canvas, HUD,
 InputController, sfx listener; requestAnimationFrame loop: `viewState.update(now)`,
 `renderer.update(dt)`, `renderer.render()`, `hud.update()`. Events from `viewState.on('*')`
-drive VFX, sounds and HUD messages. Game over → overlay → back to menu.
+drive VFX, sounds and HUD messages. Game over → overlay → back to menu. "Preparing the
+battlefield…" covers the empty canvas while the renderer's code loads and its scene builds. In a
+single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim.
 
 ## 12. Repository layout & ownership
 

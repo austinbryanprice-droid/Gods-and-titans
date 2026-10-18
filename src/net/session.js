@@ -11,7 +11,8 @@ import { ViewState } from '../game/view-state.js';
 import * as mapgen from '../sim/mapgen.js';
 import { encode, apply } from './delta.js';
 import {
-  MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
+  MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, STALL_NOTICE_MS, MAX_CLIENT_BUFFER_BYTES,
+  RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
 } from './protocol.js';
 import { sanitizeCommand, isValidSnapshot, sanitizeFelled } from './sanitize.js';
 import { Ticker } from './ticker.js';
@@ -28,6 +29,9 @@ export const CLIENT_LIMITS = {
 };
 export const RESYNC_MIN_INTERVAL_MS = 1000; // at most one full snapshot per client per second
 const CLIENT_CHAT_LIMIT = [10, 30]; // chat lines a client shows per second (bad host flooding)
+// Events and felled trees of snapshots held back from a congested client; past this the
+// client gets a full snapshot instead (it repairs everything).
+const MAX_HELD_ITEMS = 2000;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -128,7 +132,7 @@ export class HostSession extends SessionBase {
     this.ticksSinceSnap = 0;
     this.snapshotsSent = 0;
     this.lastSnap = null;
-    this.netStats = { encodes: 0, encodeMs: 0, encodeMaxMs: 0 };
+    this.netStats = { encodes: 0, encodeMs: 0, encodeMaxMs: 0, skipped: 0 };
     this.takeSnapshot();
     for (const [index, conn] of conns || []) this.attach(index, conn);
     this.ticker = new Ticker({ onTick: () => this.tickOnce(), onBatch: () => this.afterTicks(), useWorker });
@@ -153,13 +157,14 @@ export class HostSession extends SessionBase {
   attach(index, conn) {
     const c = {
       index, conn, base: null, needsFull: true, rtt: null, offs: [],
-      lastFullAt: -Infinity, fullTimer: null, fulls: 0,
+      lastFullAt: -Infinity, fullTimer: null, fulls: 0, held: null,
       limits: {
         cmd: new RateLimiter(...CLIENT_LIMITS.cmd),
         chat: new RateLimiter(...CLIENT_LIMITS.chat),
         ping: new RateLimiter(...CLIENT_LIMITS.ping),
       },
       dropped: { cmd: 0, chat: 0, ping: 0, invalid: 0, resync: 0 },
+      skipped: 0, // snapshots held back while this client's send queue was full
     };
     if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(this.connTimeoutMs);
     this.clients.set(index, c);
@@ -309,21 +314,34 @@ export class HostSession extends SessionBase {
     const t = now();
     for (const c of this.clients.values()) {
       if (!c.conn.open) continue;
-      if (!c.base || (c.needsFull && t - c.lastFullAt >= RESYNC_MIN_INTERVAL_MS)) {
+      if (!c.base) {
         this.sendSnapshot(c, snap);
         continue;
       }
-      let wire = cache.get(c.base);
+      // A client whose link cannot keep up (its send queue is full) is skipped: queueing more
+      // would only make its view older. The next delta is encoded against what it last got, so
+      // the catch-up is lossless; only the events and felled trees of the skipped snapshots need
+      // carrying over. A full snapshot it is waiting for goes out once the queue has drained.
+      if (c.conn.buffered > MAX_CLIENT_BUFFER_BYTES) {
+        if (!c.needsFull) this.holdSnapshot(c, snap);
+        continue;
+      }
+      if (c.needsFull && t - c.lastFullAt >= RESYNC_MIN_INTERVAL_MS) {
+        this.sendSnapshot(c, snap);
+        continue;
+      }
+      let wire = c.held ? null : cache.get(c.base);
       if (!wire) {
         const t0 = now();
-        const d = encode(c.base, snap);
+        const d = encode(c.base, c.held ? this.withHeld(c, snap) : snap);
         const ms = now() - t0;
         this.netStats.encodes++;
         this.netStats.encodeMs += ms;
         if (ms > this.netStats.encodeMaxMs) this.netStats.encodeMaxMs = ms;
         wire = { d, json: null };
-        cache.set(c.base, wire);
+        if (!c.held) cache.set(c.base, wire);
       }
+      c.held = null;
       if (typeof c.conn.sendJSON === 'function') {
         if (wire.json === null) wire.json = JSON.stringify({ t: MSG.DELTA, d: wire.d });
         c.conn.sendJSON(wire.json);
@@ -333,9 +351,32 @@ export class HostSession extends SessionBase {
     }
   }
 
+  /** Skip this snapshot for a congested client, remembering the parts of it a delta cannot recover. */
+  holdSnapshot(c, snap) {
+    c.skipped++;
+    this.netStats.skipped++;
+    const h = c.held || (c.held = { events: [], felled: [] });
+    if (snap.events) for (const ev of snap.events) h.events.push(ev);
+    if (snap.felled) for (const f of snap.felled) h.felled.push(f);
+    if (h.events.length + h.felled.length > MAX_HELD_ITEMS) {
+      c.held = null;
+      c.needsFull = true; // too much to carry: a full snapshot (once the queue drains) repairs it
+    }
+  }
+
+  /** `snap` with the events and felled trees held back from the client in front of its own. */
+  withHeld(c, snap) {
+    return {
+      ...snap,
+      events: c.held.events.concat(snap.events || []),
+      felled: c.held.felled.concat(snap.felled || []),
+    };
+  }
+
   sendSnapshot(c, snap) {
     if (!snap) return;
     c.conn.send({ t: MSG.FULL, snap, felledAll: this.felledAll });
+    c.held = null; // a full snapshot starts the client over from `snap`
     c.base = snap;
     c.needsFull = false;
     c.lastFullAt = now();
@@ -534,6 +575,22 @@ export class ClientSession extends SessionBase {
     this.conn.send({ t: MSG.RESYNC });
   }
 
+  /**
+   * Running milliseconds without a frame from the host (0 while frames flow or once the
+   * link is closed). Deltas come every 50 ms and heartbeats every 2 s, so a few seconds
+   * mean the connection is stuck, long before the 30 s timeout drops it. A stall of this
+   * machine itself does not count (see MAX_PULSE_GAP_MS).
+   */
+  get stalledMs() {
+    const c = this.conn;
+    return c && c.open && !this.stopped ? c.silentMs || 0 : 0;
+  }
+
+  /** True when the host has gone quiet long enough to tell the player (STALL_NOTICE_MS). */
+  get stalled() {
+    return this.stalledMs >= STALL_NOTICE_MS;
+  }
+
   /** cb(session) once the first full snapshot has arrived (at once if it already has). */
   onReady(cb) {
     if (this.snap) queueMicrotask(() => cb(this));
@@ -541,6 +598,7 @@ export class ClientSession extends SessionBase {
   }
 
   ping() {
+    if (this.stalled) this.pingMs = null; // the last figure is stale: show '…' until a pong arrives
     this.conn.send({ t: MSG.PING, ts: now(), rtt: this.pingMs });
   }
 

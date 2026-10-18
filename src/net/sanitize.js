@@ -64,6 +64,7 @@ const COMMANDS = {
   surrender: {},
 };
 export const COMMAND_TYPES = Object.keys(COMMANDS);
+export const COMMAND_SPECS = COMMANDS; // read-only: fingerprinted into the protocol version (wire-version.js)
 
 /**
  * Rebuild a client's command from the whitelist: known type, known fields of the

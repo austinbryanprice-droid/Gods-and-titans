@@ -77,7 +77,7 @@ test('Shift placement: a spot planned a moment ago is red and refused, the next 
   assert.equal(ghostAt(8, 13, true).valid, false);
   input.confirmPlace(8, 13, true);
   assert.equal(sent.length, 1, 'refused on the client');
-  assert.deepEqual(errors, ["Can't build there."]);
+  assert.deepEqual(errors, ['Another building is in the way.']);
   world.tick();
   assert.equal(world.players[0].gold, gold, 'not paid twice');
   // Overlapping by a column is refused too; a free spot next to it is fine.

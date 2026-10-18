@@ -1,7 +1,7 @@
 // Construction: placement rules, build orders (cost paid up front, refunded if
 // abandoned before the site is placed), construction progress with helpers,
 // and cancelling unfinished buildings.
-import { BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT } from '../config.js';
+import { BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT, TERRAIN } from '../config.js';
 import { BUILDINGS } from '../data/index.js';
 import { moveToRect, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
@@ -18,8 +18,14 @@ export function requiresMessage(typeId) {
   return `Requires a ${b ? b.name : typeId}.`;
 }
 
+// Refusal texts (src/game/placement.js repeats them for the ghost). Only the
+// text depends on the reason; whether a site is valid does not.
 export const CANT_BUILD = "Can't build there.";
 export const TOO_CLOSE_TO_MINE = 'Too close to a gold mine.';
+export const TREES_IN_WAY = 'Trees in the way.';
+export const BUILDING_IN_WAY = 'Another building is in the way.';
+export const MINE_IN_WAY = 'A gold mine is in the way.';
+export const UNIT_IN_WAY = 'Something is in the way.';
 
 /** Own building type ids only (no prototype keys such as 'constructor'). */
 export function buildingDef(typeId) {
@@ -31,6 +37,9 @@ export function buildingDef(typeId) {
  * (they get pushed out); enemy and neutral ground units block it. Drop-offs
  * (Town Center, Storehouse) keep a Chebyshev gap of DROPOFF_MINE_GAP empty
  * tiles from every gold mine.
+ * When several things are wrong the text names the first of: water / rock /
+ * map edge ("Can't build there."), trees, a building, a gold mine, a unit,
+ * the mine gap.
  * @returns {string|null} null when the site is valid, else the error message
  */
 export function placementError(world, player, typeId, tx, ty) {
@@ -39,17 +48,31 @@ export function placementError(world, player, typeId, tx, ty) {
   const map = world.map;
   const s = def.size;
   if (tx < 0 || ty < 0 || tx + s > map.width || ty + s > map.height) return CANT_BUILD;
+  let trees = false;
+  let building = false;
+  let mine = false;
   for (let y = ty; y < ty + s; y++) {
     for (let x = tx; x < tx + s; x++) {
-      if (!map.isBuildable(x, y)) return CANT_BUILD;
+      if (map.isBuildable(x, y)) continue;
+      const i = y * map.width + x;
+      if (map.terrain[i] === TERRAIN.FOREST) trees = true;
+      else if (!map.isWalkableTerrain(x, y)) return CANT_BUILD;
+      else {
+        const occupant = world.entities.get(map.occ[i]);
+        if (occupant && occupant.kind === 'mine') mine = true;
+        else building = true;
+      }
     }
   }
+  if (trees) return TREES_IN_WAY;
+  if (building) return BUILDING_IN_WAY;
+  if (mine) return MINE_IN_WAY;
   const tmp = world._tmpQuery;
   tmp.length = 0;
   world.hash.query(tx + s / 2, ty + s / 2, s / 2 + world.maxRadius + 0.5, tmp);
   for (const u of tmp) {
     if (u.dead || u.air || !world.areEnemies(player, u.owner)) continue;
-    if (distPointRect(u.x, u.y, tx, ty, tx + s, ty + s) < u.radius * 0.8) return CANT_BUILD;
+    if (distPointRect(u.x, u.y, tx, ty, tx + s, ty + s) < u.radius * 0.8) return UNIT_IN_WAY;
   }
   if (def.dropOff) {
     for (const m of world.mineList) {

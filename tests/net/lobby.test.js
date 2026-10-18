@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LobbyHost, LobbyClient, buildSetup, resolvePantheons } from '../../src/net/lobby.js';
+import { PROTOCOL_VERSION } from '../../src/net/wire-version.js';
+import { joinRoom, abortError } from '../../src/net/transport.js';
 import { PANTHEONS } from '../../src/data/index.js';
 import { PLAYER_COLORS, GAME_VERSION } from '../../src/config.js';
 import { generateMap, mapHash } from '../../src/sim/mapgen.js';
@@ -42,7 +44,12 @@ test('lobby flow: join, presets, setMine, chat, kick on version mismatch, start'
   // Version check in hello.
   await assert.rejects(
     LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Old', version: '0.0.1' }),
-    (err) => /Version mismatch/.test(err.message) && err.message.includes(GAME_VERSION) && err.message.includes('0.0.1'),
+    (err) => /Version mismatch/.test(err.message) && err.message.includes(PROTOCOL_VERSION) && err.message.includes(GAME_VERSION) && err.message.includes('0.0.1'),
+  );
+  // Same game version, different wire tables (a stale tab after a deploy): refused as well.
+  await assert.rejects(
+    LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Stale', version: `${GAME_VERSION}+00000000` }),
+    (err) => /Version mismatch/.test(err.message) && err.message.includes('+00000000'),
   );
   assert.deepEqual(kinds(host.state), ['host', 'human', 'closed', 'closed']);
 
@@ -109,7 +116,7 @@ test('lobby flow: join, presets, setMine, chat, kick on version mismatch, start'
   for (const [, s] of starts) assert.deepEqual(s.setup, setup);
   assert.equal(starts.find(([n]) => n === 'bob')[1].myIndex, 1);
   assert.equal(starts.find(([n]) => n === 'cara')[1].myIndex, 2);
-  assert.equal(setup.version, GAME_VERSION);
+  assert.equal(setup.version, PROTOCOL_VERSION);
   assert.equal(setup.mapSize, 'small');
   assert.equal(setup.players.length, 4);
   assert.deepEqual(setup.players.map((p) => p.index), [0, 1, 2, 3]);
@@ -263,5 +270,101 @@ test('lobby caps connections waiting to say HELLO; joined players still join, le
   const rejoin = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Joe2' });
   assert.equal(rejoin.mySlot, 1, 'a player can rejoin the freed slot');
   rejoin.leave();
+  host.close();
+});
+
+test('the game gives every player a distinct name; lobby slots keep theirs', async () => {
+  const host = await LobbyHost.create({ transport: 'none', name: 'Hosty' });
+  host.applyPreset('ffa');
+  assert.deepEqual(host.state.slots.map((s) => s.name), ['Hosty', 'AI (Normal)', 'AI (Normal)', 'AI (Normal)']);
+  host.setSlot(3, { difficulty: 'hard' });
+  const { setup } = host.start();
+  assert.deepEqual(setup.players.map((p) => p.name), ['Hosty', 'AI (Normal)', 'AI (Normal) 2', 'AI (Hard)']);
+  assert.deepEqual(host.state.slots.map((s) => s.name), ['Hosty', 'AI (Normal)', 'AI (Normal)', 'AI (Hard)']);
+
+  const names = (slots) => buildSetup({ mapSize: 'small', slots }, 7).setup.players.map((p) => p.name);
+  const slot = (kind, name, team) => ({ kind, name, pantheon: 'random', team, color: team - 1, difficulty: 'normal' });
+  assert.deepEqual(names([slot('host', 'AI (Normal) 2', 1), slot('ai', 'AI (Normal)', 2), slot('ai', 'AI (Normal)', 3), slot('ai', 'AI (Normal)', 4)]),
+    ['AI (Normal) 2', 'AI (Normal)', 'AI (Normal) 3', 'AI (Normal) 4'], 'a suffix never collides with an existing name');
+  const long = 'x'.repeat(20);
+  const out = names([slot('host', long, 1), slot('ai', long, 2)]);
+  assert.equal(out[1], `${'x'.repeat(18)} 2`);
+  assert.ok(out.every((n) => n.length <= 20));
+});
+
+test('the preset highlight survives cosmetic edits and goes when the layout changes', async () => {
+  const host = await LobbyHost.create({ transport: 'loopback', name: 'H' });
+  assert.equal(host.state.preset, '1v1');
+  host.setSlot(0, { pantheon: 'norse' });
+  host.setSlot(0, { color: 3 });
+  host.setSlot(0, { name: 'Renamed' });
+  assert.equal(host.state.preset, '1v1', 'pantheon, color and name do not change the layout');
+
+  const bob = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Bob' });
+  assert.equal(host.state.preset, '1v1', 'a player joining the open slot keeps the preset');
+  bob.setMine({ pantheon: 'greek' });
+  await waitFor(() => host.state.slots[1].pantheon === 'greek');
+  assert.equal(host.state.preset, '1v1');
+  assert.ok(host.kick(1));
+  assert.equal(host.state.preset, '1v1', 'kicking the player puts the slot back to open');
+
+  const bob2 = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Bob' });
+  bob2.setMine({ team: 1 });
+  await waitFor(() => host.state.slots[1].team === 1);
+  assert.equal(host.state.preset, null, 'a client moving to another team breaks the layout');
+  await waitFor(() => bob2.state.preset === null);
+
+  host.applyPreset('coop');
+  assert.equal(host.state.preset, 'coop');
+  host.setSlot(2, { difficulty: 'hard' });
+  assert.equal(host.state.preset, null, 'an AI difficulty is part of the layout');
+  host.applyPreset('coop');
+  host.setSlot(3, { kind: 'closed' });
+  assert.equal(host.state.preset, null);
+  host.close();
+});
+
+test('closing the lobby after the start drops game connections that are still open', async () => {
+  const host = await LobbyHost.create({ transport: 'loopback', name: 'H' });
+  const bob = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Bob' });
+  const { conns } = host.start();
+  assert.equal(conns.size, 1);
+  const closed = [];
+  bob.conn.onClose((r) => closed.push(r));
+  // The game never created its session (it failed to load): closing the lobby releases the clients.
+  host.close();
+  await waitFor(() => closed.length === 1, 3000, 'client connection closed');
+  assert.equal([...conns.values()][0].open, false);
+  // A client's own leave() after the start closes its link too (idempotent).
+  const host2 = await LobbyHost.create({ transport: 'loopback', name: 'H2' });
+  const cara = await LobbyClient.join({ transport: 'loopback', roomCode: host2.roomCode, name: 'Cara' });
+  const startInfo = [];
+  cara.onStart((i) => startInfo.push(i));
+  const res2 = host2.start();
+  await waitFor(() => startInfo.length === 1);
+  cara.leave();
+  assert.equal(cara.conn.open, false);
+  await waitFor(() => !res2.conns.get(1).open, 3000, 'host side of the link closed');
+  cara.leave();
+  host2.close();
+});
+
+test('a cancelled join leaves nothing behind', async () => {
+  const host = await LobbyHost.create({ transport: 'loopback', name: 'H' });
+  const before = new AbortController();
+  before.abort();
+  await assert.rejects(LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'A', signal: before.signal }), (e) => e.type === 'aborted');
+  await assert.rejects(joinRoom({ transport: 'loopback', roomCode: host.roomCode, signal: before.signal }), (e) => e.name === 'AbortError');
+
+  // Cancelled while the host never answers HELLO: rejects at once instead of after the handshake timeout.
+  const silent = new AbortController();
+  host.handleMessage = () => {}; // a host that accepted the link but says nothing
+  const t0 = Date.now();
+  const pending = LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'B', signal: silent.signal, timeoutMs: 5000 });
+  setTimeout(() => silent.abort(), 30);
+  await assert.rejects(pending, (e) => e.type === 'aborted' && e.message === abortError().message);
+  assert.ok(Date.now() - t0 < 2000);
+  await waitFor(() => [...host.members].every((m) => !m.conn.open), 2000, 'link closed');
+  assert.equal(host.state.slots[1].kind, 'open');
   host.close();
 });

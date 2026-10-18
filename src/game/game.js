@@ -13,14 +13,18 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { Hud } from '../ui/hud.js';
+import { Overlays } from '../ui/hud-overlays.js';
+import { el } from '../ui/hud-dom.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
 import { tierName } from '../ui/hud-data.js';
-import { sanitizeName } from '../net/protocol.js';
+import { MSG, REASONS, sanitizeName, sanitizeReason } from '../net/protocol.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
+const AMBIENT_REACH = 16; // tiles from the camera target at the default zoom
 const MAX_DT = 0.1;
-const SPELL_SOUNDS = { lightning: 'lightning', fire: 'fire', sun: 'fire', holy: 'heal' };
+const MAX_ERRORS = 20; // frame faults kept in game.errors (a fault that repeats every frame must not pile up)
+const SPELL_SOUNDS = { lightning: 'lightning', fire: 'fire', sun: 'fire' };
 const PROJECTILE_SOUNDS = { arrow: 'attack_ranged', spear: 'attack_ranged', rock: 'attack_ranged', feather: 'attack_ranged', leaf: 'attack_ranged', ice: 'attack_ranged', bolt: 'lightning', fireball: 'fire', sunray: 'fire' };
 
 /**
@@ -34,9 +38,35 @@ function freshCanvas(old) {
   return canvas;
 }
 
-/** Stand-in AI until src/ai/ai.js exists: the AI players stand still. */
+// In a browser, fetch the renderer's code (Three.js and the models, about 3 MB) in an idle
+// moment once this module is in (main.js loads it while the player is in the menu), so Start
+// does not sit on an empty screen waiting for it. A failure is ignored: init() asks again.
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const warm = () => import('../render/game-renderer.js').catch(() => {});
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 4000 });
+  else setTimeout(warm, 1500);
+}
+
+const GRAPHICS_FAILURE = /webgl|rendering context|getcontext|shader|framebuffer/i;
+const LOADING_FAILURE = /dynamically imported module|importing a module script|failed to fetch|networkerror|load failed/i;
+
+/**
+ * What the player sees when a match cannot start: a sentence in plain words
+ * and the raw message (one short line, for bug reports).
+ * @returns {{ text: string, detail: string }}
+ */
+export function describeStartFailure(err) {
+  const detail = sanitizeReason(err && err.message ? err.message : err, '');
+  let text = 'Something went wrong while setting up the match. Go back to the menu and try again; if it keeps happening, reload the page.';
+  if (GRAPHICS_FAILURE.test(detail)) text = 'Your browser could not start 3D graphics. Check that hardware acceleration is on, or try another browser.';
+  else if (LOADING_FAILURE.test(detail)) text = 'Some of the game files could not be loaded. Check your internet connection and reload the page.';
+  return { text, detail };
+}
+
+/** AI players that never move: for clients, which run no AI, and the fallback when the AI module is missing. */
 const idleAI = () => ({ tick() {} });
 
+/** The AI factory, or null when src/ai/ai.js cannot be loaded. */
 async function loadAI() {
   try {
     const mod = await import('../ai/ai.js');
@@ -45,7 +75,58 @@ async function loadAI() {
   } catch (err) {
     console.warn('[game] AI module unavailable; AI players will stand still.', err && err.message ? err.message : err);
   }
-  return idleAI;
+  return null;
+}
+
+/** A single-player match: this machine hosts it and nobody else is connected. */
+function isSolo(s) {
+  return !!(s && s.isHost && s.ticker && (!s.clients || s.clients.size === 0) && !s.stopped);
+}
+
+/** Let the browser paint once (a timer covers a hidden tab, where frames do not run). */
+function nextPaint() {
+  return new Promise((resolve) => {
+    const fallback = setTimeout(resolve, 100);
+    if (typeof requestAnimationFrame !== 'function') return;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        clearTimeout(fallback);
+        resolve();
+      }, 0);
+    });
+  });
+}
+
+/**
+ * How much farther sounds carry than at the default zoom: with the camera pulled
+ * back, more of the map is on screen, so a fight at the top edge must stay audible.
+ */
+export function hearingScale(cam) {
+  const base = (cam && cam.opts && cam.opts.defaultDistance) || 25;
+  const k = cam && Number.isFinite(cam.distance) ? cam.distance / base : 1;
+  return Math.max(0.8, Math.min(1.8, k));
+}
+
+/**
+ * Sound and volume for a spell effect. Heals, quakes, meteors and storms are told
+ * apart by their shape (most abilities would otherwise share the sparkling 'magic'
+ * chime); the rest by element. The healing bells are for heals, buffs and shields only.
+ */
+export function effectSound(ev) {
+  switch (ev.shape) {
+    case 'heal':
+      return ['heal', 1];
+    case 'quake':
+      return ['lightning', 0.6]; // its low rumble, without the full crack
+    case 'meteor':
+      return ['fire', 1];
+    case 'storm':
+      return ['lightning', ev.el === 'lightning' ? 1 : 0.6];
+    default:
+      break;
+  }
+  if (ev.el === 'holy') return [ev.shape === 'buff' || ev.shape === 'shield' ? 'heal' : 'magic', 1];
+  return [SPELL_SOUNDS[ev.el] || 'magic', 1];
 }
 
 export class Game {
@@ -79,6 +160,10 @@ export class Game {
     this.showAllBarsHeld = false;
     this.overShown = false;
     this.ended = false;
+    this.defeatSounded = false;
+    this.loadingEl = null;
+    this.failed = false;
+    this.bareHud = false;
     this.offs = [];
     this.lastAmbient = 0;
     this.stats = { frames: 0, cpuMs: 0, maxMs: 0, renderMs: 0, hudMs: 0, last: [] };
@@ -104,11 +189,16 @@ export class Game {
 
   async init({ createAI, Renderer }) {
     this.root.hidden = false;
-    const [aiFactory, RendererClass] = await Promise.all([
-      createAI ? Promise.resolve(createAI) : this.session ? Promise.resolve(idleAI) : loadAI(),
+    this.setLoading(true);
+    // Only a launch that runs the match here needs the AI module (a client's host runs the AIs).
+    const needsAI = !createAI && !this.session && !(this.launch && this.launch.role === 'client');
+    const [loadedAI, RendererClass] = await Promise.all([
+      createAI ? Promise.resolve(createAI) : needsAI ? loadAI() : Promise.resolve(idleAI),
       Renderer ? Promise.resolve(Renderer) : import('../render/game-renderer.js').then((m) => m.GameRenderer),
     ]);
     if (this.disposed) return;
+    const aiFailed = needsAI && !loadedAI;
+    const aiFactory = loadedAI || idleAI;
 
     if (!this.session) {
       const l = this.launch;
@@ -131,6 +221,7 @@ export class Game {
 
     // Clients wait for the first full snapshot.
     if (!session.isHost && !this.viewState.snapshot) {
+      this.setLoading(false);
       this.hud.overlays.showWaiting();
       await new Promise((resolve) => {
         if (typeof session.onReady === 'function') session.onReady(resolve);
@@ -139,11 +230,17 @@ export class Game {
       });
       if (this.disposed || this.ended) return;
       this.hud.overlays.hideWaiting();
+      this.setLoading(true);
     }
 
+    // The renderer builds its scene in one synchronous go (shader compile, models):
+    // let the loading text reach the screen first.
+    if (this.loadingEl) await nextPaint();
+    if (this.disposed) return;
     const tr = performance.now();
     this.renderer = new RendererClass(this.canvas, { viewState: this.viewState, setup: session.setup, quality: this.settings.quality });
     this.stats.rendererInitMs = performance.now() - tr;
+    this.setLoading(false);
     this.resize();
     this.applyShowAllBars();
     this.centerOnStart();
@@ -154,21 +251,107 @@ export class Game {
     window.addEventListener('resize', onResize);
     this.offs.push(() => window.removeEventListener('resize', onResize));
     this.watchPixelRatio();
+    this.watchVisibility();
+    if (aiFailed) this.hud.showBanner('The AI failed to load: computer players will not move.', 'danger');
     this.lastFrame = performance.now();
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
-  /** Startup failed: show the reason with a way back to the menu. */
+  /** "Preparing the battlefield…" over the empty canvas while the renderer's code loads and its scene builds. */
+  setLoading(on) {
+    if (!on) {
+      if (this.loadingEl) this.loadingEl.remove();
+      this.loadingEl = null;
+      return;
+    }
+    const root = this.root;
+    if (this.loadingEl || typeof document === 'undefined' || !root || typeof root.appendChild !== 'function') return;
+    const node = document.createElement('div');
+    node.setAttribute('role', 'status');
+    node.style.cssText = 'position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;gap:0.9em;'
+      + 'font:600 18px/1.4 var(--mw-font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--mw-gold);'
+      + 'background:radial-gradient(ellipse at 50% 40%,#121a33,#05070d 70%)';
+    const spin = document.createElement('span');
+    spin.className = 'hud-spinner';
+    const text = document.createElement('span');
+    text.textContent = 'Preparing the battlefield…';
+    node.append(spin, text);
+    root.appendChild(node);
+    this.loadingEl = node;
+  }
+
+  /**
+   * Startup failed: tell the other players at once, then say why in plain words
+   * (no results table: no match was played) with a way back to the menu.
+   */
   fail(err) {
     this.errors.push(err);
+    this.setLoading(false);
     if (this.disposed) return;
+    this.releasePlayers();
     try {
       if (!this.hud && this.viewState) this.hud = new Hud({ root: this.hudRoot, game: this });
-      if (this.hud) this.hud.overlays.showEnded(`The game could not start: ${err && err.message ? err.message : err}`);
-      else this.quitToMenu();
+      const overlays = this.hud ? this.hud.overlays : this.bareOverlays();
+      const { text, detail } = describeStartFailure(err);
+      const back = el('button', 'mw-btn hud-obtn mw-btn--primary', 'Return to Menu');
+      back.type = 'button';
+      back.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.play('click');
+        this.quitToMenu();
+      });
+      const raw = detail ? el('div', 'hud-ohint hud-startfail-raw', detail) : null;
+      if (raw) raw.style.userSelect = 'text'; // the HUD is not selectable; this line is for copying into a bug report
+      const node = overlays.panel('Could not start the game', text, raw, el('div', 'hud-obtns', back));
+      overlays.show('ended', node, null); // 'ended' also keeps F10 from opening the game menu over it
     } catch {
       this.quitToMenu();
     }
+  }
+
+  /**
+   * A failed start must not leave the other players waiting: stop the session
+   * (hosts tell their clients the game is over; a client leaves, so an AI takes
+   * over its army) or, if it was never built, close the lobby connections the
+   * launch handed over. Closing twice is harmless.
+   */
+  releasePlayers() {
+    if (this.failed) return;
+    this.failed = true;
+    try {
+      if (this.session) {
+        this.session.stop();
+        return;
+      }
+      const l = this.launch;
+      if (!l) return;
+      const hosting = l.role !== 'client';
+      const conns = [l.conn, ...(l.conns && typeof l.conns.values === 'function' ? l.conns.values() : [])];
+      for (const conn of conns) {
+        if (!conn || typeof conn.close !== 'function') continue;
+        try {
+          if (hosting && typeof conn.send === 'function') conn.send({ t: MSG.END, reason: REASONS.HOST_QUIT });
+        } catch {
+          // already gone
+        }
+        try {
+          conn.close(hosting ? 'end' : 'quit');
+        } catch {
+          // already gone
+        }
+      }
+    } catch (err) {
+      console.warn('[game] releasing the other players failed', err);
+    }
+  }
+
+  /** Overlays for a failure before the HUD could be built (no view state yet). */
+  bareOverlays() {
+    const layer = el('div', 'hud-overlays');
+    this.hudRoot.classList.add('hud');
+    this.hudRoot.appendChild(layer);
+    this.bareHud = true;
+    return new Overlays(layer, this);
   }
 
   centerOnStart() {
@@ -203,6 +386,24 @@ export class Game {
     this.offs.push(() => mq && mq.removeEventListener('change', onChange));
   }
 
+  /**
+   * A single-player match has nobody to wait for, but its ticker runs in a Worker and so
+   * keeps simulating in a hidden tab, where the HUD and the alerts stand still: open the
+   * game menu (which pauses) when the tab is hidden.
+   */
+  watchVisibility() {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    const onChange = () => {
+      if (!document.hidden || this.disposed || this.ended || this.paused || !this.hud) return;
+      const vs = this.viewState;
+      if (!isSolo(this.session) || vs.gameOver || (vs.me && vs.me.defeated) || this.hud.overlays.open) return;
+      this.hud.overlays.openMenu();
+    };
+    document.addEventListener('visibilitychange', onChange);
+    this.offs.push(() => document.removeEventListener('visibilitychange', onChange));
+    onChange(); // the tab may already be hidden: the player switched away while the match was loading
+  }
+
   resize() {
     if (!this.renderer) return;
     const w = this.root.clientWidth || window.innerWidth;
@@ -219,8 +420,8 @@ export class Game {
     const dt = Math.min(MAX_DT, Math.max(0, (now - this.lastFrame) / 1000));
     this.lastFrame = now;
     const t0 = performance.now();
-    let t1 = t0;
-    let t2 = t0;
+    // Each stage has its own guard: a fault in one (the renderer choking on an odd
+    // entity, say) must not freeze the HUD or hold back the victory / defeat screen.
     try {
       // Paused (single player, F10 menu): the world is frozen, so the last
       // picture stays on the canvas; redraw only after a resize or option change.
@@ -232,17 +433,28 @@ export class Game {
         this.renderer.update(this.paused ? 0 : dt);
         this.renderer.render(now);
       }
-      t1 = performance.now();
-      const cam = this.renderer.camera;
-      if (cam && cam.target) sfx.setListener(cam.target.x, cam.target.y);
-      this.hud.update(now);
-      this.checkEnd();
-      this.ambientSounds(now);
-      t2 = performance.now();
     } catch (err) {
-      this.errors.push(err);
-      if (this.errors.length <= 5) console.error('[game] frame failed', err);
+      this.frameFault(err);
     }
+    const t1 = performance.now();
+    try {
+      this.hud.update(now);
+    } catch (err) {
+      this.frameFault(err);
+    }
+    try {
+      this.checkEnd();
+    } catch (err) {
+      this.frameFault(err);
+    }
+    try {
+      const cam = this.renderer.camera;
+      if (cam && cam.target) sfx.setListener(cam.target.x, cam.target.y, hearingScale(cam));
+      this.ambientSounds(now);
+    } catch (err) {
+      this.frameFault(err);
+    }
+    const t2 = performance.now();
     const st = this.stats;
     const cpu = t2 - t0;
     st.frames++;
@@ -252,6 +464,12 @@ export class Game {
     if (cpu > st.maxMs) st.maxMs = cpu;
     st.last.push(cpu);
     if (st.last.length > 120) st.last.shift();
+  }
+
+  /** Keep a frame fault for the play-test (the first few go to the console too). */
+  frameFault(err) {
+    if (this.errors.length < MAX_ERRORS) this.errors.push(err);
+    if (this.errors.length <= 5) console.error('[game] frame failed', err);
   }
 
   /** Frame timing summary (play-test). */
@@ -291,8 +509,7 @@ export class Game {
   /** Pause the simulation (single player only). Returns true if the game is paused. */
   setPaused(on) {
     const s = this.session;
-    const solo = s && s.isHost && s.ticker && (!s.clients || s.clients.size === 0) && !s.stopped;
-    if (!solo) return false;
+    if (!isSolo(s)) return false;
     if (on && !this.paused) {
       s.ticker.stop();
       this.paused = true;
@@ -341,6 +558,7 @@ export class Game {
   onEnd({ reason } = {}) {
     if (this.disposed) return;
     this.ended = true;
+    this.setLoading(false);
     if (!this.hud) return;
     if (this.overShown && (reason === 'game-over' || reason === 'host-quit')) {
       this.hud.message('The host has closed the game.', 'system');
@@ -356,13 +574,16 @@ export class Game {
       const wt = vs.gameOver.winningTeam;
       const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
       if (this.input) this.input.cancelMode();
-      sfx.play(result === 'victory' ? 'victory' : 'defeat');
+      // (A defeat already heard when the local player fell is not played again.)
+      if (result === 'victory') sfx.play('victory');
+      else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
         if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
+      this.defeatSounded = true;
       sfx.play('defeat');
       this.hud.overlays.showDefeated();
     }
@@ -416,7 +637,8 @@ export class Game {
           sfx.play('summon_god', { volume: 0.8 });
         } else {
           hud.showBanner(`${name} is being summoned by ${this.playerName(ev.player)}!`, vs.isAlly(ev.player) ? 'titan' : 'danger');
-          sfx.play('horn');
+          // Not the horn: an under-attack horn a moment earlier would lock this warning out.
+          sfx.play('summon_titan', { volume: 0.7 });
         }
         break;
       }
@@ -504,8 +726,8 @@ export class Game {
         break;
       }
       case 'effect': {
-        const name = ev.shape === 'heal' ? 'heal' : SPELL_SOUNDS[ev.el] || 'magic';
-        this.worldSound(name, ev.x, ev.y);
+        const [name, volume] = effectSound(ev);
+        this.worldSound(name, ev.x, ev.y, volume);
         break;
       }
       default:
@@ -518,19 +740,23 @@ export class Game {
     if (p) this.worldSound(name, p.x, p.y, volume);
   }
 
-  /** Occasional chop / mine / hammer / prayer sounds from own workers near the camera. */
+  /** Occasional chop / mine / hammer / prayer sounds from own workers working near the camera. */
   ambientSounds(now) {
-    if (now - this.lastAmbient < AMBIENT_MS || !this.renderer) return;
+    if (now - this.lastAmbient < AMBIENT_MS || !this.renderer || this.paused) return;
     this.lastAmbient = now;
     const cam = this.renderer.camera;
     if (!cam || !cam.target) return;
     const vs = this.viewState;
+    const reach = AMBIENT_REACH * hearingScale(cam);
     const cands = [];
     for (const e of vs.entities.values()) {
       if (e.k !== 'u' || e.o !== vs.myIndex) continue;
       if (e.st !== 'gather' && e.st !== 'build' && e.st !== 'pray') continue;
+      // A worker on its way to the tree or mine already has the 'gather' state; it is still
+      // moving while the drawn position (ix, iy) trails the newest one.
+      if (e.ix !== undefined && Math.abs(e.ix - e.x) + Math.abs(e.iy - e.y) > 0.08) continue;
       const d = Math.hypot(e.x - cam.target.x, e.y - cam.target.y);
-      if (d < 16) cands.push(e);
+      if (d < reach) cands.push(e);
     }
     if (!cands.length) return;
     const e = cands[Math.floor(Math.random() * cands.length)];
@@ -547,6 +773,7 @@ export class Game {
     if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    this.setLoading(false);
     for (const off of this.offs.splice(0)) {
       try {
         off();
@@ -575,6 +802,7 @@ export class Game {
       console.warn('[game] hud.dispose failed', err);
     }
     if (this.hudRoot) this.hudRoot.textContent = '';
+    if (this.bareHud && this.hudRoot.classList) this.hudRoot.classList.remove('hud');
     if (this.canvas) this.canvas.className = '';
     this.root.hidden = true;
     sfx.setListener(NaN, NaN);
