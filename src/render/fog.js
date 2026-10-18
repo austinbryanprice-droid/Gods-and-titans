@@ -7,6 +7,7 @@
 // visible = full color, explored = dimmed, unexplored = near black, and
 // everything fades to black past the map edge.
 import * as THREE from 'three';
+import { CLOUD_TEXTURE, WORLD_UNIFORMS } from './shading.js';
 
 export const FOW_VISIBLE = 255;
 export const FOW_EXPLORED = 128; // ≈ 50% brightness (display space)
@@ -23,6 +24,12 @@ CLEAR_TEX.needsUpdate = true;
 export const FOW_UNIFORMS = {
   uFowTex: { value: CLEAR_TEX }, // no fog bound: everything fully lit
   uFowSize: { value: new THREE.Vector4(1e6, 1e6, 1e-6, 1e-6) }, // width, height, 1/width, 1/height
+  // 1 when materials write display (sRGB) values (low quality); about 1.4 when they
+  // write linear values into the post-processing target (the factors are tuned for
+  // display space). Set each frame by GameRenderer.render.
+  uFowPow: { value: 1 },
+  uFowNoise: { value: CLOUD_TEXTURE },
+  uFowTime: WORLD_UNIFORMS.uTime,
 };
 
 export const FOW_PARS_VERTEX = 'varying vec2 vFowXZ;';
@@ -41,13 +48,36 @@ export const FOW_VERTEX = `
 export const FOW_PARS_FRAGMENT = `
 uniform sampler2D uFowTex;
 uniform vec4 uFowSize;
+uniform float uFowPow;
+uniform sampler2D uFowNoise;
+uniform float uFowTime;
 varying vec2 vFowXZ;
 float fowFactor( vec2 p ) {
   float f = texture2D( uFowTex, p * uFowSize.zw ).r;
   vec2 d = min( p, uFowSize.xy - p );
   return f * smoothstep( -0.4, 1.6, min( d.x, d.y ) );
+}
+// Remembered ground loses its color toward a cool grey; unexplored land sits
+// under a slowly drifting dark mist instead of flat black.
+vec3 fowApply( vec3 c, vec2 p ) {
+  float f = fowFactor( p );
+  if ( f >= 0.995 ) return c;
+  float fog = 1.0 - smoothstep( 0.6, 0.97, f );
+  float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+  c = mix( c, vec3( l ) * vec3( 0.86, 0.93, 1.06 ), fog * 0.5 );
+  c *= pow( f, uFowPow );
+  float shroud = 1.0 - smoothstep( 0.04, 0.4, f );
+  if ( shroud > 0.0 ) {
+    vec2 q = p * 0.045 + vec2( uFowTime * 0.006, uFowTime * 0.0035 );
+    float m = texture2D( uFowNoise, q ).g * 0.6 + texture2D( uFowNoise, q * 2.7 + 0.3 ).r * 0.4;
+    vec3 mist = vec3( 0.075, 0.085, 0.1 ) * ( 0.35 + 0.9 * smoothstep( 0.3, 0.8, m ) );
+    vec2 d = min( p, uFowSize.xy - p );
+    mist *= smoothstep( -0.4, 1.6, min( d.x, d.y ) );
+    c += pow( mist, vec3( uFowPow ) ) * shroud;
+  }
+  return c;
 }`;
-export const FOW_FRAGMENT = 'gl_FragColor.rgb *= fowFactor( vFowXZ );';
+export const FOW_FRAGMENT = 'gl_FragColor.rgb = fowApply( gl_FragColor.rgb, vFowXZ );';
 
 /**
  * Inject the fog-of-war sample into a built-in material (Lambert, Basic, …).
@@ -67,10 +97,13 @@ export function patchFowMaterial(mat) {
     if (typeof prev === 'function') prev.call(this, shader, renderer);
     shader.uniforms.uFowTex = FOW_UNIFORMS.uFowTex;
     shader.uniforms.uFowSize = FOW_UNIFORMS.uFowSize;
+    shader.uniforms.uFowPow = FOW_UNIFORMS.uFowPow;
+    shader.uniforms.uFowNoise = FOW_UNIFORMS.uFowNoise;
+    shader.uniforms.uFowTime = FOW_UNIFORMS.uFowTime;
     if (custom) injectCustom(shader);
     else injectBuiltin(shader);
   };
-  mat.customProgramCacheKey = () => `${prevKey}|fow1`;
+  mat.customProgramCacheKey = () => `${prevKey}|fow2`;
   mat.needsUpdate = true;
   return true;
 }
@@ -90,7 +123,7 @@ function injectCustom(shader) {
     /void\s+main\s*\(\s*(void)?\s*\)\s*\{/,
     (m) => `${m}\n  vFowXZ = ( modelMatrix * vec4( position, 1.0 ) ).xz;`,
   );
-  shader.fragmentShader = appendToMain(`${FOW_PARS_FRAGMENT}\n${shader.fragmentShader}`, 'gl_FragColor *= fowFactor( vFowXZ );');
+  shader.fragmentShader = appendToMain(`${FOW_PARS_FRAGMENT}\n${shader.fragmentShader}`, 'gl_FragColor *= pow( fowFactor( vFowXZ ), uFowPow );');
 }
 
 function appendToMain(src, code) {

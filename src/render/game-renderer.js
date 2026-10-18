@@ -14,24 +14,50 @@ import { UNITS, BUILDINGS, PANTHEONS } from '../data/index.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
 import { createForest, createDecor } from './models/props.js';
+import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
 import { CameraController, CAMERA_DEFAULTS } from './camera.js';
-import { FogOfWar, patchFowObject } from './fog.js';
+import { FogOfWar, patchFowObject, FOW_UNIFORMS } from './fog.js';
 import { createTerrain, WATER_LEVEL } from './terrain.js';
 import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } from './overlays.js';
 import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
+import { PostFX } from './post.js';
+import { createEnvironment, setCloudShadows, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 
+// Low draws straight to the canvas; the others go through the post-processing
+// pipeline (post.js: MSAA, bloom, + ambient occlusion on high / ultra), which
+// also does the antialiasing, so the canvas itself never needs it.
+// `minScale` bounds adaptive resolution (scene drawn below the canvas size
+// while frames are slow); `vfx` is the VFX tier (it has no 'ultra').
 const QUALITY = {
-  low: { pixelRatio: 1, shadows: false, shadowSize: 0, antialias: false },
-  medium: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, antialias: true },
-  high: { pixelRatio: 2, shadows: true, shadowSize: 4096, antialias: true },
+  low: { pixelRatio: 1, shadows: false, shadowSize: 0, shadowRadius: 1, clouds: 0, minScale: 1, vfx: 'low' },
+  medium: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, shadowRadius: 2.2, clouds: 0.3, minScale: 0.6, vfx: 'medium' },
+  high: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 2.6, clouds: 0.34, minScale: 0.6, vfx: 'high' },
+  ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 3, clouds: 0.34, minScale: 0.7, vfx: 'high' },
 };
 
-const SUN_DIR = new THREE.Vector3(-30, 60, 40).normalize();
+// Light rig (linear, tone-mapped by post.js / the low path's Neutral mapping)
+const SUN_COLOR = 0xfff1dc;
+const SUN_INTENSITY = 2.6;
+const SKY_COLOR = 0xd6e4ff;
+const GROUND_COLOR = 0x5a5638;
+const HEMI_INTENSITY = 0.85;
+const ENV_INTENSITY = 0.55;
+const EXPOSURE = 1.0;
+// Adaptive resolution (frame times in ms, smoothed): slower than SLOW_FRAME_MS (and
+// well past the display's own frame period) lowers the scene scale a step; frames
+// that keep up with the display, or run faster than FAST_FRAME_MS on a high-refresh
+// screen, raise it again.
+const SLOW_FRAME_MS = 24;
+const FAST_FRAME_MS = 15;
+const SCALE_SETTLE = 90; // frames the average settles for after any step
+const SCALE_UP_WAIT = 240; // frames before a step up (doubled while steps up keep being undone)
+const SCALE_UP_WAIT_MAX = 3600;
+const MAX_VSYNC_MS = 34; // no display or browser cap runs slower than 30 Hz: longer is the GPU
 const AIR_RING_LIFT = AIR_HOVER_HEIGHT - 0.14; // flyers' rings: just under the hovering body
 const DEATH_SECONDS = 1.65; // keep animating 'dead' this long (topple + sink)
 const COLLAPSE_SECONDS = 1.6; // destroyed buildings sink this long
@@ -92,7 +118,7 @@ export class GameRenderer {
    * @param {object} o
    * @param {import('../game/view-state.js').ViewState} o.viewState
    * @param {object} [o.setup] GameSetup (defaults to viewState.setup)
-   * @param {'low'|'medium'|'high'} [o.quality]
+   * @param {'low'|'medium'|'high'|'ultra'} [o.quality]
    * @param {THREE.WebGLRenderer} [o.webgl] an existing renderer to draw with (tests / tools)
    */
   constructor(canvas, { viewState, setup, quality = 'medium', webgl = null } = {}) {
@@ -116,23 +142,36 @@ export class GameRenderer {
 
     // ---- WebGL
     this.ownsWebgl = !webgl;
-    this.renderer = webgl || new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance', stencil: false });
+    this.renderer = webgl || new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.setClearColor(0x050605, 1);
     this.renderer.shadowMap.enabled = Q.shadows;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap; // (three r186 dropped PCFSoftShadowMap)
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // soft: vogel-disk taps scaled by shadow.radius
     this.renderer.shadowMap.autoUpdate = true;
+    this.renderer.toneMappingExposure = EXPOSURE;
+    if (this.renderer.info) this.renderer.info.autoReset = false; // several render() calls per frame
+    // the post pipeline needs a real WebGLRenderer (tests draw through a stub)
+    this.post = typeof this.renderer.setRenderTarget === 'function' ? new PostFX(this.renderer, this.quality) : null;
+    if (this.post) this.post.look.aoFloor = WATER_LEVEL; // no ambient occlusion on the lake bed under the water
+    this.renderScale = 1;
+    this.lastRenderAt = 0;
+    this.vsyncMs = 1000 / 60; // the display's frame period (learned)
+    this.resetAdaptive();
     this.applyPixelRatio();
 
     // ---- scene, lights
     const scene = (this.scene = new THREE.Scene());
     scene.name = 'game';
     scene.background = new THREE.Color(0x050605);
-    scene.fog = new THREE.Fog(0x9db3c2, 60, 150);
-    this.hemi = new THREE.HemisphereLight(0xdfe9ff, 0x4a5a32, 1.15);
+    // aerial haze: only the far edge of the view at the farthest zoom reaches it
+    scene.fog = new THREE.Fog(0xaebfcc, 44, 170);
+    this.hemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, HEMI_INTENSITY);
     scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.45);
+    this.sun = new THREE.DirectionalLight(SUN_COLOR, SUN_INTENSITY);
+    // along SUN_DIR on every quality (with shadows, updateShadowCamera re-centers it each frame)
+    this.sun.position.copy(SUN_DIR).multiplyScalar(60);
     this.sun.castShadow = Q.shadows;
     this.sun.shadow.mapSize.set(Q.shadowSize || 1024, Q.shadowSize || 1024);
+    this.sun.shadow.radius = Q.shadowRadius;
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.03;
     this.sun.shadow.camera.near = 1;
@@ -140,6 +179,35 @@ export class GameRenderer {
     this.shadowR = 0;
     scene.add(this.sun);
     scene.add(this.sun.target);
+    // image-based lighting from a procedural sky (reflections on metal, stone, lacquer)
+    this.env = createEnvironment(this.ownsWebgl ? this.renderer : null);
+    if (this.env) {
+      scene.environment = this.env.texture;
+      scene.environmentIntensity = ENV_INTENSITY;
+    }
+    // After a lost context comes back (GPU reset, driver update, mobile tab eviction)
+    // three re-uploads textures from their data, but the environment was rendered on
+    // the GPU and has none: render it again. (The old one went with the old context;
+    // disposing it would delete handles that context owned.) Registered after three's
+    // own handler, so the GL state is already rebuilt when this runs.
+    this.onContextRestored = () => {
+      if (this.disposed || !this.env) return;
+      this.env = createEnvironment(this.renderer);
+      scene.environment = this.env ? this.env.texture : null;
+    };
+    const dom = this.ownsWebgl ? this.renderer.domElement : null;
+    if (dom && typeof dom.addEventListener === 'function') dom.addEventListener('webglcontextrestored', this.onContextRestored);
+    setCloudShadows(Q.clouds);
+
+    // Overlays that must keep their exact colors (health bars, selection rings,
+    // markers, text, rally flags, placement ghosts, status icons) live in their
+    // own scene, drawn after post-processing, depth-tested against the world.
+    const overlayScene = (this.overlayScene = new THREE.Scene());
+    overlayScene.name = 'overlays';
+    this.overlayHemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, 1.15);
+    this.overlaySun = new THREE.DirectionalLight(SUN_COLOR, 2.45);
+    this.overlaySun.position.copy(SUN_DIR).multiplyScalar(60);
+    overlayScene.add(this.overlayHemi, this.overlaySun);
 
     // ---- camera
     const cam = new THREE.PerspectiveCamera(CAMERA_DEFAULTS.fov, 16 / 9, 0.5, 400);
@@ -148,7 +216,7 @@ export class GameRenderer {
 
     // ---- world layers
     this.fow = new FogOfWar(this.width, this.height);
-    this.terrain = createTerrain(this.map);
+    this.terrain = createTerrain(this.map, { quality: this.quality });
     scene.add(this.terrain.group);
     this.heightFn = (x, y) => heightAt(this.map, x, y);
     this.buildForest();
@@ -158,6 +226,9 @@ export class GameRenderer {
     });
     scene.add(this.decor.object3d);
     patchFowObject(this.decor.object3d);
+    this.groundCover = createGroundCover(this.map, this.heightFn, { quality: this.quality });
+    scene.add(this.groundCover.object3d);
+    patchFowObject(this.groundCover.object3d);
     this.rockDecor = this.buildRockDecor();
     if (this.rockDecor) {
       scene.add(this.rockDecor.object3d);
@@ -167,17 +238,22 @@ export class GameRenderer {
     this.entityRoot = new THREE.Group();
     this.entityRoot.name = 'entities';
     scene.add(this.entityRoot);
+    // world-space overlays that belong to the lit, post-processed picture
+    this.groundFxRoot = new THREE.Group();
+    this.groundFxRoot.name = 'ground-fx';
+    scene.add(this.groundFxRoot);
     this.overlayRoot = new THREE.Group();
     this.overlayRoot.name = 'overlays';
-    scene.add(this.overlayRoot);
+    overlayScene.add(this.overlayRoot);
 
-    this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: this.quality });
+    this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: Q.vfx });
 
-    this.blobs = new BlobLayer(this.overlayRoot);
+    this.blobs = new BlobLayer(this.groundFxRoot);
     this.rings = new RingLayer(this.overlayRoot);
-    this.stars = new StarLayer(this.overlayRoot);
+    this.stars = new StarLayer(this.groundFxRoot);
     this.status = new StatusLayer(this.overlayRoot);
-    this.fires = new FireLayer(this.overlayRoot);
+    // burning buildings offer their flickering light to the VFX light pool
+    this.fires = new FireLayer(this.groundFxRoot, undefined, this.vfx.lights);
     this.bars = new BarLayer(this.overlayRoot);
     this.markers = new MarkerLayer(this.overlayRoot);
     this.texts = new FloatingTextLayer(this.overlayRoot);
@@ -229,6 +305,13 @@ export class GameRenderer {
   applyPixelRatio() {
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     this.renderer.setPixelRatio(Math.min(dpr, QUALITY[this.quality].pixelRatio));
+  }
+
+  /** Size the post-processing targets to the canvas' drawing buffer. */
+  syncPostSize() {
+    if (!this.post || typeof this.renderer.getDrawingBufferSize !== 'function') return;
+    const v = this.renderer.getDrawingBufferSize(this._dbs || (this._dbs = new THREE.Vector2()));
+    this.post.setSize(v.x, v.y);
   }
 
   buildForest() {
@@ -322,7 +405,16 @@ export class GameRenderer {
         }
       });
       this.scene.add(group);
-      if (typeof this.renderer.compile === 'function') this.renderer.compile(this.scene, this.threeCamera);
+      if (typeof this.renderer.compile === 'function') {
+        // compile for the target the world is drawn into (linear HDR) or the canvas (low)
+        const target = this.post && this.post.enabled ? this.post.sceneTarget() : null;
+        const prevTone = this.renderer.toneMapping;
+        if (target) this.renderer.setRenderTarget(target);
+        else this.renderer.toneMapping = THREE.NeutralToneMapping;
+        this.renderer.compile(this.scene, this.threeCamera);
+        if (target) this.renderer.setRenderTarget(null);
+        this.renderer.toneMapping = prevTone;
+      }
     } catch (err) {
       console.error('[render] warm-up failed', err);
     } finally {
@@ -377,39 +469,106 @@ export class GameRenderer {
     this.applyPixelRatio(); // browser zoom or another screen changes devicePixelRatio
     this.renderer.setSize(this.viewW, this.viewH, !!(this.canvas && this.canvas.style));
     this.camera.setViewport(this.viewW, this.viewH);
+    this.syncPostSize();
   }
 
   /**
-   * Change quality live (pixel ratio, shadows, VFX density). Antialiasing stays as
-   * created (a context's attributes are fixed): it applies from the next match,
-   * which draws on a fresh canvas (Game).
+   * Change quality live: pixel ratio, shadows, VFX density, and the post-processing
+   * pipeline with its MSAA (post.js allocates its targets per quality; the canvas
+   * itself never has antialiasing).
    */
   setQuality(q) {
     if (!QUALITY[q] || q === this.quality) return;
     this.quality = q;
     const Q = QUALITY[q];
+    if (this.post) this.post.setQuality(q);
+    this.setRenderScale(1);
+    this.resetAdaptive();
     this.resize(this.viewW, this.viewH);
     const was = this.renderer.shadowMap.enabled;
     this.renderer.shadowMap.enabled = Q.shadows;
     this.sun.castShadow = Q.shadows;
-    if (Q.shadows) {
-      this.sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize);
-      if (this.sun.shadow.map) {
-        this.sun.shadow.map.dispose();
-        this.sun.shadow.map = null;
-      }
+    this.sun.shadow.radius = Q.shadowRadius;
+    if (Q.shadows) this.sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize);
+    // reallocated at the new size when shadows are on; freed on low (up to 4096²)
+    if (this.sun.shadow.map) {
+      this.sun.shadow.map.dispose();
+      this.sun.shadow.map = null;
     }
     if (was !== Q.shadows) this.scene.traverse((o) => {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
     });
-    this.vfx.setQuality(q);
+    setCloudShadows(Q.clouds);
+    this.terrain.setQuality(q);
+    this.groundCover.setQuality(q);
+    patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
+    this.vfx.setQuality(Q.vfx);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
   }
 
-  /** Unit meshes cast real shadows on high only; blob shadows ground them everywhere. */
+  /** Unit meshes cast real shadows on high and ultra; blob shadows ground them everywhere. */
   unitsCastShadows() {
-    return this.quality === 'high' && QUALITY.high.shadows;
+    return (this.quality === 'high' || this.quality === 'ultra') && QUALITY[this.quality].shadows;
+  }
+
+  /** Scene resolution relative to the canvas (adaptive resolution; post-processed qualities only). */
+  setRenderScale(s) {
+    const Q = QUALITY[this.quality];
+    s = clamp(s, Q.minScale, 1);
+    this.renderScale = s;
+    if (this.post) this.post.setRenderScale(s);
+  }
+
+  /** Start adaptive resolution afresh (new quality: frame times measured before no longer apply). */
+  resetAdaptive() {
+    this.frameMs = this.vsyncMs;
+    this.scaleHold = SCALE_SETTLE; // first-frame shader compiles and uploads settle
+    this.upWait = 0;
+    this.upWaitNext = SCALE_UP_WAIT;
+    this.adaptN = 0;
+    this.upAt = -Infinity;
+  }
+
+  /**
+   * Adaptive resolution: while frames take longer than SLOW_FRAME_MS (smoothed),
+   * draw the scene a step smaller; when they keep up with the display again,
+   * step back up. Only the 3D scene scales (the composite sharpens it back to the
+   * canvas); overlays and the HUD stay crisp.
+   * @param {number} t frame timestamp (ms; the requestAnimationFrame time when there is one)
+   */
+  adaptResolution(t) {
+    const last = this.lastRenderAt;
+    this.lastRenderAt = t;
+    if (!last || !this.post || !this.post.enabled) return;
+    const ms = t - last;
+    if (!(ms > 0) || ms > 250) return; // tab was hidden, paused, or a long stall
+    // The display's frame period: vsync holds frames at it however idle the GPU is.
+    // The shortest interval, creeping up so a lower rate (another screen, a 30 fps
+    // battery-saver cap) is learned within a minute; one far shorter is a timer glitch.
+    const v = (this.vsyncMs = Math.min(ms > this.vsyncMs * 0.4 ? ms : Infinity, this.vsyncMs + 0.01, MAX_VSYNC_MS));
+    const slowMs = Math.max(SLOW_FRAME_MS, v * 1.3);
+    // one long frame (garbage collection, a first-use shader) barely moves the average
+    this.frameMs += (Math.min(ms, 2 * slowMs) - this.frameMs) * 0.05;
+    const n = ++this.adaptN;
+    if (this.upWait > 0) this.upWait--;
+    if (this.scaleHold > 0) {
+      this.scaleHold--;
+      return;
+    }
+    const Q = QUALITY[this.quality];
+    if (this.frameMs > slowMs && this.renderScale > Q.minScale + 0.01) {
+      // undoing a step up made shortly before: wait longer before the next one
+      this.upWaitNext = n - this.upAt < 1800 ? Math.min(this.upWaitNext * 2, SCALE_UP_WAIT_MAX) : SCALE_UP_WAIT;
+      this.upWait = this.upWaitNext;
+      this.setRenderScale(this.renderScale - 0.1);
+      this.scaleHold = SCALE_SETTLE;
+    } else if (this.frameMs < Math.max(v * 1.12, v + 1, FAST_FRAME_MS) && this.upWait <= 0 && this.renderScale < 0.99) {
+      this.setRenderScale(this.renderScale + 0.1);
+      this.scaleHold = SCALE_SETTLE;
+      this.upWait = SCALE_UP_WAIT;
+      this.upAt = n;
+    }
   }
 
   setSelection(ids) {
@@ -810,7 +969,8 @@ export class GameRenderer {
     } else this.camera.setShake(0, 0);
     this.camera.update(dt);
     _vp.multiplyMatrices(this.threeCamera.projectionMatrix, this.threeCamera.matrixWorldInverse);
-    this.vfx.setFocus(this.camera.target.x, this.camera.target.y);
+    // the zoom too: the VFX lights go to what is on screen
+    this.vfx.setFocus(this.camera.target.x, this.camera.target.y, this.camera.distance);
 
     const fresh = vs.snapshotCount !== this.lastSnapshot;
     if (fresh) {
@@ -825,6 +985,7 @@ export class GameRenderer {
     this.flushPendingHits();
 
     this.fow.update(dt);
+    WORLD_UNIFORMS.uTime.value = this.time;
     this.terrain.update(this.time);
     setBuildingTime(this.time);
     this.vfx.update(dt);
@@ -1132,6 +1293,7 @@ export class GameRenderer {
       });
       this.entityRoot.add(model.root);
       this.decor.hideInRect(tx - 0.2, ty - 0.2, tx + def.size + 0.2, ty + def.size + 0.2);
+      this.groundCover.hideInRect(tx - 0.1, ty - 0.1, tx + def.size + 0.1, ty + def.size + 0.1);
       this.buildings.set(e.id, b);
       b.bp = -1;
       b.tr = e.tr || 1;
@@ -1193,6 +1355,7 @@ export class GameRenderer {
         patchFowObject(model.root);
         this.entityRoot.add(model.root);
         this.decor.hideInRect(tx - 0.2, ty - 0.2, tx + 3.2, ty + 3.2);
+        this.groundCover.hideInRect(tx - 0.1, ty - 0.1, tx + 3.1, ty + 3.1);
         const init = this.mineInitial.get(`${tx},${ty}`) || Math.max(e.amt || 0, (e.amt || 0) > GOLD_MINE_AMOUNT ? EXPANSION_MINE_AMOUNT : GOLD_MINE_AMOUNT);
         m = { id: e.id, e, model, tx, ty, x: tx + 1.5, y: ty + 1.5, size: 3, height: model.height, initial: init, amt: -1, tag };
         this.mines.set(e.id, m);
@@ -1244,7 +1407,9 @@ export class GameRenderer {
     const bars = this.bars;
     const zk = this.zoomK();
     const blobs = this.blobs;
-    const blobAlpha = this.unitsCastShadows() ? 0.2 : 0.36;
+    let blobAlpha = this.unitsCastShadows() ? 0.2 : 0.36;
+    // blended in linear light (post-processed qualities): same perceived darkening
+    if (this.post && this.post.enabled) blobAlpha = 1 - (1 - blobAlpha) ** 2.2;
     const stars = this.stars;
     rings.begin(this.time);
     bars.begin();
@@ -1468,9 +1633,33 @@ export class GameRenderer {
 
   // ------------------------------------------------------------------ render
 
-  render() {
+  /** @param {number} [frameTime] the requestAnimationFrame timestamp (ms), for adaptive resolution */
+  render(frameTime) {
     if (this.disposed) return;
-    this.renderer.render(this.scene, this.threeCamera);
+    const r = this.renderer;
+    if (r.info && typeof r.info.reset === 'function') r.info.reset();
+    if (this.post && this.post.enabled) {
+      this.adaptResolution(frameTime > 0 ? frameTime : now());
+      // materials write linear values into the HDR target, so the fog's display-space
+      // factors are raised to a power; well under 2.2 because the tone curve's toe and
+      // the grade darken the dimmed (remembered) ground further (1.4 keeps it at about
+      // the ~50% brightness of low quality)
+      FOW_UNIFORMS.uFowPow.value = 1.4;
+      this.post.look.exposure = EXPOSURE;
+      this.post.render(this.scene, this.threeCamera, this.overlayScene);
+      return;
+    }
+    // low: straight to the canvas, tone mapped in the material shaders; then the overlays, untouched
+    FOW_UNIFORMS.uFowPow.value = 1;
+    const prevTone = r.toneMapping;
+    const prevAuto = r.autoClear;
+    r.toneMapping = THREE.NeutralToneMapping;
+    r.render(this.scene, this.threeCamera);
+    r.toneMapping = THREE.NoToneMapping;
+    r.autoClear = false;
+    r.render(this.overlayScene, this.threeCamera);
+    r.autoClear = prevAuto;
+    r.toneMapping = prevTone;
   }
 
   // ------------------------------------------------------------------ picking
@@ -1636,16 +1825,25 @@ export class GameRenderer {
     this.fadeMats.dispose();
     this.forest.dispose();
     this.decor.dispose();
+    this.groundCover.dispose();
     if (this.rockDecor) this.rockDecor.dispose();
     this.terrain.dispose();
     this.fow.dispose();
     if (this.sun.shadow.map) this.sun.shadow.map.dispose();
     this.sun.dispose();
     this.hemi.dispose();
+    this.overlaySun.dispose();
+    this.overlayHemi.dispose();
+    if (this.post) this.post.dispose();
+    if (this.env) this.env.dispose();
+    this.scene.environment = null;
     this.scene.clear();
+    this.overlayScene.clear();
     clearUnitModelCache();
     clearBuildingCaches();
     if (this.ownsWebgl) {
+      const dom = this.renderer.domElement;
+      if (dom && typeof dom.removeEventListener === 'function') dom.removeEventListener('webglcontextrestored', this.onContextRestored);
       this.renderer.renderLists.dispose();
       this.renderer.dispose();
       // Free the GPU context now (each match gets a fresh canvas and context).

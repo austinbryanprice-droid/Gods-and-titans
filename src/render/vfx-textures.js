@@ -2,7 +2,9 @@
 // particle sprites. In the browser the atlas is a CanvasTexture whose glow cell
 // is a canvas radial gradient; in Node (tests) the same pixels go into a
 // DataTexture. Image row 0 is the top of a sprite (flipY = false), so a cell's
-// uv is ((col + pc.x) / 4, (row + pc.y) / 2) with pc = gl_PointCoord.
+// uv is ((col + pc.x) / 4, (row + pc.y) / 2) with pc = gl_PointCoord. The rgb
+// shading is authored in sRGB and decoded to linear by the GPU (the alpha,
+// i.e. the sprite's coverage, is not).
 import * as THREE from 'three';
 
 /** Atlas cell indices (particle `cell` values). */
@@ -170,6 +172,7 @@ export function makeAtlasTexture() {
     tex.generateMipmaps = true;
   }
   tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.wrapS = THREE.ClampToEdgeWrapping;

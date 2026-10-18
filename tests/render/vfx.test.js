@@ -1,7 +1,8 @@
 // Tests for the VFX system (src/render/vfx.js + vfx-*.js helpers): every schema
 // shape, projectile kind and element is covered, nothing produces NaNs, the
 // particle cap holds under load, everything is released when it finishes,
-// camera shake decays, delays / homing / follow behave, and dispose() cleans up.
+// camera shake decays, delays / homing / follow behave, the fixed set of point
+// lights goes to the strongest flashes, and dispose() cleans up.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
@@ -16,10 +17,11 @@ export async function resolve(spec, ctx, next) {
 }`)}`);
 
 const THREE = await import('three');
-const { VFXSystem } = await import('../../src/render/vfx.js');
+const { VFXSystem, LIGHT_GROUND_MAX } = await import('../../src/render/vfx.js');
 const { SHAPES } = await import('../../src/render/vfx-shapes.js');
 const { PROJECTILE_SPECS } = await import('../../src/render/vfx-projectiles.js');
-const { getPalette } = await import('../../src/render/vfx-palette.js');
+const { getPalette, COLORS } = await import('../../src/render/vfx-palette.js');
+const { FLARE_HOT } = await import('../../src/render/vfx-layers.js');
 const { VFX_SHAPES, PROJECTILES, ELEMENTS } = await import('../../src/data/schema.js');
 const { ELEMENT_COLORS } = await import('../../src/config.js');
 
@@ -50,7 +52,7 @@ function assertIdle(vfx, what) {
 /** First non-finite value in the live part of every dynamic buffer, or null. */
 function findNaN(vfx) {
   for (const layer of [vfx.add, vfx.alpha]) {
-    for (const [name, arr, w] of [['pos', layer.aPos, 3], ['col', layer.aCol, 4], ['par', layer.aPar, 3]]) {
+    for (const [name, arr, w] of [['pos', layer.aPos, 3], ['col', layer.aCol, 4], ['par', layer.aPar, 4]]) {
       for (let i = 0; i < layer.count * w; i++) if (!Number.isFinite(arr[i])) return `${layer.points.name}.${name}[${i}]`;
     }
   }
@@ -364,4 +366,74 @@ test('dispose detaches everything and later calls are no-ops', () => {
   vfx.spawnProjectile({ kind: 'arrow', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } });
   assert.equal(vfx.stats().effects, 0);
   assert.equal(scene.children.length, 0);
+});
+
+test('point lights: a fixed pool given to the strongest flashes near the camera, dark when idle', () => {
+  const { scene, vfx } = make({ quality: 'high' });
+  const L = vfx.lights;
+  const N = L.count;
+  const lights = L.lights.slice(0, N);
+  assert.ok(N > 0);
+  for (const l of lights) assert.equal(l.parent, vfx.root);
+  for (const l of lights) assert.ok(l.isPointLight && !l.castShadow && l.intensity === 0);
+  vfx.setFocus(20, 20, 30);
+  vfx.spawnEffect({ el: 'fire', shape: 'strike', x: 20, y: 20, r: 2 });
+  step(vfx, 0.1);
+  assert.ok(lights.some((l) => l.intensity > 1), 'an impact lights its surroundings');
+  step(vfx, 4);
+  assert.ok(lights.every((l) => l.intensity === 0), 'dark again once the flash is over');
+  vfx.spawnEffect({ el: 'fire', shape: 'strike', x: 200, y: 200, r: 2 });
+  step(vfx, 0.1);
+  assert.ok(lights.every((l) => l.intensity === 0), 'far from the camera: not worth a light');
+  // more sources than lights: the strongest get them, steadily
+  for (let f = 0; f < 30; f++) {
+    for (let i = 0; i < N + 3; i++) L.offer(i, 20 + i, 1, 20, 1, 0.4, 0.1, 1 + i, 6);
+    vfx.update(DT);
+  }
+  const lit = lights.map((l) => Math.round(l.intensity)).sort((a, b) => a - b);
+  assert.deepEqual(lit, Array.from({ length: N }, (_, k) => 4 + k));
+  // the light count is part of every lit shader: it only changes with a switch to or from
+  // low (the renderer rebuilds every shader then), never between medium and high
+  vfx.setQuality('medium');
+  assert.equal(L.count, N);
+  vfx.setQuality('low');
+  step(vfx, 0.1);
+  assert.equal(L.count, 0);
+  assert.ok(lights.every((l) => l.intensity === 0 && !l.parent), 'no lights in the scene on low');
+  vfx.spawnEffect({ el: 'fire', shape: 'strike', x: 20, y: 20, r: 2 });
+  step(vfx, 0.1);
+  assert.ok(L.lights.every((l) => l.intensity === 0 && !l.parent));
+  assert.equal(scene.children.length, 1);
+  vfx.dispose();
+  const lo = make({ quality: 'low' });
+  assert.equal(lo.vfx.lights.count, 0, 'no lights when a match starts on low');
+  assert.ok(lo.vfx.lights.lights.every((l) => !l.parent));
+  lo.vfx.setQuality('medium');
+  assert.ok(lo.vfx.lights.count > 0, 'switching up from low brings the lights');
+  assert.equal(lo.vfx.root.children.filter((o) => o.isPointLight).length, lo.vfx.lights.count);
+  lo.vfx.setFocus(20, 20, 30);
+  lo.vfx.spawnEffect({ el: 'holy', shape: 'nova', x: 20, y: 20, r: 3 });
+  step(lo.vfx, 0.1);
+  const on = lo.vfx.lights.lights.filter((l) => l.intensity > 0);
+  assert.ok(on.length > 0);
+  // capped: the ground right under a light is tinted, not bleached
+  for (const l of on) {
+    const h = l.position.y - hills(l.position.x, l.position.z);
+    assert.ok(h >= 2.9 && l.intensity / (h * h) <= LIGHT_GROUND_MAX, `ground irradiance ${l.intensity / (h * h)}`);
+  }
+  lo.vfx.dispose();
+  assert.equal(lo.scene.children.length, 0);
+});
+
+test('a flare from the pool gets its own white-hot core, whatever it drew before', () => {
+  const { vfx } = make({ quality: 'high' });
+  vfx.spawnEffect({ el: 'fire', shape: 'meteor', x: 20, y: 20, r: 2 }); // sets its own core heat
+  step(vfx, 3);
+  assert.equal(vfx.stats().flares, 0);
+  assert.ok(vfx.flares.freeItems.length > 0);
+  for (const f of vfx.flares.freeItems) f.u.uHot.value = 9;
+  const e = vfx.flareFx(20, 1, 20, 1, 2, 0.3, COLORS.gold, COLORS.goldCore, 1);
+  assert.equal(e.f0.u.uHot.value, FLARE_HOT);
+  assert.equal(vfx.flareFx(20, 1, 20, 1, 2, 0.3, COLORS.gold, COLORS.goldCore, 1, 0, 0.1, 2).f0.u.uHot.value, 2);
+  vfx.dispose();
 });

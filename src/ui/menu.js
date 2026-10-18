@@ -877,9 +877,10 @@ export function createMenu({ root, onStart }) {
     } }, '♪ Test sound');
 
     const qualities = [
-      ['low', 'Low', 'No shadows, fewer particles. For older laptops.'],
-      ['medium', 'Medium', 'Shadows and full effects. Recommended.'],
-      ['high', 'High', 'Sharper shadows and the most particles.'],
+      ['low', 'Low', 'No shadows or post-processing, fewer particles. For older laptops.'],
+      ['medium', 'Medium', 'Shadows, glow (bloom), smoothed edges and cloud shadows. Recommended.'],
+      ['high', 'High', 'Adds ambient occlusion, sharper shadows, unit shadows and the most particles.'],
+      ['ultra', 'Ultra', 'Everything at its best and finest. For gaming PCs.'],
     ];
     const qDesc = h('div.mw-field-note');
     const qBtns = qualities.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { q: id }, onclick: () => {

@@ -3,7 +3,7 @@
 // (tests) simply fall back to in-memory settings.
 
 const STORAGE_KEY = 'mythicwar-settings';
-const QUALITIES = ['low', 'medium', 'high'];
+const QUALITIES = ['low', 'medium', 'high', 'ultra'];
 const MAX_NAME_LENGTH = 20;
 
 const listeners = new Set();
@@ -77,7 +77,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean }}
  */
 export function getSettings() {
   return load();

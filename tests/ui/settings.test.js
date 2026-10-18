@@ -41,7 +41,7 @@ test('defaults: random 3-digit player name, volume 0.7, medium quality, edge scr
 test('saveSettings merges, validates, persists and notifies', () => {
   const seen = [];
   const off = onSettingsChange((s, changed) => seen.push([s.volume, changed]));
-  const next = saveSettings({ volume: 0.25, quality: 'ultra', edgeScroll: 'yes', name: '  Zeus   Fan  ' });
+  const next = saveSettings({ volume: 0.25, quality: 'extreme', edgeScroll: 'yes', name: '  Zeus   Fan  ' });
   assert.equal(next.volume, 0.25);
   assert.equal(next.quality, 'medium'); // invalid value ignored
   assert.equal(next.edgeScroll, true); // non-boolean ignored
@@ -53,6 +53,8 @@ test('saveSettings merges, validates, persists and notifies', () => {
   off();
   saveSettings({ volume: 0.5 });
   assert.equal(seen.length, 1);
+  // every quality the Settings menu offers is accepted
+  for (const q of ['low', 'high', 'ultra', 'medium']) assert.equal(saveSettings({ quality: q }).quality, q, q);
 });
 
 test('clamps volume and limits the name to 20 characters', () => {

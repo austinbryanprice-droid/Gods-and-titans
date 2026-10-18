@@ -127,13 +127,38 @@ class FootprintGrid {
   }
 }
 
-/** Ghost materials: the model's vertex colors, translucent, tinted. */
+// Glowing parts store HDR colors (they bloom in the world); the ghosts are
+// drawn straight to the canvas, so they are scaled back into range.
+const GHOST_GLOW_SCALE = 0.45;
+
+/**
+ * A fresnel edge in the ghost's tint: faces turned away from the camera light
+ * up, so the translucent silhouette stays readable on any ground.
+ */
+function ghostEdge(mat, edge) {
+  const uEdge = { value: edge };
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uGhostEdge = uEdge;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uGhostEdge;')
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        totalEmissiveRadiance += uGhostEdge * pow( 1.0 - saturate( abs( dot( normal, normalize( vViewPosition ) ) ) ), 2.5 );`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'mythicwar-ghost-edge';
+  return mat;
+}
+
+/** Ghost materials: the model's vertex colors (smooth where the model is round), translucent, tinted. */
 function ghostMaterials(tint, opacity, teamColor) {
-  const body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity, color: tint.clone(), depthWrite: true });
+  const edge = tint.clone().multiplyScalar(0.35);
+  const body = ghostEdge(new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity, color: tint.clone(), depthWrite: true }), edge);
   body.name = 'ghost-body';
-  const team = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity, color: new THREE.Color(teamColor).multiply(tint), depthWrite: true });
+  const team = ghostEdge(new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity, color: new THREE.Color(teamColor).multiply(tint), depthWrite: true }), edge);
   team.name = 'ghost-team';
-  const glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: opacity * 0.8, color: tint.clone(), depthWrite: false });
+  const glow = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: opacity * 0.8, color: tint.clone().multiplyScalar(GHOST_GLOW_SCALE), depthWrite: false });
   glow.name = 'ghost-glow';
   return { body, team, glow };
 }

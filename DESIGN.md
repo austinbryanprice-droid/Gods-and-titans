@@ -600,9 +600,9 @@ tx, ty, size, amount`.
 
 Three.js scene owned by `GameRenderer` (`src/render/game-renderer.js`):
 ```js
-const r = new GameRenderer(canvas, { viewState, setup, quality: 'low'|'medium'|'high' });
+const r = new GameRenderer(canvas, { viewState, setup, quality: 'low'|'medium'|'high'|'ultra' }); // default 'medium'
 r.update(dtSeconds);   // sync meshes from viewState (interpolated positions), animate, VFX from events
-r.render();
+r.render(rafTimestamp); // the timestamp feeds adaptive resolution (optional)
 r.resize(w, h);
 r.camera              // CameraController: target {x, y}, pan(dx, dy) tiles, zoomBy(steps), centerOn(x, y), getViewQuad() → 4 {x,y} ground corners
 r.screenToWorld(sx, sy) → {x, y} | null      // ground point (raycast vs terrain)
@@ -624,17 +624,31 @@ per-frame budget, so a revealed army appears over a few frames.
   and caches geometry/materials per unit type. `src/render/models/building-models.js` exports
   `buildBuildingModel(buildingTypeId, pantheon, teamColor, tier) → { root, height, setProgress(bp) }`
   and `buildGoldMineModel()`. `src/render/models/props.js` exports tree instancing helpers
-  (`createForest(mapData)` → `{ object3d, fell(tx, ty) }`), `createDecor(mapData)`.
+  (`createForest(mapData, heightFn)` → `{ object3d, fell(tx, ty) }`), `createDecor(mapData, heightFn)`;
+  `src/render/models/ground-cover.js` exports `createGroundCover(mapData, heightFn, { quality })`
+  (instanced grass and flowers, none on low).
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
   `spawnProjectile({ kind, el, from: {x, y, h}, to: {x, y, h}, flight })`,
   `spawnEffect({ el, shape, x, y, r, fx, fy, points, duration })`, `spawnHit({ x, y, h, el })`,
   `spawnDeath({ x, y, scale })`, `spawnLevelUp({ x, y })`, `spawnSummon({ x, y, scale, el })`,
   `spawnDust({ x, y, size })`, `update(dt)`, `dispose()`. Positions in sim coords; h = height above ground.
-- Look: low-poly, flat-shaded (`MeshLambertMaterial({ flatShading: true })` or Standard with roughness 1),
-  warm sun + hemisphere light, soft fog at distance, shadows on medium/high quality.
-  Terrain: vertex-colored grid using `heights`, water plane with gentle animated color.
-  Fog of war: explored-but-not-visible areas darkened (~45%), unexplored near-black; enemy units
-  hidden when not visible; enemy buildings shown as last seen.
+- Look: low-poly, flat-shaded. Units, buildings and terrain use `MeshStandardMaterial` with
+  per-vertex roughness / metalness and baked AO; foliage and ground cover stay Lambert with a
+  wind shader. Light: warm sun + hemisphere + image-based lighting from a procedural sky, with
+  drifting cloud shadows on the sunlight and a rim light (`src/render/shading.js`,
+  `patchWorldMaterial`); soft aerial fog at distance.
+  Quality: low draws straight to the canvas with Neutral tone mapping. Medium / high / ultra
+  draw through `src/render/post.js` (`PostFX`): 4x MSAA HDR target, bloom, ambient occlusion on
+  high / ultra, Neutral tone mapping, grade, vignette, dithering, and adaptive resolution (the
+  scene drops below the canvas size while frames are slow). Overlays (selection rings, bars,
+  markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
+  keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
+  shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
+  Terrain: procedural texture array with height blending and bump; shader water with caustics;
+  misty map border.
+  Fog of war (`src/render/fog.js`, installed after the other material patches): remembered
+  ground dimmed and desaturated toward a cool grey, unexplored land under a drifting dark mist;
+  enemy units hidden when not visible; enemy buildings shown as last seen.
 - Vision-edge fade (`src/render/unit-fade.js`): enemy and neutral units that come into sight
   after load fade in over `FADE_SECONDS` (0.25 s) and fade out the same way when they leave
   it (own and allied units, and everything visible at load, never fade). A fading-out unit is

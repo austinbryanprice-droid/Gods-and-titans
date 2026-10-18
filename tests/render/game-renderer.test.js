@@ -18,6 +18,7 @@ export async function resolve(spec, ctx, next) {
 }`)}`);
 
 const { GameRenderer } = await import('../../src/render/game-renderer.js');
+const { FOW_UNIFORMS } = await import('../../src/render/fog.js');
 const { createWorld } = await import('../../src/sim/world.js');
 const { ViewState } = await import('../../src/game/view-state.js');
 const { PLAYER_COLORS, DT } = await import('../../src/config.js');
@@ -25,8 +26,13 @@ const { PLAYER_COLORS, DT } = await import('../../src/config.js');
 const W = 1280;
 const H = 720;
 
-function stubWebgl() {
-  return {
+/**
+ * A stand-in for THREE.WebGLRenderer. With `post`, it also has the render-target
+ * API, so medium / high / ultra draw through the post-processing pipeline
+ * (post.js) as in the browser; `log` lists every draw as [scene, target].
+ */
+function stubWebgl({ post = false } = {}) {
+  const gl = {
     shadowMap: { enabled: false, type: 0, autoUpdate: true },
     info: { render: { calls: 0, triangles: 0 } },
     renderLists: { dispose() {} },
@@ -41,8 +47,9 @@ function stubWebgl() {
       this.size = [w, h];
     },
     render(scene, camera) {
-      assert.ok(scene.isScene && camera.isCamera);
-      this.renders++;
+      assert.ok((scene.isScene || scene.isMesh) && camera.isCamera);
+      if (scene.isScene) this.renders++;
+      if (this.log) this.log.push([scene.name || scene.type, this.target ? this.target.texture.name : 'canvas']);
     },
     compile() {
       this.compiled++;
@@ -51,10 +58,29 @@ function stubWebgl() {
       this.disposed = true;
     },
   };
+  if (!post) return gl;
+  return Object.assign(gl, {
+    log: [],
+    target: null,
+    toneMapping: 0,
+    autoClear: true,
+    extensions: { has: (name) => name === 'EXT_color_buffer_float' },
+    capabilities: { maxSamples: 4 },
+    setRenderTarget(t) {
+      this.target = t;
+    },
+    getRenderTarget() {
+      return this.target;
+    },
+    getDrawingBufferSize(v) {
+      return v.set(this.size[0] * (this.pixelRatio || 1), this.size[1] * (this.pixelRatio || 1));
+    },
+    clear() {},
+  });
 }
 
 /** A small 2-player match: world, view state for player 0, renderer, and a frame stepper. */
-function makeMatch({ quality = 'medium', myIndex = 0, pantheons = ['greek', 'norse'] } = {}) {
+function makeMatch({ quality = 'medium', myIndex = 0, pantheons = ['greek', 'norse'], post = false } = {}) {
   const setup = {
     version: '0.1.0',
     seed: 4242,
@@ -65,7 +91,7 @@ function makeMatch({ quality = 'medium', myIndex = 0, pantheons = ['greek', 'nor
   const vs = new ViewState({ setup, mapData: world.mapData, myIndex, interpDelayMs: 50 });
   let now = 1000;
   vs.pushSnapshot(world.getSnapshot(), now);
-  const webgl = stubWebgl();
+  const webgl = stubWebgl({ post });
   const canvas = { clientWidth: W, clientHeight: H, width: W, height: H, style: {} };
   const r = new GameRenderer(canvas, { viewState: vs, setup, quality, webgl });
   let acc = 0;
@@ -105,7 +131,9 @@ test('GameRenderer: builds the scene, warms shaders, starts on the local town ce
   for (const v of r.units.values()) assert.ok(!v.visible || vs.isEntityVisible(v.e));
   assert.ok(r.mines.size >= 1);
   r.render();
-  assert.equal(webgl.renders, 1);
+  // (this stub has no render targets, so even medium takes the direct path low uses;
+  // the post-processed path is covered below)
+  assert.equal(webgl.renders, 2, 'world, then the overlays on top');
   const s = r.getStats();
   for (const k of ['drawCalls', 'triangles', 'entities', 'updateMs']) assert.ok(Number.isFinite(s[k]), k);
   assert.ok(s.entities >= mine.length);
@@ -220,7 +248,7 @@ test('GameRenderer: events become effects, deaths play out, quality changes live
   vs.fields = [];
   r.syncFields();
   assert.equal(r.fieldShown.size, 0);
-  // quality: unit shadows only on high
+  // quality: unit shadows only on high and ultra
   let casts = 0;
   for (const v of r.units.values()) v.model.root.traverse((o) => {
     if (o.isMesh && o.castShadow) casts++;
@@ -281,7 +309,7 @@ test('GameRenderer: resize picks up a new devicePixelRatio (capped by quality); 
   const had = 'window' in globalThis;
   globalThis.window = { devicePixelRatio: 1 };
   try {
-    for (const [quality, cap] of [['low', 1], ['medium', 1.5], ['high', 2]]) {
+    for (const [quality, cap] of [['low', 1], ['medium', 1.5], ['high', 2], ['ultra', 2]]) {
       const { r, webgl } = makeMatch({ quality });
       assert.equal(webgl.pixelRatio, 1);
       assert.equal(webgl.shadowMap.type, THREE.PCFShadowMap, 'PCFSoftShadowMap is gone from three');
@@ -296,4 +324,82 @@ test('GameRenderer: resize picks up a new devicePixelRatio (capped by quality); 
   } finally {
     if (!had) delete globalThis.window;
   }
+});
+
+test('GameRenderer: adaptive resolution lowers the scene scale on slow frames and restores it at the display rate', () => {
+  const { r } = makeMatch({ post: true });
+  assert.ok(r.post && r.post.enabled, 'medium draws through post-processing');
+  const run = (frames, ms, t0) => {
+    let t = t0;
+    for (let i = 0; i < frames; i++) r.adaptResolution((t += ms));
+    return t;
+  };
+  const composite = r.post.composite;
+  let t = run(600, 1000 / 60, 1000); // vsync-capped 60 Hz
+  assert.equal(r.renderScale, 1);
+  // one long stall (garbage collection, a shader compile) is not a slow stretch
+  t = run(1, 200, t);
+  t = run(600, 1000 / 60, t);
+  assert.equal(r.renderScale, 1, 'a single hitch keeps the full resolution');
+  // a heavy fight: the scene drops a step or more ...
+  t = run(300, 30, t);
+  assert.ok(r.renderScale < 1, `scale ${r.renderScale} during slow frames`);
+  assert.ok(r.post.sw < r.post.width, 'the scene target shrinks');
+  r.render((t += 30));
+  assert.ok(r.post.composite.uniforms.uSharpen.value > 0, 'the upscaled scene is sharpened');
+  assert.equal(r.post.composite, composite, 'without a new composite program');
+  // ... and comes back once frames are at the display's 16.7 ms again (vsync never lets them go faster)
+  t = run(60 * 60, 1000 / 60, t);
+  assert.equal(r.renderScale, 1, 'full resolution again at a steady 60 Hz');
+  assert.equal(r.post.sw, r.post.width);
+  r.render((t += 1000 / 60));
+  assert.equal(r.post.composite.uniforms.uSharpen.value, 0);
+  // a 30 fps cap (battery saver) is learned as the display rate: full resolution within a few minutes
+  t = run(30 * 180, 1000 / 30, t);
+  assert.equal(r.renderScale, 1, 'a 30 Hz cap does not keep the scene blurred');
+  // a quality change starts over at full scale
+  t = run(300, 60, t);
+  assert.ok(r.renderScale < 1, 'frames well past the 30 Hz period are still slow');
+  r.setQuality('high');
+  assert.equal(r.renderScale, 1);
+  t = run(30, 60, t);
+  assert.equal(r.renderScale, 1, 'the slow average measured at the old quality does not carry over');
+  r.dispose();
+});
+
+test('GameRenderer: medium and up draw through post-processing, low straight to the canvas', () => {
+  const { r, webgl, step } = makeMatch({ post: true });
+  step(0.2);
+  assert.ok(r.post && r.post.enabled);
+  webgl.log.length = 0;
+  r.render();
+  const log = webgl.log;
+  assert.deepEqual(log[0], ['game', 'post-scene'], 'the world goes into the HDR target first');
+  assert.ok(log.some(([, target]) => /^post-bloom/.test(target)), 'bloom passes');
+  assert.ok(!log.some(([, target]) => target === 'post-ao'), 'no ambient occlusion on medium');
+  assert.deepEqual(log[log.length - 2], ['Mesh', 'canvas'], 'the composite lands on the canvas');
+  assert.deepEqual(log[log.length - 1], ['overlays', 'canvas'], 'overlays last, on the canvas, untouched by post');
+  assert.ok(FOW_UNIFORMS.uFowPow.value > 1, 'fog factors raised for linear output');
+  const [sw, sh] = webgl.size;
+  assert.equal(r.post.width, Math.round(sw * webgl.pixelRatio), 'targets follow the drawing buffer');
+  assert.equal(r.post.sh, Math.round(sh * webgl.pixelRatio));
+  for (const q of ['high', 'ultra']) {
+    r.setQuality(q);
+    webgl.log.length = 0;
+    r.render();
+    assert.ok(r.post.aoRaw, `${q}: ambient occlusion targets`);
+    assert.ok(webgl.log.some(([, target]) => target === 'post-ao'), `${q}: ambient occlusion pass`);
+    assert.equal(r.post.samples, 4);
+  }
+  r.setQuality('low');
+  assert.equal(r.post.enabled, false);
+  assert.equal(r.post.scene, null, 'targets freed on low');
+  webgl.log.length = 0;
+  r.render();
+  assert.deepEqual(webgl.log, [['game', 'canvas'], ['overlays', 'canvas']]);
+  assert.equal(FOW_UNIFORMS.uFowPow.value, 1);
+  r.setQuality('medium');
+  assert.ok(r.post.enabled && r.post.scene, 'targets come back live');
+  r.dispose();
+  assert.equal(r.post.targets.length, 0, 'dispose frees the targets');
 });

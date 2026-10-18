@@ -4,7 +4,7 @@
 // holds the numbers the animator needs. Models face +X, feet on y = 0, at
 // visual scale 1 (the instance scales the rig).
 import {
-  PartBuilder, TEAM, C, mixC, shadeC, tintC,
+  PartBuilder, TEAM, C, mixC, shadeC, tintC, withMat,
   box, cyl, cone, ball, ico, dodeca, octa, torus, dome, slab, taper, seg, tube, T,
 } from './unit-geo.js';
 import {
@@ -195,7 +195,7 @@ function addSaddle(b, x, y, len, width, drop) {
 /** Small seated rider (team tunic) on a mount, seat at the current origin. */
 function addRider(b, pal, ctx, size = 1) {
   const s = size;
-  const skin = C('#c8a07a');
+  const skin = withMat('#c8a07a', 'skin');
   b.push([0, 0, 0], [0, 0, 0], s);
   b.add(T(taper(0.16, 0.2, 0.22, 1.1, 1.25), [0, 0.02, 0]), TEAM(1));
   b.add(T(box(0.17, 0.05, 0.24), [0, 0.05, 0]), pal.secondary);
@@ -204,7 +204,7 @@ function addRider(b, pal, ctx, size = 1) {
   b.add(seg([0.12, -0.06, 0.16], [0.1, -0.2, 0.17], 0.035, 0.03, 4), shadeC(pal.primary, 0.6));
   b.add(seg([0.12, -0.06, -0.16], [0.1, -0.2, -0.17], 0.035, 0.03, 4), shadeC(pal.primary, 0.6));
   b.frame([0.02, 0.33, 0], [0, 0, 0], 0.1, () => {
-    const anchor = addHead(b, { ...pal, skin, skinDark: shadeC(skin, 0.7), hair: C('#2a1c14'), eyeGlow: null }, ctx.v, 'human');
+    const anchor = addHead(b, { ...pal, skin, skinDark: shadeC(skin, 0.7), hair: withMat('#2a1c14', 'hair'), eyeGlow: null }, ctx.v, 'human');
     addHeadgear(b, pal, ctx.v, 'helmet', anchor, {});
   });
   b.add(seg([0, 0.2, 0.13], [0.12, 0.08, 0.15], 0.035, 0.03, 4), skin);
@@ -274,7 +274,7 @@ function headAssembly(b, ctx, headKind, opts = {}) {
   if (ex.has('jewelry') && anchor.hair) {
     const ear = octa(0.12);
     T(ear, [0, -0.35, 0.95]);
-    b.addSym(ear, pal.accent, { glow: 0.2 });
+    b.addSym(ear, pal.accentMetal, { glow: 0.2 });
   }
   if (ex.has('mane') && anchor.hair) {
     const m = dodeca(1.35);
@@ -345,15 +345,15 @@ function buildArm(ctx, P, side, item, sizeK = 1) {
   if (ex.has('armor')) {
     const br = cyl(P.armR * 1.25, P.armR * 1.15, P.fore * 0.55, ctx.lod ? 6 : 5, true);
     T(br, [0, elbowY - P.fore * 0.55, 0]);
-    b.add(br, pal.accent, { morph: lower });
+    b.add(br, pal.accentMetal, { morph: lower });
   }
   if (ex.has('jewelry')) {
     const band = cyl(P.armR * 1.3, P.armR * 1.3, 0.025, 6, true);
     T(band, [0, elbowY * 0.45, 0]);
-    b.add(band, pal.accent);
+    b.add(band, pal.accentMetal);
     const wr = cyl(P.armR * 1.1, P.armR * 1.1, 0.02, 6, true);
     T(wr, [0, elbowY - P.fore * 0.85, 0]);
-    b.add(wr, pal.accent, { morph: lower });
+    b.add(wr, pal.accentMetal, { morph: lower });
   }
   if (ex.has('chains')) {
     const sh = cyl(P.armR * 1.35, P.armR * 1.35, 0.05, 6, true);
@@ -400,7 +400,7 @@ function buildLeg(ctx, P, side) {
   const kneeY = -P.thigh;
   const pants = ex.has('skirt') || P.bare ? (P.bare ? pal.skin : shadeC(pal.primary, 0.8)) : shadeC(pal.primary, 0.78);
   const lower = hingeMorphs(b, [null, 'k45', 'k90'], KNEE_SAMPLES.map((a) => -a), [0, kneeY, 0], [0, 0, 1]);
-  const boot = ctx.v.body === 'beast_biped' ? pal.skinDark : ex.has('armor') ? shadeC(pal.accent, 0.75) : pal.leather;
+  const boot = ctx.v.body === 'beast_biped' ? pal.skinDark : ex.has('armor') ? shadeC(pal.accentMetal, 0.75) : pal.leather;
   if (P.digi) {
     const k = [0.05, kneeY, 0];
     const ank = [-0.07, kneeY - P.thigh * 0.95, 0];
@@ -422,7 +422,7 @@ function buildLeg(ctx, P, side) {
     if (ex.has('armor') && ctx.lod > 0) {
       const gr = box(P.legR * 1.4, (L - P.thigh) * 0.6, P.legR * 2.2);
       T(gr, [P.legR * 0.35, kneeY - (L - P.thigh) * 0.38, 0]);
-      b.add(gr, pal.accent, { morph: lower });
+      b.add(gr, pal.accentMetal, { morph: lower });
     }
   }
   return b.build();
@@ -459,7 +459,7 @@ function addExtraArms(b, ctx, P, sh) {
       } else if (it === 'blade') {
         const bl = taper(0.04, 0.22, 0.015, 0.4, 1);
         T(bl, [hand[0], hand[1] + 0.02, hand[2]]);
-        b.add(bl, pal.accent);
+        b.add(bl, pal.accentMetal);
       } else {
         const s = cone(0.035, 0.1, 5);
         T(s, ip, [0, 0, -0.5]);
@@ -494,11 +494,11 @@ function buildTorso(ctx, P, opts = {}) {
   // belt + team sash
   const belt = box(P.depth * 1.08, 0.055, P.waistW * 1.04);
   T(belt, [0, 0.06, 0]);
-  b.add(belt, ctx.worker || spirit ? TEAM(0.9) : pal.secondary);
+  b.add(belt, ctx.worker || spirit ? TEAM(0.9) : pal.secondary, { mat: 'leather' });
   if (ctx.lod > 0) {
     const buckle = box(0.03, 0.05, 0.06);
     T(buckle, [P.depth * 0.55, 0.06, 0]);
-    b.add(buckle, pal.accent);
+    b.add(buckle, pal.accentMetal);
   }
   if (!spirit) {
     const sash = box(P.chestD * 1.06, 0.06, P.chestW * 1.08);
@@ -528,11 +528,11 @@ function buildTorso(ctx, P, opts = {}) {
   if (ex.has('armor')) {
     const plate = taper(P.depth * 0.55, sh * 0.62, P.waistW * 0.9, P.chestD / P.depth, P.chestW / P.waistW * 0.95, 0.02);
     T(plate, [P.depth * 0.26, sh * 0.32, 0]);
-    b.add(plate, pal.accent);
+    b.add(plate, pal.accentMetal);
     if (ctx.lod > 0) {
       const back = taper(P.depth * 0.3, sh * 0.55, P.waistW * 0.85, 1.1, P.chestW / P.waistW * 0.9, -0.01);
       T(back, [-P.depth * 0.38, sh * 0.35, 0]);
-      b.add(back, shadeC(pal.accent, 0.8));
+      b.add(back, shadeC(pal.accentMetal, 0.8));
     }
   }
   // neck + head
@@ -559,11 +559,11 @@ function buildTorso(ctx, P, opts = {}) {
     for (const side of [1, -1]) {
       const pad = dome(P.padR * (ctx.grand ? 1.15 : 1), 6, 2);
       T(pad, [0, sh - 0.015, side * P.shoulderZ * 1.02], [side * -0.35, 0, 0], [1.1, 0.9, 1]);
-      b.add(pad, TEAM(1));
+      b.add(pad, TEAM(1, 'painted'));
       if ((ex.has('armor') || ctx.grand) && ctx.lod > 0) {
         const rim = cyl(P.padR * 1.18, P.padR * 1.22, 0.03, 6, true);
         T(rim, [0, sh - 0.02, side * P.shoulderZ * 1.04], [side * -0.35, 0, 0]);
-        b.add(rim, pal.accent);
+        b.add(rim, pal.accentMetal);
       }
       if (ex.has('spikes')) {
         const sp = cone(P.padR * 0.35, P.padR * 1.3, 4);
@@ -586,13 +586,13 @@ function buildTorso(ctx, P, opts = {}) {
       const a = PI * (0.5 + i / (n - 1));
       const f = octa(P.chestW * 0.15);
       T(f, [Math.cos(a) * P.chestD * 0.5 - 0.01, sh - 0.01, Math.sin(a) * P.chestW * 0.46], [a, a * 2, 0], [1.25, 0.75, 1.15]);
-      b.add(f, P.bare && ctx.v.body !== 'giant' ? pal.back : pal.fur);
+      b.add(f, P.bare && ctx.v.body !== 'giant' ? pal.back : pal.fur, { mat: 'fur' });
     }
   }
   if (ex.has('jewelry')) {
     const col = cyl(0.13 * (P.chestW / 0.38), 0.15 * (P.chestW / 0.38), 0.03, 8, true);
     T(col, [0.01, sh - 0.01, 0]);
-    b.add(col, pal.accent, { glow: 0.15 });
+    b.add(col, pal.accentMetal, { glow: 0.15 });
     const col2 = cyl(0.155 * (P.chestW / 0.38), 0.165 * (P.chestW / 0.38), 0.02, 8, true);
     T(col2, [0.012, sh - 0.035, 0]);
     b.add(col2, pal.secondary);
@@ -642,7 +642,7 @@ function buildTorso(ctx, P, opts = {}) {
     if (ctx.lod > 0) {
       const clasp = octa(0.035);
       T(clasp, [P.chestD * 0.42, sh - 0.02, P.chestW * 0.38]);
-      b.addSym(clasp, pal.accent);
+      b.addSym(clasp, pal.accentMetal);
     }
   }
   if (ex.has('feather_cloak')) {
@@ -684,7 +684,7 @@ function buildTorso(ctx, P, opts = {}) {
   if (ex.has('shell')) {
     const s = dome(P.chestW * 0.55, 7, 2);
     T(s, [backX - 0.02, sh * 0.5, 0], [0, 0, PI / 2], [0.55, 1.1, 1]);
-    b.add(s, pal.secondary);
+    b.add(s, pal.secondary, { mat: 'bone' });
   }
   if (ex.has('tail')) {
     const hk = v.head;
@@ -876,12 +876,12 @@ function buildQuadLeg(ctx, Q, front, colors) {
   if (ctx.ex.has('jewelry')) {
     const band = cyl(Q.legR * 1.2, Q.legR * 1.2, 0.025, 6, true);
     T(band, [0, -L * 0.75, 0]);
-    b.add(band, pal.accent, { morph: lower });
+    b.add(band, pal.accentMetal, { morph: lower });
   }
   if (ctx.ex.has('armor') && front) {
     const g = box(Q.legR * 1.6, L * 0.3, Q.legR * 2.3);
     T(g, [Q.legR * 0.4, -L * 0.7, 0]);
-    b.add(g, pal.accent, { morph: lower });
+    b.add(g, pal.accentMetal, { morph: lower });
   }
   return b.build();
 }
@@ -930,10 +930,10 @@ function quadTemplate(ctx) {
   if (ex.has('armor')) {
     const plate = taper(0.03, Q.H * 0.8, Q.W * 1.05, 1, 0.9);
     T(plate, [Q.L * 0.48, cy - Q.H * 0.4, 0]);
-    body.add(plate, pal.accent);
+    body.add(plate, pal.accentMetal);
     const back2 = box(Q.L * 0.5, 0.03, Q.W * 0.9);
     T(back2, [0, topY + 0.02, 0]);
-    body.add(back2, shadeC(pal.accent, 0.8));
+    body.add(back2, shadeC(pal.accentMetal, 0.8));
   }
   if (ex.has('spikes')) {
     for (let i = 0; i < 5; i++) {
@@ -946,13 +946,13 @@ function quadTemplate(ctx) {
     for (let i = 0; i < 6; i++) {
       const tf = cone(Q.W * 0.16, Q.H * 0.45, 4);
       T(tf, [Q.L * (0.35 - i * 0.12), topY - 0.01, (i % 2 ? 1 : -1) * Q.W * 0.12], [i % 2 ? 0.4 : -0.4, 0, 0.9]);
-      body.add(tf, shadeC(back, 0.9));
+      body.add(tf, shadeC(back, 0.9), { mat: 'fur' });
     }
   }
   if (ex.has('shell')) {
     const sh = dome(1, 8, 3);
     T(sh, [-0.02, topY - Q.H * 0.15, 0], [0, 0, 0], [Q.L * 0.5, Q.H * 0.75, Q.W * 0.62]);
-    body.add(sh, pal.secondary);
+    body.add(sh, pal.secondary, { mat: 'bone' });
   }
   if (ex.has('flames')) {
     body.frame([0, topY, 0], [0, 0, 0], Q.W * 0.35, () => {
@@ -1039,7 +1039,7 @@ function quadTemplate(ctx) {
       if (ex.has('jewelry')) {
         const col = cyl(nR * 1.25, nR * 1.3, 0.04, 7, true);
         T(col, [n1[0] * 0.3, n1[1] * 0.3, zoff * 0.4], [0, 0, Q.neckA - PI / 2]);
-        hb.add(col, pal.accent, { glow: 0.15 });
+        hb.add(col, pal.accentMetal, { glow: 0.15 });
       } else if (i === 0) {
         const col = cyl(nR * 1.2, nR * 1.2, 0.035, 7, true);
         T(col, [n1[0] * 0.25, n1[1] * 0.25, 0], [0, 0, Q.neckA - PI / 2]);
@@ -1114,13 +1114,13 @@ function elephantTemplate(ctx) {
   if (ex.has('rider')) {
     const how = box(Q.L * 0.3, 0.1, Q.W * 0.6);
     T(how, [-0.02, topY + 0.05, 0]);
-    b.add(how, pal.primary);
+    b.add(how, pal.primary, { mat: 'painted' });
     b.frame([-0.02, topY + 0.1, 0], [0, 0, 0], 1.0, () => addRider(b, pal, ctx, 0.9));
   }
   if (ex.has('armor')) {
     const pl = box(Q.L * 0.5, 0.04, Q.W * 0.95);
     T(pl, [Q.L * 0.25, topY - 0.05, 0], [0, 0, -0.3]);
-    b.add(pl, pal.accent);
+    b.add(pl, pal.accentMetal);
   }
   if (ex.has('flames')) {
     b.frame([0, topY + 0.04, 0], [0, 0, 0], Q.W * 0.3, () => flameRow(b, pal, 4, Q.L / (Q.W * 0.3)));
@@ -1229,7 +1229,7 @@ function birdTemplate(ctx) {
   if (ex.has('jewelry')) {
     const col = cyl(0.07, 0.075, 0.03, 7, true);
     T(col, [L * 0.42, cy + 0.08, 0], [0, 0, -0.9]);
-    b.add(col, pal.accent);
+    b.add(col, pal.accentMetal);
   }
   if (ex.has('spikes')) {
     for (let i = 0; i < 3; i++) {
@@ -1435,7 +1435,7 @@ function dragonTemplate(ctx) {
       for (let c = 0; c < 3; c++) {
         const cl = cone(0.012, 0.05, 3);
         T(cl, [foot[0] + 0.02, foot[1] - 0.01, foot[2] + (c - 1) * 0.02], [0, 0, -1.9]);
-        b.add(cl, pal.accent, { morph: wave });
+        b.add(cl, pal.accent, { morph: wave, mat: 'bone' });
       }
     }
     {
@@ -1536,14 +1536,14 @@ function insectTemplate(ctx) {
     for (const side of [1, -1]) {
       const sh = dome(1, 6, 2);
       T(sh, [-0.14, cy + 0.03, side * 0.085], [side * 0.15, 0, 0], [0.3, 0.13, 0.12]);
-      b.add(sh, pal.primary);
+      b.add(sh, pal.primary, { mat: 'bone' });
     }
     const seam = box(0.5, 0.03, 0.035);
     T(seam, [-0.14, cy + 0.14, 0]);
     b.add(seam, TEAM(1));
     const rim = cyl(0.2, 0.2, 0.03, 8, true);
     T(rim, [-0.14, cy + 0.02, 0], [0, 0, 0], [1.5, 1, 1.05]);
-    b.add(rim, pal.accent, { glow: 0.2 });
+    b.add(rim, pal.accentMetal, { glow: 0.2 });
   } else {
     const st = box(0.36, 0.03, 0.05);
     T(st, [-0.2, cy + 0.14, 0]);
@@ -1574,11 +1574,11 @@ function insectTemplate(ctx) {
       eyesSmall(b, pal, [0.31, cy + 0.03, 0.05]);
       if (ex.has('shell')) {
         const horn = seg([0.3, cy + 0.03, 0], [0.42, cy + 0.14, 0], 0.03, 0.0, 4);
-        b.add(horn, pal.accent);
+        b.add(horn, pal.accent, { mat: 'bone' });
       }
       for (const side of [1, -1]) {
         const md = seg([0.31, cy - 0.02, side * 0.04], [0.38, cy - 0.03, side * 0.015], 0.015, 0.005, 3);
-        b.add(md, pal.accent);
+        b.add(md, pal.accent, { mat: 'bone' });
       }
     }
   }
@@ -1590,10 +1590,10 @@ function insectTemplate(ctx) {
       b.add(seg(arm[1], arm[2], 0.025, 0.035, 4), skin);
       const p1 = cone(0.03, 0.12, 4);
       T(p1, [0.5, cy + 0.03, side * 0.19], [0, 0, -PI / 2 - 0.2]);
-      b.add(p1, pal.accent);
+      b.add(p1, pal.accent, { mat: 'bone' });
       const p2 = cone(0.025, 0.1, 4);
       T(p2, [0.5, cy + 0.03, side * 0.13], [0, 0, -PI / 2 + 0.2]);
-      b.add(p2, pal.accent);
+      b.add(p2, pal.accent, { mat: 'bone' });
     }
   }
   // scorpion tail curling over the back
@@ -1654,9 +1654,9 @@ function eyesSmall(b, pal, p) {
 
 function ramTemplate(ctx) {
   const { pal } = ctx;
-  const wood = pal.primary;
-  const dark = pal.secondary;
-  const metal = pal.accent;
+  const wood = withMat(pal.primary, 'wood');
+  const dark = withMat(pal.secondary, 'wood');
+  const metal = pal.accentMetal;
   const b = new PartBuilder();
   const wr = 0.14;
   const baseY = wr + 0.04;
@@ -1678,7 +1678,7 @@ function ramTemplate(ctx) {
   for (const side of [1, -1]) {
     const roof = box(0.9, 0.035, 0.36);
     T(roof, [0, 0.6, side * 0.15], [side * 0.82, 0, 0]);
-    b.add(roof, TEAM(1));
+    b.add(roof, TEAM(1, 'leather'));
     const ribs = box(0.04, 0.045, 0.37);
     for (const x of [0.22, -0.22]) {
       const r = ribs.clone();
@@ -1698,7 +1698,7 @@ function ramTemplate(ctx) {
   const bodyGeo = b.build();
   // log hanging from the ridge
   const lb = new PartBuilder();
-  lb.add(seg([-0.55, 0, 0], [0.45, 0, 0], 0.075, 0.075, 6), C('#6b4a2a'));
+  lb.add(seg([-0.55, 0, 0], [0.45, 0, 0], 0.075, 0.075, 6), withMat('#6b4a2a', 'wood'));
   const head = cyl(0.1, 0.085, 0.14, 6, true);
   T(head, [0.5, 0, 0], [0, 0, -PI / 2]);
   lb.add(head, metal);
@@ -1706,10 +1706,10 @@ function ramTemplate(ctx) {
   T(cap, [0.63, 0, 0], [0, 0, -PI / 2]);
   lb.add(cap, shadeC(metal, 0.8));
   for (const x of [-0.25, 0.2]) {
-    lb.add(seg([x, 0.05, 0], [x, 0.36, 0], 0.012, 0.012, 3, true), C('#3a3a3a'));
+    lb.add(seg([x, 0.05, 0], [x, 0.36, 0], 0.012, 0.012, 3, true), withMat('#3a3a3a', 'iron'));
     const band = cyl(0.08, 0.08, 0.03, 6, true);
     T(band, [x, 0, 0], [0, 0, PI / 2]);
-    lb.add(band, C('#3a3a3a'));
+    lb.add(band, withMat('#3a3a3a', 'iron'));
   }
   // axles with wheels
   const axle = new PartBuilder();
@@ -1717,7 +1717,7 @@ function ramTemplate(ctx) {
   for (const z of [0.3, -0.3]) {
     const w = cyl(wr, wr, 0.06, 7);
     T(w, [0, 0, z], [PI / 2, 0, 0]);
-    axle.add(w, C('#5a3e24'));
+    axle.add(w, withMat('#5a3e24', 'wood'));
     const hub = octa(0.045);
     T(hub, [0, 0, z * 1.12]);
     axle.add(hub, metal);
