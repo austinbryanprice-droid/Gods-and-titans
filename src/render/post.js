@@ -333,6 +333,18 @@ function supportsHalfFloat(renderer) {
   }
 }
 
+/** Most MSAA samples an R11F_G11F_B10F render target can have (0 = not renderable). */
+function r11fSamples(renderer) {
+  try {
+    const gl = typeof renderer.getContext === 'function' ? renderer.getContext() : null;
+    if (!gl || typeof gl.getInternalformatParameter !== 'function' || !renderer.extensions.has('EXT_color_buffer_float')) return 0;
+    const s = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.R11F_G11F_B10F, gl.SAMPLES);
+    return s && s.length ? s[0] : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export class PostFX {
   /**
    * @param {THREE.WebGLRenderer} renderer
@@ -346,6 +358,10 @@ export class PostFX {
     this.renderScale = 1;
     this.hdr = supportsHalfFloat(renderer);
     this.type = this.hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
+    // The scene target as R11F_G11F_B10F: half the bytes of RGBA16F per MSAA sample
+    // (nothing reads its alpha). Needs EXT_color_buffer_float (the half-float extension
+    // does not make it renderable) and multisampling in that format.
+    this.r11Samples = this.hdr ? r11fSamples(renderer) : 0;
     const caps = renderer.capabilities || {};
     this.maxSamples = caps.maxSamples || 0;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -475,9 +491,10 @@ export class PostFX {
     depth.type = THREE.UnsignedIntType;
     depth.minFilter = THREE.NearestFilter;
     depth.magFilter = THREE.NearestFilter;
+    const r11 = this.r11Samples >= Math.max(1, this.samples);
     this.scene = new THREE.WebGLRenderTarget(sw, sh, {
-      type: this.type,
-      format: THREE.RGBAFormat,
+      type: r11 ? THREE.UnsignedInt101111Type : this.type, // three maps RGB + this type to R11F_G11F_B10F
+      format: r11 ? THREE.RGBFormat : THREE.RGBAFormat,
       samples: this.samples,
       depthBuffer: true,
       stencilBuffer: false,
