@@ -487,6 +487,10 @@ export class PostFX {
       generateMipmaps: false,
     });
     this.scene.texture.name = 'post-scene';
+    // Without float color buffers the targets are 8-bit: store them sRGB-encoded
+    // (SRGB8_ALPHA8: encoded on write, decoded on read and blend) so the dark end of
+    // the linear values keeps its precision instead of banding in the fog.
+    if (!this.hdr) this.scene.texture.colorSpace = THREE.SRGBColorSpace;
     this.targets.push(this.scene);
     // bloom chain from half resolution down
     let bw = sw;
@@ -495,6 +499,7 @@ export class PostFX {
       bw = Math.max(1, bw >> 1);
       bh = Math.max(1, bh >> 1);
       const rt = colorTarget(bw, bh, this.type, `post-bloom${i}`);
+      if (!this.hdr) rt.texture.colorSpace = THREE.SRGBColorSpace;
       this.bloomDown.push(rt);
       this.targets.push(rt);
       if (bw <= 2 || bh <= 2) break;

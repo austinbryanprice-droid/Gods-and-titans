@@ -229,6 +229,10 @@ void main() {
  */
 export function createEnvironment(renderer) {
   if (!renderer || typeof renderer.setRenderTarget !== 'function' || typeof THREE.PMREMGenerator !== 'function') return null;
+  // PMREM draws into half-float targets: without a float color buffer every draw
+  // fails (GL errors, no exception) and the environment stays black
+  const ext = renderer.extensions;
+  if (!ext || !(ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float'))) return null;
   let pmrem = null;
   let rt = null;
   const geo = new THREE.SphereGeometry(10, 48, 24);
