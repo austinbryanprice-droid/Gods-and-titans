@@ -12,9 +12,14 @@ export const MINE_GAP = DROPOFF_MINE_GAP;
 /** @deprecated same as MINE_GAP (it applies to every drop-off now). */
 export const TC_MINE_GAP = DROPOFF_MINE_GAP;
 
-/** Error texts, identical to the sim's. */
+/** Error texts, identical to the sim's (UNEXPLORED excepted: the sim does not know the fog). */
 export const CANT_BUILD = "Can't build there.";
 export const TOO_CLOSE_TO_MINE = 'Too close to a gold mine.';
+export const TREES_IN_WAY = 'Trees in the way.';
+export const BUILDING_IN_WAY = 'Another building is in the way.';
+export const MINE_IN_WAY = 'A gold mine is in the way.';
+export const UNIT_IN_WAY = 'Something is in the way.';
+export const UNEXPLORED = 'Unexplored ground.';
 
 const WALKABLE = new Set([TERRAIN.GRASS, TERRAIN.DIRT, TERRAIN.SAND]);
 
@@ -60,8 +65,10 @@ function knownFootprints(vs, planned) {
  * @param {{ b: string, tx: number, ty: number }[]} [planned] my own buildings ordered but not placed yet
  *   (Shift-queued in this placement, workers' pending builds): they block like buildings
  * @returns {{ valid: boolean, tiles: boolean[], size: number, message: string|null }} tiles: size×size
- *   row-major, true = this tile is fine; message: null when valid, TOO_CLOSE_TO_MINE when the mine gap
- *   is the only problem (the sim reports the same text), else CANT_BUILD
+ *   row-major, true = this tile is fine; message: null when valid, else the reason, in this order of
+ *   preference: UNEXPLORED (fog; checked before the terrain so the text does not tell what lies in it),
+ *   CANT_BUILD (water, rock, map edge), TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY,
+ *   TOO_CLOSE_TO_MINE (the mine gap alone). The sim words the same reasons the same way.
  */
 export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned = null) {
   const def = typeof buildingTypeId === 'string' && Object.hasOwn(BUILDINGS, buildingTypeId) ? BUILDINGS[buildingTypeId] : null;
@@ -75,7 +82,10 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
   const W = map.width;
   const H = map.height;
 
-  // Terrain, bounds and fog.
+  // Terrain, bounds and fog. Fog comes first: what lies in it is not known yet.
+  let fog = false;
+  let hardTerrain = false;
+  let trees = false;
   for (let dy = 0; dy < s; dy++) {
     for (let dx = 0; dx < s; dx++) {
       const x = tx + dx;
@@ -83,9 +93,15 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
       let ok = x >= 0 && y >= 0 && x < W && y < H;
       if (ok) {
         const i = y * W + x;
-        ok = WALKABLE.has(terrain[i]);
-        if (ok && vs.explored && !vs.revealAll) ok = vs.explored[i] === 1;
-      }
+        if (vs.explored && !vs.revealAll && vs.explored[i] !== 1) {
+          ok = false;
+          fog = true;
+        } else if (!WALKABLE.has(terrain[i])) {
+          ok = false;
+          if (terrain[i] === TERRAIN.FOREST) trees = true;
+          else hardTerrain = true;
+        }
+      } else hardTerrain = true;
       if (!ok) tiles[dy * s + dx] = false;
     }
   }
@@ -94,6 +110,9 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
   const gapped = !!def.dropOff;
   let otherProblem = tiles.some((ok) => !ok);
   let mineProblem = false;
+  let buildingBlock = false;
+  let mineBlock = false;
+  let unitBlock = false;
   for (const f of knownFootprints(vs, planned)) {
     const fx1 = f.tx + f.size;
     const fy1 = f.ty + f.size;
@@ -107,8 +126,11 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
         const gx = Math.max(f.tx - (x + 1), x - fx1, 0);
         const gy = Math.max(f.ty - (y + 1), y - fy1, 0);
         const inside = x >= f.tx && x < fx1 && y >= f.ty && y < fy1;
-        if (inside) otherProblem = true;
-        else if (reach > 0 && Math.max(gx, gy) < reach) mineProblem = true;
+        if (inside) {
+          otherProblem = true;
+          if (f.mine) mineBlock = true;
+          else buildingBlock = true;
+        } else if (reach > 0 && Math.max(gx, gy) < reach) mineProblem = true;
         if (inside || (reach > 0 && Math.max(gx, gy) < reach)) tiles[dy * s + dx] = false;
       }
     }
@@ -124,6 +146,7 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
     const r = (ud.radius || 0.4) * 0.8;
     if (distPointRect(e.x, e.y, tx, ty, tx + s, ty + s) >= r) continue;
     otherProblem = true;
+    unitBlock = true;
     for (let dy = 0; dy < s; dy++) {
       for (let dx = 0; dx < s; dx++) {
         if (distPointRect(e.x, e.y, tx + dx, ty + dy, tx + dx + 1, ty + dy + 1) < r) tiles[dy * s + dx] = false;
@@ -132,7 +155,17 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
   }
 
   const valid = tiles.every(Boolean);
-  return { valid, tiles, size: s, message: valid ? null : mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD };
+  let message = null;
+  if (!valid) {
+    if (fog) message = UNEXPLORED;
+    else if (hardTerrain) message = CANT_BUILD;
+    else if (trees) message = TREES_IN_WAY;
+    else if (buildingBlock) message = BUILDING_IN_WAY;
+    else if (mineBlock) message = MINE_IN_WAY;
+    else if (unitBlock) message = UNIT_IN_WAY;
+    else message = mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD;
+  }
+  return { valid, tiles, size: s, message };
 }
 
 /**

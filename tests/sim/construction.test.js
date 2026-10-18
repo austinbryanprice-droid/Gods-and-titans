@@ -25,6 +25,26 @@ test('placement validity rules', () => {
   assert.ok(p && w.canPlaceBuilding(0, 'barracks', p.tx, p.ty));
 });
 
+test('placement refusals say why: trees, building, mine, unit; water and the map edge stay generic', () => {
+  const w = makeWorld({ map: { forest: [{ x: 20, y: 20, w: 2, h: 2 }], water: [{ x: 30, y: 4, w: 3, h: 3 }] } });
+  const err = (type, tx, ty) => w.placementError(0, type, tx, ty);
+  assert.equal(err('house', 14, 14), null);
+  assert.equal(err('house', 19, 19), 'Trees in the way.');
+  assert.equal(err('house', 7, 7), 'Another building is in the way.', 'the Town Center');
+  assert.equal(err('house', 13, 6), 'A gold mine is in the way.');
+  assert.equal(err('house', 29, 3), "Can't build there.", 'water');
+  assert.equal(err('house', -1, 5), "Can't build there.", 'off the map');
+  assert.equal(err('house', 47, 5), "Can't build there.", 'off the map');
+  spawn(w, 1, 'warrior', 15, 15);
+  assert.equal(err('house', 14, 14), 'Something is in the way.', 'an enemy unit');
+  assert.equal(err('house', 19, 19), 'Trees in the way.');
+  assert.equal(w.placementError(1, 'house', 14, 14), null, 'own units are pushed out of the way');
+  // Only the text differs by reason: every refusal is still a refusal.
+  for (const [type, tx, ty] of [['house', 19, 19], ['house', 7, 7], ['house', 13, 6], ['house', 14, 14], ['house', 29, 3]]) {
+    assert.equal(w.canPlaceBuilding(0, type, tx, ty), false, `${type} ${tx},${ty}`);
+  }
+});
+
 test('build deducts cost immediately, completes, raises pop cap', () => {
   const w = makeWorld();
   const u = workers(w)[0];
@@ -85,7 +105,7 @@ test('build errors: tier, requires, resources, placement', () => {
   tryBuild('house', 20, 20);
   w.players[0].wood = 500;
   tryBuild('house', 7, 7);
-  assert.deepEqual(errs, ['Requires City.', 'Requires a Shrine.', 'Not enough gold.', 'Not enough wood.', "Can't build there."]);
+  assert.deepEqual(errs, ['Requires City.', 'Requires a Shrine.', 'Not enough gold.', 'Not enough wood.', 'Another building is in the way.']);
   assert.equal(w.players[0].gold, 500);
 });
 
@@ -109,7 +129,7 @@ test('site blocked on arrival refunds with an error', () => {
   // Another building appears on the site before the worker arrives.
   place(w, 0, 'house', 24, 24);
   const ev = runCollect(w, 12);
-  assert.ok(errorsOf(ev).includes("Can't build there."));
+  assert.ok(errorsOf(ev).includes('Another building is in the way.'));
   assert.equal(w.players[0].gold, 400);
 });
 
@@ -160,13 +180,13 @@ test('Storehouse mine gap: Chebyshev distance between footprints', () => {
   // Diagonal: corner gap max(dx, dy).
   assert.equal(err(26, 15), null, 'gap x 2, y 3 → 3');
   assert.equal(err(26, 16), 'Too close to a gold mine.', 'gap x 2, y 2');
-  // Overlap / forest / water stay "Can't build there.".
-  assert.equal(err(30, 20), "Can't build there.");
+  // Overlapping the mine itself is a different refusal.
+  assert.equal(err(30, 20), 'A gold mine is in the way.');
   assert.equal(w.canPlaceBuilding(0, 'storehouse', 26, 20), false);
   assert.equal(w.canPlaceBuilding(0, 'storehouse', 25, 20), true);
   // Other buildings may hug a mine.
   assert.equal(err(28, 20, 'house'), null);
-  assert.equal(err(28, 20, 'barracks'), "Can't build there.", 'barracks is 3×3: overlaps');
+  assert.equal(err(28, 20, 'barracks'), 'A gold mine is in the way.', 'barracks is 3×3: overlaps');
   assert.equal(err(27, 20, 'barracks'), null);
   // Town Center: 4×4.
   assert.equal(err(23, 20, 'town_center'), null);

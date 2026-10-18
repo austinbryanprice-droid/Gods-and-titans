@@ -277,10 +277,14 @@ Pop used = pop of living units + pop of everything queued in production.
 - Placement: all footprint tiles in bounds, ground-passable (not forest/water/rock), no
   building/mine footprint overlap, no enemy units on it (own units are pushed out), and every
   drop-off (Town Center, Storehouse) keeps a gap of ≥ `DROPOFF_MINE_GAP` (3) empty tiles
-  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. Error: `Too close to a gold
-  mine.` when the gap is the only problem, else `Can't build there.`;
+  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. The error names the reason,
+  the first that applies of: water, rock or the map edge (`Can't build there.`), `Trees in the
+  way.`, `Another building is in the way.`, `A gold mine is in the way.`, `Something is in the
+  way.` (an enemy or neutral unit), `Too close to a gold mine.` (the gap alone);
   `world.placementError(i, typeId, tx, ty)` returns that text (null = valid) and
-  src/game/placement.js `checkPlacement(...).message` gives the same on the client.
+  src/game/placement.js `checkPlacement(...).message` gives the same on the client, which also
+  says `Unexplored ground.` first for any fogged tile (the sim does not know the fog, and the
+  text does not reveal what lies in it). Only the text depends on the reason, never validity.
 - `cancelBuild` on an unfinished building: removes it, refunds `CANCEL_BUILD_REFUND` (75%).
 
 ### 5.4 Production
@@ -394,7 +398,8 @@ Units that cannot do the resolved action just move.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
-`Can't build there.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
+`Can't build there.` `Trees in the way.` `Another building is in the way.` `A gold mine is in the way.`
+`Something is in the way.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
 `Requires a <Building>.` (e.g. `Requires a Shrine.`) `Production queue is full.`
 `The Town Center is growing.` `You already have that god.` `You can only have 3 gods.`
 `Your next god requires Town.` `Your next god requires City.` `You already have a Titan.`
@@ -476,7 +481,9 @@ EntityView = {
 `world.tickCount`, `world.time`, `world.rng`, `world.getEntity(id)`, `world.unitsOf(i)`,
 `world.buildingsOf(i)`, `world.queryRadius(x, y, r, filter)`, `world.areEnemies(a, b)`
 (owner indices), `world.canPlaceBuilding(i, typeId, tx, ty)`,
-`world.placementError(i, typeId, tx, ty)` → `"Can't build there." | "Too close to a gold mine." | null`,
+`world.placementError(i, typeId, tx, ty)` → the refusal text (5.3: `"Can't build there."`, `"Trees in the way."`,
+`"Another building is in the way."`, `"A gold mine is in the way."`, `"Something is in the way."`,
+`"Too close to a gold mine."`) `| null`,
 `world.findPlacement(i, typeId, nearX, nearY, maxR)` → `{tx, ty} | null`,
 `world.canAfford(i, cost)`, `world.hasBuilding(i, typeId, completedOnly = true)`,
 `world.isGameOver()`, `world.winningTeam`.
