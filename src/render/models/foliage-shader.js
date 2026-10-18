@@ -19,11 +19,6 @@ export const WIND_UNIFORMS = {
   uWind: { value: new THREE.Vector4(0.93, 0.36, 1, 0) },
 };
 
-/** Wind strength (0 = calm); direction stays. */
-export function setWindStrength(s) {
-  WIND_UNIFORMS.uWind.value.z = s;
-}
-
 /**
  * GLSL: windOffset(root, p, bend, flutter) → world-space displacement of point
  * `p` (local coordinates, only used for the flutter's phase) of a plant rooted

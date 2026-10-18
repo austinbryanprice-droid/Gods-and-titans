@@ -133,7 +133,6 @@ uniform mat4 uProjInv;
 uniform vec4 uProj; // P[0][0], P[1][1], radius, bias
 uniform mat4 uViewInv;
 uniform vec2 uFloor; // world height below which the occlusion fades out, fade width
-uniform float uFrame;
 varying vec2 vUv;
 
 vec3 viewPos( vec2 uv ) {
@@ -376,7 +375,6 @@ export class PostFX {
     this.scene = null;
     this.aoRaw = null;
     this.aoTmp = null;
-    this.aoOut = null;
     this.projInv = new THREE.Matrix4();
 
     this.prefilter = passMaterial(PREFILTER_FRAG, {
@@ -427,7 +425,6 @@ export class PostFX {
         uProj: { value: new THREE.Vector4() },
         uViewInv: { value: new THREE.Matrix4() },
         uFloor: { value: new THREE.Vector2(-1e6, 0.25) },
-        uFrame: { value: 0 },
       }, { AO_TAPS: cfg.aoTaps });
     }
     this.buildComposite();

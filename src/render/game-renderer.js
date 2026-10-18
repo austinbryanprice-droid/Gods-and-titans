@@ -18,7 +18,7 @@ import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
 import { CameraController, CAMERA_DEFAULTS } from './camera.js';
-import { FogOfWar, patchFowObject } from './fog.js';
+import { FogOfWar, patchFowObject, FOW_UNIFORMS } from './fog.js';
 import { createTerrain, WATER_LEVEL } from './terrain.js';
 import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } from './overlays.js';
 import { PlacementLayer } from './placement.js';
@@ -27,7 +27,6 @@ import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade
 import { StatusLayer } from './status-markers.js';
 import { PostFX } from './post.js';
 import { createEnvironment, setCloudShadows, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
-import { FOW_UNIFORMS } from './fog.js';
 
 // Low draws straight to the canvas; the others go through the post-processing
 // pipeline (post.js: MSAA, bloom, + ambient occlusion on high / ultra), which
@@ -40,7 +39,6 @@ const QUALITY = {
   high: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 2.6, clouds: 0.34, minScale: 0.6, vfx: 'high' },
   ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 3, clouds: 0.34, minScale: 0.7, vfx: 'high' },
 };
-export const QUALITY_LEVELS = Object.keys(QUALITY);
 
 // Light rig (linear, tone-mapped by post.js / the low path's Neutral mapping)
 const SUN_COLOR = 0xfff1dc;
@@ -118,7 +116,7 @@ export class GameRenderer {
    * @param {object} o
    * @param {import('../game/view-state.js').ViewState} o.viewState
    * @param {object} [o.setup] GameSetup (defaults to viewState.setup)
-   * @param {'low'|'medium'|'high'} [o.quality]
+   * @param {'low'|'medium'|'high'|'ultra'} [o.quality]
    * @param {THREE.WebGLRenderer} [o.webgl] an existing renderer to draw with (tests / tools)
    */
   constructor(canvas, { viewState, setup, quality = 'medium', webgl = null } = {}) {
@@ -473,9 +471,9 @@ export class GameRenderer {
   }
 
   /**
-   * Change quality live (pixel ratio, shadows, VFX density). Antialiasing stays as
-   * created (a context's attributes are fixed): it applies from the next match,
-   * which draws on a fresh canvas (Game).
+   * Change quality live: pixel ratio, shadows, VFX density, and the post-processing
+   * pipeline with its MSAA (post.js allocates its targets per quality; the canvas
+   * itself never has antialiasing).
    */
   setQuality(q) {
     if (!QUALITY[q] || q === this.quality) return;
@@ -489,12 +487,11 @@ export class GameRenderer {
     this.renderer.shadowMap.enabled = Q.shadows;
     this.sun.castShadow = Q.shadows;
     this.sun.shadow.radius = Q.shadowRadius;
-    if (Q.shadows) {
-      this.sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize);
-      if (this.sun.shadow.map) {
-        this.sun.shadow.map.dispose();
-        this.sun.shadow.map = null;
-      }
+    if (Q.shadows) this.sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize);
+    // reallocated at the new size when shadows are on; freed on low (up to 4096²)
+    if (this.sun.shadow.map) {
+      this.sun.shadow.map.dispose();
+      this.sun.shadow.map = null;
     }
     if (was !== Q.shadows) this.scene.traverse((o) => {
       if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;

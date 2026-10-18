@@ -24,10 +24,8 @@ const SPELL_SOUNDS = { lightning: 'lightning', fire: 'fire', sun: 'fire', holy: 
 const PROJECTILE_SOUNDS = { arrow: 'attack_ranged', spear: 'attack_ranged', rock: 'attack_ranged', feather: 'attack_ranged', leaf: 'attack_ranged', ice: 'attack_ranged', bolt: 'lightning', fireball: 'fire', sunray: 'fire' };
 
 /**
- * A canvas keeps its first WebGL context, whose attributes (antialias) cannot
- * change: each match draws on a new copy of the page's canvas, so the quality
- * chosen in Settings applies to the next match (the old context is freed when
- * its renderer is disposed).
+ * Each match draws on a new copy of the page's canvas, so it starts with a fresh
+ * WebGL context (the old one is freed when its renderer is disposed).
  */
 function freshCanvas(old) {
   if (!old || typeof old.cloneNode !== 'function' || typeof old.replaceWith !== 'function') return old;
