@@ -167,6 +167,8 @@ export class GameRenderer {
     this.hemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, HEMI_INTENSITY);
     scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(SUN_COLOR, SUN_INTENSITY);
+    // along SUN_DIR on every quality (with shadows, updateShadowCamera re-centers it each frame)
+    this.sun.position.copy(SUN_DIR).multiplyScalar(60);
     this.sun.castShadow = Q.shadows;
     this.sun.shadow.mapSize.set(Q.shadowSize || 1024, Q.shadowSize || 1024);
     this.sun.shadow.radius = Q.shadowRadius;
