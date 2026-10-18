@@ -24,8 +24,9 @@ CLEAR_TEX.needsUpdate = true;
 export const FOW_UNIFORMS = {
   uFowTex: { value: CLEAR_TEX }, // no fog bound: everything fully lit
   uFowSize: { value: new THREE.Vector4(1e6, 1e6, 1e-6, 1e-6) }, // width, height, 1/width, 1/height
-  // 1 when materials write display (sRGB) values, 2.2 when they write linear
-  // values into the post-processing target (the factors are tuned for display space)
+  // 1 when materials write display (sRGB) values (low quality); about 1.4 when they
+  // write linear values into the post-processing target (the factors are tuned for
+  // display space). Set each frame by GameRenderer.render.
   uFowPow: { value: 1 },
   uFowNoise: { value: CLOUD_TEXTURE },
   uFowTime: WORLD_UNIFORMS.uTime,

@@ -1627,9 +1627,11 @@ export class GameRenderer {
     if (r.info && typeof r.info.reset === 'function') r.info.reset();
     if (this.post && this.post.enabled) {
       this.adaptResolution(frameTime > 0 ? frameTime : now());
-      // materials write linear values into the HDR target; a little under 2.2
-      // because the tone curve's toe darkens the dimmed (remembered) ground further
-      FOW_UNIFORMS.uFowPow.value = 1.7;
+      // materials write linear values into the HDR target, so the fog's display-space
+      // factors are raised to a power; well under 2.2 because the tone curve's toe and
+      // the grade darken the dimmed (remembered) ground further (1.4 keeps it at about
+      // the ~50% brightness of low quality)
+      FOW_UNIFORMS.uFowPow.value = 1.4;
       this.post.look.exposure = EXPOSURE;
       this.post.render(this.scene, this.threeCamera, this.overlayScene);
       return;
