@@ -203,6 +203,16 @@ function auraMaterial(color) {
       color: col, vertexColors: true, transparent: true, opacity: 0.8,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
     });
+    // The aura was tuned for adding onto the sRGB canvas (low quality). Added in the
+    // linear HDR target (medium and up) and then tone mapped + sRGB encoded, the same
+    // light reads about half as bright, so it is doubled there.
+    m.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <colorspace_fragment>',
+        '#include <colorspace_fragment>\n\tif ( linearToOutputTexel( vec4( 0.5 ) ).r < 0.6 ) gl_FragColor.rgb *= 2.0;',
+      );
+    };
+    m.customProgramCacheKey = () => 'unit-aura-hdr2';
     m.name = `unit-aura-${key}`;
     AURA_MATS.set(key, m);
   }
