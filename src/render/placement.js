@@ -207,6 +207,25 @@ export class PlacementLayer {
   }
 
   /**
+   * Build one hidden ghost (of a building with glow parts, so every ghost
+   * material is used) for the renderer's warm-up compile; otherwise the first
+   * build placement of a match links the ghost shaders. The first show() of
+   * that type reuses it.
+   */
+  prewarm() {
+    if (this.ghost) return;
+    const typeId = ['shrine', 'temple', 'town_center'].find((t) => BUILDINGS[t]);
+    if (!typeId) return;
+    this.ensureMats();
+    const { pantheon, color } = this.getStyle();
+    const model = buildBuildingModel(typeId, pantheon, color, 1);
+    applyGhost(model, this.matsOk);
+    model.root.visible = false;
+    this.parent.add(model.root);
+    this.ghost = { type: typeId, model, valid: true };
+  }
+
+  /**
    * Show the ghost for a building type with its top-left tile at (tx, ty).
    * @param {boolean[]|Uint8Array} [tiles] per-tile validity (row-major, size×size)
    */

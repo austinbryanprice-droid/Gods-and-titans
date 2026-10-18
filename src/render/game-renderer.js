@@ -363,7 +363,8 @@ export class GameRenderer {
   /**
    * Build every building (all tiers, plus a construction stage) and unit model
    * each player can field once, in their colors, and compile their shader
-   * programs now, so the first barracks or titan of a match does not hitch.
+   * programs now (with the overlays' and the VFX pools'), so the first barracks,
+   * titan, nova or rally flag of a match does not hitch.
    */
   warmUp() {
     const group = new THREE.Group();
@@ -413,6 +414,11 @@ export class GameRenderer {
         else this.renderer.toneMapping = THREE.NeutralToneMapping;
         this.renderer.compile(this.scene, this.threeCamera);
         if (target) this.renderer.setRenderTarget(null);
+        // the overlays (drawn to the canvas, untoned) make some materials on first use
+        this.flags.prewarm();
+        this.placement.prewarm();
+        this.renderer.toneMapping = THREE.NoToneMapping;
+        this.renderer.compile(this.overlayScene, this.threeCamera);
         this.renderer.toneMapping = prevTone;
       }
     } catch (err) {

@@ -397,8 +397,14 @@ test('overlays: markers expire, text is a no-op without a DOM, rally lines follo
   texts.dispose();
 
   const flags = new RallyFlags(root, 4, (x, y) => x * 0.1 + y * 0.05);
+  flags.prewarm();
+  flags.prewarm();
+  assert.equal(flags.items.length, 1, 'one hidden flag, made once');
+  assert.equal(flags.items[0].g.visible, false);
   flags.begin();
   flags.add(10, 1, 10, '#ff0000', 0);
+  assert.equal(flags.items.length, 1, 'the first flag reuses the primed one');
+  assert.equal(flags.items[0].g.visible, true);
   flags.addLine(0, 0, 10, 10, 2, '#ff0000', 0.3);
   flags.end();
   assert.ok(flags.dots.count > 10 && flags.dots.count < 30, `${flags.dots.count} dots`);
@@ -411,6 +417,24 @@ test('overlays: markers expire, text is a no-op without a DOM, rally lines follo
   flags.end();
   assert.equal(flags.dots.count, 0);
   flags.dispose();
+  assert.equal(root.children.length, 0);
+});
+
+test('placement: prewarm primes a hidden ghost that the first show of its type reuses', () => {
+  const root = new THREE.Group();
+  const layer = new PlacementLayer(root, hillyMap(), () => ({ pantheon: null, color: '#3366ff' }));
+  layer.prewarm();
+  const primed = layer.ghost;
+  assert.ok(primed && primed.model.root.visible === false);
+  assert.ok(layer.matsOk && layer.matsBad && layer.orderMats, 'every ghost material exists');
+  layer.prewarm();
+  assert.equal(layer.ghost, primed, 'primed once');
+  layer.show(primed.type, 3, 3, false, null);
+  assert.equal(layer.ghost, primed, 'the same type reuses the primed ghost');
+  assert.equal(primed.model.root.visible, true);
+  layer.show('barracks', 3, 3, true, null);
+  assert.notEqual(layer.ghost, primed, 'another type replaces it');
+  layer.dispose();
   assert.equal(root.children.length, 0);
 });
 
