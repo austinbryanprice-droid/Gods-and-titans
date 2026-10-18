@@ -140,7 +140,7 @@ test('Town Center: Worshipper, Grow (with requirement), Rally, queue count, grow
   run(world, 0.1);
   card = getCommandCard([tc.id], viewOf(world));
   assert.equal(card[0].state, 'disabled');
-  assert.equal(card[0].reason, 'The Town Center is growing.');
+  assert.equal(card[0].reason, 'Your settlement is already growing.');
   assert.equal(card[1].state, 'disabled');
 
   // Grown into a Town: next is City (needs a Temple), then no Grow button at all.
