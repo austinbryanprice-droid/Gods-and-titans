@@ -14,6 +14,7 @@ import { UNITS, BUILDINGS, PANTHEONS } from '../data/index.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
 import { createForest, createDecor } from './models/props.js';
+import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
 import { CameraController, CAMERA_DEFAULTS } from './camera.js';
@@ -205,6 +206,9 @@ export class GameRenderer {
     });
     scene.add(this.decor.object3d);
     patchFowObject(this.decor.object3d);
+    this.groundCover = createGroundCover(this.map, this.heightFn, { quality: this.quality });
+    scene.add(this.groundCover.object3d);
+    patchFowObject(this.groundCover.object3d);
     this.rockDecor = this.buildRockDecor();
     if (this.rockDecor) {
       scene.add(this.rockDecor.object3d);
@@ -475,6 +479,8 @@ export class GameRenderer {
     });
     setCloudShadows(Q.clouds);
     this.terrain.setQuality(q);
+    this.groundCover.setQuality(q);
+    patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
     this.vfx.setQuality(Q.vfx);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
@@ -1241,6 +1247,7 @@ export class GameRenderer {
       });
       this.entityRoot.add(model.root);
       this.decor.hideInRect(tx - 0.2, ty - 0.2, tx + def.size + 0.2, ty + def.size + 0.2);
+      this.groundCover.hideInRect(tx - 0.1, ty - 0.1, tx + def.size + 0.1, ty + def.size + 0.1);
       this.buildings.set(e.id, b);
       b.bp = -1;
       b.tr = e.tr || 1;
@@ -1302,6 +1309,7 @@ export class GameRenderer {
         patchFowObject(model.root);
         this.entityRoot.add(model.root);
         this.decor.hideInRect(tx - 0.2, ty - 0.2, tx + 3.2, ty + 3.2);
+        this.groundCover.hideInRect(tx - 0.1, ty - 0.1, tx + 3.1, ty + 3.1);
         const init = this.mineInitial.get(`${tx},${ty}`) || Math.max(e.amt || 0, (e.amt || 0) > GOLD_MINE_AMOUNT ? EXPANSION_MINE_AMOUNT : GOLD_MINE_AMOUNT);
         m = { id: e.id, e, model, tx, ty, x: tx + 1.5, y: ty + 1.5, size: 3, height: model.height, initial: init, amt: -1, tag };
         this.mines.set(e.id, m);
@@ -1768,6 +1776,7 @@ export class GameRenderer {
     this.fadeMats.dispose();
     this.forest.dispose();
     this.decor.dispose();
+    this.groundCover.dispose();
     if (this.rockDecor) this.rockDecor.dispose();
     this.terrain.dispose();
     this.fow.dispose();
