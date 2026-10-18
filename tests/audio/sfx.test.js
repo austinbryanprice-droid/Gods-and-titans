@@ -212,6 +212,62 @@ test('distance attenuation: full near the listener, silent beyond 30 tiles', () 
   assert.equal(sfx.play('hit', { x: 1000, y: 1000 }), true, 'no listener = not attenuated');
 });
 
+test('the listener scale stretches the hearing range, so a zoomed-out view still hears its far side', () => {
+  sfx.setListener(50, 50, 1);
+  ctx.currentTime += 10;
+  assert.equal(sfx.play('hit', { x: 85, y: 50 }), false, '35 tiles is silent at the default zoom');
+  sfx.setListener(50, 50, 1.8);
+  ctx.currentTime += 10;
+  assert.equal(sfx.play('hit', { x: 85, y: 50 }), true, 'but heard with the camera pulled back');
+  sfx.setListener(50, 50, NaN);
+  assert.equal(sfx.listener.scale, 1, 'a bad scale is ignored');
+  sfx.setListener(50, 50, -2);
+  assert.equal(sfx.listener.scale, 1);
+  sfx.setListener(NaN, 0);
+});
+
+test('the audio unlock stays armed for the life of the page: a context suspended or interrupted later is resumed by the next gesture', async () => {
+  class SuspendedContext extends FakeAudioContext {
+    constructor() {
+      super();
+      this.state = 'suspended';
+      this.resumed = 0;
+    }
+    resume() {
+      this.resumed++;
+      this.state = 'running';
+      return Promise.resolve();
+    }
+  }
+  const handlers = new Map();
+  const removed = [];
+  const saved = { window: globalThis.window, AudioContext: globalThis.AudioContext };
+  globalThis.window = { addEventListener: (type, fn) => handlers.set(type, fn), removeEventListener: (type) => removed.push(type) };
+  globalThis.AudioContext = SuspendedContext;
+  try {
+    const s = (await import('../../src/audio/sfx.js?unlock')).sfx;
+    s.init();
+    const gesture = handlers.get('pointerdown');
+    assert.equal(typeof gesture, 'function');
+    gesture();
+    assert.equal(s.ctx.resumed, 1);
+    assert.equal(s.ready, true);
+    gesture();
+    assert.equal(s.ctx.resumed, 1, 'a running context is left alone');
+    s.ctx.state = 'interrupted'; // Safari, after a call or an output change
+    assert.equal(s.ready, false);
+    gesture();
+    assert.equal(s.ctx.resumed, 2);
+    assert.equal(s.ready, true);
+    assert.deepEqual(removed, [], 'no listener was taken down');
+  } finally {
+    globalThis.window = saved.window;
+    globalThis.AudioContext = saved.AudioContext;
+    if (saved.window === undefined) delete globalThis.window;
+    if (saved.AudioContext === undefined) delete globalThis.AudioContext;
+  }
+});
+
 test('volume and mute drive the master gain', () => {
   sfx.setVolume(0.5);
   assert.equal(sfx.volume, 0.5);

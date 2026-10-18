@@ -708,7 +708,9 @@ per-frame budget, so a revealed army appears over a few frames.
 - `minimap.js`: 2D canvas: terrain colors, mines, trees, units/buildings as team-colored dots
   (visible only), fog, camera quad; click/drag moves camera, right-click issues smart move.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with
-  distance attenuation from `sfx.setListener(x, y)`.
+  distance attenuation from `sfx.setListener(x, y, scale)` (the camera target; `scale` follows the
+  zoom, 0.8 close to 1.8 far, and stretches the hearing range so a zoomed-out view still hears its
+  far side).
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
   tier_up, chop, mine, pray, horn.
@@ -732,7 +734,9 @@ big fights); retreat badly hurt gods to base. Hard is fair (no resource cheats).
 ClientSession, then `new Game({ session, settings })`: creates GameRenderer on a canvas, HUD,
 InputController, sfx listener; requestAnimationFrame loop: `viewState.update(now)`,
 `renderer.update(dt)`, `renderer.render()`, `hud.update()`. Events from `viewState.on('*')`
-drive VFX, sounds and HUD messages. Game over → overlay → back to menu.
+drive VFX, sounds and HUD messages. Game over → overlay → back to menu. "Preparing the
+battlefield…" covers the empty canvas while the renderer's code loads and its scene builds. In a
+single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim.
 
 ## 12. Repository layout & ownership
 

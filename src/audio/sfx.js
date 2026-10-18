@@ -1,7 +1,7 @@
 // Sound effects synthesized with WebAudio (no audio files). DESIGN 9.
 //   sfx.init()                       arm the AudioContext unlock on the first user gesture
 //   sfx.play(name, { x, y, volume }) positional when x, y are given (tile coords)
-//   sfx.setListener(x, y)            usually the camera target
+//   sfx.setListener(x, y, scale)     usually the camera target; scale > 1 widens the hearing range (zoomed out)
 //   sfx.setVolume(v) / sfx.mute(bool)
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers).
 
@@ -488,7 +488,7 @@ class SfxEngine {
     this.kit = null;
     this.volume = 0.7;
     this.muted = false;
-    this.listener = null; // { x, y } or null = no attenuation
+    this.listener = null; // { x, y, scale } or null = no attenuation
     this.last = new Map(); // name → last start (ctx time)
     this.active = new Map(); // name → [end times]
     this.voiceEnds = [];
@@ -508,14 +508,17 @@ class SfxEngine {
     }
     if (this.armed || !audioContextClass() || typeof window === 'undefined' || !window.addEventListener) return this;
     this.armed = true;
-    const handler = () => {
-      this.unlock();
-      if (this.ctx && this.ctx.state === 'running') {
-        for (const ev of ['pointerdown', 'keydown', 'touchend', 'mousedown']) window.removeEventListener(ev, handler, true);
-      }
-    };
+    // The listeners stay for the life of the page: a context that the browser later suspends
+    // (or, on Safari, interrupts) is resumed by the next click or key press. unlock() does
+    // nothing while the context is running.
+    const handler = () => this.unlock();
     this.unlockHandler = handler;
     for (const ev of ['pointerdown', 'keydown', 'touchend', 'mousedown']) window.addEventListener(ev, handler, true);
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && this.ctx) this.unlock();
+      });
+    }
     // Browsers that already saw a gesture (e.g. module loaded late) can start right away.
     try {
       if (navigator.userActivation && navigator.userActivation.hasBeenActive) this.unlock();
@@ -533,7 +536,8 @@ class SfxEngine {
         if (!AC) return;
         this._attach(new AC({ latencyHint: 'interactive' }));
       }
-      if (this.ctx.state === 'suspended' && this.ctx.resume) this.ctx.resume().catch(() => {});
+      const st = this.ctx.state;
+      if (st !== 'running' && st !== 'closed' && this.ctx.resume) this.ctx.resume().catch(() => {});
     } catch (err) {
       console.warn('[sfx] audio unavailable', err);
     }
@@ -578,8 +582,9 @@ class SfxEngine {
     if (this.listener && Number.isFinite(x) && Number.isFinite(y)) {
       const dx = x - this.listener.x;
       const dy = y - this.listener.y;
-      gain *= distanceGain(Math.hypot(dx, dy));
-      pan = Math.max(-0.75, Math.min(0.75, dx / 18));
+      const scale = this.listener.scale;
+      gain *= distanceGain(Math.hypot(dx, dy) / scale);
+      pan = Math.max(-0.75, Math.min(0.75, dx / (18 * scale)));
     }
     if (gain < 0.01) return false;
 
@@ -639,9 +644,13 @@ class SfxEngine {
     }
   }
 
-  /** Listener position (tiles), usually the camera target. */
-  setListener(x, y) {
-    if (Number.isFinite(x) && Number.isFinite(y)) this.listener = { x, y };
+  /**
+   * Listener position (tiles), usually the camera target. `scale` stretches the hearing
+   * range (and the stereo spread) by that factor: the camera's zoom, so that what is on
+   * screen stays audible when the view is pulled back.
+   */
+  setListener(x, y, scale = 1) {
+    if (Number.isFinite(x) && Number.isFinite(y)) this.listener = { x, y, scale: scale > 0 && Number.isFinite(scale) ? scale : 1 };
     else this.listener = null;
   }
 
