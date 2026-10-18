@@ -12,13 +12,15 @@
 // matrices) every instance is one vec4 (x, ground height, z, packed scale + rank)
 // plus four color bytes; rotation comes from a hash of its position. Two kinds
 // per 16×16-tile chunk (one draw call each, frustum culled): grass tufts, and
-// "accents" (flower clumps, pebbles, mushrooms: one geometry holding all three,
-// the instance's class collapses the parts it does not use). Each chunk keeps
-// its instances sorted by a random rank, so a lower quality or a far chunk just
-// draws a shorter prefix (geometry.instanceCount, set per frame in
+// "accents" (flower clumps, pebbles, mushrooms: three shapes padded to the same
+// vertex count and stored side by side in one geometry, so each instance runs
+// the vertex shader only for its own shape, picked by its class). Each chunk
+// keeps its instances sorted by a random rank, so a lower quality or a far chunk
+// just draws a shorter prefix (geometry.instanceCount, set per frame in
 // onBeforeRender), and the vertex shader shrinks the instances near that cut so
 // thinning with distance has no popping. Grass and flowers sway with the trees'
-// wind (foliage-shader.js).
+// wind (foliage-shader.js). The cover does not write depth (see
+// groundCoverMaterial), so it stays out of the SSAO input.
 import * as THREE from 'three';
 import { TERRAIN } from '../../config.js';
 import { heightAt } from '../height.js';
@@ -48,15 +50,13 @@ const FLOWERS = 3; // in flowering meadow patches
 const PEBBLES = { meadow: 0.04, edge: 0.06, border: 0.3, dirt: 0.12, sand: 0.12, forest: 0.04 };
 const MUSHROOMS = { edge: 0.16, forest: 0.3 };
 
-// Accent classes (instance color alpha) and geometry parts (aGc.y).
+// Accent classes (instance color alpha): which of the accent geometry's three shapes it draws.
 const CLS_FLOWERS = 0;
 const CLS_PEBBLES = 1;
 const CLS_MUSHROOMS = 2;
-const PART_STEM = 0;
-const PART_HEAD = 1;
-const PART_PEBBLE = 2;
-const PART_MUSH_STEM = 3;
-const PART_CAP = 4;
+// aGc.y: 1 = takes the instance tint (flower heads, pebbles, caps, grass), 0 = keeps its own color (stems)
+const OWN = 0;
+const TINT = 1;
 
 const lin = (hex) => new THREE.Color(hex); // sRGB hex → linear working color
 const FLOWER_COLORS = ['#f4f1e6', '#f2cc3a', '#dc4a3a', '#9a62d6', '#e676b4', '#5a8fe6', '#f6a63a'].map(lin);
@@ -108,10 +108,10 @@ function rng(seed) {
 }
 
 // ---------------------------------------------------------------------------
-// geometry (built once, shared): position, normal, color, aGc (bend amplitude, part)
+// geometry (built once, shared): position, normal, color, aGc (bend amplitude, tint weight)
 // ---------------------------------------------------------------------------
 
-/** Accumulates triangles with per-vertex color, bend and part, normals bent toward `soft`. */
+/** Accumulates triangles with per-vertex color, bend and tint weight, normals bent toward `soft`. */
 class TriBuilder {
   constructor() {
     this.pos = [];
@@ -124,11 +124,11 @@ class TriBuilder {
    * @param {number[][]} tri three [x, y, z]
    * @param {(p: number[]) => number[]} color linear rgb per vertex
    * @param {(p: number[]) => number} bend wind amplitude per vertex
-   * @param {number} part
+   * @param {number} tint 1: multiplied by the instance tint, 0: keeps its own color
    * @param {{ up?: number, center?: number[] }} [n] normals: blend of the face normal (oriented up) toward
    *   straight up (`up`) or toward the direction away from `center`
    */
-  add(tri, color, bend, part, n = {}) {
+  add(tri, color, bend, tint, n = {}) {
     const [a, b, c] = tri.map((p) => new THREE.Vector3(...p));
     const fn = new THREE.Vector3().subVectors(b, a).cross(_d.subVectors(c, a)).normalize();
     if (fn.y < 0) fn.negate();
@@ -140,20 +140,37 @@ class TriBuilder {
       this.nor.push(_v.x, _v.y, _v.z);
       const col = color([p.x, p.y, p.z]);
       this.col.push(col[0], col[1], col[2]);
-      this.gc.push(bend([p.x, p.y, p.z]), part);
+      this.gc.push(bend([p.x, p.y, p.z]), tint);
     }
   }
 
   /** Every face of a geometry (disposed afterwards). */
-  addGeometry(g, color, bend, part, n) {
+  addGeometry(g, color, bend, tint, n) {
     const f = g.index ? g.toNonIndexed() : g;
     const p = f.attributes.position;
     for (let i = 0; i < p.count; i += 3) {
       const tri = [0, 1, 2].map((k) => [p.getX(i + k), p.getY(i + k), p.getZ(i + k)]);
-      this.add(tri, color, bend, part, n);
+      this.add(tri, color, bend, tint, n);
     }
     f.dispose();
     g.dispose();
+  }
+
+  get triangles() {
+    return this.pos.length / 9;
+  }
+
+  /** Pad with degenerate (zero-area, never rasterized) triangles up to n. */
+  pad(n) {
+    while (this.triangles < n) {
+      for (let k = 0; k < 3; k++) {
+        this.pos.push(0, 0, 0);
+        this.nor.push(0, 1, 0);
+        this.col.push(0, 0, 0);
+        this.gc.push(0, 0);
+      }
+    }
+    return this;
   }
 
   build() {
@@ -164,6 +181,21 @@ class TriBuilder {
     g.setAttribute('aGc', new THREE.Float32BufferAttribute(this.gc, 2));
     g.computeBoundingSphere();
     return g;
+  }
+
+  /**
+   * The same shape as packed attributes for one of the accent geometry's extra
+   * slots: aPB = position + bend, aNT = normal + tint weight, aCol = color.
+   */
+  packed() {
+    const n = this.pos.length / 3;
+    const pb = new Float32Array(n * 4);
+    const nt = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      pb.set([this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2], this.gc[i * 2]], i * 4);
+      nt.set([this.nor[i * 3], this.nor[i * 3 + 1], this.nor[i * 3 + 2], this.gc[i * 2 + 1]], i * 4);
+    }
+    return { pb: new THREE.BufferAttribute(pb, 4), nt: new THREE.BufferAttribute(nt, 4), col: new THREE.Float32BufferAttribute(this.col, 3) };
   }
 }
 
@@ -189,15 +221,21 @@ function tuftGeo() {
       return [0.68 + 0.62 * k * 1.04, 0.68 + 0.62 * k * 1.06, 0.68 + 0.62 * k * 0.8];
     };
     // lit like the ground it grows from: normals almost straight up
-    t.add(tri, color, (p) => 0.05 * Math.pow(p[1] / 0.2, 1.5), 0, { up: 0.75 });
+    t.add(tri, color, (p) => 0.05 * Math.pow(p[1] / 0.2, 1.5), TINT, { up: 0.75 });
   }
   return t.build();
 }
 
-/** Flower clump + pebbles + mushrooms in one geometry (the instance class picks which parts show). */
+/**
+ * The three accent shapes in one geometry: flower clump in the standard
+ * attributes (position, normal, color, aGc), pebbles in aPB1 / aNT1 / aCol1,
+ * mushrooms in aPB2 / aNT2 / aCol2, each padded to the same triangle count. The
+ * vertex shader reads the slot of the instance's class, so an instance costs
+ * only its own shape's vertices.
+ */
 function accentGeo() {
   const r = rng(73);
-  const t = new TriBuilder();
+  const flowers = new TriBuilder();
   const stemCol = lin('#3e7a2c');
   const stem = (p) => {
     const k = 0.6 + 0.5 * smooth01(p[1] / 0.15);
@@ -213,21 +251,22 @@ function accentGeo() {
     const h = 0.12 + r() * 0.1;
     const tx = x + (r() - 0.5) * 0.03;
     const tz = z + (r() - 0.5) * 0.03;
-    t.add([[x - 0.007, 0, z], [x + 0.007, 0, z], [tx, h, tz]], stem, sway, PART_STEM, { up: 0.6 });
+    flowers.add([[x - 0.007, 0, z], [x + 0.007, 0, z], [tx, h, tz]], stem, sway, OWN, { up: 0.6 });
     const s = 0.03 + r() * 0.01;
     const top = [tx, h + 0.014, tz];
     const ring = [0, 1, 2, 3].map((k) => [tx + Math.cos(k * PI / 2 + a) * s, h - 0.004, tz + Math.sin(k * PI / 2 + a) * s]);
     for (let k = 0; k < 4; k++) {
-      t.add([top, ring[k], ring[(k + 1) % 4]], (p) => (p[1] > h + 0.005 ? [1.12, 1.12, 1.05] : [0.86, 0.86, 0.86]), sway, PART_HEAD, { up: 0.55 });
+      flowers.add([top, ring[k], ring[(k + 1) % 4]], (p) => (p[1] > h + 0.005 ? [1.12, 1.12, 1.05] : [0.86, 0.86, 0.86]), sway, TINT, { up: 0.55 });
     }
   }
   for (let i = 0; i < 2; i++) {
     const a = i * 2.6 + 0.5;
     const ca = Math.cos(a);
     const sa = Math.sin(a);
-    t.add([[-sa * 0.015, 0.005, ca * 0.015], [sa * 0.015, 0.005, -ca * 0.015], [ca * 0.08, 0.02, sa * 0.08]], stem, () => 0, PART_STEM, { up: 0.5 });
+    flowers.add([[-sa * 0.015, 0.005, ca * 0.015], [sa * 0.015, 0.005, -ca * 0.015], [ca * 0.08, 0.02, sa * 0.08]], stem, () => 0, OWN, { up: 0.5 });
   }
   // pebbles: three squashed, wobbled octahedra half sunk into the ground, close together
+  const pebbles = new TriBuilder();
   for (let i = 0; i < 3; i++) {
     const rad = 0.028 + r() * 0.02;
     const g = new THREE.OctahedronGeometry(rad, 0);
@@ -239,23 +278,34 @@ function accentGeo() {
     const cz = Math.sin(a) * d;
     g.translate(cx, rad * 0.1, cz);
     const k0 = 0.92 + r() * 0.22;
-    t.addGeometry(g, (q) => {
+    pebbles.addGeometry(g, (q) => {
       const k = k0 * (0.72 + 0.4 * smooth01((q[1] + 0.005) / 0.025));
       return [k, k, k];
-    }, () => 0, PART_PEBBLE, { center: [cx, -0.01, cz], soft: 0.75 });
+    }, () => 0, TINT, { center: [cx, -0.01, cz], soft: 0.75 });
   }
   // mushrooms: a pale stem under a conical cap
+  const mushrooms = new TriBuilder();
   const cream = lin('#e3d8c0');
   for (const [x, z, h, cr] of [[0.02, 0.01, 0.06, 0.035], [-0.045, 0.03, 0.04, 0.025]]) {
     const s = new THREE.CylinderGeometry(0.008, 0.011, h, 3, 1, true).translate(x, h / 2, z);
-    t.addGeometry(s, (q) => {
+    mushrooms.addGeometry(s, (q) => {
       const k = 0.7 + 0.35 * smooth01(q[1] / h);
       return [cream.r * k, cream.g * k, cream.b * k];
-    }, () => 0, PART_MUSH_STEM, { center: [x, h / 2, z], soft: 0.6 });
+    }, () => 0, OWN, { center: [x, h / 2, z], soft: 0.6 });
     const c = new THREE.ConeGeometry(cr, cr * 0.75, 6, 1, true).translate(x, h + cr * 0.3, z);
-    t.addGeometry(c, (q) => (q[1] > h + cr * 0.4 ? [1.05, 1.05, 1.05] : [0.8, 0.8, 0.8]), () => 0, PART_CAP, { center: [x, h - cr * 0.3, z], soft: 0.5 });
+    mushrooms.addGeometry(c, (q) => (q[1] > h + cr * 0.4 ? [1.05, 1.05, 1.05] : [0.8, 0.8, 0.8]), () => 0, TINT, { center: [x, h - cr * 0.3, z], soft: 0.5 });
   }
-  return t.build();
+  const shapes = { flowers: flowers.triangles, pebbles: pebbles.triangles, mushrooms: mushrooms.triangles };
+  const n = Math.max(shapes.flowers, shapes.pebbles, shapes.mushrooms);
+  const g = flowers.pad(n).build();
+  for (const [slot, t] of [[1, pebbles], [2, mushrooms]]) {
+    const { pb, nt, col } = t.pad(n).packed();
+    g.setAttribute(`aPB${slot}`, pb);
+    g.setAttribute(`aNT${slot}`, nt);
+    g.setAttribute(`aCol${slot}`, col);
+  }
+  g.userData.shapes = shapes;
+  return g;
 }
 
 let GEO = null;
@@ -264,10 +314,14 @@ function geometries() {
   return GEO;
 }
 
-/** Triangle counts of the ground-cover geometries (tests, budgets). */
+/**
+ * Triangle counts of the ground-cover geometries (tests, budgets): `accent` is
+ * what one accent instance draws (its shape, padded), `shapes` the real
+ * triangles of each.
+ */
 export function getGroundCoverInfo() {
   const g = geometries();
-  return { tuft: g.tuft.attributes.position.count / 3, accent: g.accent.attributes.position.count / 3 };
+  return { tuft: g.tuft.attributes.position.count / 3, accent: g.accent.attributes.position.count / 3, shapes: { ...g.accent.userData.shapes } };
 }
 
 // ---------------------------------------------------------------------------
@@ -278,14 +332,44 @@ const GC_PARS = /* glsl */ `
 attribute vec4 aInst;
 attribute vec4 aTint;
 attribute vec2 aGc;
+#ifdef GC_ACCENT
+attribute vec4 aPB1;
+attribute vec4 aNT1;
+attribute vec3 aCol1;
+attribute vec4 aPB2;
+attribute vec4 aNT2;
+attribute vec3 aCol2;
+#endif
 uniform vec4 uGcThin;
 ${WIND_GLSL}`;
+
+// First in main() (after color_vertex): this instance's shape, as position +
+// bend, normal + tint weight and color. Accents take the slot of their class
+// (instance color alpha). The tint colors grass blades, flower heads, pebbles
+// and mushroom caps; stems keep their own green / cream.
+const GC_SHAPE = /* glsl */ `
+vec4 gcPB = vec4( position, aGc.x );
+vec4 gcNT = vec4( normal, aGc.y );
+vec3 gcCol = color;
+#ifdef GC_ACCENT
+  float gcCls = floor( aTint.a * 255.0 + 0.5 );
+  if ( gcCls > 1.5 ) {
+    gcPB = aPB2;
+    gcNT = aNT2;
+    gcCol = aCol2;
+  } else if ( gcCls > 0.5 ) {
+    gcPB = aPB1;
+    gcNT = aNT1;
+    gcCol = aCol1;
+  }
+#endif
+vColor.rgb = gcCol * mix( vec3( 1.0 ), aTint.rgb, gcNT.w );`;
 
 // rotation about +y from a hash of the instance position
 const GC_NORMAL = /* glsl */ `
 float gcAng = fract( sin( dot( aInst.xz, vec2( 41.37, 17.13 ) ) ) * 43758.5453 ) * 6.2832;
 mat3 gcRot = mat3( cos( gcAng ), 0.0, - sin( gcAng ), 0.0, 1.0, 0.0, sin( gcAng ), 0.0, cos( gcAng ) );
-objectNormal = gcRot * objectNormal;`;
+objectNormal = gcRot * gcNT.xyz;`;
 
 // aInst.w = round(scale × 256) + rank (0..1). Instances ranked past the share
 // kept at this distance shrink to nothing; the survivors grow a little so a
@@ -296,30 +380,19 @@ float gcScale = floor( aInst.w ) * ( 1.0 / 256.0 );
   float keepD = mix( 1.0, uGcThin.z, smoothstep( uGcThin.x, uGcThin.y, distance( cameraPosition, aInst.xyz ) ) );
   float keep = uGcThin.w * keepD;
   gcScale *= ( 1.0 - smoothstep( keep - 0.04, keep, fract( aInst.w ) ) ) * ( 1.0 + 0.5 * ( 1.0 - keepD ) );
-  #ifdef GC_ACCENT
-    // class 0: flower parts (0, 1); 1: pebbles (2); 2: mushrooms (3, 4)
-    float cls = floor( aTint.a * 255.0 + 0.5 );
-    float part = aGc.y;
-    gcScale *= cls < 0.5 ? step( part, 1.5 ) : cls < 1.5 ? step( 1.5, part ) * step( part, 2.5 ) : step( 2.5, part );
-  #endif
 }
-vec3 gcLocal = gcRot * ( transformed * gcScale );
+vec3 gcLocal = gcRot * ( gcPB.xyz * gcScale );
 transformed = aInst.xyz + gcLocal;
-if ( gcScale > 0.0 ) transformed += windOffset( aInst.xz, gcLocal, aGc.x * gcScale, 0.0 );`;
-
-// Grass: the instance color tints the blades. Accents: flower heads, pebbles
-// and mushroom caps take it; stems keep their own color.
-const GC_COLOR = /* glsl */ `
-#ifdef GC_ACCENT
-  float gcPart = aGc.y;
-  vColor.rgb *= ( gcPart < 0.5 || abs( gcPart - 3.0 ) < 0.5 ) ? vec3( 1.0 ) : aTint.rgb;
-#else
-  vColor.rgb *= aTint.rgb;
-#endif`;
+if ( gcScale > 0.0 ) transformed += windOffset( aInst.xz, gcLocal, gcPB.w * gcScale, 0.0 );`;
 
 function groundCoverMaterial(accent) {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   mat.name = accent ? 'ground-cover-accent' : 'ground-cover-grass';
+  // No depth writes: thousands of thin blades in the depth buffer would give
+  // every tuft a dark SSAO halo (high / ultra). The meshes draw after the
+  // opaque world (renderOrder 1) and still depth-test against it; overlapping
+  // tufts lose their order among themselves, which at this size does not show.
+  mat.depthWrite = false;
   if (accent) mat.defines = { GC_ACCENT: '' };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WORLD_UNIFORMS.uTime;
@@ -327,7 +400,7 @@ function groundCoverMaterial(accent) {
     shader.uniforms.uGcThin = GROUND_COVER_UNIFORMS.uGcThin;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${GC_PARS}`)
-      .replace('#include <color_vertex>', `#include <color_vertex>\n${GC_COLOR}`)
+      .replace('#include <color_vertex>', `#include <color_vertex>\n${GC_SHAPE}`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>\n${GC_NORMAL}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${GC_VERTEX}`);
     // both sides of a blade are lit like its front (double-sided, but no flipped normal)
@@ -336,7 +409,7 @@ function groundCoverMaterial(accent) {
       '#include <normal_fragment_begin>\nnormal = normalize( vNormal );\nnonPerturbedNormal = normal;',
     );
   };
-  mat.customProgramCacheKey = () => `groundcover1${accent ? 'a' : 'g'}`;
+  mat.customProgramCacheKey = () => `groundcover2${accent ? 'a' : 'g'}`;
   patchWorldMaterial(mat, { cloud: true });
   return mat;
 }
@@ -561,7 +634,7 @@ export function createGroundCover(mapData, heightFn, { quality = 'medium' } = {}
     const G = geometries();
     const base = kind === 'grass' ? G.tuft : G.accent;
     const geo = new THREE.InstancedBufferGeometry();
-    for (const name of ['position', 'normal', 'color', 'aGc']) geo.setAttribute(name, base.attributes[name]);
+    for (const name of Object.keys(base.attributes)) geo.setAttribute(name, base.attributes[name]);
     const aInst = new THREE.InstancedBufferAttribute(inst, 4);
     geo.setAttribute('aInst', aInst);
     geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 4, true));
@@ -575,6 +648,7 @@ export function createGroundCover(mapData, heightFn, { quality = 'medium' } = {}
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = false;
     mesh.receiveShadow = true;
+    mesh.renderOrder = 1; // after the opaque world: it does not write depth (groundCoverMaterial)
     mesh.userData.cover = { chunk, kind, n, inst, aInst, ranks, x0, x1, y0, y1, z0, z1 };
     mesh.onBeforeRender = onBeforeRender;
     return mesh;

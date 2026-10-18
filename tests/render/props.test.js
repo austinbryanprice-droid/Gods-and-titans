@@ -227,9 +227,11 @@ test('plants sway (their shadows too), stone and stumps stay still', () => {
     assert.ok(m.material.userData.__foliage, `${m.name} uses the foliage material`);
     assert.ok(m.customDepthMaterial && m.customDepthMaterial.isMeshDepthMaterial, `${m.name} casts a swaying shadow`);
     assert.ok(m.castShadow && m.receiveShadow, `${m.name} casts and receives shadows`);
-    // open leaf shells (pine tiers, fronds) cast from both faces, not just the back ones
+    // open leaf shells (pine tiers, fronds) cast from both faces; closed crowns
+    // only from their back faces (the default: half the shadow-map work, no acne)
     const both = m.material.side === THREE.DoubleSide || m.material.shadowSide === THREE.DoubleSide;
-    assert.ok(both, `${m.name}: both faces cast`);
+    const open = m.name === 'forest-pine' || m.name === 'forest-palm';
+    assert.equal(both, open, `${m.name}: ${open ? 'both faces' : 'back faces'} cast`);
     // wind weights: no bend at the roots, most at the crown; only leaves flutter
     const pos = m.geometry.attributes.position;
     const fol = m.geometry.attributes.aFol;
@@ -285,7 +287,12 @@ test('shader patches chain: foliage, then world (clouds), then fog of war', () =
     const vs = shader.vertexShader;
     const call = vs.lastIndexOf('windOffset( ');
     assert.ok(call > vs.indexOf('#include <begin_vertex>') && call < vs.indexOf('#include <project_vertex>'));
-    if (mat.userData.__foliage) assert.match(shader.fragmentShader, /uFoliage/, `${mat.name}: soft leaf light`);
+    if (mat.userData.__foliage) {
+      assert.match(shader.fragmentShader, /uFoliage/, `${mat.name}: soft leaf light`);
+      // leaves on the far side of a crown look their shadow up on its sunlit side
+      assert.ok(vs.indexOf('folWorldPos') < vs.indexOf('#include <shadowmap_vertex>'), `${mat.name}: crown-side shadow lookup`);
+      assert.match(shader.fragmentShader, /folLightColor = directLight\.color/, `${mat.name}: unshadowed light kept for leaves`);
+    }
   }
   const depth = instancedOf(f.object3d)[0].customDepthMaterial;
   const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.depth.vertexShader, fragmentShader: THREE.ShaderLib.depth.fragmentShader };
@@ -332,6 +339,9 @@ test('ground cover grows on grass, forest floor and dirt borders, never in water
   for (const m of cover.object3d.children) {
     assert.ok(m.geometry.boundingSphere && m.geometry.boundingSphere.radius < 20, 'chunked for culling');
     assert.equal(m.castShadow, false);
+    // no depth writes (no SSAO halo around every tuft), drawn after the opaque world it depth-tests against
+    assert.equal(m.material.depthWrite, false, `${m.name} keeps out of the depth buffer`);
+    assert.ok(m.renderOrder >= 1, `${m.name} draws after the terrain`);
   }
   cover.dispose();
 });
@@ -424,4 +434,7 @@ test('ground cover on a generated map: quick to build, few meshes, tiny geometry
   const info = getGroundCoverInfo();
   assert.ok(info.tuft <= 16, `tuft: ${info.tuft} triangles`);
   assert.ok(info.accent <= 96, `accent: ${info.accent} triangles`);
+  // an accent instance draws only its own shape (flowers, pebbles or mushrooms), padded to the largest
+  assert.equal(info.accent, Math.max(...Object.values(info.shapes)), JSON.stringify(info.shapes));
+  for (const [k, t] of Object.entries(info.shapes)) assert.ok(t > 4 && t <= 32, `${k}: ${t} triangles`);
 });

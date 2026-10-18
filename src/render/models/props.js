@@ -12,12 +12,12 @@
 // picked by a tile hash and low-frequency noise, 1–2 per forest tile with
 // random rotation, scale and leaf tint (some yellow-green and autumn
 // broadleaves) so forests read as solid but varied walls. One InstancedMesh per
-// variant per 32×32-tile chunk keeps draw calls low while letting off-screen
-// chunks cull. Plants sway in the wind (foliage-shader.js; shadows too), canopies
-// have normals bent away from their center (soft, rounded light), baked
-// occlusion toward the trunk and light shining through the leaves. Rocks, ruins
-// and stumps are still, physically based stone / wood with roughness per face
-// and moss on their tops.
+// variant per CHUNK×CHUNK-tile chunk keeps draw calls low while letting
+// off-screen chunks cull. Plants sway in the wind (foliage-shader.js; shadows
+// too), canopies have normals bent away from their center (soft, rounded
+// light), baked occlusion toward the trunk and light shining through the
+// leaves. Rocks, ruins and stumps are still, physically based stone / wood with
+// roughness per face and moss on their tops.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TERRAIN } from '../../config.js';
@@ -26,7 +26,11 @@ import { heightAt } from '../height.js';
 import { patchWorldMaterial } from '../shading.js';
 import { patchFoliageMaterial, patchStoneMaterial, foliageDepthMaterial } from './foliage-shader.js';
 
-const CHUNK = 32;
+// Forest chunk size (tiles). Every variant in a chunk is one InstancedMesh,
+// culled as a whole in the main and the shadow pass: at close and default zoom
+// 20 draws under half the off-screen trees 32 did, for a few more draw calls
+// (a medium map still stays well under 200 forest + decor meshes).
+const CHUNK = 20;
 const PI = Math.PI;
 const VARIANTS = ['pine', 'broadleaf', 'birch', 'palm'];
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -282,20 +286,22 @@ function pineTier(R, h, n, rot, rng) {
 function pineGeo() {
   const r = new RNG(11);
   const parts = [shade(cyl(0.045, 0.085, 0.62, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.42) })];
-  const tiers = [[0.7, 0.6, 0.34, '#264b2c'], [0.57, 0.55, 0.65, '#2b5331'], [0.45, 0.5, 0.95, '#325c36'], [0.32, 0.46, 1.23, '#39653b']];
+  const tiers = [[0.7, 0.6, 0.34, '#2d5c2b'], [0.57, 0.55, 0.65, '#326530'], [0.45, 0.5, 0.95, '#386e35'], [0.32, 0.46, 1.23, '#3e773a']];
   tiers.forEach(([R, h, y, col], ti) => {
     const g = pineTier(R, h, 7, r.next() * PI, r).translate(0, y, 0);
     const c = new THREE.Vector3(0, y - h * 0.1, 0);
-    const tierK = 0.74 + ti * 0.09; // lower tiers sit in the shade of the upper ones
-    const ao = (p) => tierK * (0.55 + 0.45 * smooth01(Math.hypot(p.x, p.z) / R * 1.15 - 0.1));
+    const tierK = 0.86 + ti * 0.05; // lower tiers sit in the shade of the upper ones
+    // darker only deep inside, toward the trunk; the outer branches stay bright
+    const ao = (p) => tierK * (0.7 + 0.3 * smooth01(Math.hypot(p.x, p.z) / R * 1.15 - 0.1));
     // branch tips catch the light: a fresher, yellower green
-    const grad = { to: '#4f7a3c', t: (p) => 0.6 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.5) };
-    parts.push(shade(g, col, r, { jit: 0.09, leaf: 1, center: c, soft: 0.55, ao, grad }));
+    const grad = { to: '#5a8a3e', t: (p) => 0.55 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.5) };
+    // normals only a little rounded: the faceted tiers keep a crisp lit / shaded side
+    parts.push(shade(g, col, r, { jit: 0.14, leaf: 1, center: c, soft: 0.2, ao, grad }));
   });
   // the tip is wide enough at its base to close the open top of the last tier
   const tip = cone(0.23, 0.52, 6).translate(0, 1.39, 0);
   wobble(tip, 0.02, r);
-  parts.push(shade(tip, '#3e6c40', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.45, 0), soft: 0.5 }));
+  parts.push(shade(tip, '#437e3e', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.45, 0), soft: 0.25 }));
   return finish(parts, { height: 1.95, bend: 0.075, flutter: 0.008 });
 }
 
@@ -306,12 +312,12 @@ function broadleafGeo() {
   for (const [a, b, rad] of [[[0, 0.55, 0], [0.26, 0.92, 0.1], 0.035], [[0, 0.62, 0], [-0.22, 0.95, -0.12], 0.03]]) {
     parts.push(shade(limb(a, b, rad), '#4a3122', r, { jit: 0.06, ao: () => 0.7 }));
   }
-  const lobes = [[0.47, 0, 1.08, 0, '#3d772d'], [0.37, 0.31, 0.95, 0.15, '#447d30'], [0.35, -0.29, 0.98, -0.13, '#3a702b'], [0.31, 0.05, 0.9, -0.34, '#41762f'], [0.31, 0.04, 1.39, 0.03, '#4c8735']];
+  const lobes = [[0.47, 0, 1.08, 0, '#4c8836'], [0.37, 0.31, 0.95, 0.15, '#54903a'], [0.35, -0.29, 0.98, -0.13, '#468233'], [0.31, 0.05, 0.9, -0.34, '#4f8a37'], [0.31, 0.04, 1.39, 0.03, '#5c9a42']];
   for (const [rad, x, y, z, col] of lobes) {
     const g = ico(rad);
     squashBottom(g, 0.66);
     wobble(g, rad * 0.24, r);
-    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.07, leaf: 1, center: C, soft: 0.8, ao: canopyAO(C, 0.66, 0.42) }));
+    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.08, leaf: 1, center: C, soft: 0.65, ao: canopyAO(C, 0.66, 0.56) }));
   }
   return finish(parts, { height: 1.75, bend: 0.07, flutter: 0.014 });
 }
@@ -591,12 +597,18 @@ function shared() {
   if (SHARED) return SHARED;
   // Plants: Lambert (cheap; hemisphere ambient only) with wind and soft leaf
   // light; the double-sided variant for flat leaves (palm fronds, flowers, grass).
+  // Closed crowns (broadleaf, birch, bushes) cast from their back faces, the default.
   const plant = new THREE.MeshLambertMaterial({ vertexColors: true });
   plant.name = 'props-plant';
-  // Pine tiers are open skirts flatter than the sun is high: with the default
-  // back-face shadow pass they would cast only thin rings. Both faces cast.
-  plant.shadowSide = THREE.DoubleSide;
   patchWorldMaterial(patchFoliageMaterial(plant), { cloud: true, rim: 0.12 });
+  // Pine tiers are open skirts flatter than the sun is high: with the default
+  // back-face shadow pass they would cast only thin rings, so both faces cast.
+  // Same program as `plant`; only the shadow pass differs.
+  const plantOpen = new THREE.MeshLambertMaterial({ vertexColors: true });
+  plantOpen.name = 'props-plant-open';
+  plantOpen.shadowSide = THREE.DoubleSide;
+  // less wrap than the round crowns: needles keep a crisp lit and shaded side
+  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3 }), { cloud: true, rim: 0.12 });
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
   patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45 }), { cloud: true, rim: 0.12 });
@@ -605,7 +617,7 @@ function shared() {
   stone.name = 'props-stone';
   patchWorldMaterial(patchStoneMaterial(stone), { cloud: true });
   SHARED = {
-    mat: { plant, plant2, stone },
+    mat: { plant, plantOpen, plant2, stone },
     depth: foliageDepthMaterial(),
     trees: { pine: pineGeo(), broadleaf: broadleafGeo(), birch: birchGeo(), palm: palmGeo() },
     stump: stumpGeo(),
@@ -623,7 +635,7 @@ function shared() {
 }
 
 /** Material of a tree variant / decor kind, and whether it sways (needs the swaying shadow material). */
-const TREE_MAT = { pine: 'plant', broadleaf: 'plant', birch: 'plant', palm: 'plant2' };
+const TREE_MAT = { pine: 'plantOpen', broadleaf: 'plant', birch: 'plant', palm: 'plant2' };
 const DECOR_MAT = { rock: 'stone', bush: 'plant', flowers: 'plant2', ruin: 'stone', stump: 'stone', grass: 'plant2' };
 
 /** Triangle counts of the shared prop geometries (for tests and budgets). */
@@ -683,12 +695,12 @@ function treeTint(variant, r1, r2, n, out) {
     return out.setRGB(k * (1 + h), k * (1 + h * 0.3), k * (1 - h));
   }
   if (variant === 'birch') {
-    if (r2 > 0.8) return out.setRGB(k * 1.55, k * 1.08, k * 0.6); // golden
+    if (r2 > 0.8) return out.setRGB(k * 1.7, k * 0.9, k * 0.48); // golden (warm, not lemon)
     return out.setRGB(k * (1 + h), k, k * (1 - h));
   }
   if (variant === 'palm') return out.setRGB(k * (1 + h * 1.4), k, k * (1 - h));
-  // pine: blue-green to olive
-  return out.setRGB(k * (1 + h), k * (1 + h * 0.2), k * (1 - h * 0.9));
+  // pine: slightly blue-green to olive
+  return out.setRGB(k * (1 + h), k * (1 + h * 0.2), k * (1 - h * 0.5));
 }
 
 // ---------------------------------------------------------------------------
