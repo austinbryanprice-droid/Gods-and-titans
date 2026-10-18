@@ -131,15 +131,17 @@ test('a failure after the session exists stops it, so the other players are told
       throw new Error('THREE.WebGLRenderer: Error creating WebGL context.');
     }
   }
-  // The fake DOM cannot build the real HUD, so start-up stops there; what matters is that fail() runs with a live session.
+  // Start-up stops at the renderer; what matters is that fail() runs with a live session.
   const launch = { role: 'host', setup, myIndex: 0, conns: new Map([[1, hostSide]]) };
-  const { game, exits } = await startFailing({ launch, Renderer: NoGraphics });
+  const { game, exits, hudRoot } = await startFailing({ launch, Renderer: NoGraphics });
   assert.ok(game.session, 'the session had been built');
   assert.equal(game.session.stopped, true, 'and was stopped');
   await sleep(400);
   assert.ok(peer.messages.some((m) => m.t === MSG.END && m.reason === REASONS.HOST_QUIT), 'the client was told the host closed the game');
   assert.notEqual(peer.closed, null, 'and its connection closed');
-  assert.equal(exits.length, 1, 'the player is back at the menu (the screen above needs the HUD)');
+  assert.match(hudRoot.textContent, /Could not start the game/);
+  hudRoot.button('Return to Menu').click();
+  assert.equal(exits.length, 1, 'and the button takes the player back to the menu');
 });
 
 test('with the HUD up the failure screen says what went wrong in plain words and offers the menu', () => {
