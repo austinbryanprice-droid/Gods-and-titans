@@ -4,6 +4,7 @@ import { BUILDINGS, getUnitType } from '../data/index.js';
 import { MAX_GODS, GOD_SLOT_TIER, REVIVE_COST_MULT, MAX_QUEUE, POP_MAX } from '../config.js';
 import { countOf, doneOf } from './scan.js';
 import { unitInfo, godRoles } from './unit-info.js';
+import { workerNeed } from './economy.js';
 
 function halfCost(cost) {
   return {
@@ -124,6 +125,7 @@ export function planProduction(ai, s, wants) {
   const t = s.t;
   const tier = p.tier;
   const underThreat = !!ai.threat;
+  const workerWant = workerNeed(ai, s); // worshippers the mines, wood line and prayer slots can use
 
   // ---- Tier upgrades (queued behind the worshipper in training; the TC stops training while it grows)
   const mainTc = s.tcs.length ? s.tcs.reduce((a, b) => (b.tier > a.tier ? b : a)) : null;
@@ -132,8 +134,8 @@ export function planProduction(ai, s, wants) {
     const up = (BUILDINGS.town_center.tierUpgrades || [])[mainTc.tier];
     if (up && (up.requires || []).every((r) => doneOf(s, r))) {
       let ok = false;
-      if (up.toTier === 2) ok = t >= prof.tier2At && s.workers.length >= Math.min(12, prof.workers - 2) && doneOf(s, 'barracks') > 0;
-      else if (up.toTier === 3) ok = t >= prof.tier3At && s.gods.length >= 1 && s.workers.length >= Math.min(16, prof.workers - 4);
+      if (up.toTier === 2) ok = t >= prof.tier2At && s.workers.length >= Math.min(12, prof.workers - 2, workerWant) && doneOf(s, 'barracks') > 0;
+      else if (up.toTier === 3) ok = t >= prof.tier3At && s.gods.length >= 1 && s.workers.length >= Math.min(16, prof.workers - 4, workerWant);
       if (ok && !underThreat) {
         growing = true;
         wants.push({
@@ -152,7 +154,7 @@ export function planProduction(ai, s, wants) {
 
   // ---- Worshippers
   const workerCount = s.workers.length + (s.queued.get('worshipper') || 0);
-  let workerTarget = prof.workers;
+  let workerTarget = workerWant;
   if (ai.pairs.length === 0 && !ai.woodSpot) workerTarget = Math.min(workerTarget, s.workers.length);
   for (const tc of s.tcs) {
     if (workerCount >= workerTarget) break;

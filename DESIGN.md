@@ -719,9 +719,10 @@ per-frame budget, so a revealed army appears over a few frames.
 
 `createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
 thinks every `AI_THINK_INTERVAL[difficulty]` ticks. Reads world state, acts **only** through
-`world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers (to ~16/22/26 by
-difficulty), split them gold ~60% / wood ~25% / prayer the rest (more prayer once a Temple
-exists), build houses ahead of the pop cap, Barracks, Shrine, Temple, summon gods, tier up,
+`world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers up to what its
+mines, wood line and prayer slots can use (at most 15/30/34 by difficulty; a mine takes only
+2 miners at once, so it takes a second mine from about 5:30, hard 4:30, easy 11:00, and a
+third later), split them gold / wood / prayer (more prayer once a Temple exists), build houses ahead of the pop cap, Barracks, Shrine, Temple, summon gods, tier up,
 second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/creatures; defend
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
