@@ -41,7 +41,7 @@ export default {
           effects: [{ type: 'line', amount: 150, width: 1.4, length: 7 }],
           vfx: { element: 'sun', shape: 'beam' },
           ai: { use: 'damage' },
-          icon: '🪄',
+          icon: '📏',
           description: 'Stretches his as-you-will golden-banded staff into a 7-tile pillar that slams every enemy in the line for 150 damage.',
         },
         {
@@ -394,7 +394,7 @@ export default {
         effects: [{ type: 'line', amount: 260, width: 2.4, length: 9 }],
         vfx: { element: 'earth', shape: 'wave' },
         ai: { use: 'damage' },
-        icon: '🪓',
+        icon: '🥚',
         description: 'Brings down the great axe that cracked open the primordial egg, splitting the ground in a 9-tile line and dealing 260 damage to every enemy in it.',
       },
       {

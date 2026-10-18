@@ -27,7 +27,7 @@ export const BUILDINGS = {
     ],
     icon: '🏛️',
     hotkey: 'C',
-    description: 'Heart of your settlement. Trains Worshippers, stores gold and wood, and grows from Village to Town to City.',
+    description: 'Heart of your settlement, the Town Center. Trains Worshippers, stores gold and wood, and grows from Village Hall to Town Hall to City Palace.',
   },
 
   house: {
@@ -135,7 +135,7 @@ export const BUILDINGS = {
     faithRate: 0.7,
     sight: 9,
     attack: null,
-    icon: '🛕',
+    icon: '⛩️',
     hotkey: 'E',
     description: 'Summons and revives your gods. Up to 5 Worshippers pray here for extra Faith. Requires a Shrine.',
   },
