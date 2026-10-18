@@ -99,7 +99,7 @@ export function createMenu({ root, onStart }) {
     if (b && !b.disabled && !b.classList.contains('mw-silent')) sfx.play('click');
   });
   document.addEventListener('keydown', (e) => {
-    if (root.hidden || e.key !== 'Escape' || !current || !current.onEscape) return;
+    if (root.hidden || e.key !== 'Escape' || e.repeat || !current || !current.onEscape) return;
     if (root.querySelector('.mw-overlay, .mw-popover')) return;
     e.preventDefault();
     // In the lobby, Esc in a text box (chat) or a dropdown only leaves that control, as in the game.

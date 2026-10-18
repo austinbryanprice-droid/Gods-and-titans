@@ -176,6 +176,7 @@ test('a hidden tab opens the (pausing) game menu in a solo match only', () => {
     });
     const hide = (game) => {
       listeners.length = 0;
+      document.hidden = false;
       Game.prototype.watchVisibility.call(game);
       assert.equal(listeners[0][0], 'visibilitychange');
       assert.equal(game.offs.length, 1, 'the listener is removed on teardown');
@@ -197,6 +198,11 @@ test('a hidden tab opens the (pausing) game menu in a solo match only', () => {
     hide(make({ viewState: { gameOver: null, me: { defeated: true } } }));
     hide(make({ hud: { overlays: { open: true, openMenu: () => opened++ } } }));
     assert.equal(opened, 0, 'already paused, over, defeated or in a panel: nothing to open');
+    // The player switched tabs while the match was still loading: no event will come, so it pauses at once.
+    listeners.length = 0;
+    document.hidden = true;
+    Game.prototype.watchVisibility.call(make());
+    assert.equal(opened, 1, 'a tab that is already hidden when the match is up pauses it');
   } finally {
     delete globalThis.document;
   }

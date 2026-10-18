@@ -93,7 +93,7 @@ export async function startGame(launch) {
       // Nothing on screen to show the error: go back to the menu (which also closes
       // the lobby, so joined friends hear that the room is gone) and say what happened.
       showMenu('title');
-      if (menu) menu.toast('The game could not start. Check your connection and try again; if it keeps happening, reload the page.');
+      if (menu) menu.toast('The game could not start. Reload the page (Ctrl+Shift+R) and try again.');
     }
   } finally {
     clearStartNotice(notice);

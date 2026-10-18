@@ -609,6 +609,7 @@ export function brokerMessage(params) {
 }
 
 function friendlyPeerError(err, code, params) {
+  if (err && (err.name === 'AbortError' || err.type === 'aborted')) return err; // a cancelled join keeps its identity
   const type = err && err.type;
   let message;
   if (type === 'peer-unavailable') message = `Room ${code} was not found. Check the code and that the host is still in the lobby.`;

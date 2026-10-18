@@ -401,6 +401,7 @@ export class Game {
     };
     document.addEventListener('visibilitychange', onChange);
     this.offs.push(() => document.removeEventListener('visibilitychange', onChange));
+    onChange(); // the tab may already be hidden: the player switched away while the match was loading
   }
 
   resize() {
