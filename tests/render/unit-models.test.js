@@ -296,7 +296,7 @@ test('unit material: PBR shader patch survives fade clones', () => {
   for (const part of [
     'roughnessFactor *= vUnitFx.y', 'metalnessFactor *= vUnitFx.z', 'unitGlow', 'unitAo', 'unitHue', 'uUnitSheen',
     'reflectVec.y = abs', 'vec3( 0.2126, 0.7152, 0.0722 ) ) ), 0.7 )', 'radiance += iblRadiance * ( 1.0 + uUnitLook.z',
-    'shadowIntensity * 0.85', 'cloudShade', 'uRimStrength',
+    'shadowIntensity * 0.85', 'cloudShade', 'uRimStrength', 'if ( directLight.visible ) RE_Direct(',
   ]) {
     assert.ok(s.fragmentShader.includes(part), part);
   }

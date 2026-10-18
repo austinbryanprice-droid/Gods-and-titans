@@ -93,6 +93,8 @@ export function setCloudShadows(strength) {
 }
 
 const DIR_LIGHT_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
+// The first light evaluation in three's light loop: the point lights'.
+const POINT_LIGHT_DIRECT = 'RE_Direct( directLight, geometryPosition';
 const PARS_VERTEX = 'varying vec3 vWorldPos;';
 const VERTEX = `
 {
@@ -179,6 +181,13 @@ export function patchWorldMaterial(mat, { rim = 0, cloud = true, key = '' } = {}
         }`,
       );
     }
+    // The VFX point lights stay in the scene at intensity 0 while idle (a fixed light
+    // count keeps the programs), yet three evaluates the whole BRDF for each of them on
+    // every lit pixel. Skip the ones that do not reach this fragment: getPointLightInfo
+    // sets visible = ( color != 0 ), which is false at intensity 0 and past their range.
+    fs = fs
+      .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin)
+      .replace(POINT_LIGHT_DIRECT, `if ( directLight.visible ) ${POINT_LIGHT_DIRECT}`);
     shader.fragmentShader = fs;
   };
   mat.customProgramCacheKey = () => `${prevKey}|world${cloud ? 'c' : ''}${rim > 0 ? 'r' : ''}${key}`;

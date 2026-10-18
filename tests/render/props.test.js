@@ -275,6 +275,7 @@ test('shader patches chain: foliage, then world (clouds), then fog of war', () =
     mat.onBeforeCompile(shader, null);
     assert.match(shader.fragmentShader, /cloudShade/, `${mat.name}: cloud patch applied`);
     assert.match(shader.fragmentShader, /fowApply/, `${mat.name}: fog patch applied`);
+    assert.match(shader.fragmentShader, /pointLights\[ i \];[^}]*if \( directLight\.visible \) RE_Direct\(/, `${mat.name}: idle point lights skipped`);
     assert.match(shader.vertexShader, /vWorldPos = /);
     assert.match(shader.vertexShader, /vFowXZ = /);
     if (mat.isMeshStandardMaterial) {
