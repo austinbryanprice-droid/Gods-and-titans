@@ -115,7 +115,8 @@ export class Hud {
         this.closeChat();
       }
     });
-    this.chatInput.addEventListener('keyup', (e) => e.stopPropagation());
+    // Key-ups are left to reach the input controller: a key held when chat opened (an
+    // arrow, Alt, Shift) would otherwise stay "down" there after it was released.
     this.chatInput.addEventListener('blur', () => {
       if (this.chatOpen) setTimeout(() => this.chatOpen && this.closeChat(), 0);
     });

@@ -694,9 +694,11 @@ per-frame budget, so a revealed army appears over a few frames.
   type on screen, Ctrl+1–9 groups, 1–9 recall (double tap centers), right-click smart command
   (shift queues), hotkeys from the command card, targeting modes (attack-move A, ability
   targeting, build placement with ghost (a refused click shows the client-side
-  `checkPlacement(...).message`); Esc cancels; right-click cancels targeting), camera:
-  edge scroll, arrow keys, mouse wheel zoom, middle-drag pan, minimap click/drag, Space centers
-  on selection or last alert, F1–F3 select gods, Alt shows all health bars.
+  `checkPlacement(...).message`); Esc cancels; right-click cancels targeting; another command
+  hotkey replaces the pending order), camera: edge scroll, arrow keys, mouse wheel zoom (one
+  step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan, minimap click/drag,
+  Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
+  Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.
   Hotkeys: units M move, S stop, H hold, A attack; workers + G gather, B build (submenu: House H,
   Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C), P pray,
