@@ -185,6 +185,18 @@ export class GameRenderer {
       scene.environment = this.env.texture;
       scene.environmentIntensity = ENV_INTENSITY;
     }
+    // After a lost context comes back (GPU reset, driver update, mobile tab eviction)
+    // three re-uploads textures from their data, but the environment was rendered on
+    // the GPU and has none: render it again. (The old one went with the old context;
+    // disposing it would delete handles that context owned.) Registered after three's
+    // own handler, so the GL state is already rebuilt when this runs.
+    this.onContextRestored = () => {
+      if (this.disposed || !this.env) return;
+      this.env = createEnvironment(this.renderer);
+      scene.environment = this.env ? this.env.texture : null;
+    };
+    const dom = this.ownsWebgl ? this.renderer.domElement : null;
+    if (dom && typeof dom.addEventListener === 'function') dom.addEventListener('webglcontextrestored', this.onContextRestored);
     setCloudShadows(Q.clouds);
 
     // Overlays that must keep their exact colors (health bars, selection rings,
@@ -1831,6 +1843,8 @@ export class GameRenderer {
     clearUnitModelCache();
     clearBuildingCaches();
     if (this.ownsWebgl) {
+      const dom = this.renderer.domElement;
+      if (dom && typeof dom.removeEventListener === 'function') dom.removeEventListener('webglcontextrestored', this.onContextRestored);
       this.renderer.renderLists.dispose();
       this.renderer.dispose();
       // Free the GPU context now (each match gets a fresh canvas and context).
