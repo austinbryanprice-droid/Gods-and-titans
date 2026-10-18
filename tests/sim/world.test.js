@@ -213,6 +213,21 @@ test('defeat when no buildings remain; victory and gameOver', () => {
   assert.equal(w.players[1].defeated, true);
 });
 
+test('the last buildings of both sides falling on one tick is a draw', () => {
+  const w = makeWorld();
+  for (const p of [0, 1]) for (const b of w.buildingsOf(p)) w.killEntity(b, null);
+  const ev = runCollect(w, 0.1);
+  assert.deepEqual(eventsOf(ev, 'playerDefeated').map((e) => e.player), [0, 1]);
+  assert.deepEqual(eventsOf(ev, 'gameOver').map((e) => e.winningTeam), [null]);
+  assert.deepEqual(w.getSnapshot().gameOver, { winningTeam: null });
+  // a 2v2 wipe-out on one tick likewise
+  const w2 = makeWorld({ players: 4, teams: [1, 1, 2, 2], map: { width: 64, height: 64 } });
+  for (const b of w2.buildingList.slice()) w2.killEntity(b, null);
+  run(w2, 0.1);
+  assert.equal(w2.isGameOver(), true);
+  assert.equal(w2.winningTeam, null);
+});
+
 test('surrender defeats the issuing player; teams win together', () => {
   const w = makeWorld({ players: 3, teams: [1, 1, 2], map: { width: 64, height: 64 } });
   w.issueCommand(2, { type: 'surrender' });

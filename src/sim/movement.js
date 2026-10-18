@@ -9,6 +9,7 @@ const TURN_RATE = 14; // radians per second
 const STUCK_INTERVAL = 16; // ticks between progress checks
 const LOS_RECHECK = 10; // ticks between line-of-sight checks while chasing directly
 const MAX_PUSH = 0.2; // max collision correction per pair per tick
+const FAIL_RETRY_TICKS = 40; // a failed footprint walk is retried at most this often
 
 /**
  * Which side (+1 / -1 along the mover's left normal) an obstacle is on.
@@ -123,9 +124,13 @@ export function moveToRect(world, u, tx, ty, size, key) {
   const cur = u.mv;
   if (cur && cur.kind === 'rect' && cur.key === key) {
     // An arrival only stands while the unit is still next to the footprint
-    // (it may have been pushed away since): otherwise walk there again.
+    // (it may have been pushed away since): otherwise walk there again. A
+    // failed walk stands for FAIL_RETRY_TICKS so a caller that keeps it (a
+    // carrier with an unreachable drop-off) does not search every tick.
     const r = cur.rect;
-    if (!cur.arrived || cur.failed || distPointRect(u.x, u.y, r.x0, r.y0, r.x1, r.y1) <= u.radius + 0.15) return cur;
+    if (cur.failed) {
+      if (world.tickCount - cur.reqT < FAIL_RETRY_TICKS) return cur;
+    } else if (!cur.arrived || distPointRect(u.x, u.y, r.x0, r.y0, r.x1, r.y1) <= u.radius + 0.15) return cur;
   }
   const m = newMv(world, u, 'rect');
   m.key = key;
@@ -278,6 +283,23 @@ function stepForced(world, u) {
     u.forced = null;
     if (done) done(world, u);
   }
+}
+
+/** True when a friendly unit of the same layer that is still moving is crowding u (queueing, not blocked). */
+function trafficAhead(world, u) {
+  const tmp = world._tmpSteer;
+  tmp.length = 0;
+  world.hash.query(u.x, u.y, u.radius + world.maxRadius + 1.2, tmp);
+  for (let i = 0; i < tmp.length; i++) {
+    const o = tmp[i];
+    if (o === u || o.dead || o.ghost || o.air !== u.air || !o.moving) continue;
+    if (world.areEnemies(u.owner, o.owner)) continue;
+    const r = u.radius + o.radius + 1.2;
+    const dx = o.x - u.x;
+    const dy = o.y - u.y;
+    if (dx * dx + dy * dy <= r * r) return true;
+  }
+  return false;
 }
 
 function stepUnit(world, u) {
@@ -449,11 +471,14 @@ function stepUnit(world, u) {
       if (mv.kind === 'point' && gd < crowdR) {
         arrive(u, mv);
       } else {
-        mv.stuck++;
+        // Queueing behind allies that are still moving (a narrow gap) is a
+        // jam, not a blockage: count it as a fraction of a stuck step.
+        const before = mv.stuck;
+        mv.stuck += trafficAhead(world, u) ? 0.25 : 1;
         if (mv.stuck >= 4) {
           mv.failed = true;
           arrive(u, mv);
-        } else {
+        } else if (Math.floor(mv.stuck) !== Math.floor(before)) {
           repath(world, u);
         }
       }

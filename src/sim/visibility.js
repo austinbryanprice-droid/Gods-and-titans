@@ -21,7 +21,8 @@ export function computeVisibility(width, height, sources, explored, out) {
     const y1 = Math.min(height - 1, Math.floor(s.y + r));
     for (let ty = y0; ty <= y1; ty++) {
       const dy = ty + 0.5 - s.y;
-      const span = Math.sqrt(Math.max(0, r2 - dy * dy));
+      if (dy * dy > r2) continue; // row centre outside the circle: no lone tile beyond the rim
+      const span = Math.sqrt(r2 - dy * dy);
       const x0 = Math.max(0, Math.floor(s.x - span));
       const x1 = Math.min(width - 1, Math.floor(s.x + span));
       const row = ty * width;
