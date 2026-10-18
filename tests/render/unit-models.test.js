@@ -1,7 +1,8 @@
 // Tests for the procedural unit models (src/render/models/unit-models.js):
 // every unit type and every visual vocabulary value builds, stays inside the
 // triangle / mesh budgets, has sane proportions, animates every state without
-// producing NaNs, and shares cached geometry and materials between instances.
+// producing NaNs, shares cached geometry and materials between instances, and
+// carries per-vertex surface classes (roughness / metalness) and baked AO.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
@@ -251,6 +252,72 @@ test('instances share cached geometry and per-team materials; dispose keeps shar
   d.dispose();
 });
 
+test('unit surfaces carry material classes and baked occlusion', () => {
+  let metalUnits = 0;
+  for (const u of Object.values(UNITS)) {
+    const m = buildUnitModel(u, PLAYER_COLORS[2]);
+    let metal = 0;
+    m.root.traverse((o) => {
+      if (!o.isMesh || o.name === 'aura' || o.name === 'shadow') return;
+      const { position, aFx, aAo } = o.geometry.attributes;
+      assert.ok(aFx && aFx.itemSize === 4 && aFx.count === position.count, `${u.id}/${o.name}: aFx is (team, glow, roughness, metalness)`);
+      assert.ok(aAo && aAo.itemSize === 1 && aAo.count === position.count, `${u.id}/${o.name}: aAo per vertex`);
+      for (let i = 0; i < aFx.count; i++) {
+        const r = aFx.getZ(i);
+        const mt = aFx.getW(i);
+        const ao = aAo.getX(i);
+        assert.ok(r > 0.1 && r <= 1 && mt >= 0 && mt < 1, `${u.id}/${o.name}: roughness ${r} metalness ${mt}`);
+        assert.ok(ao >= 0.2 && ao <= 1, `${u.id}/${o.name}: occlusion ${ao}`);
+        if (mt > 0) metal++;
+      }
+    });
+    if (metal) metalUnits++;
+    m.dispose();
+  }
+  assert.ok(metalUnits > Object.keys(UNITS).length / 3, `only ${metalUnits} unit types show any metal`);
+});
+
+test('unit material: PBR shader patch survives fade clones', () => {
+  const mat = getUnitMaterial(PLAYER_COLORS[5], 0);
+  assert.ok(mat.isMeshStandardMaterial && mat.vertexColors && mat.flatShading);
+  const compile = (m) => {
+    const shader = {
+      uniforms: {},
+      vertexShader: THREE.ShaderLib.standard.vertexShader,
+      fragmentShader: THREE.ShaderLib.standard.fragmentShader,
+    };
+    m.onBeforeCompile(shader, null);
+    return shader;
+  };
+  const s = compile(mat);
+  for (const part of ['attribute vec4 aFx', 'attribute float aAo', 'uTeamColor', 'vDirectionalShadowCoord[ i ].z -= unitShadowReach']) {
+    assert.ok(s.vertexShader.includes(part), part);
+  }
+  for (const part of [
+    'roughnessFactor *= vUnitFx.y', 'metalnessFactor *= vUnitFx.z', 'unitGlow', 'unitAo', 'unitHue', 'uUnitSheen',
+    'reflectVec.y = abs', 'vec3( 0.2126, 0.7152, 0.0722 ) ) ), 0.7 )', 'radiance += iblRadiance * ( 1.0 + uUnitLook.z',
+    'shadowIntensity * 0.85', 'cloudShade', 'uRimStrength',
+  ]) {
+    assert.ok(s.fragmentShader.includes(part), part);
+  }
+  for (const chunk of ['lights_fragment_begin', 'lights_fragment_maps', 'envmap_physical_pars_fragment']) {
+    assert.ok(!s.fragmentShader.includes(`#include <${chunk}>`), `${chunk} replaced`);
+  }
+  assert.ok(!s.vertexShader.includes('#include <shadowmap_vertex>'), 'shadowmap_vertex replaced');
+  assert.equal(s.uniforms.uTeamColor, mat.userData.uTeamColor, 'team color uniform shared through userData');
+  // unit-fade.js clones the material and shares userData and both hooks
+  const fade = mat.clone();
+  fade.userData = mat.userData;
+  fade.onBeforeCompile = mat.onBeforeCompile;
+  fade.customProgramCacheKey = mat.customProgramCacheKey;
+  fade.alphaHash = true;
+  const f = compile(fade);
+  assert.equal(f.fragmentShader, s.fragmentShader);
+  assert.equal(f.uniforms.uTeamColor, s.uniforms.uTeamColor);
+  assert.equal(f.uniforms.uUnitLook, s.uniforms.uUnitLook);
+  assert.equal(fade.customProgramCacheKey(), mat.customProgramCacheKey());
+});
+
 test('workers swap tools and show cargo', () => {
   const m = buildUnitModel(UNITS.worshipper, PLAYER_COLORS[3]);
   const visibleMeshes = () => {
@@ -279,8 +346,26 @@ test('workers swap tools and show cargo', () => {
 
 test('preload and cache clearing rebuild cleanly', () => {
   preloadUnitModels(Object.values(MORTALS));
+  const aoOf = (u) => {
+    const m = buildUnitModel(u, PLAYER_COLORS[4]);
+    const out = new Map();
+    m.root.traverse((o) => {
+      if (o.isMesh && o.geometry.attributes.aAo) out.set(o.name, o.geometry.attributes.aAo);
+    });
+    m.dispose();
+    return out;
+  };
+  const before = aoOf(UNITS.worshipper);
   clearUnitModelCache();
   const m = buildUnitModel(UNITS.archer, PLAYER_COLORS[4]);
   runStates(m, 'archer after clear');
   m.dispose();
+  // rebuilt templates get the occlusion baked before the clear (not a blank one)
+  const after = aoOf(UNITS.worshipper);
+  assert.equal(after.size, before.size);
+  assert.ok([...after.values()].some((a) => a.array.some((v) => v < 0.95)), 'occlusion is baked');
+  for (const [name, attr] of after) {
+    assert.notEqual(attr, before.get(name), `${name}: new geometry after the clear`);
+    assert.deepEqual([...attr.array], [...before.get(name).array], `${name}: same baked occlusion`);
+  }
 });

@@ -7,16 +7,21 @@
 //   model.dispose();                       // detaches; shared geometry stays cached
 //
 // Geometry is built once per unit type (merged, vertex-colored, with morph
-// targets for knees / elbows / wings / waves) and shared by every instance.
-// One Lambert material per (team color × morph count × opacity) covers all
-// units; team-colored vertices are recolored in the vertex shader.
+// targets for knees / elbows / wings / waves and baked ambient occlusion) and
+// shared by every instance. One physically based material per (team color ×
+// morph count × opacity) covers all units: team-colored vertices are
+// recolored in the vertex shader, and every vertex carries its own roughness,
+// metalness, self-glow and occlusion (unit-geo.js), so metal reflects the sky
+// while cloth stays matte under the same material.
 import * as THREE from 'three';
 import { buildTemplate, normalizeVisual } from './unit-bodies.js';
 import { animateModel, driveWave } from './unit-anim.js';
-import { PartBuilder, TEAM, C, box, cyl, dodeca, seg, T } from './unit-geo.js';
+import { PartBuilder, TEAM, C, withMat, box, cyl, dodeca, seg, T, bakeAO } from './unit-geo.js';
+import { patchWorldMaterial } from '../shading.js';
 
 const HOVER = 2.2; // air units fly this high above the ground
 const TEMPLATES = new Map();
+const AO_CACHE = new Map(); // template key → baked aAo arrays (outlives clearUnitModelCache, see templateAO)
 const MATERIALS = new Map();
 const AURA_MATS = new Map();
 let shared = null;
@@ -26,20 +31,143 @@ let seedCounter = 1;
 // materials
 // ---------------------------------------------------------------------------
 
-function patchTeamShader(mat) {
+/**
+ * Shared by every unit material (uUnitLook): x = emissive gain of full glow
+ * (eyes, runes, flames, orbs reach up to ~2.5x their albedo, above the bloom
+ * threshold of the HDR pipeline; see UNIT_EMISSIVE for the per-channel cap),
+ * y = how much of the baked occlusion also
+ * dims direct sunlight (indirect light always gets all of it), z = extra sky
+ * reflection on metal (an RTS camera sees little bright sky in reflections;
+ * without it metal reads darker than cloth), w = diffuse gain (makes up for
+ * the light the PBR model moves from diffuse into Fresnel, so cloth and skin
+ * stay as bright as the old Lambert units).
+ * uUnitSheen: x = specular strength left on rough non-metals, y = strength
+ * of the sky reflection on all non-metals (a full Fresnel reflection of sun
+ * and sky lays a grey film over saturated cloth, paint and team colors).
+ */
+const UNIT_UNIFORMS = {
+  uUnitLook: { value: new THREE.Vector4(1.65, 0.3, 2.4, 1.06) },
+  uUnitSheen: { value: new THREE.Vector2(0.25, 0.4) },
+};
+
+const UNIT_PARS_VERTEX = `
+attribute vec4 aFx;
+attribute float aAo;
+uniform vec3 uTeamColor;
+varying vec4 vUnitFx; // glow, roughness, metalness, occlusion`;
+const UNIT_VERTEX = `
+#if defined( USE_COLOR )
+  if ( aFx.x > 0.0 ) vColor.rgb = uTeamColor * aFx.x;
+#endif
+  vUnitFx = vec4( aFx.yzw, aAo );`;
+const UNIT_PARS_FRAGMENT = `
+uniform vec4 uUnitLook;
+uniform vec2 uUnitSheen;
+varying vec4 vUnitFx;`;
+// Glow: g * (0.85 + gain * g^2) keeps faint glints (jewelry, 0.15) subtle and
+// pushes full glow into HDR. The gain stops where the strongest channel
+// reaches 1.6, so pale glow (lightning, souls, gold) blooms while saturated
+// fire keeps its hue instead of washing out to pink in the tone mapper.
+const UNIT_EMISSIVE = `
+{
+  float unitGlow = vUnitFx.x;
+  float unitPeak = max( max( diffuseColor.r, diffuseColor.g ), max( diffuseColor.b, 0.05 ) );
+  float unitGain = min( 0.85 + uUnitLook.x * unitGlow * unitGlow, max( 0.85, 1.6 / unitPeak ) );
+  totalEmissiveRadiance += diffuseColor.rgb * unitGlow * unitGain;
+}`;
+// Occlusion as an aoMap would apply it (indirect diffuse and specular), plus
+// part of the direct light so crevices still read in full sun. Metal keeps the
+// strength of its sky reflection but takes the hue of its albedo (scaled so
+// the brightest channel matches): the grey Fresnel / multi-scatter terms and
+// the sky's own tint would otherwise wash saturated gold or copper out to tan.
+// Non-metals keep a weaker sky reflection, and rough ones (cloth, fur, wood:
+// roughness 0.85 and up) only a faint sheen of the sun too (uUnitSheen), so
+// cloth, paint and team colors stay about as saturated as their albedo while
+// smooth surfaces (skin, leather, lacquer, gems) keep their sun highlights.
+const UNIT_AO = `
+{
+  float unitAo = vUnitFx.w;
+  float unitAoDirect = mix( 1.0, unitAo, uUnitLook.y );
+  reflectedLight.indirectDiffuse *= unitAo * uUnitLook.w;
+  reflectedLight.directDiffuse *= unitAoDirect * uUnitLook.w;
+  float unitMetal = saturate( material.metalness * 2.5 );
+  float unitSheen = mix( 1.0, uUnitSheen.x, smoothstep( 0.45, 0.85, material.roughness ) );
+  reflectedLight.directSpecular *= unitAoDirect * mix( unitSheen, 1.0, unitMetal );
+  float unitNV = saturate( dot( geometryNormal, geometryViewDir ) );
+  vec3 unitSpec = reflectedLight.indirectSpecular;
+  vec3 unitHue = diffuseColor.rgb / max( max3( diffuseColor.rgb ), 1e-3 );
+  unitSpec = mix( unitSpec * unitSheen * uUnitSheen.y, max3( unitSpec ) * unitHue, unitMetal );
+  reflectedLight.indirectSpecular = unitSpec * computeSpecularOcclusion( unitNV, unitAo, material.roughness );
+}`;
+// Units reflect the sky, never the ground under them: reflection vectors that
+// point down are mirrored up, so metal turned toward the (high) camera shows
+// sky instead of dark soil. The reflected sky is mostly desaturated (it
+// tints the sheen of non-metals; metal takes its own hue in UNIT_AO).
+const SKY_REFLECTION = THREE.ShaderChunk.envmap_physical_pars_fragment
+  .replace(
+    'reflectVec = transformDirectionByInverseViewMatrix( reflectVec, viewMatrix );',
+    'reflectVec = transformDirectionByInverseViewMatrix( reflectVec, viewMatrix );\n\t\t\treflectVec.y = abs( reflectVec.y );',
+  )
+  .replace(
+    'vec4 envMapColor = textureCubeUV( envMap, envMapRotation * reflectVec, roughness );\n\t\t\treturn envMapColor.rgb * envMapIntensity;',
+    'vec4 envMapColor = textureCubeUV( envMap, envMapRotation * reflectVec, roughness );\n\t\t\treturn mix( envMapColor.rgb, vec3( dot( envMapColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), 0.7 ) * envMapIntensity;',
+  );
+// The extra sky reflection on metal (uUnitLook.z) boosts the reflected
+// radiance only, not the irradiance-driven multi-scatter term.
+const UNIT_IBL = THREE.ShaderChunk.lights_fragment_maps.replace(
+  'radiance += iblRadiance;',
+  'radiance += iblRadiance * ( 1.0 + uUnitLook.z * material.metalness );',
+);
+
+// Received sun shadows ignore occluders within UNIT_SHADOW_REACH (in model
+// units, about a third of a humanoid's height) of the surface along the sun
+// ray: a unit's own head, arms and weapon, which the soft shadow map cannot
+// resolve at unit size (it would put a god's whole front in grey shade). The
+// lookup depth moves toward the light by that distance in world units; the
+// shadow camera is orthographic, so that is a constant shift of the shadow
+// coordinate's depth by the length of its gradient (the z row of the shadow
+// matrix). Trees, buildings and big neighbours still shade units, at
+// UNIT_SHADOW strength.
+const UNIT_SHADOW = 0.85;
+const UNIT_SHADOW_REACH = 0.42;
+const UNIT_SHADOW_VERTEX = `
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+  float unitShadowReach = ${UNIT_SHADOW_REACH.toFixed(2)} * length( modelMatrix[ 1 ].xyz );
+  #ifdef USE_REVERSED_DEPTH_BUFFER
+    unitShadowReach = - unitShadowReach;
+  #endif
+#endif
+${THREE.ShaderChunk.shadowmap_vertex.replace(
+    'vDirectionalShadowCoord[ i ] = directionalShadowMatrix[ i ] * shadowWorldPosition;',
+    `vDirectionalShadowCoord[ i ] = directionalShadowMatrix[ i ] * shadowWorldPosition;
+			vDirectionalShadowCoord[ i ].z -= unitShadowReach * length( vec3( directionalShadowMatrix[ i ][ 0 ].z, directionalShadowMatrix[ i ][ 1 ].z, directionalShadowMatrix[ i ][ 2 ].z ) );`,
+  )}`;
+const UNIT_LIGHTS = THREE.ShaderChunk.lights_fragment_begin.replace(
+  'directionalLightShadow.shadowIntensity,',
+  `directionalLightShadow.shadowIntensity * ${UNIT_SHADOW.toFixed(2)},`,
+);
+
+function patchUnitShader(mat) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTeamColor = mat.userData.uTeamColor;
+    shader.uniforms.uUnitLook = UNIT_UNIFORMS.uUnitLook;
+    shader.uniforms.uUnitSheen = UNIT_UNIFORMS.uUnitSheen;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aFx;\nuniform vec3 uTeamColor;\nvarying float vGlow;')
-      .replace(
-        '#include <color_vertex>',
-        '#include <color_vertex>\n#if defined( USE_COLOR )\n\tif ( aFx.x > 0.0 ) vColor.rgb = uTeamColor * aFx.x;\n#endif\n\tvGlow = aFx.y;',
-      );
+      .replace('#include <common>', `#include <common>\n${UNIT_PARS_VERTEX}`)
+      .replace('#include <color_vertex>', `#include <color_vertex>\n${UNIT_VERTEX}`)
+      .replace('#include <shadowmap_vertex>', UNIT_SHADOW_VERTEX);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vGlow;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * vGlow * 0.85;');
+      .replace('#include <common>', `#include <common>\n${UNIT_PARS_FRAGMENT}`)
+      .replace('#include <envmap_physical_pars_fragment>', SKY_REFLECTION)
+      .replace('#include <lights_fragment_begin>', UNIT_LIGHTS)
+      .replace('#include <lights_fragment_maps>', UNIT_IBL)
+      // per-vertex surface: the material's own roughness / metalness are 1
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n\troughnessFactor *= vUnitFx.y;')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tmetalnessFactor *= vUnitFx.z;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${UNIT_EMISSIVE}`)
+      .replace('#include <aomap_fragment>', `#include <aomap_fragment>\n${UNIT_AO}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-unit-v1';
+  mat.customProgramCacheKey = () => 'mythicwar-unit-v3';
 }
 
 /**
@@ -51,7 +179,7 @@ export function getUnitMaterial(teamColor, morphCount = 0, ghost = false) {
   const key = `${col.getHexString()}|${morphCount}|${ghost ? 1 : 0}`;
   let m = MATERIALS.get(key);
   if (m) return m;
-  m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  m = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, metalness: 1 });
   m.userData.uTeamColor = { value: col };
   if (ghost) {
     m.transparent = true;
@@ -59,7 +187,9 @@ export function getUnitMaterial(teamColor, morphCount = 0, ghost = false) {
     m.depthWrite = true;
   }
   m.name = `unit-${key}`;
-  patchTeamShader(m);
+  patchUnitShader(m);
+  // drifting cloud shadows like the ground, and a cool rim so units stand off it
+  patchWorldMaterial(m, { rim: 0.3, cloud: true });
   MATERIALS.set(key, m);
   return m;
 }
@@ -158,23 +288,27 @@ function sharedAssets() {
   sack.add(bag, '#a8865a');
   const tie = cyl(0.03, 0.04, 0.04, 5);
   T(tie, [0, 0.092, 0]);
-  sack.add(tie, '#6a4a2a');
+  sack.add(tie, '#6a4a2a', { mat: 'leather' });
   for (let i = 0; i < 3; i++) {
     const coin = cyl(0.028, 0.028, 0.012, 6);
     T(coin, [Math.cos(i * 2.1) * 0.03, 0.12, Math.sin(i * 2.1) * 0.03], [0.4, 0, 0.3 * i]);
-    sack.add(coin, '#ffd040', { glow: 0.6 });
+    sack.add(coin, withMat('#ffd040', 'gold'), { glow: 0.6 });
   }
   const wood = new PartBuilder();
   // a bundle of logs lying front-to-back on the shoulder (reads from above)
   for (let i = 0; i < 3; i++) {
     const log = seg([-0.2, -0.03, 0], [0.17, 0.04, 0], 0.036, 0.032, 5);
     T(log, [0, i === 2 ? 0.055 : 0, i === 2 ? 0 : (i - 0.5) * 0.065]);
-    wood.add(log, i % 2 ? '#8a5e34' : '#6e4a2a');
+    wood.add(log, i % 2 ? '#8a5e34' : '#6e4a2a', { mat: 'wood' });
   }
   const strap = cyl(0.075, 0.075, 0.03, 6, true);
   T(strap, [0, 0.02, 0], [0, 0, Math.PI / 2], [1, 1, 1.1]);
-  wood.add(strap, TEAM(0.8));
-  shared = { aura, shadow, shadowMat, sack: sack.build(), wood: wood.build() };
+  wood.add(strap, TEAM(0.8, 'leather'));
+  const sackGeo = sack.build();
+  const woodGeo = wood.build();
+  bakeAO([{ geo: sackGeo }], { ground: 0 });
+  bakeAO([{ geo: woodGeo }], { ground: 0 });
+  shared = { aura, shadow, shadowMat, sack: sackGeo, wood: woodGeo };
   return shared;
 }
 
@@ -186,11 +320,103 @@ function templateKey(unitType) {
   return `${unitType.id}|${unitType.class}|${unitType.air ? 1 : 0}|${JSON.stringify(unitType.visual || {})}`;
 }
 
+/**
+ * Bake ambient occlusion over the whole model, so parts occlude each other
+ * (arms on the torso, legs under the body). Arms are posed as they idle
+ * (unit-anim.js restArms: swung a little forward, elbow at its rest bend), so
+ * a spear held forward is not baked as if it pointed into the ground. Worker
+ * tool arms are baked against the rest of the body in place of the bare arm.
+ */
+function bakeTemplateAO(tpl, unitType) {
+  const rig = tpl.rig;
+  const mats = new Map();
+  const byName = new Map(tpl.parts.map((p) => [p.name, p]));
+  const restRot = (p) => {
+    if (p.name === 'armL' && rig.holdAloft) return [-0.3, 0, 2.5];
+    if (p.name === 'armR' || p.name === 'armL') return [p.name === 'armR' ? -0.1 : 0.1, 0, 0.14];
+    return p.rot || [0, 0, 0];
+  };
+  const matrixOf = (p) => {
+    let m = mats.get(p.name);
+    if (m) return m;
+    const r = restRot(p);
+    _e.set(r[0], r[1], r[2]);
+    m = new THREE.Matrix4().compose(_v.fromArray(p.pos), _q.setFromEuler(_e), _one);
+    const parent = p.parent && byName.get(p.parent);
+    if (parent) m.premultiply(matrixOf(parent));
+    mats.set(p.name, m);
+    return m;
+  };
+  const entry = (p, geo = p.geo) => {
+    const e = { geo, matrix: matrixOf(p) };
+    if (p.name === 'armR' || p.name === 'armL') {
+      const bend = p.name === 'armL' && rig.holdAloft ? 0.55 : ((p.name === 'armR' ? rig.rightElbow : rig.leftElbow) ?? 0.25) * (Math.PI / 2);
+      e.positions = elbowPose(geo, bend);
+    }
+    return e;
+  };
+  const entries = [];
+  for (const p of tpl.parts) if (p.geo) entries.push(entry(p));
+  const ground = unitType.air ? 0 : 1; // flyers hover: no darkening toward their (absent) feet
+  bakeAO(entries, { ground });
+  const arm = byName.get('armR');
+  if (!rig.tools || !arm) return;
+  const body = entries.filter((e) => e.geo !== arm.geo).map((e) => ({ ...e, receive: false }));
+  for (const g of new Set(Object.values(rig.tools))) {
+    if (g !== arm.geo) bakeAO([...body, entry(arm, g)], { ground });
+  }
+}
+
+/** Positions of an arm geometry with its elbow morphs (e45 / e90) bent by `angle` radians, or null. */
+function elbowPose(geo, angle) {
+  const names = geo.userData.morphNames || [];
+  const morphs = geo.morphAttributes.position;
+  const i45 = names.indexOf('e45');
+  const i90 = names.indexOf('e90');
+  if (!morphs || (i45 < 0 && i90 < 0) || !(angle > 0)) return null;
+  const q = Math.PI / 4;
+  const a = Math.min(angle, 2 * q);
+  const w45 = a <= q ? a / q : 2 - a / q;
+  const w90 = a <= q ? 0 : a / q - 1;
+  const base = geo.attributes.position.array;
+  const out = new Float32Array(base);
+  const d45 = i45 >= 0 ? morphs[i45].array : null;
+  const d90 = i90 >= 0 ? morphs[i90].array : null;
+  for (let i = 0; i < out.length; i++) out[i] += (d45 ? d45[i] * w45 : 0) + (d90 ? d90[i] * w90 : 0);
+  return new THREE.BufferAttribute(out, 3);
+}
+
+/** Every geometry of a template (parts, then worker tool arms), each once, in build order. */
+function templateGeometries(tpl) {
+  const geos = new Set();
+  for (const p of tpl.parts) if (p.geo) geos.add(p.geo);
+  if (tpl.rig.tools) for (const g of Object.values(tpl.rig.tools)) geos.add(g);
+  return [...geos];
+}
+
+/**
+ * Bake the template's occlusion, or copy it from an earlier bake of the same
+ * template key: templates are rebuilt after clearUnitModelCache (every match),
+ * the bake is the slow part of building one, and its result only depends on
+ * the key. Only the plain arrays are kept.
+ */
+function templateAO(tpl, unitType, key) {
+  const geos = templateGeometries(tpl);
+  const cached = AO_CACHE.get(key);
+  if (cached && cached.length === geos.length && geos.every((g, i) => g.attributes.aAo.count === cached[i].length)) {
+    geos.forEach((g, i) => g.attributes.aAo.array.set(cached[i]));
+    return;
+  }
+  bakeTemplateAO(tpl, unitType);
+  AO_CACHE.set(key, geos.map((g) => g.attributes.aAo.array));
+}
+
 function getTemplate(unitType) {
   const key = templateKey(unitType);
   let tpl = TEMPLATES.get(key);
   if (!tpl) {
     tpl = buildTemplate(unitType);
+    templateAO(tpl, unitType, key);
     tpl.visual = normalizeVisual(unitType.visual);
     tpl.triangles = 0;
     tpl.meshes = 0;
@@ -212,6 +438,9 @@ function getTemplate(unitType) {
 
 const _box = new THREE.Box3();
 const _v = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _one = new THREE.Vector3(1, 1, 1);
 
 function baseBox(geo) {
   if (!geo.userData.baseBox) {
@@ -253,6 +482,8 @@ class UnitModel {
         const count = p.geo.morphAttributes.position ? p.geo.morphAttributes.position.length : 0;
         obj = new THREE.Mesh(p.geo, getUnitMaterial(this.teamColor, count, !!p.ghost));
         obj.castShadow = true;
+        // trees, buildings (and on high / ultra other units) shade units too
+        obj.receiveShadow = true;
       } else obj = new THREE.Group();
       obj.name = p.name;
       obj.position.fromArray(p.pos);
@@ -270,6 +501,7 @@ class UnitModel {
       this.carryMesh = new THREE.Mesh(assets.sack, getUnitMaterial(this.teamColor, 0, false));
       this.carryMesh.visible = false;
       this.carryMesh.castShadow = true;
+      this.carryMesh.receiveShadow = true;
       this.parts.carry.add(this.carryMesh);
     }
     this.toolKind = 'none';
