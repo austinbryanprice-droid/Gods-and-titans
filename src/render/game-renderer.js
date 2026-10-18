@@ -25,7 +25,7 @@ import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
-import { PostFX } from './post.js';
+import { PostFX, RESIZE_SETTLE_MS } from './post.js';
 import { createEnvironment, setCloudShadows, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 
 // Low draws straight to the canvas; the others go through the post-processing
@@ -61,7 +61,7 @@ const MAX_VSYNC_MS = 34; // no display or browser cap runs slower than 30 Hz: lo
 const AIR_RING_LIFT = AIR_HOVER_HEIGHT - 0.14; // flyers' rings: just under the hovering body
 const DEATH_SECONDS = 1.65; // keep animating 'dead' this long (topple + sink)
 const COLLAPSE_SECONDS = 1.6; // destroyed buildings sink this long
-const EVENT_STALE = 1.5; // seconds: VFX events older than this are dropped (hidden tab)
+const EVENT_STALE = 1.5; // seconds of real time: queued VFX events older than this are dropped (hidden tab)
 // Unit animation CPU budget per frame (ms). Past it, small on-screen units
 // animate round robin (every 2nd..5th frame, accumulating dt).
 const ANIM_MS = 2.0;
@@ -154,6 +154,7 @@ export class GameRenderer {
     if (this.post) this.post.look.aoFloor = WATER_LEVEL; // no ambient occlusion on the lake bed under the water
     this.renderScale = 1;
     this.lastRenderAt = 0;
+    this.sizeTimer = 0; // fallback that applies a held-back post size when no frame follows
     this.vsyncMs = 1000 / 60; // the display's frame period (learned)
     this.resetAdaptive();
     this.applyPixelRatio();
@@ -311,7 +312,32 @@ export class GameRenderer {
   syncPostSize() {
     if (!this.post || typeof this.renderer.getDrawingBufferSize !== 'function') return;
     const v = this.renderer.getDrawingBufferSize(this._dbs || (this._dbs = new THREE.Vector2()));
-    this.post.setSize(v.x, v.y);
+    this.post.setSize(v.x, v.y, now());
+    this.armSizeSettle();
+  }
+
+  /**
+   * The post targets are reallocated once a changed size has held still (post.setSize),
+   * which render() applies. With no frames following (a paused game redraws only on a
+   * resize) a timer applies it and redraws once.
+   */
+  armSizeSettle() {
+    const post = this.post;
+    if (this.sizeTimer || this.disposed || !post || !post.enabled || !post.sizePending) return;
+    const wait = Math.max(16, post.sizeAt + RESIZE_SETTLE_MS - now() + 8);
+    const timer = (this.sizeTimer = setTimeout(() => {
+      this.sizeTimer = 0;
+      if (this.disposed || !this.post) return;
+      if (!this.post.settleSize(now())) this.armSizeSettle(); // sized again meanwhile
+      else {
+        try {
+          this.render();
+        } catch (err) {
+          console.error('[render] redraw after resize failed', err);
+        }
+      }
+    }, wait));
+    if (timer && typeof timer.unref === 'function') timer.unref();
   }
 
   buildForest() {
@@ -656,7 +682,9 @@ export class GameRenderer {
         return;
     }
     if (this.events.length > 1500) this.events.splice(0, this.events.length - 1000);
-    this.events.push({ ev, t: this.time });
+    // stamped on the real clock: this.time only advances in update() (dt is capped), so
+    // it stands still while the tab is hidden and could never tell how old an event is
+    this.events.push({ ev, at: now() });
   }
 
   onTreeFelled(ev) {
@@ -671,10 +699,10 @@ export class GameRenderer {
   processEvents() {
     const list = this.events;
     if (!list.length) return;
-    const time = this.time;
+    const cutoff = now() - EVENT_STALE * 1000;
     for (let i = 0; i < list.length; i++) {
-      const { ev, t } = list[i];
-      if (time - t > EVENT_STALE) continue;
+      const { ev, at } = list[i];
+      if (at < cutoff) continue;
       try {
         this.handleEvent(ev);
       } catch (err) {
@@ -1646,7 +1674,7 @@ export class GameRenderer {
       // the ~50% brightness of low quality)
       FOW_UNIFORMS.uFowPow.value = 1.4;
       this.post.look.exposure = EXPOSURE;
-      this.post.render(this.scene, this.threeCamera, this.overlayScene);
+      this.post.render(this.scene, this.threeCamera, this.overlayScene, now());
       return;
     }
     // low: straight to the canvas, tone mapped in the material shaders; then the overlays, untouched
@@ -1799,6 +1827,8 @@ export class GameRenderer {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.sizeTimer) clearTimeout(this.sizeTimer);
+    this.sizeTimer = 0;
     for (const off of this.unsub) off();
     this.unsub = [];
     for (const v of this.units.values()) v.dispose();

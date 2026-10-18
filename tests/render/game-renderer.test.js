@@ -4,7 +4,7 @@
 // only for what the local player may see, picks / box-selects / projects, turns
 // view-state events into VFX, keeps update() cheap with hundreds of units, and
 // dispose() leaves an empty scene.
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 
@@ -402,4 +402,159 @@ test('GameRenderer: medium and up draw through post-processing, low straight to 
   assert.ok(r.post.enabled && r.post.scene, 'targets come back live');
   r.dispose();
   assert.equal(r.post.targets.length, 0, 'dispose frees the targets');
+});
+
+/** Drive the renderer's real-time clock (performance.now) by hand. */
+function fakeClock(start = 50000) {
+  let t = start;
+  mock.method(performance, 'now', () => t);
+  return {
+    advance(ms) {
+      t += ms;
+      return t;
+    },
+    restore() {
+      mock.restoreAll();
+    },
+  };
+}
+
+test('GameRenderer: VFX events queued while the tab was hidden are dropped on return', () => {
+  const { vs, r, step } = makeMatch();
+  step(0.3);
+  const clock = fakeClock();
+  try {
+    const handled = [];
+    const handle = r.handleEvent.bind(r);
+    r.handleEvent = (ev) => (handled.push(ev.type), handle(ev));
+    // a hidden tab: events keep arriving (the sim runs in a worker) but no frame runs for a while
+    for (let i = 0; i < 1200; i++) vs.fire({ type: 'attack', src: -1 - i, dst: -1, ranged: false });
+    clock.advance(30000);
+    for (let i = 0; i < 3; i++) vs.fire({ type: 'bounty', player: 1, x: 1, y: 1, amount: 5 });
+    clock.advance(500);
+    assert.equal(r.events.length, 1203);
+    // back: the first frame is one capped dt (0.1 s), which never aged the queue before
+    r.update(0.1);
+    assert.deepEqual(handled, ['bounty', 'bounty', 'bounty'], 'only what happened within the last 1.5 s plays');
+    assert.equal(r.events.length, 0, 'the queue is empty again');
+    // events handled in the frame they arrive are never stale, however long the frame takes to run
+    handled.length = 0;
+    vs.fire({ type: 'attack', src: -2, dst: -1, ranged: false });
+    clock.advance(40);
+    r.update(1 / 30);
+    assert.deepEqual(handled, ['attack']);
+  } finally {
+    clock.restore();
+    r.dispose();
+  }
+});
+
+test('GameRenderer: a window drag reallocates the post targets once, after the size has held still', () => {
+  const { r, webgl } = makeMatch({ post: true });
+  const clock = fakeClock();
+  try {
+    const post = r.post;
+    const first = post.scene;
+    assert.ok(first && post.width === W && post.height === H);
+    let allocs = 0;
+    const allocate = post.allocate.bind(post);
+    post.allocate = () => (allocs++, allocate());
+    // dragging the window edge: a resize every frame
+    for (let i = 1; i <= 20; i++) {
+      r.resize(W - i * 10, H - i * 4);
+      // the contract callers rely on: the size is applied at once ...
+      assert.equal(r.viewW, W - i * 10);
+      assert.equal(r.viewH, H - i * 4);
+      assert.deepEqual(webgl.size, [W - i * 10, H - i * 4]);
+      assert.ok(Math.abs(r.threeCamera.aspect - (W - i * 10) / (H - i * 4)) < 1e-6, 'the camera follows');
+      // ... and the frame is drawn at once, into the old targets
+      clock.advance(16);
+      r.render();
+      assert.equal(post.scene, first, 'no reallocation while the size changes');
+    }
+    assert.equal(allocs, 0);
+    assert.ok(post.sizePending);
+    assert.equal(post.canvasW, W - 200, 'the vignette aspect follows the canvas');
+    // held still for less than the settle time: still the old targets
+    clock.advance(60);
+    r.render();
+    assert.equal(allocs, 0);
+    // settled: the next frame reallocates once, at the final size
+    clock.advance(80);
+    r.render();
+    assert.equal(allocs, 1);
+    assert.notEqual(post.scene, first);
+    assert.equal(post.width, W - 200);
+    assert.equal(post.height, H - 80);
+    assert.ok(!post.sizePending);
+    clock.advance(500);
+    r.render();
+    assert.equal(allocs, 1, 'and not again');
+    // a repeated resize to the same size does not restart anything
+    r.resize(W - 200, H - 80);
+    assert.ok(!post.sizePending);
+    // quality changes reallocate at the latest size at once
+    r.resize(W, H);
+    assert.ok(post.sizePending);
+    r.setQuality('high');
+    assert.ok(!post.sizePending);
+    assert.equal(post.width, W);
+    assert.ok(post.aoRaw && post.scene.width === W);
+  } finally {
+    clock.restore();
+    r.dispose();
+  }
+});
+
+test('GameRenderer: a held-back post size still lands when no frame follows (paused game)', () => {
+  const { r, webgl } = makeMatch({ post: true });
+  const clock = fakeClock();
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const post = r.post;
+    const first = post.scene;
+    r.resize(W - 300, H - 100);
+    assert.ok(post.sizePending);
+    assert.equal(post.scene, first);
+    const renders = webgl.renders;
+    clock.advance(130);
+    mock.timers.tick(130);
+    assert.ok(!post.sizePending, 'the timer applied the size');
+    assert.equal(post.width, W - 300);
+    assert.equal(webgl.renders, renders + 2, 'and redrew once (world + overlays)');
+    // another resize while it waits pushes the reallocation back
+    r.resize(W - 310, H - 100);
+    clock.advance(100);
+    r.resize(W - 320, H - 100);
+    clock.advance(40);
+    mock.timers.tick(140);
+    assert.ok(post.sizePending, 'sized again 40 ms ago');
+    clock.advance(100);
+    mock.timers.tick(100);
+    assert.ok(!post.sizePending);
+    assert.equal(post.width, W - 320);
+    // no timer outlives the renderer
+    r.resize(W - 400, H - 100);
+    assert.ok(r.sizeTimer);
+    r.dispose();
+    assert.equal(r.sizeTimer, 0);
+    const renders2 = webgl.renders;
+    clock.advance(500);
+    mock.timers.tick(500);
+    assert.equal(webgl.renders, renders2);
+  } finally {
+    mock.timers.reset();
+    clock.restore();
+    r.dispose();
+  }
+});
+
+test('GameRenderer: resize without a post pipeline just applies the size (stub WebGL)', () => {
+  const { r, webgl } = makeMatch();
+  assert.equal(r.post, null);
+  r.resize(800, 450);
+  assert.deepEqual(webgl.size, [800, 450]);
+  assert.equal(r.viewW, 800);
+  assert.equal(r.sizeTimer, 0);
+  r.dispose();
 });

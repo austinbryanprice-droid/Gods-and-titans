@@ -11,8 +11,8 @@
 // behind the units and buildings in front of them.
 //
 //   const post = new PostFX(webglRenderer, 'high');
-//   post.setSize(drawingBufferWidth, drawingBufferHeight);
-//   post.render(scene, camera, overlayScene);   // whole frame
+//   post.setSize(drawingBufferWidth, drawingBufferHeight, nowMs);
+//   post.render(scene, camera, overlayScene, nowMs);   // whole frame
 //   post.setQuality('medium'); post.setRenderScale(0.8); post.dispose();
 //
 // Everything is plain three.js (render targets + ShaderMaterials on one
@@ -26,6 +26,13 @@ export const POST_QUALITY = {
   high: { samples: 4, bloomLevels: 6, aoTaps: 10 },
   ultra: { samples: 4, bloomLevels: 6, aoTaps: 16 },
 };
+
+/**
+ * A changed canvas size reallocates the targets only after it has held still this
+ * long (ms): dragging a window edge fires a resize event per frame, and every
+ * reallocation frees and rebuilds the multisampled HDR, bloom and AO targets.
+ */
+export const RESIZE_SETTLE_MS = 120;
 
 /** Look of the final image; tweakable live through `post.look`. */
 export const DEFAULT_LOOK = {
@@ -356,8 +363,12 @@ export class PostFX {
   constructor(renderer, quality = 'medium') {
     this.renderer = renderer;
     this.look = { ...DEFAULT_LOOK };
-    this.width = 1;
+    this.width = 1; // the canvas size the targets are allocated for
     this.height = 1;
+    this.canvasW = 1; // the canvas size asked for last; differs from width while a resize is held back
+    this.canvasH = 1;
+    this.sizeAt = 0; // ms timestamp of the last change of canvasW / canvasH
+    this.sized = false; // true once setSize has been called
     this.renderScale = 1;
     this.hdr = supportsHalfFloat(renderer);
     this.type = this.hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
@@ -428,6 +439,7 @@ export class PostFX {
       }, { AO_TAPS: cfg.aoTaps });
     }
     this.buildComposite();
+    this.adoptSize();
     this.freeTargets();
     this.allocate();
   }
@@ -462,15 +474,59 @@ export class PostFX {
     this.composite.depthFunc = THREE.AlwaysDepth;
   }
 
-  /** Drawing-buffer size of the canvas in device pixels. */
-  setSize(w, h) {
+  /**
+   * Drawing-buffer size of the canvas in device pixels. The first call, and any call
+   * without a timestamp, reallocates the targets at once. Otherwise a changed size
+   * waits until it has held still for RESIZE_SETTLE_MS (render() or settleSize()
+   * then applies it); until then the frame is drawn into the old targets and
+   * stretched to the canvas, which keeps the picture's geometry (the camera already
+   * has the new aspect) at a briefly lower resolution.
+   * @param {number} w
+   * @param {number} h
+   * @param {number} [t] ms timestamp (same clock as render's)
+   */
+  setSize(w, h, t) {
     w = Math.max(1, Math.floor(w));
     h = Math.max(1, Math.floor(h));
-    if (w === this.width && h === this.height && this.scene) return;
-    this.width = w;
-    this.height = h;
+    const changed = w !== this.canvasW || h !== this.canvasH;
+    this.canvasW = w;
+    this.canvasH = h;
+    if (!this.sized || typeof t !== 'number') {
+      this.sized = true;
+      this.applySize();
+    } else if (changed) this.sizeAt = t;
+  }
+
+  /** True while a changed canvas size is waiting for the targets to be reallocated. */
+  get sizePending() {
+    return this.canvasW !== this.width || this.canvasH !== this.height;
+  }
+
+  /** Allocate the targets for the latest canvas size from now on. */
+  adoptSize() {
+    this.width = this.canvasW;
+    this.height = this.canvasH;
+  }
+
+  applySize() {
+    const same = this.canvasW === this.width && this.canvasH === this.height;
+    this.adoptSize();
+    if (same && this.scene) return;
     this.freeTargets();
     this.allocate();
+  }
+
+  /**
+   * Reallocate the targets for a held-back size once it has held still for
+   * RESIZE_SETTLE_MS (at once without a timestamp).
+   * @param {number} [t] ms timestamp
+   * @returns {boolean} true if the targets were reallocated
+   */
+  settleSize(t) {
+    if (!this.sizePending) return false;
+    if (typeof t === 'number' && t >= this.sizeAt && t - this.sizeAt < RESIZE_SETTLE_MS) return false;
+    this.applySize();
+    return true;
   }
 
   /** Scene resolution relative to the canvas (adaptive resolution), 0.5..1. */
@@ -478,6 +534,7 @@ export class PostFX {
     s = Math.max(0.5, Math.min(1, s));
     if (Math.abs(s - this.renderScale) < 0.01) return;
     this.renderScale = s;
+    this.adoptSize(); // reallocating anyway: at the latest size
     this.freeTargets();
     this.allocate();
   }
@@ -561,9 +618,11 @@ export class PostFX {
    * @param {THREE.Scene} scene
    * @param {THREE.Camera} camera
    * @param {THREE.Scene} [overlay]
+   * @param {number} [t] ms timestamp, to apply a held-back canvas size once it has settled
    */
-  render(scene, camera, overlay) {
+  render(scene, camera, overlay, t) {
     const r = this.renderer;
+    this.settleSize(t);
     if (!this.scene) this.allocate();
     const look = this.look;
     const prevTarget = r.getRenderTarget();
@@ -643,7 +702,7 @@ export class PostFX {
     c.uHighlightTint.value.fromArray(look.highlightTint);
     c.uVignette.value = look.vignette;
     c.uSharpen.value = this.renderScale < 0.999 ? look.sharpen : 0;
-    const aspect = this.width / Math.max(1, this.height);
+    const aspect = this.canvasW / Math.max(1, this.canvasH);
     c.uAspect.value.set(aspect > 1 ? aspect : 1, aspect > 1 ? 1 : 1 / aspect);
     r.setRenderTarget(null);
     r.autoClear = false;
