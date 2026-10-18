@@ -18,6 +18,7 @@ export async function resolve(spec, ctx, next) {
 }`)}`);
 
 const { GameRenderer } = await import('../../src/render/game-renderer.js');
+const { FOW_UNIFORMS } = await import('../../src/render/fog.js');
 const { createWorld } = await import('../../src/sim/world.js');
 const { ViewState } = await import('../../src/game/view-state.js');
 const { PLAYER_COLORS, DT } = await import('../../src/config.js');
@@ -130,6 +131,8 @@ test('GameRenderer: builds the scene, warms shaders, starts on the local town ce
   for (const v of r.units.values()) assert.ok(!v.visible || vs.isEntityVisible(v.e));
   assert.ok(r.mines.size >= 1);
   r.render();
+  // (this stub has no render targets, so even medium takes the direct path low uses;
+  // the post-processed path is covered below)
   assert.equal(webgl.renders, 2, 'world, then the overlays on top');
   const s = r.getStats();
   for (const k of ['drawCalls', 'triangles', 'entities', 'updateMs']) assert.ok(Number.isFinite(s[k]), k);
@@ -362,4 +365,41 @@ test('GameRenderer: adaptive resolution lowers the scene scale on slow frames an
   t = run(30, 60, t);
   assert.equal(r.renderScale, 1, 'the slow average measured at the old quality does not carry over');
   r.dispose();
+});
+
+test('GameRenderer: medium and up draw through post-processing, low straight to the canvas', () => {
+  const { r, webgl, step } = makeMatch({ post: true });
+  step(0.2);
+  assert.ok(r.post && r.post.enabled);
+  webgl.log.length = 0;
+  r.render();
+  const log = webgl.log;
+  assert.deepEqual(log[0], ['game', 'post-scene'], 'the world goes into the HDR target first');
+  assert.ok(log.some(([, target]) => /^post-bloom/.test(target)), 'bloom passes');
+  assert.ok(!log.some(([, target]) => target === 'post-ao'), 'no ambient occlusion on medium');
+  assert.deepEqual(log[log.length - 2], ['Mesh', 'canvas'], 'the composite lands on the canvas');
+  assert.deepEqual(log[log.length - 1], ['overlays', 'canvas'], 'overlays last, on the canvas, untouched by post');
+  assert.ok(FOW_UNIFORMS.uFowPow.value > 1, 'fog factors raised for linear output');
+  const [sw, sh] = webgl.size;
+  assert.equal(r.post.width, Math.round(sw * webgl.pixelRatio), 'targets follow the drawing buffer');
+  assert.equal(r.post.sh, Math.round(sh * webgl.pixelRatio));
+  for (const q of ['high', 'ultra']) {
+    r.setQuality(q);
+    webgl.log.length = 0;
+    r.render();
+    assert.ok(r.post.aoRaw, `${q}: ambient occlusion targets`);
+    assert.ok(webgl.log.some(([, target]) => target === 'post-ao'), `${q}: ambient occlusion pass`);
+    assert.equal(r.post.samples, 4);
+  }
+  r.setQuality('low');
+  assert.equal(r.post.enabled, false);
+  assert.equal(r.post.scene, null, 'targets freed on low');
+  webgl.log.length = 0;
+  r.render();
+  assert.deepEqual(webgl.log, [['game', 'canvas'], ['overlays', 'canvas']]);
+  assert.equal(FOW_UNIFORMS.uFowPow.value, 1);
+  r.setQuality('medium');
+  assert.ok(r.post.enabled && r.post.scene, 'targets come back live');
+  r.dispose();
+  assert.equal(r.post.targets.length, 0, 'dispose frees the targets');
 });

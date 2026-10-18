@@ -186,9 +186,18 @@ test('fog: patchFowMaterial chains onBeforeCompile, keys the program and is idem
   };
   mat.onBeforeCompile(shader, null);
   assert.equal(prevCalls, 1, 'the previous hook still runs');
-  assert.ok(shader.uniforms.uFowTex && shader.uniforms.uFowSize);
+  // every shared uniform is bound (an unbound uFowPow reads 0 in GLSL: pow(f, 0) = 1, no fog at all)
+  for (const k of Object.keys(FOW_UNIFORMS)) assert.equal(shader.uniforms[k], FOW_UNIFORMS[k], k);
   assert.match(shader.vertexShader, /vFowXZ|vFow/);
   assert.match(shader.fragmentShader, /fowFactor/);
+  assert.match(shader.fragmentShader, /fowApply\(/);
+  // custom shader materials get the same uniforms
+  const custom = new THREE.ShaderMaterial({ vertexShader: 'void main() { gl_Position = vec4( position, 1.0 ); }', fragmentShader: 'void main() { gl_FragColor = vec4( 1.0 ); }' });
+  patchFowMaterial(custom);
+  const cs = { uniforms: {}, vertexShader: custom.vertexShader, fragmentShader: custom.fragmentShader };
+  custom.onBeforeCompile(cs, null);
+  for (const k of Object.keys(FOW_UNIFORMS)) assert.equal(cs.uniforms[k], FOW_UNIFORMS[k], `custom ${k}`);
+  assert.match(cs.fragmentShader, /pow\( fowFactor\( vFowXZ \), uFowPow \)/);
   // objects: every mesh material gets patched
   const g = new THREE.Group();
   const m1 = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
