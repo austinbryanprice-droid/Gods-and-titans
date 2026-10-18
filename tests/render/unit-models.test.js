@@ -290,11 +290,20 @@ test('unit material: PBR shader patch survives fade clones', () => {
     return shader;
   };
   const s = compile(mat);
-  for (const part of ['attribute vec4 aFx', 'attribute float aAo', 'uTeamColor']) assert.ok(s.vertexShader.includes(part), part);
-  for (const part of ['roughnessFactor *= vUnitFx.y', 'metalnessFactor *= vUnitFx.z', 'unitGlow', 'unitAo', 'reflectVec.y = abs', 'shadowIntensity * 0.55', 'cloudShade', 'uRimStrength']) {
+  for (const part of ['attribute vec4 aFx', 'attribute float aAo', 'uTeamColor', 'vDirectionalShadowCoord[ i ].z -= unitShadowReach']) {
+    assert.ok(s.vertexShader.includes(part), part);
+  }
+  for (const part of [
+    'roughnessFactor *= vUnitFx.y', 'metalnessFactor *= vUnitFx.z', 'unitGlow', 'unitAo', 'unitHue', 'uUnitSheen',
+    'reflectVec.y = abs', 'vec3( 0.2126, 0.7152, 0.0722 ) ) ), 0.7 )', 'radiance += iblRadiance * ( 1.0 + uUnitLook.z',
+    'shadowIntensity * 0.85', 'cloudShade', 'uRimStrength',
+  ]) {
     assert.ok(s.fragmentShader.includes(part), part);
   }
-  assert.ok(!s.fragmentShader.includes('#include <lights_fragment_begin>'), 'lights chunk replaced');
+  for (const chunk of ['lights_fragment_begin', 'lights_fragment_maps', 'envmap_physical_pars_fragment']) {
+    assert.ok(!s.fragmentShader.includes(`#include <${chunk}>`), `${chunk} replaced`);
+  }
+  assert.ok(!s.vertexShader.includes('#include <shadowmap_vertex>'), 'shadowmap_vertex replaced');
   assert.equal(s.uniforms.uTeamColor, mat.userData.uTeamColor, 'team color uniform shared through userData');
   // unit-fade.js clones the material and shares userData and both hooks
   const fade = mat.clone();
@@ -337,8 +346,26 @@ test('workers swap tools and show cargo', () => {
 
 test('preload and cache clearing rebuild cleanly', () => {
   preloadUnitModels(Object.values(MORTALS));
+  const aoOf = (u) => {
+    const m = buildUnitModel(u, PLAYER_COLORS[4]);
+    const out = new Map();
+    m.root.traverse((o) => {
+      if (o.isMesh && o.geometry.attributes.aAo) out.set(o.name, o.geometry.attributes.aAo);
+    });
+    m.dispose();
+    return out;
+  };
+  const before = aoOf(UNITS.worshipper);
   clearUnitModelCache();
   const m = buildUnitModel(UNITS.archer, PLAYER_COLORS[4]);
   runStates(m, 'archer after clear');
   m.dispose();
+  // rebuilt templates get the occlusion baked before the clear (not a blank one)
+  const after = aoOf(UNITS.worshipper);
+  assert.equal(after.size, before.size);
+  assert.ok([...after.values()].some((a) => a.array.some((v) => v < 0.95)), 'occlusion is baked');
+  for (const [name, attr] of after) {
+    assert.notEqual(attr, before.get(name), `${name}: new geometry after the clear`);
+    assert.deepEqual([...attr.array], [...before.get(name).array], `${name}: same baked occlusion`);
+  }
 });

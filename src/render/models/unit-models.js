@@ -21,6 +21,7 @@ import { patchWorldMaterial } from '../shading.js';
 
 const HOVER = 2.2; // air units fly this high above the ground
 const TEMPLATES = new Map();
+const AO_CACHE = new Map(); // template key → baked aAo arrays (outlives clearUnitModelCache, see templateAO)
 const MATERIALS = new Map();
 const AURA_MATS = new Map();
 let shared = null;
@@ -40,9 +41,13 @@ let seedCounter = 1;
  * without it metal reads darker than cloth), w = diffuse gain (makes up for
  * the light the PBR model moves from diffuse into Fresnel, so cloth and skin
  * stay as bright as the old Lambert units).
+ * uUnitSheen: x = specular strength left on rough non-metals, y = strength
+ * of the sky reflection on all non-metals (a full Fresnel reflection of sun
+ * and sky lays a grey film over saturated cloth, paint and team colors).
  */
 const UNIT_UNIFORMS = {
   uUnitLook: { value: new THREE.Vector4(1.65, 0.3, 2.4, 1.06) },
+  uUnitSheen: { value: new THREE.Vector2(0.25, 0.4) },
 };
 
 const UNIT_PARS_VERTEX = `
@@ -57,6 +62,7 @@ const UNIT_VERTEX = `
   vUnitFx = vec4( aFx.yzw, aAo );`;
 const UNIT_PARS_FRAGMENT = `
 uniform vec4 uUnitLook;
+uniform vec2 uUnitSheen;
 varying vec4 vUnitFx;`;
 // Glow: g * (0.85 + gain * g^2) keeps faint glints (jewelry, 0.15) subtle and
 // pushes full glow into HDR. The gain stops where the strongest channel
@@ -70,21 +76,33 @@ const UNIT_EMISSIVE = `
   totalEmissiveRadiance += diffuseColor.rgb * unitGlow * unitGain;
 }`;
 // Occlusion as an aoMap would apply it (indirect diffuse and specular), plus
-// part of the direct light so crevices still read in full sun.
+// part of the direct light so crevices still read in full sun. Metal keeps the
+// strength of its sky reflection but takes the hue of its albedo (scaled so
+// the brightest channel matches): the grey Fresnel / multi-scatter terms and
+// the sky's own tint would otherwise wash saturated gold or copper out to tan.
+// Non-metals keep a weaker sky reflection, and rough ones (cloth, fur, wood:
+// roughness 0.85 and up) only a faint sheen of the sun too (uUnitSheen), so
+// cloth, paint and team colors stay about as saturated as their albedo while
+// smooth surfaces (skin, leather, lacquer, gems) keep their sun highlights.
 const UNIT_AO = `
 {
   float unitAo = vUnitFx.w;
   float unitAoDirect = mix( 1.0, unitAo, uUnitLook.y );
   reflectedLight.indirectDiffuse *= unitAo * uUnitLook.w;
   reflectedLight.directDiffuse *= unitAoDirect * uUnitLook.w;
-  reflectedLight.directSpecular *= unitAoDirect;
+  float unitMetal = saturate( material.metalness * 2.5 );
+  float unitSheen = mix( 1.0, uUnitSheen.x, smoothstep( 0.45, 0.85, material.roughness ) );
+  reflectedLight.directSpecular *= unitAoDirect * mix( unitSheen, 1.0, unitMetal );
   float unitNV = saturate( dot( geometryNormal, geometryViewDir ) );
-  reflectedLight.indirectSpecular *= computeSpecularOcclusion( unitNV, unitAo, material.roughness ) * ( 1.0 + uUnitLook.z * metalnessFactor );
+  vec3 unitSpec = reflectedLight.indirectSpecular;
+  vec3 unitHue = diffuseColor.rgb / max( max3( diffuseColor.rgb ), 1e-3 );
+  unitSpec = mix( unitSpec * unitSheen * uUnitSheen.y, max3( unitSpec ) * unitHue, unitMetal );
+  reflectedLight.indirectSpecular = unitSpec * computeSpecularOcclusion( unitNV, unitAo, material.roughness );
 }`;
 // Units reflect the sky, never the ground under them: reflection vectors that
 // point down are mirrored up, so metal turned toward the (high) camera shows
-// sky instead of dark soil. The reflected sky is mostly desaturated, or gold
-// mirroring blue turns olive.
+// sky instead of dark soil. The reflected sky is mostly desaturated (it
+// tints the sheen of non-metals; metal takes its own hue in UNIT_AO).
 const SKY_REFLECTION = THREE.ShaderChunk.envmap_physical_pars_fragment
   .replace(
     'reflectVec = transformDirectionByInverseViewMatrix( reflectVec, viewMatrix );',
@@ -94,11 +112,36 @@ const SKY_REFLECTION = THREE.ShaderChunk.envmap_physical_pars_fragment
     'vec4 envMapColor = textureCubeUV( envMap, envMapRotation * reflectVec, roughness );\n\t\t\treturn envMapColor.rgb * envMapIntensity;',
     'vec4 envMapColor = textureCubeUV( envMap, envMapRotation * reflectVec, roughness );\n\t\t\treturn mix( envMapColor.rgb, vec3( dot( envMapColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), 0.7 ) * envMapIntensity;',
   );
+// The extra sky reflection on metal (uUnitLook.z) boosts the reflected
+// radiance only, not the irradiance-driven multi-scatter term.
+const UNIT_IBL = THREE.ShaderChunk.lights_fragment_maps.replace(
+  'radiance += iblRadiance;',
+  'radiance += iblRadiance * ( 1.0 + uUnitLook.z * material.metalness );',
+);
 
-// Sun shadows received on high / ultra land at reduced strength: a unit's
-// own head, arms and weapon would otherwise put its whole front in shade at a
-// size where the soft shadow map cannot resolve the shape that casts it.
-const UNIT_SHADOW = 0.55;
+// Received sun shadows ignore occluders within UNIT_SHADOW_REACH (in model
+// units, about a third of a humanoid's height) of the surface along the sun
+// ray: a unit's own head, arms and weapon, which the soft shadow map cannot
+// resolve at unit size (it would put a god's whole front in grey shade). The
+// lookup depth moves toward the light by that distance in world units; the
+// shadow camera is orthographic, so that is a constant shift of the shadow
+// coordinate's depth by the length of its gradient (the z row of the shadow
+// matrix). Trees, buildings and big neighbours still shade units, at
+// UNIT_SHADOW strength.
+const UNIT_SHADOW = 0.85;
+const UNIT_SHADOW_REACH = 0.42;
+const UNIT_SHADOW_VERTEX = `
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+  float unitShadowReach = ${UNIT_SHADOW_REACH.toFixed(2)} * length( modelMatrix[ 1 ].xyz );
+  #ifdef USE_REVERSED_DEPTH_BUFFER
+    unitShadowReach = - unitShadowReach;
+  #endif
+#endif
+${THREE.ShaderChunk.shadowmap_vertex.replace(
+    'vDirectionalShadowCoord[ i ] = directionalShadowMatrix[ i ] * shadowWorldPosition;',
+    `vDirectionalShadowCoord[ i ] = directionalShadowMatrix[ i ] * shadowWorldPosition;
+			vDirectionalShadowCoord[ i ].z -= unitShadowReach * length( vec3( directionalShadowMatrix[ i ][ 0 ].z, directionalShadowMatrix[ i ][ 1 ].z, directionalShadowMatrix[ i ][ 2 ].z ) );`,
+  )}`;
 const UNIT_LIGHTS = THREE.ShaderChunk.lights_fragment_begin.replace(
   'directionalLightShadow.shadowIntensity,',
   `directionalLightShadow.shadowIntensity * ${UNIT_SHADOW.toFixed(2)},`,
@@ -108,13 +151,16 @@ function patchUnitShader(mat) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTeamColor = mat.userData.uTeamColor;
     shader.uniforms.uUnitLook = UNIT_UNIFORMS.uUnitLook;
+    shader.uniforms.uUnitSheen = UNIT_UNIFORMS.uUnitSheen;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${UNIT_PARS_VERTEX}`)
-      .replace('#include <color_vertex>', `#include <color_vertex>\n${UNIT_VERTEX}`);
+      .replace('#include <color_vertex>', `#include <color_vertex>\n${UNIT_VERTEX}`)
+      .replace('#include <shadowmap_vertex>', UNIT_SHADOW_VERTEX);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${UNIT_PARS_FRAGMENT}`)
       .replace('#include <envmap_physical_pars_fragment>', SKY_REFLECTION)
       .replace('#include <lights_fragment_begin>', UNIT_LIGHTS)
+      .replace('#include <lights_fragment_maps>', UNIT_IBL)
       // per-vertex surface: the material's own roughness / metalness are 1
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n\troughnessFactor *= vUnitFx.y;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tmetalnessFactor *= vUnitFx.z;')
@@ -340,12 +386,37 @@ function elbowPose(geo, angle) {
   return new THREE.BufferAttribute(out, 3);
 }
 
+/** Every geometry of a template (parts, then worker tool arms), each once, in build order. */
+function templateGeometries(tpl) {
+  const geos = new Set();
+  for (const p of tpl.parts) if (p.geo) geos.add(p.geo);
+  if (tpl.rig.tools) for (const g of Object.values(tpl.rig.tools)) geos.add(g);
+  return [...geos];
+}
+
+/**
+ * Bake the template's occlusion, or copy it from an earlier bake of the same
+ * template key: templates are rebuilt after clearUnitModelCache (every match),
+ * the bake is the slow part of building one, and its result only depends on
+ * the key. Only the plain arrays are kept.
+ */
+function templateAO(tpl, unitType, key) {
+  const geos = templateGeometries(tpl);
+  const cached = AO_CACHE.get(key);
+  if (cached && cached.length === geos.length && geos.every((g, i) => g.attributes.aAo.count === cached[i].length)) {
+    geos.forEach((g, i) => g.attributes.aAo.array.set(cached[i]));
+    return;
+  }
+  bakeTemplateAO(tpl, unitType);
+  AO_CACHE.set(key, geos.map((g) => g.attributes.aAo.array));
+}
+
 function getTemplate(unitType) {
   const key = templateKey(unitType);
   let tpl = TEMPLATES.get(key);
   if (!tpl) {
     tpl = buildTemplate(unitType);
-    bakeTemplateAO(tpl, unitType);
+    templateAO(tpl, unitType, key);
     tpl.visual = normalizeVisual(unitType.visual);
     tpl.triangles = 0;
     tpl.meshes = 0;

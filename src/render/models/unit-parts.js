@@ -27,15 +27,18 @@ const _hsl = { h: 0, s: 0, l: 0 };
 
 /**
  * Surface class for an accent color worn as metal (weapons, armor, jewelry,
- * helmets): gold / bronze / copper hues are gold, greys and pale tints steel
- * or silver, very dark greys iron; any other hue reads as glossy enamel.
+ * helmets): yellow gold / brass hues are gold, saturated orange copper (less
+ * metallic, so fire-orange armor keeps its color), greys and pale tints steel,
+ * silver or electrum, very dark greys iron; any other hue reads as glossy
+ * enamel.
  */
 export function accentMetalClass(c) {
   C(c).convertLinearToSRGB().getHSL(_hsl);
   const hue = _hsl.h * 360;
   if (_hsl.l < 0.3 && _hsl.s < 0.3) return 'iron';
-  if (_hsl.s < 0.22 || _hsl.l > 0.86) return hue >= 30 && hue <= 62 && _hsl.s > 0.5 ? 'gold' : 'metal';
-  if (hue >= 18 && hue <= 62) return 'gold';
+  if (_hsl.s < 0.22 || _hsl.l > 0.86) return 'metal';
+  if (hue >= 15 && hue < 36) return 'copper';
+  if (hue >= 36 && hue <= 62) return _hsl.l > 0.78 ? 'metal' : 'gold'; // ivory / pale gold: electrum
   return 'lacquer';
 }
 

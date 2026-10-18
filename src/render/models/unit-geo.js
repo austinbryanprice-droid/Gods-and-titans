@@ -40,10 +40,12 @@ export const MATS = {
   bone: [0.5, 0], // bone, horn, teeth, beaks, chitin
   gloss: [0.32, 0], // eyes, wet noses, obsidian
   gem: [0.24, 0],
-  // stylized metal: some diffuse left so it never goes black away from the sky
-  metal: [0.36, 0.72], // steel, silver
-  gold: [0.3, 0.76], // gold, bronze, copper
-  iron: [0.52, 0.6], // dark, worn iron
+  // stylized metal: enough diffuse left that the sunlit color still reads
+  // where a facet mirrors a dull patch of sky
+  metal: [0.36, 0.66], // steel, silver, electrum
+  gold: [0.3, 0.62], // gold, brass, bronze
+  copper: [0.34, 0.45], // orange metal: copper, fire-forged armor
+  iron: [0.52, 0.56], // dark, worn iron
 };
 
 /** Team color marker for PartBuilder.add (shade multiplies the team color; mat = surface class). */
