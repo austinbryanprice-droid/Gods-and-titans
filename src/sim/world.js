@@ -14,7 +14,7 @@ import { updateMovement } from './movement.js';
 import { computeDerived, tickStatuses, updateAuras } from './status.js';
 import { dealDamage, updateProjectiles, updateTower } from './combat.js';
 import { updateDelayed, updateFields } from './abilities.js';
-import { computePrayerSpots, mineSpots } from './economy.js';
+import { computePrayerSpots, mineSpots, nearestMine } from './economy.js';
 import { canPlace, placementError, findPlacement, updateConstruction } from './construction.js';
 import { updateProduction } from './production.js';
 import { spawnCreeps } from './creeps.js';
@@ -498,6 +498,12 @@ export class World {
     m.amount = 0;
     this.map.setOccupied(m.tx, m.ty, m.size, 0);
     this.emit({ type: 'resourceDepleted', id: m.id });
+    // Rally flags planted on the mine move on to the nearest one, as gatherers do.
+    const next = nearestMine(this, m.x, m.y, 16);
+    if (!next) return;
+    for (const b of this.buildingList) {
+      if (!b.dead && b.rally && b.rally.target === m.id) b.rally = { x: next.x, y: next.y, target: next.id, tree: null };
+    }
   }
 
   onTreeFelled(tx, ty) {

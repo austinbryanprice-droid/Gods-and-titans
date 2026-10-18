@@ -286,7 +286,8 @@ Pop used = pop of living units + pop of everything queued in production.
 ### 5.4 Production
 - `train` puts an item in the building's queue (max 5). Cost and population are reserved
   when queued (refunded on `cancelTrain`). Units spawn at the footprint edge nearest the rally
-  point and then follow the rally (rally on a mine/tree → worker gathers).
+  point and then follow the rally (rally on a mine/tree → worker gathers). When a rallied
+  mine runs dry the rally moves to the nearest mine within 16 tiles (if any).
 - Creatures need tier ≥ their tier. Gods: unique per player (no duplicates alive or queued),
   max `MAX_GODS` (3) alive+queued, and the n-th god needs tier `GOD_SLOT_TIER[n-1]`
   (1st Village, 2nd Town, 3rd City). Titan: max 1 alive+queued, needs Titan Gate (City).
