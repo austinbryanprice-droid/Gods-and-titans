@@ -13,10 +13,12 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { Hud } from '../ui/hud.js';
+import { Overlays } from '../ui/hud-overlays.js';
+import { el } from '../ui/hud-dom.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
 import { tierName } from '../ui/hud-data.js';
-import { sanitizeName } from '../net/protocol.js';
+import { MSG, REASONS, sanitizeName, sanitizeReason } from '../net/protocol.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const MAX_DT = 0.1;
@@ -32,6 +34,22 @@ function freshCanvas(old) {
   const canvas = old.cloneNode(false);
   old.replaceWith(canvas);
   return canvas;
+}
+
+const GRAPHICS_FAILURE = /webgl|rendering context|getcontext|shader|framebuffer/i;
+const LOADING_FAILURE = /dynamically imported module|importing a module script|failed to fetch|networkerror|load failed/i;
+
+/**
+ * What the player sees when a match cannot start: a sentence in plain words
+ * and the raw message (one short line, for bug reports).
+ * @returns {{ text: string, detail: string }}
+ */
+export function describeStartFailure(err) {
+  const detail = sanitizeReason(err && err.message ? err.message : err, '');
+  let text = 'Something went wrong while setting up the match. Go back to the menu and try again; if it keeps happening, reload the page.';
+  if (GRAPHICS_FAILURE.test(detail)) text = 'Your browser could not start 3D graphics. Check that hardware acceleration is on, or try another browser.';
+  else if (LOADING_FAILURE.test(detail)) text = 'Some of the game files could not be loaded. Check your internet connection and reload the page.';
+  return { text, detail };
 }
 
 /** Stand-in AI until src/ai/ai.js exists: the AI players stand still. */
@@ -79,6 +97,8 @@ export class Game {
     this.showAllBarsHeld = false;
     this.overShown = false;
     this.ended = false;
+    this.failed = false;
+    this.bareHud = false;
     this.offs = [];
     this.lastAmbient = 0;
     this.stats = { frames: 0, cpuMs: 0, maxMs: 0, renderMs: 0, hudMs: 0, last: [] };
@@ -158,17 +178,77 @@ export class Game {
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
-  /** Startup failed: show the reason with a way back to the menu. */
+  /**
+   * Startup failed: tell the other players at once, then say why in plain words
+   * (no results table: no match was played) with a way back to the menu.
+   */
   fail(err) {
     this.errors.push(err);
     if (this.disposed) return;
+    this.releasePlayers();
     try {
       if (!this.hud && this.viewState) this.hud = new Hud({ root: this.hudRoot, game: this });
-      if (this.hud) this.hud.overlays.showEnded(`The game could not start: ${err && err.message ? err.message : err}`);
-      else this.quitToMenu();
+      const overlays = this.hud ? this.hud.overlays : this.bareOverlays();
+      const { text, detail } = describeStartFailure(err);
+      const back = el('button', 'mw-btn hud-obtn mw-btn--primary', 'Return to Menu');
+      back.type = 'button';
+      back.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.play('click');
+        this.quitToMenu();
+      });
+      const raw = detail ? el('div', 'hud-ohint hud-startfail-raw', detail) : null;
+      if (raw) raw.style.userSelect = 'text'; // the HUD is not selectable; this line is for copying into a bug report
+      const node = overlays.panel('Could not start the game', text, raw, el('div', 'hud-obtns', back));
+      overlays.show('ended', node, null); // 'ended' also keeps F10 from opening the game menu over it
     } catch {
       this.quitToMenu();
     }
+  }
+
+  /**
+   * A failed start must not leave the other players waiting: stop the session
+   * (hosts tell their clients the game is over; a client leaves, so an AI takes
+   * over its army) or, if it was never built, close the lobby connections the
+   * launch handed over. Closing twice is harmless.
+   */
+  releasePlayers() {
+    if (this.failed) return;
+    this.failed = true;
+    try {
+      if (this.session) {
+        this.session.stop();
+        return;
+      }
+      const l = this.launch;
+      if (!l) return;
+      const hosting = l.role !== 'client';
+      const conns = [l.conn, ...(l.conns && typeof l.conns.values === 'function' ? l.conns.values() : [])];
+      for (const conn of conns) {
+        if (!conn || typeof conn.close !== 'function') continue;
+        try {
+          if (hosting && typeof conn.send === 'function') conn.send({ t: MSG.END, reason: REASONS.HOST_QUIT });
+        } catch {
+          // already gone
+        }
+        try {
+          conn.close(hosting ? 'end' : 'quit');
+        } catch {
+          // already gone
+        }
+      }
+    } catch (err) {
+      console.warn('[game] releasing the other players failed', err);
+    }
+  }
+
+  /** Overlays for a failure before the HUD could be built (no view state yet). */
+  bareOverlays() {
+    const layer = el('div', 'hud-overlays');
+    this.hudRoot.classList.add('hud');
+    this.hudRoot.appendChild(layer);
+    this.bareHud = true;
+    return new Overlays(layer, this);
   }
 
   centerOnStart() {
@@ -575,6 +655,7 @@ export class Game {
       console.warn('[game] hud.dispose failed', err);
     }
     if (this.hudRoot) this.hudRoot.textContent = '';
+    if (this.bareHud && this.hudRoot.classList) this.hudRoot.classList.remove('hud');
     if (this.canvas) this.canvas.className = '';
     this.root.hidden = true;
     sfx.setListener(NaN, NaN);
