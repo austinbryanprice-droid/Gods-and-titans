@@ -14,7 +14,7 @@ import { CELL, makeAtlasTexture } from './vfx-textures.js';
 import { getPalette, COLORS } from './vfx-palette.js';
 import {
   ParticleLayer, GlowBatch, LightPool, createDecalPool, createRibbonPool, createFlarePool, createPillarPool, createDomePool,
-  disposePool, RIBBON_MAX,
+  disposePool, RIBBON_MAX, FLARE_HOT,
 } from './vfx-layers.js';
 import { createProjectileBatches, PROJECTILE_SPECS } from './vfx-projectiles.js';
 import { SHAPES, INTERNAL, STYLE, boltPath, BOLT_N } from './vfx-shapes.js';
@@ -24,18 +24,28 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 /**
  * Point lights: intensities at the call sites are relative, LIGHT_GAIN turns
  * them into candela (the scene is in full daylight: a light has to be strong
- * to show). LIGHT_PER_FLARE: intensity per unit of flare size (flareFx);
- * LIGHT_LIFT: flashes light from at least this high above the ground, so they
- * make a soft pool instead of a hot spot on whoever stands there.
+ * to show). LIGHT_PER_FLARE: intensity per unit of flare size (flareFx).
+ * LIGHT_LIFT: every VFX light sits at least this high above the ground, so it
+ * makes a soft pool instead of a hot spot (big flares sit higher still).
+ * LIGHT_GROUND_MAX: the most a light adds to the ground right under it, in
+ * irradiance (the sun gives flat ground ~2): above that the pool no longer
+ * tints the ground but bleaches it, and the effect drawn on it loses contrast.
+ * Intensities are soft-capped to it for the light's height (lightCap).
+ * LIGHT_LUM: lights are dimmed to about this luminance per unit of intensity,
+ * so pale hues (holy, ice, wind, physical) do not just brighten everything.
  */
 const LIGHT_GAIN = 2.6;
 const LIGHT_PER_FLARE = 3.2;
-const LIGHT_LIFT = 2;
+const LIGHT_LIFT = 3;
+export const LIGHT_GROUND_MAX = 1.9;
+const LIGHT_LUM = 0.45;
+/** Point lights the pool owns (the most any tier uses). */
+const LIGHTS_MAX = 4;
 
-// lights: point lights in the pool, fixed for the system's life (the count is
-// part of every lit shader, and each one costs every lit pixel: medium, which
-// must hold 60 fps on integrated GPUs at up to 1.5x pixel ratio, gets 2); a
-// later switch to 'low' only turns them down to 0
+// lights: point lights in the scene per tier (each one costs every lit pixel:
+// medium, which must hold 60 fps on integrated GPUs at up to 1.5x pixel ratio,
+// gets 2). The count is part of every lit shader, so it only follows the tier
+// when the renderer rebuilds them all anyway (see setQuality).
 const QUALITY = {
   low: { particles: 1600, mult: 0.5, lights: 0 },
   medium: { particles: 3000, mult: 0.8, lights: 2 },
@@ -134,6 +144,16 @@ const BOLT = new Float32Array(BOLT_N * 3);
 const _lc = { r: 1, g: 1, b: 1 };
 
 /**
+ * Soft cap of a light's intensity (candela) for its height h above the ground:
+ * the ground right under it gets at most about LIGHT_GROUND_MAX (I / h²);
+ * weaker lights pass nearly unchanged.
+ */
+function lightCap(I, h) {
+  const cap = LIGHT_GROUND_MAX * h * h;
+  return cap * Math.tanh(I / cap);
+}
+
+/**
  * VFX for the game renderer.
  *
  *   const vfx = new VFXSystem(scene, (x, y) => heightAt(mapData, x, y), { quality: 'high' });
@@ -145,7 +165,7 @@ export class VFXSystem {
    * @param {THREE.Scene} scene
    * @param {(x:number, y:number) => number} getHeight ground height at sim (x, y)
    * @param {{ quality?: 'low'|'medium'|'high', maxParticles?: number, lights?: number }} [options]
-   *   lights: point lights in the pool (default per quality: 0 on low, 2 on medium, 4 on high)
+   *   lights: point lights in the scene above low quality (default per quality: 2 on medium, 4 on high; none on low)
    */
   constructor(scene, getHeight, options = {}) {
     this.scene = scene;
@@ -170,7 +190,8 @@ export class VFXSystem {
     this.batches = pb.batches;
     this.projMaterials = pb.materials;
     /** Dynamic point lights (also fed by the renderer's burning buildings). */
-    this.lights = new LightPool(this.root, Number.isFinite(options.lights) ? options.lights : QUALITY[this.quality].lights);
+    this.lightsOpt = Number.isFinite(options.lights) ? Math.max(0, options.lights | 0) : -1;
+    this.lights = new LightPool(this.root, Math.max(LIGHTS_MAX, this.lightsOpt), this.lightCount(this.quality));
     this.effects = [];
     this.fxPool = [];
     this.projectiles = [];
@@ -397,7 +418,7 @@ export class VFXSystem {
     this.alpha.update(dt);
     this.glows.flush();
     for (const k in this.batches) this.batches[k].flush();
-    this.lights.update(dt, this.focusX, this.focusY, this.focusR, this.quality === 'low' ? 0 : 1);
+    this.lights.update(dt, this.focusX, this.focusY, this.focusR, 1);
     // camera shake decays exponentially
     if (this.shake > 0) {
       this.shake *= Math.exp(-4.5 * dt);
@@ -440,13 +461,25 @@ export class VFXSystem {
   }
 
   /**
-   * 'low' | 'medium' | 'high': scales particle counts (the cap and the number of
-   * lights are fixed at construction; on 'low' the lights are turned down to 0).
+   * 'low' | 'medium' | 'high': scales particle counts (the cap is fixed at
+   * construction). The point lights leave the scene on 'low' and come back
+   * above it: the renderer rebuilds every lit shader exactly then (low is the
+   * tier without shadows), so a new light count costs nothing more. Medium ↔
+   * high keeps the count it has, which would otherwise recompile every shader
+   * mid-match.
    */
   setQuality(q) {
     if (!QUALITY[q]) return;
+    const was = this.quality;
     this.quality = q;
     this.mult = QUALITY[q].mult;
+    if ((was === 'low') !== (q === 'low')) this.lights.setCount(this.lightCount(q));
+  }
+
+  /** Point lights in the scene on tier q. */
+  lightCount(q) {
+    if (q === 'low') return 0;
+    return this.lightsOpt >= 0 ? this.lightsOpt : QUALITY[q].lights;
   }
 
   /**
@@ -648,9 +681,13 @@ export class VFXSystem {
     return e;
   }
 
-  /** Billboard flash at world (x, wy, z): size0 → size1 over life. Big ones light their surroundings. */
-  flareFx(x, wy, z, size0, size1, life, c, core, alpha, rays = 0, fin = 0.12) {
-    if (size1 >= 1.5) this.flashLight(x, wy, z, c, core, LIGHT_PER_FLARE * alpha * size1, 2.4 + 1.5 * size1, life * 1.6 + 0.1, fin);
+  /**
+   * Billboard flash at world (x, wy, z): size0 → size1 over life; hot = HDR gain
+   * of its white-hot core. Big ones light their surroundings (from higher up the
+   * bigger they are, so the pool spreads with the flash).
+   */
+  flareFx(x, wy, z, size0, size1, life, c, core, alpha, rays = 0, fin = 0.12, hot = FLARE_HOT) {
+    if (size1 >= 1.5) this.flashLight(x, wy, z, c, LIGHT_PER_FLARE * alpha * size1, 2.4 + 1.5 * size1, life * 1.6 + 0.1, fin, Math.max(LIGHT_LIFT, 0.55 * size1));
     const f = this.flares.acquire();
     if (!f) {
       // fall back to a point glow
@@ -670,6 +707,7 @@ export class VFXSystem {
     f.u.uColor.value.set(c.r, c.g, c.b);
     f.u.uCore.value.set(core.r, core.g, core.b);
     f.u.uRays.value = rays;
+    f.u.uHot.value = hot;
     f.u.uSpin.value = Math.random() * TAU;
     f.u.uOpacity.value = 0;
     f.u.uSize.value = size0;
@@ -679,28 +717,46 @@ export class VFXSystem {
   }
 
   /**
-   * Point-light flash at world (x, wy, z), raised to light the ground around it;
-   * its color leans from c toward the white-hot core.
+   * Point-light flash of hue c at world (x, wy, z), raised to at least `lift`
+   * above the ground so it lights a soft pool around it.
    */
-  flashLight(x, wy, z, c, core, intensity, range, life, attack = 0.04) {
+  flashLight(x, wy, z, c, intensity, range, life, attack = 0.04, lift = LIGHT_LIFT) {
     if (!this.lights.count) return -1;
-    this.lightColor(c, core, 0.3);
-    return this.lights.flash(x, Math.max(wy, this.ground(x, z) + LIGHT_LIFT), z, _lc, intensity * LIGHT_GAIN, range, life, attack);
+    const g = this.ground(x, z);
+    const y = Math.max(wy, g + lift);
+    const I = lightCap(intensity * LIGHT_GAIN * this.lightColor(c), y - g);
+    return this.lights.flash(x, y, z, _lc, I, Math.max(range, 1.6 * (y - g)), life, attack);
   }
 
-  /** A held point light (see LightPool.hold); let it go with this.lights.release(handle). */
-  holdLight(x, wy, z, c, core, intensity, range, attack = 0.08, flicker = 0) {
+  /**
+   * A held point light of hue c (see LightPool.hold): move it with moveLight(),
+   * let it go with this.lights.release(handle).
+   */
+  holdLight(x, wy, z, c, intensity, range, attack = 0.08, flicker = 0) {
     if (!this.lights.count) return -1;
-    this.lightColor(c, core, 0.3);
-    return this.lights.hold(x, wy, z, _lc, intensity * LIGHT_GAIN, range, attack, flicker);
+    // it may come down to LIGHT_LIFT above the ground while it moves: capped for that
+    const I = lightCap(intensity * LIGHT_GAIN * this.lightColor(c), LIGHT_LIFT);
+    const g = this.ground(x, z);
+    return this.lights.hold(x, Math.max(wy, g + LIGHT_LIFT), z, _lc, I, Math.max(range, 1.6 * LIGHT_LIFT), attack, flicker);
   }
 
-  /** c leaned toward core by k, into the shared scratch color. */
-  lightColor(c, core, k) {
-    _lc.r = c.r + (core.r - c.r) * k;
-    _lc.g = c.g + (core.g - c.g) * k;
-    _lc.b = c.b + (core.b - c.b) * k;
-    return _lc;
+  /** Move a held light, kept at least LIGHT_LIFT above the ground. */
+  moveLight(handle, x, wy, z) {
+    if (handle >= 0) this.lights.move(handle, x, Math.max(wy, this.ground(x, z) + LIGHT_LIFT), z);
+  }
+
+  /**
+   * Light hue c into the shared scratch color (the element's own hue, not its
+   * white-hot core: a near-white light bleaches the ground instead of tinting
+   * it). Returns the intensity factor that keeps pale hues as bright as LIGHT_LUM.
+   */
+  lightColor(c) {
+    const k = 1 / Math.max(c.r, c.g, c.b, 1e-4);
+    _lc.r = c.r * k;
+    _lc.g = c.g * k;
+    _lc.b = c.b * k;
+    const lum = 0.2126 * _lc.r + 0.7152 * _lc.g + 0.0722 * _lc.b;
+    return Math.min(1, LIGHT_LUM / Math.max(lum, 1e-3));
   }
 
   /** Column of light at ground (x, y). */
@@ -819,8 +875,8 @@ export class VFXSystem {
       }
     }
     // fireballs and big (ability) orbs light the ground under their flight
-    if (p.kind === 'fireball') p.light = this.holdLight(ax, ah, ay, pal.mid, pal.core, 4.5 * big, 3.5 + 1.5 * big, 0.06, 0.18);
-    else if (p.kind === 'orb' && big > 1.2) p.light = this.holdLight(ax, ah, ay, pal.glow, pal.core, 3.2 * big, 3 + 1.5 * big, 0.08, 0.06);
+    if (p.kind === 'fireball') p.light = this.holdLight(ax, ah, ay, pal.mid, 4.5 * big, 3.5 + 1.5 * big, 0.06, 0.18);
+    else if (p.kind === 'orb' && big > 1.2) p.light = this.holdLight(ax, ah, ay, pal.glow, 3.2 * big, 3 + 1.5 * big, 0.08, 0.06);
     p.spin = spec.spin * rnd(0.7, 1.3) * (Math.random() < 0.5 ? -1 : 1);
     p.roll = Math.random() * TAU;
     if (p.kind === 'rock') {
@@ -906,7 +962,7 @@ export class VFXSystem {
       const heat = p.kind === 'arrow' || p.kind === 'spear' ? 0.9 : p.kind === 'skull' ? 1.1 : 1.8;
       this.glows.set(p.glow, x, h, z, g * flick, p.kind === 'fireball' ? pal.core : pal.glow, p.kind === 'skull' ? 0.8 : 1, CELL.GLOW, 0, heat);
     }
-    if (p.light >= 0) this.lights.move(p.light, x, h + 0.25, z);
+    if (p.light >= 0) this.moveLight(p.light, x, h + 0.25, z);
     if (p.rib) this.layProjRibbon(p, u);
     if (dt > 0) this.projTrail(p, x, h, z, dt);
     if (u >= 1) {
@@ -1068,7 +1124,7 @@ export class VFXSystem {
       case 'zap':
         this.add.add(x, h, z, 0, 0, 0, 0.15, 1.0, 1.4, pal.glow, 1, CELL.GLOW);
         this.burst(this.add, x, h, z, 10, 2, 5, -1, 3, 0.12, 0.25, 0.16, 0.03, pal.core, pal.glow, 1, CELL.SPARK, 6, 1);
-        this.flashLight(x, h, z, pal.glow, pal.core, 7, 4.5, 0.2, 0.02);
+        this.flashLight(x, h, z, pal.glow, 7, 4.5, 0.2, 0.02);
         break;
       case 'rock': {
         const gz = this.ground(x, z);
@@ -1083,7 +1139,7 @@ export class VFXSystem {
         break;
       }
       case 'explode':
-        this.flashLight(x, h, z, pal.mid, pal.core, 9 * big, 4 + 2 * big, 0.45, 0.03);
+        this.flashLight(x, h, z, pal.mid, 9 * big, 4 + 2 * big, 0.45, 0.03);
         this.add.setHeat(this.add.add(x, h, z, 0, 0, 0, 0.25, 1.2 * big, 2.0 * big, pal.core, 0.95, CELL.GLOW), 1.6);
         this.burst(this.add, x, h, z, 12 * big, 0.8, 2.5, 0.3, 1.8, 0.3, 0.5, 0.55 * big, 0.2, pal.mid, pal.alt, 0.7, CELL.FLAME, -1, 2.5);
         this.burst(this.add, x, h, z, 8, 2, 4.5, 1, 3, 0.4, 0.7, 0.13, 0.04, COLORS.ember, pal.alt, 1, CELL.SPARK, 7, 0.5);

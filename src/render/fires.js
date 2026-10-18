@@ -9,7 +9,7 @@
 // (SUN_DIR) with an orange underglow from the flames, and each building
 // offers one warm, flickering light to the VFX light pool (when given one).
 import * as THREE from 'three';
-import { VFX_OUT_GLSL, glowBlend } from './vfx-layers.js';
+import { VFX_OUT_GLSL, VFX_TONEMAP_GLSL, glowBlend } from './vfx-layers.js';
 import { SUN_DIR, CLOUD_TEXTURE } from './shading.js';
 
 const SMOKE_PER_FIRE = 4;
@@ -20,9 +20,7 @@ const FLAME_OCCLUSION = 0.35;
 const FIRE_LIGHT = { r: 1, g: 0.32, b: 0.06 };
 const FIRE_LIGHT_WEIGHT = 0.6;
 
-const OUT = /* glsl */ `
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>`;
+const OUT = VFX_TONEMAP_GLSL;
 
 const NOISE = /* glsl */ `
 float hash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }

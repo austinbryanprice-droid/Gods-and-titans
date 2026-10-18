@@ -7,10 +7,10 @@
 //
 // Colors are linear { r, g, b } (vfx-palette.js). The shaders work in linear
 // light and may go past 1 (HDR) at hot cores so post.js blooms them; they end
-// with the tone mapping and color space chunks, which are no-ops into the HDR
-// target and tone map + sRGB-encode on the low-quality path (straight to the
-// canvas), before the color is premultiplied (vfxPremul), so there it blends in
-// sRGB space just as the effects were designed.
+// with VFX_TONEMAP_GLSL (the tone mapping and color space chunks, which are
+// no-ops into the HDR target and tone map + sRGB-encode on the low-quality
+// path, straight to the canvas), before the color is premultiplied (vfxPremul),
+// so there it blends in sRGB space just as the effects were designed.
 import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
@@ -39,8 +39,7 @@ export function glowBlend(mat) {
  * Premultiplied output shared by every VFX shader (and fires.js). Usage, with
  * c the un-premultiplied linear color and a its coverage:
  *   gl_FragColor = vec4( c, 1.0 );
- *   #include <tonemapping_fragment>
- *   #include <colorspace_fragment>
+ *   <VFX_TONEMAP_GLSL>
  *   gl_FragColor = vfxPremul( gl_FragColor.rgb, a );
  * uOcc: how much of the coverage hides what is behind (1 = alpha blended).
  */
@@ -48,25 +47,56 @@ export const VFX_OUT_GLSL = /* glsl */ `
 uniform float uOcc;
 // true when this pass writes linear values (the HDR target), false on an sRGB canvas
 bool vfxLinearOut() { return linearToOutputTexel( vec4( 0.5 ) ).r < 0.6; }
+// The Neutral tone mapper (post.js, and the canvas on low quality) has a toe that
+// pulls every channel down by about the darkest one (min m becomes 6.25 m^2 below
+// 0.08): dark colors come out much darker and more saturated (storm-cloud grey
+// turns navy). The effects were authored for the screen as is, so their colors
+// are pre-compensated with the toe's inverse and come out as authored. Exact on
+// the canvas (tone mapped per fragment). In the HDR target the toe comes after
+// blending, so there only alpha-blended colors are compensated: where they cover,
+// the pixel is mostly their own color; glows add to whatever is below.
+vec3 vfxUntoe( vec3 c ) {
+  #ifndef TONE_MAPPING
+    if ( !( uOcc >= 0.999 && vfxLinearOut() ) ) return c;
+  #endif
+  float m = max( min( c.r, min( c.g, c.b ) ), 0.0 );
+  return c + ( ( m < 0.04 ? 0.4 * sqrt( m ) : m + 0.04 ) - m );
+}
 vec4 vfxPremul( vec3 c, float a ) {
   a = clamp( a, 0.0, 1.0 );
   float cov = a * uOcc;
   float w = a;
   if ( vfxLinearOut() ) {
     // Blended in linear light the same coverage hides far less than it did in
-    // sRGB (half coverage over black reads ~73% bright, not 50%). Curve it so
-    // veils and dark smoke darken by the same perceived amount; bright smoke
-    // already matches with plain linear coverage, so the curve eases off.
-    float p = uOcc < 0.999 ? 2.2 : mix( 2.2, 1.0, smoothstep( 0.02, 0.25, dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ) );
-    cov = 1.0 - pow( 1.0 - cov, p );
-    if ( uOcc >= 0.999 ) w = cov;
+    // sRGB (half coverage over black reads ~73% bright, not 50%), so it is
+    // curved: cov' = 1 - (1 - cov)^p.
+    if ( uOcc < 0.999 ) {
+      // glows: only the darkening, by as much as the sRGB blend darkened
+      cov = 1.0 - pow( 1.0 - cov, 2.2 );
+    } else {
+      // alpha blended (smoke, clouds, scorch): color weight and darkening follow
+      // the same curve. p was fitted (with vfxUntoe and the tone mapper) so the
+      // result matches the sRGB blend over typical ground: 1.55 for dark colors,
+      // easing to 1 (plain linear) from mid grey up. Steeper over-weights a dark
+      // tinted body (storm clouds turn navy).
+      float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+      cov = 1.0 - pow( 1.0 - cov, mix( 1.55, 1.0, smoothstep( 0.08, 0.2, l ) ) );
+      w = cov;
+    }
   }
   return vec4( c * w, cov );
 }`;
 
-const OUT = /* glsl */ `
+/**
+ * End of every VFX fragment shader before vfxPremul (needs VFX_OUT_GLSL): the
+ * authored color through the tone mapper (vfxUntoe) and into the output's color space.
+ */
+export const VFX_TONEMAP_GLSL = /* glsl */ `
+  gl_FragColor.rgb = vfxUntoe( gl_FragColor.rgb );
   #include <tonemapping_fragment>
   #include <colorspace_fragment>`;
+
+const OUT = VFX_TONEMAP_GLSL;
 
 // ---------------------------------------------------------------- shaders
 
@@ -1031,6 +1061,9 @@ export function createRibbonPool(root, max) {
 
 // --- flares: big camera-facing glows (too large for point sprites)
 
+/** Default HDR gain of a flare's white-hot core (uHot); set again on every acquire, pooled flares keep the last value. */
+export const FLARE_HOT = 3.5;
+
 export function createFlarePool(root, max) {
   const geo = new THREE.PlaneGeometry(1, 1);
   const base = glowBlend(new THREE.ShaderMaterial({
@@ -1041,7 +1074,7 @@ export function createFlarePool(root, max) {
       uSize: { value: 1 },
       uRays: { value: 0 },
       uSpin: { value: 0 },
-      uHot: { value: 3.5 },
+      uHot: { value: FLARE_HOT },
       uOcc: { value: OCCLUSION.flare },
     },
     vertexShader: FLARE_VS,
@@ -1134,10 +1167,11 @@ const SOURCE_KEY = 1e12; // keys of per-frame sources sit above every emitter ke
 const FADE_RATE = 40; // 1/s: how fast a light follows its source and hands over
 
 /**
- * Dynamic point lights for the VFX. The pool owns a fixed number of
- * PointLights (no shadows) that are never added, removed or hidden at runtime:
- * the light count is part of every lit material's shader program, so idle
- * lights just sit at intensity 0. Emitters are requested freely, either
+ * Dynamic point lights for the VFX. The pool owns a fixed set of PointLights
+ * (no shadows); `count` of them are in the scene. The light count is part of
+ * every lit material's shader program, so it only changes through setCount()
+ * (when the renderer rebuilds every shader anyway) and idle lights just sit at
+ * intensity 0. Emitters are requested freely, either
  * flashes with an envelope (strikes, explosions, level ups) or held lights
  * that follow something until released (a fireball's head, a beam's end);
  * per-frame sources (burning buildings) are offered anew every frame. update()
@@ -1156,19 +1190,20 @@ const FADE_RATE = 40; // 1/s: how fast a light follows its source and hands over
 export class LightPool {
   /**
    * @param {THREE.Object3D} root
-   * @param {number} count lights (0 = none: the pool accepts requests and does nothing)
+   * @param {number} capacity lights owned (built up front)
+   * @param {number} [count] of them in the scene (0 = none: the pool accepts requests and does nothing)
    */
-  constructor(root, count) {
-    this.count = Math.max(0, count | 0);
+  constructor(root, capacity, count = capacity) {
+    this.root = root;
+    this.count = 0;
     this.lights = [];
-    for (let i = 0; i < this.count; i++) {
+    for (let i = 0; i < Math.max(0, capacity | 0); i++) {
       const l = new THREE.PointLight(0xffffff, 0, 6, 2);
       l.castShadow = false;
       l.name = 'vfx-light';
-      root.add(l);
       this.lights.push(l);
     }
-    const N = Math.max(1, this.count);
+    const N = Math.max(1, this.lights.length);
     this.key = new Float64Array(N).fill(-1);
     this.cur = new Float32Array(N);
     this.want = new Int16Array(N);
@@ -1199,6 +1234,29 @@ export class LightPool {
     this.cRef = new Int16Array(c); // >= 0 emitter index, < 0: source -1 - ref
     this.time = 0;
     this.lit = 0;
+    this.setCount(count);
+  }
+
+  /**
+   * Put the first n lights in the scene and take the rest out (dark). This
+   * changes every lit shader's light count, so the caller does it only when
+   * all the shaders are being rebuilt anyway (VFXSystem.setQuality).
+   */
+  setCount(n) {
+    n = Math.min(this.lights.length, Math.max(0, n | 0));
+    if (n === this.count) return;
+    for (let j = 0; j < this.lights.length; j++) {
+      const l = this.lights[j];
+      if (j < n) {
+        if (l.parent !== this.root) this.root.add(l);
+      } else {
+        l.removeFromParent();
+        l.intensity = 0;
+        this.cur[j] = 0;
+        this.key[j] = -1;
+      }
+    }
+    this.count = n;
   }
 
   /** A flash: rises over `attack` s, then fades out (quadratic) until `life`. Returns its index or -1. */
@@ -1412,7 +1470,7 @@ export class LightPool {
   clear() {
     for (let i = 0; i < EMITTERS; i++) if (this.eState[i]) this.kill(i);
     this.ns = 0;
-    for (let j = 0; j < this.count; j++) {
+    for (let j = 0; j < this.lights.length; j++) {
       this.cur[j] = 0;
       this.key[j] = -1;
       this.lights[j].intensity = 0;

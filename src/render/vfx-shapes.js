@@ -301,7 +301,7 @@ function summonStart(sys, e, S) {
   e.stage = 0;
   const height = 6 + 2.6 * S;
   sys.pillarFx(x, y, 0.45 + 0.34 * S, height, 1.4, pal.glow, pal.core, 1, 0.12, 0.55);
-  sys.flashLight(x, gz + 2, y, pal.glow, pal.core, 7 + 3 * S, 5 + 2 * S, 1.6, 0.25);
+  sys.flashLight(x, gz + 2, y, pal.glow, 7 + 3 * S, 5 + 2 * S, 1.6, 0.25);
   sys.boltFx(x, gz + height, y, x, gz + 0.05, y, 1.05, 0.28 + 0.14 * S, pal.glow, pal.core, 0, 0);
   sys.decalFx(STYLE.runes, x, y, 0.95 + 0.6 * S, 1.05 + 0.66 * S, 1.75, pal.glow, pal.core, 1, 0.22, 0.6, 1.3);
   sys.decalFx(STYLE.glowDisc, x, y, 0.6 + 0.4 * S, 0.8 + 0.5 * S, 1.5, pal.glow, pal.core, 0.6, 0.2, 0.6);
@@ -516,7 +516,7 @@ export const SHAPES = {
       if (halo) halo.u.uFade.value.set(0.05, 0.05);
       e.g0 = sys.glows.alloc();
       e.g1 = sys.glows.alloc();
-      e.light = sys.holdLight(P[3], P[4] + 0.6, P[5], pal.glow, pal.core, 5 + 3 * R, 4 + 2 * R, 0.12, 0.08);
+      e.light = sys.holdLight(P[3], P[4] + 0.6, P[5], pal.glow, 5 + 3 * R, 4 + 2 * R, 0.12, 0.08);
       e.d0 = sys.acquireDecal(STYLE.glowDisc, pal.glow, pal.core);
       if (e.d0) e.d0.layout(sys.getHeight, P[3], P[5], Math.max(R, 0.8));
       if (pal.gloom) {
@@ -776,7 +776,7 @@ export const SHAPES = {
       e.timer = 0;
       sys.decalFx(STYLE.ring, e.x, e.y, 0.3, R, 0.45, pal.glow, pal.core, 0.9, 0.03, 0.3);
       // burning ground flickers a warm light (dim: flashes take precedence for the lights)
-      if (pal.el === 'fire') e.light = sys.holdLight(e.x, e.gz + 1.2, e.y, pal.mid, pal.core, 1.6 + 0.8 * R, 2.5 + 1.6 * R, 0.4, 0.22);
+      if (pal.el === 'fire') e.light = sys.holdLight(e.x, e.gz + 1.2, e.y, pal.mid, 1.6 + 0.8 * R, 2.5 + 1.6 * R, 0.4, 0.22);
     },
     update(sys, e, dt) {
       const t = e.t;
@@ -1013,7 +1013,7 @@ export const SHAPES = {
         e.f0.u.uHot.value = 3;
       }
       // the falling rock lights the ground more and more as it comes down
-      e.light = sys.holdLight(P[0], P[1], P[2], pal.mid, pal.core, 9 + 2.5 * R, 7 + 2 * R, Math.max(0.1, e.dur * 0.8), 0.12);
+      e.light = sys.holdLight(P[0], P[1], P[2], pal.mid, 9 + 2.5 * R, 7 + 2 * R, Math.max(0.1, e.dur * 0.8), 0.12);
       e.d0 = sys.acquireDecal(STYLE.tele, pal.glow, pal.core);
       if (e.d0) e.d0.layout(sys.getHeight, e.x, e.y, R * 1.05);
       e.k1 = rnd(-1, 1);
@@ -1042,7 +1042,7 @@ export const SHAPES = {
         sys.batches.rock.setMatrix(e.rock, _m);
       }
       sys.glows.set(e.g0, x, h, z, 1.6 + 0.3 * R, pal.core, 1, 0, 0, 2);
-      if (e.light >= 0) sys.lights.move(e.light, x, h, z);
+      if (e.light >= 0) sys.moveLight(e.light, x, h, z);
       if (e.f0) {
         e.f0.mesh.position.set(x, h, z);
         e.f0.u.uSize.value = (2 + 0.45 * R) * (0.92 + 0.08 * Math.sin(t * 40));
@@ -1289,7 +1289,7 @@ export const SHAPES = {
       const a = env(t, life, 0.4, 0.8);
       e.k2 *= Math.exp(-9 * dt);
       if (e.d0) {
-        e.d0.u.uOpacity.value = a * 0.66; // dark as authored now (linear), so a bit thinner: the fight below stays readable
+        e.d0.u.uOpacity.value = a * 0.78;
         e.d0.u.uTime.value = t * 0.6;
         e.d0.u.uSpin.value += 0.2 * dt;
       }
@@ -1305,7 +1305,7 @@ export const SHAPES = {
         const ang = Math.random() * TAU;
         const rr = R * Math.sqrt(Math.random()) * 0.95;
         const p = sys.alpha.add(e.x + Math.cos(ang) * rr, e.k1 + rnd(-0.1, 0.35), e.y + Math.sin(ang) * rr, Math.cos(ang) * 0.25, rnd(0.02, 0.15), Math.sin(ang) * 0.25,
-          rnd(1.4, 2.1), rnd(1.0, 1.5) + 0.2 * R, rnd(1.6, 2.2) + 0.25 * R, Math.random() < 0.35 ? COLORS.cloudLit : cloudC, 0.36, CELL.SMOKE, 0, 0.3);
+          rnd(1.4, 2.1), rnd(1.0, 1.5) + 0.2 * R, rnd(1.6, 2.2) + 0.25 * R, Math.random() < 0.35 ? COLORS.cloudLit : cloudC, 0.5, CELL.SMOKE, 0, 0.3);
         sys.alpha.setSpin(p, Math.random() * TAU, rnd(-0.3, 0.3));
         sys.alpha.setFadeIn(p, 0.35);
       }
