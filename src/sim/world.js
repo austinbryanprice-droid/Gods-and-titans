@@ -540,15 +540,18 @@ export class World {
     }
   }
 
-  /** Defeat a player: their units die (and on surrender their buildings fall too). */
-  defeatPlayer(i, surrender = false) {
+  /**
+   * Defeat a player: their units die (and on surrender their buildings fall too).
+   * deferVictory leaves the victory check to the caller (several players can fall on one tick).
+   */
+  defeatPlayer(i, surrender = false, deferVictory = false) {
     const p = this.players[i];
     if (!p || p.defeated) return;
     p.defeated = true;
     for (const u of this.unitList) if (!u.dead && u.owner === i) this.killEntity(u, null);
     if (surrender) for (const b of this.buildingList) if (!b.dead && b.owner === i) this.killEntity(b, null);
     this.emit({ type: 'playerDefeated', player: i });
-    this.checkVictory();
+    if (!deferVictory) this.checkVictory();
   }
 
   checkVictory() {
@@ -677,9 +680,16 @@ export class World {
     if (this.gameOver) return;
     const counts = new Array(this.players.length).fill(0);
     for (const b of this.buildingList) if (!b.dead && b.owner >= 0) counts[b.owner]++;
+    // Everyone left without a building falls on this tick, then the winner is
+    // decided once: a mutual wipe-out is a draw, not a win for the higher index.
+    let fell = false;
     for (let i = 0; i < this.players.length; i++) {
-      if (!this.players[i].defeated && counts[i] === 0) this.defeatPlayer(i, false);
+      if (!this.players[i].defeated && counts[i] === 0) {
+        this.defeatPlayer(i, false, true);
+        fell = true;
+      }
     }
+    if (fell) this.checkVictory();
     if (this.unitList.some((u) => u.dead)) {
       for (const e of this.unitList) if (e.dead) this.entities.delete(e.id);
       this.unitList = this.unitList.filter((u) => !u.dead);
