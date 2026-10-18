@@ -225,7 +225,8 @@ export class InfoView {
       s.parts.buildText = txt;
       return;
     }
-    if (e.o === vs.myIndex && e.q && e.q.length) {
+    const queueing = e.o === vs.myIndex && e.q && e.q.length;
+    if (queueing) {
       const q = e.q;
       const first = q[0];
       const big = el('button', 'hi-q-main');
@@ -254,12 +255,13 @@ export class InfoView {
       }
       extra.appendChild(el('div', 'hi-queue', big, el('div', 'hi-q-side', info, small)));
       s.parts.trainFill = bar.children[0];
-      return;
     }
+    // The prayer line stays while a god or creature is being summoned: that is when the Faith matters.
     if (def && def.prayerSlots > 0) {
       s.parts.pray = el('div', 'hi-note');
       extra.appendChild(s.parts.pray);
     }
+    if (queueing) return;
     if (e.t === 'town_center' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', 'Trains Worshippers. Gold and wood are delivered here.'));
     } else if (e.t === 'storehouse' && e.o === vs.myIndex) {

@@ -339,8 +339,7 @@ function unitCard(card, vs, group, ownIds, mode) {
   const def = UNITS[group.type];
   const isWorker = def && def.class === 'worker';
 
-  if (mode === 'build') {
-    if (!isWorker) return card;
+  if (mode === 'build' && isWorker) {
     BUILD_MENU.forEach((typeId, i) => {
       const b = BUILDINGS[typeId];
       if (!b || i >= 8) return;
