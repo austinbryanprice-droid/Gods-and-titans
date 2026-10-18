@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="src/ui/hud.css">
   <script src="vendor/peerjs.min.js" defer></script>
+  <noscript><style>#boot-text { display: none; }</style></noscript>
 </head>
 <body>
   <div id="app">
@@ -25,8 +26,15 @@
       <div id="hud-root"></div>
     </div>
     <div id="menu-root"></div>
-    <div id="boot-message">Loading…</div>
+    <div id="boot-message"><span id="boot-text">Loading…</span><noscript>Mythic War needs JavaScript. Please turn it on and reload the page.</noscript></div>
   </div>
   <script type="module" src="src/main.js"></script>
+  <script>
+    // If the game never starts (a blocked or failed download, a browser too old for modules), say so instead of "Loading…" forever.
+    setTimeout(function () {
+      var t = document.getElementById('boot-text');
+      if (t) t.textContent = 'Still loading… If nothing changes, reload the page (Ctrl+Shift+R). Mythic War needs a current desktop browser.';
+    }, 12000);
+  </script>
 </body>
 </html>

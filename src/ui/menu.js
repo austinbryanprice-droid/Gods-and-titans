@@ -7,7 +7,7 @@
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
-import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES } from '../config.js';
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
@@ -91,6 +91,7 @@ export function createMenu({ root, onStart }) {
 
   let current = null; // { name, cleanup, onEscape }
   let launchedLobby = null; // lobby of the running match; closed when the menu returns
+  let titleNotice = null; // persistent warning shown on the title screen (menu.setNotice)
 
   // Button clicks get a soft click sound (delegated).
   root.addEventListener('click', (e) => {
@@ -101,6 +102,12 @@ export function createMenu({ root, onStart }) {
     if (root.hidden || e.key !== 'Escape' || !current || !current.onEscape) return;
     if (root.querySelector('.mw-overlay, .mw-popover')) return;
     e.preventDefault();
+    // In the lobby, Esc in a text box (chat) or a dropdown only leaves that control, as in the game.
+    const t = e.target;
+    if (current.name === 'lobby' && t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) {
+      t.blur();
+      return;
+    }
     current.onEscape();
   });
 
@@ -243,6 +250,7 @@ export function createMenu({ root, onStart }) {
         h('p.mw-tagline', 'Raise a city of the faithful. Pray. Summon the gods. Unleash the titans.'),
       ),
       h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
+        titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
         playBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
@@ -275,6 +283,8 @@ export function createMenu({ root, onStart }) {
     const subs = [];
     let alive = true;
     let leaving = false;
+    let leaveArmed = false; // host: first Leave / Esc asks, the second one closes the room
+    let leaveTimer = 0;
     const st = () => lobby.state || { slots: [], mapSize: 'small' };
     const myIndex = () => {
       if (!isHost) return Number.isInteger(lobby.mySlot) ? lobby.mySlot : -1;
@@ -445,7 +455,11 @@ export function createMenu({ root, onStart }) {
       ['ffa', 'Free-for-all', 'Every player for themselves'],
     ].map(([id, label, title]) => h('button.mw-chip-btn', { type: 'button', title, dataset: { preset: id }, onclick: () => {
       try {
-        lobby.applyPreset(id);
+        // false: the layout cannot hold the players already in the room (or the game has started)
+        if (lobby.applyPreset(id) === false && !lobby.started) {
+          const n = st().slots.filter(M.isHuman).length;
+          toast(`${label} does not fit the ${n} players in this room. Remove a player first.`);
+        }
       } catch (err) {
         toast(err?.message || 'Could not apply that preset.');
       }
@@ -599,7 +613,7 @@ export function createMenu({ root, onStart }) {
           p.names.map((n, j) => h('span.mw-team-name', { style: { '--c': p.colors[j] } }, n))),
       ]) : h('span.mw-hint', 'No players yet.'));
       if (startBtn) {
-        const status = M.startStatus(lobby);
+        const status = M.startStatus(lobby, { online });
         startBtn.disabled = !status.ok;
         reason.textContent = status.ok ? 'All set. May the gods favor you.' : status.reason;
         reason.classList.toggle('is-ok', status.ok);
@@ -653,6 +667,18 @@ export function createMenu({ root, onStart }) {
 
     function leave() {
       if (leaving) return;
+      // The host leaving closes the room for everyone who joined: ask once, for a few seconds.
+      if (isHost && online && !leaveArmed && st().slots.some((s) => s && s.kind === 'human')) {
+        leaveArmed = true;
+        leaveBtn.textContent = 'Close room?';
+        toast('Leaving closes the room for everyone. Press Leave or Esc again to confirm.', 'info', 3200);
+        leaveTimer = setTimeout(() => {
+          leaveArmed = false;
+          leaveBtn.textContent = '‹ Leave';
+        }, 3200);
+        return;
+      }
+      clearTimeout(leaveTimer);
       leaving = true;
       alive = false;
       closeLobby(lobby);
@@ -685,26 +711,29 @@ export function createMenu({ root, onStart }) {
       });
     }
 
-    const el = h('div.mw-lobby',
-      h('header.mw-lobby-head',
-        h('button.mw-btn.mw-btn--ghost.mw-btn--back', { type: 'button', onclick: leave }, '‹ Leave'),
-        h('div.mw-lobby-titles',
-          h('h2.mw-h2', 'Prepare for Battle'),
-          h('div.mw-lobby-mode', M.lobbyModeLabel(role, transport)),
-        ),
-        h('div.mw-head-spacer'),
-      ),
-      h('main.mw-lobby-main',
-        h('section.mw-panel.mw-players',
-          h('div.mw-slot-head',
-            h('span'), h('span'), h('span.mw-label', 'Player'), h('span.mw-label', 'Pantheon'), h('span.mw-label', 'Team'), h('span'),
+    const leaveBtn = h('button.mw-btn.mw-btn--ghost.mw-btn--back', { type: 'button', onclick: leave }, '‹ Leave');
+    const el = h('div.mw-lobby-wrap',
+      h('div.mw-lobby',
+        h('header.mw-lobby-head',
+          leaveBtn,
+          h('div.mw-lobby-titles',
+            h('h2.mw-h2', 'Prepare for Battle'),
+            h('div.mw-lobby-mode', M.lobbyModeLabel(role, transport)),
           ),
-          slotList,
+          h('div.mw-head-spacer'),
         ),
-        h('section.mw-panel.mw-options-panel', options),
+        h('main.mw-lobby-main',
+          h('section.mw-panel.mw-players',
+            h('div.mw-slot-head',
+              h('span'), h('span'), h('span.mw-label', 'Player'), h('span.mw-label', 'Pantheon'), h('span.mw-label', 'Team'), h('span'),
+            ),
+            slotList,
+          ),
+          h('section.mw-panel.mw-options-panel', options),
+        ),
+        side,
       ),
-      side,
-      footer,
+      h('div.mw-lobby-dock', footer),
     );
     renderAll();
     if (online && isHost && chatLog && chatLog.children.length === 0) {
@@ -715,6 +744,7 @@ export function createMenu({ root, onStart }) {
       onEscape: leave,
       cleanup: () => {
         alive = false;
+        clearTimeout(leaveTimer);
         unsubAll(subs);
       },
     };
@@ -741,8 +771,21 @@ export function createMenu({ root, onStart }) {
       autocapitalize: 'characters',
       'aria-label': 'Room code',
       oninput: () => {
-        const clean = M.cleanRoomCode(codeInput.value);
-        if (clean !== codeInput.value) codeInput.value = clean;
+        const raw = codeInput.value;
+        const clean = M.cleanRoomCode(raw);
+        if (clean !== raw) {
+          // Keep the caret where the player is typing: count the code characters before it.
+          const caret = codeInput.selectionStart ?? raw.length;
+          const valid = (t) => [...t.toUpperCase()].filter((c) => ROOM_CODE_ALPHABET.includes(c)).join('');
+          const plain = clean === valid(raw).slice(0, ROOM_CODE_LENGTH); // only unusable characters were dropped
+          const at = plain ? Math.min(valid(raw.slice(0, caret)).length, clean.length) : clean.length;
+          codeInput.value = clean;
+          try {
+            codeInput.setSelectionRange(at, at);
+          } catch {
+            // not all inputs allow it
+          }
+        }
         joinBtn.disabled = !M.isCompleteRoomCode(clean);
         setStatus(null);
       },
@@ -815,7 +858,7 @@ export function createMenu({ root, onStart }) {
     const el = h('div.mw-center-screen',
       h('section.mw-panel.mw-form-panel.mw-join',
         h('h2.mw-h2', 'Join Online Game'),
-        h('p.mw-panel-sub', 'Ask the host for the 5-character room code shown in their lobby (letters and digits).'),
+        h('p.mw-panel-sub', 'Ask the host for the 5-character room code shown in their lobby. Codes use the letters A-Z (no I or O) and the digits 2-9.'),
         h('label.mw-field', h('span.mw-label', 'Your name'), nameInput),
         h('label.mw-field', h('span.mw-label', 'Room code'), codeInput),
         status,
@@ -923,6 +966,11 @@ export function createMenu({ root, onStart }) {
     root,
     go,
     toast,
+    /** Pin a warning to the title screen (null clears it), e.g. when the browser lacks WebGL 2. */
+    setNotice(text) {
+      titleNotice = text || null;
+      if (current && current.name === 'title') go('title');
+    },
     /** Show a screen. Closes the last match's lobby unless opts.keepLobby. */
     show(screen = 'title', opts = {}) {
       if (launchedLobby && !opts.keepLobby) {

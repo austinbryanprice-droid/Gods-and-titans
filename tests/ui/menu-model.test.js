@@ -17,6 +17,16 @@ test('cleanRoomCode accepts typed codes, lower case, spaces and invite links', (
   assert.ok(!M.isCompleteRoomCode('K7QX'));
 });
 
+test('cleanRoomCode finds the code inside a pasted sentence instead of mixing in letters from the words', () => {
+  assert.equal(M.cleanRoomCode('Join with code K7QX2'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('room code: K7QX2'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('come play K7QX2!'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('please K7QX2'), 'K7QX2'); // 'please' is made of valid letters too
+  assert.equal(M.cleanRoomCode('hello kqxzb'), 'KQXZB');
+  assert.equal(M.cleanRoomCode('K7QX2 2'), 'K7QX2');
+  assert.equal(M.cleanRoomCode('k7 qx2'), 'K7QX2'); // a code typed in pieces still works
+});
+
 test('inviteLink keeps only join + network params', () => {
   const link = M.inviteLink('https://host.example/mythic/index.html?mockLobby=1&transport=local&peerHost=localhost&join=OLD#x', 'K7QX2');
   const u = new URL(link);
@@ -68,6 +78,19 @@ test('startStatus prefers startProblem(), falls back to canStart()', () => {
   assert.equal(M.startStatus({ canStart: () => { throw new Error('boom'); } }).reason, 'boom');
   const alone = { slots: [slot('host'), slot('open'), slot('closed'), slot('closed')] };
   assert.match(M.startBlockReason(alone), /opponent/);
+});
+
+test('startStatus says nobody has joined yet instead of quoting the team rule', () => {
+  const teams = 'Players must be on at least two different teams.';
+  const lone = { state: { slots: [slot('host'), slot('open', { team: 2 }), slot('closed'), slot('closed')] }, startProblem: () => teams };
+  assert.match(M.startStatus(lone, { online: true }).reason, /friend to join/);
+  assert.match(M.startStatus(lone, { online: false }).reason, /slot to AI/);
+  // two players on one team keep the lobby's own wording
+  const same = { state: { slots: [slot('host'), slot('ai'), slot('closed'), slot('closed')] }, startProblem: () => teams };
+  assert.equal(M.startStatus(same, { online: true }).reason, teams);
+  // other problems are never replaced
+  const waiting = { state: lone.state, startProblem: () => 'Waiting for Bob to connect.' };
+  assert.equal(M.startStatus(waiting, { online: true }).reason, 'Waiting for Bob to connect.');
 });
 
 test('matchup summary groups filled slots by team', () => {
