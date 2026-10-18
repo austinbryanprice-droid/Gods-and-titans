@@ -96,7 +96,7 @@ void main() {
   vec2 cp = ( p - uSunDir.xz * ( vWPos.y / max( uSunDir.y, 0.2 ) ) ) * uCloud.y + uCloud.zw * t * uCloud.y;
   if ( uCloud.x > 0.0 ) {
     float n = texture2D( uCloudTex, cp ).r;
-    shade = 1.0 - uCloud.x * smoothstep( 0.46, 0.68, n );
+    shade = 1.0 - uCloud.x * smoothstep( 0.58, 0.72, n ); // as cloudShade (shading.js)
   }
 
   // ---- body: absorption deepens the color and the opacity with depth

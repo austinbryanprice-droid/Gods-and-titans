@@ -119,7 +119,9 @@ float cloudShade( vec3 wp ) {
   vec2 p = wp.xz - uSunDirW.xz * ( wp.y / max( uSunDirW.y, 0.2 ) );
   p = p * uCloud.y + uCloud.zw * uTime * uCloud.y;
   float n = texture2D( uCloudTex, p ).r * 0.65 + texture2D( uCloudTex, p * 2.3 + 0.37 ).r * 0.35;
-  return 1.0 - uCloud.x * smoothstep( 0.46, 0.68, n );
+  // the noise sits mostly in 0.5..0.7: this threshold leaves about a third of the
+  // ground in clear sun (0.46..0.68 shaded ~95% of it, a dimmer sun rather than clouds)
+  return 1.0 - uCloud.x * smoothstep( 0.58, 0.72, n );
 }`;
 
 /**

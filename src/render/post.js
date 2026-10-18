@@ -42,7 +42,7 @@ export const DEFAULT_LOOK = {
   saturation: 1.0,
   shadowTint: [0.98, 1.0, 1.03], // multiplied in, weighted to the dark end
   highlightTint: [1.02, 1.0, 0.97], // … and the bright end
-  vignette: 0.3,
+  vignette: 0.2,
   sharpen: 0.35, // only when the scene renders below the canvas resolution
 };
 
