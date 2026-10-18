@@ -49,6 +49,7 @@ export class Minimap {
     this.pxPerTile = 0;
     this.dragging = 0; // mouse button held on the minimap + 1
     this.colorCache = new Map();
+    this.viewQuad = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }]; // refilled by camera.getViewQuad every draw
 
     // Layers: terrain (1 px per tile), fog (1 px per tile), entities (canvas size).
     this.terrain = document.createElement('canvas');
@@ -264,7 +265,7 @@ export class Minimap {
       dirty = true;
     }
     const cam = this.getCamera();
-    const quad = cam && typeof cam.getViewQuad === 'function' ? cam.getViewQuad() : null;
+    const quad = cam && typeof cam.getViewQuad === 'function' ? cam.getViewQuad(this.viewQuad) : null;
     const quadSig = quad ? quad.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ') : '';
     if (quadSig !== this.quadSig) {
       this.quadSig = quadSig;

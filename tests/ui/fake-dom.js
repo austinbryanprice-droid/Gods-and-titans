@@ -22,6 +22,8 @@ export class FakeElement {
     this.parentNode = null;
     this.hidden = false;
     this.listeners = new Map();
+    this.attrs = {};
+    this.dataset = {};
     const props = new Map();
     this.style = { setProperty: (k, v) => props.set(k, String(v)), getPropertyValue: (k) => props.get(k) || '' };
     const classes = new Set();
@@ -53,6 +55,22 @@ export class FakeElement {
       };
     }
     return this.ctx2d;
+  }
+  setAttribute(k, v) {
+    this.attrs[k] = String(v);
+  }
+  getAttribute(k) {
+    return k in this.attrs ? this.attrs[k] : null;
+  }
+  removeAttribute(k) {
+    delete this.attrs[k];
+  }
+  /** Only `.class` selectors: the first element (this or a descendant) with that class. */
+  querySelector(sel) {
+    return this.find(String(sel).replace(/^\./, ''));
+  }
+  getBoundingClientRect() {
+    return { left: 0, top: 0, right: 150, bottom: 150, width: 150, height: 150 };
   }
   addEventListener(type, fn) {
     if (!this.listeners.has(type)) this.listeners.set(type, []);

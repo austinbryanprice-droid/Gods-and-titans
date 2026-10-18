@@ -33,7 +33,7 @@ const BARRACKS_KEYS = { warrior: 'W', archer: 'A', priest: 'P', battering_ram: '
 const CREATURE_KEYS = ['Q', 'W', 'E'];
 const GOD_KEYS = ['Q', 'W', 'E', 'R'];
 const PASSIVE_ICONS = {
-  aura: '🔆', regen: '💚', lifesteal: '🩸', cleave: '🪓', thorns: '🌵', evasion: '💨', critical: '💥', onHitSlow: '🐌', onHitDot: '☠️',
+  aura: '🔆', regen: '💚', lifesteal: '🧛', cleave: '🔪', thorns: '🌵', evasion: '💨', critical: '💥', onHitSlow: '🐌', onHitDot: '☠️',
 };
 const TARGET_TEXT = { none: 'No target', point: 'Targets an area', unit: 'Targets a unit', ally: 'Targets an ally', enemy: 'Targets an enemy' };
 

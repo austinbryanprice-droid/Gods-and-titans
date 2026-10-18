@@ -6,7 +6,7 @@
 //
 //   tipSteps(vs) → [{ id, icon, text, keys, done }]   (pure, Node-testable)
 //   new TipsView(root, { viewState, onDismiss })      (DOM; update() ~2 Hz)
-import { UNITS } from '../data/index.js';
+import { UNITS, BUILDINGS } from '../data/index.js';
 import { el, setClass, setHidden, setText } from './hud-dom.js';
 
 /** Own entities of the local player, split by kind. */
@@ -41,7 +41,7 @@ export function tipSteps(vs) {
     { id: 'mine', icon: '⛏️', text: 'Select your Worshippers (drag a box around them) and right-click the gold mine.', keys: [], done: mining },
     { id: 'build', icon: '🔨', text: 'Press B to build. Houses (H) raise your population limit.', keys: ['B', 'H'], done: built },
     { id: 'pray', icon: '🙏', text: 'Build a Shrine (S), then right-click it with Worshippers to pray for Faith.', keys: ['S'], done: !!(me && me.faithRate > 0) },
-    { id: 'god', icon: '🛕', text: 'A Temple (E) summons your gods with Faith.', keys: ['E'], done: gods },
+    { id: 'god', icon: BUILDINGS.temple.icon, text: 'A Temple (E) summons your gods with Faith.', keys: ['E'], done: gods },
     { id: 'titan', icon: '🌀', text: 'Grow the Town Center into a Town, then a City (U), and raise a Titan Gate (G) for your Titan.', keys: ['U', 'G'], done: has('titan_gate') || !!(me && me.titan) },
   ];
 }

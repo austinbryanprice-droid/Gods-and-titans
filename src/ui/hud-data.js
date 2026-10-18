@@ -1,7 +1,7 @@
 // Shared lookups for the HUD, the command card and the input controller:
 // entity definitions, names, icons, subgroup ordering and small helpers that
 // read a ViewState. Pure (no DOM), so Node tests can use it.
-import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
+import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS } from '../data/index.js';
 
 /** Subgroup order (WC3 sorts heroes first): lower comes first. */
 const CLASS_ORDER = { god: 0, titan: 1, creature: 2, infantry: 3, ranged: 4, siege: 5, support: 6, minion: 7, worker: 8 };
@@ -109,4 +109,26 @@ export function formatClock(sec) {
 export const TIER_NAMES = ['Village', 'Town', 'City'];
 export function tierName(t) {
   return TIER_NAMES[Math.max(0, Math.min(2, (t || 1) - 1))];
+}
+
+/**
+ * "You lead the Norse pantheon." from the game setup (the lobby's Random is already
+ * drawn there), or '' for a spectator / an unknown pantheon.
+ */
+export function leadText(vs) {
+  const players = vs && vs.setup && vs.setup.players;
+  const mine = players && vs.myIndex >= 0 ? players[vs.myIndex] : null;
+  const pantheon = mine && PANTHEONS[mine.pantheon];
+  return pantheon ? `You lead the ${pantheon.name} pantheon.` : '';
+}
+
+/**
+ * The connection warning for a joined (client) session while the host has been silent
+ * for STALL_NOTICE_MS (session.stalled / stalledMs), else '' (also for a HostSession,
+ * which has neither property, and for no session).
+ */
+export function stallText(session) {
+  if (!session || session.isHost || session.stalled !== true) return '';
+  const ms = Number.isFinite(session.stalledMs) ? session.stalledMs : 0;
+  return `Connection problem: waiting for the host… (${Math.max(0, Math.floor(ms / 1000))}s)`;
 }

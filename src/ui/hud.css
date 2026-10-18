@@ -303,6 +303,24 @@
   pointer-events: auto;
 }
 
+.hud-stall {
+  position: absolute;
+  top: 2.9em;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3em 1.1em;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #ffe7a3;
+  text-shadow: 0 1px 2px #000;
+  background: rgba(120, 66, 10, 0.9);
+  border: 1px solid #e8a23a;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.hud-stall[hidden] { display: none; }
+.hud-mismatch:not([hidden]) ~ .hud-stall { top: 5.4em; }
+
 .hud-chat {
   position: absolute;
   left: 0.8em;
