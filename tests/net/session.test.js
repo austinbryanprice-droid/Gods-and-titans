@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HostSession, ClientSession } from '../../src/net/session.js';
+import { HostSession, ClientSession, RESYNC_MIN_INTERVAL_MS } from '../../src/net/session.js';
+import { MAX_CLIENT_BUFFER_BYTES, STALL_NOTICE_MS } from '../../src/net/protocol.js';
 import { LobbyHost, LobbyClient } from '../../src/net/lobby.js';
 import { createLoopbackPair } from '../../src/net/transport.js';
 import { FakeWorld, fakeWorldFactory, makeFakeMap } from '../../src/net/fake-world.js';
@@ -183,6 +184,110 @@ test('sessions: a dropped delta triggers resync and a full snapshot with felledA
   assert.deepEqual(new Set(ann.viewState.felledAll.map(String)), new Set(host.felledAll.map(String)));
   await stepAndSync(host, clients, 20);
   assert.deepStrictEqual(ann.snap, json(host.lastSnap));
+  host.stop();
+});
+
+test('sessions: a client with a full send queue is skipped, then caught up without losing events or trees', async () => {
+  const { host, clients, conns } = makeGame({ clients: 2, units: 120 });
+  const [ann, ben] = clients;
+  host.start();
+  for (const c of clients) c.start();
+  await Promise.all(clients.map((c) => c.ready));
+  await stepAndSync(host, clients, 20);
+  const felledSeen = (c) => c.viewState.felledAll.length;
+
+  // Ann's link is congested: her send queue stays over the limit while the host plays on.
+  conns.get(1).bufferedFn = () => MAX_CLIENT_BUFFER_BYTES + 1;
+  const annTick = ann.snap.tick;
+  const skippedBefore = host.netStats.skipped;
+  const sentEvents = [];
+  const sentFelled = [];
+  const felledBefore = host.felledAll.length;
+  for (let i = 0; i < 12; i++) {
+    host.step(1);
+    sentEvents.push(...(host.lastSnap.events || []));
+    sentFelled.push(...(host.lastSnap.felled || []));
+    await waitFor(() => ben.snap.tick === host.lastSnap.tick, 3000, 'ben keeps up');
+  }
+  await sleep(20);
+  assert.equal(ann.snap.tick, annTick, 'nothing was queued for the congested client');
+  assert.equal(host.netStats.skipped - skippedBefore, 12);
+  assert.ok(sentEvents.length > 0 && host.felledAll.length > felledBefore, 'events and trees happened meanwhile');
+  assert.equal(ann.resyncs, 0);
+
+  // The queue drains: one delta brings her to the host's state, with everything that happened in between.
+  conns.get(1).bufferedFn = null;
+  const annEvents = [];
+  ann.viewState.on('*', (ev) => annEvents.push(ev));
+  const fulls = host.clients.get(1).fulls;
+  host.step(1);
+  sentEvents.push(...(host.lastSnap.events || []));
+  sentFelled.push(...(host.lastSnap.felled || []));
+  await waitFor(() => ann.snap.tick === host.lastSnap.tick, 3000, 'ann catches up');
+  const { events: aEv, felled: aFl, ...annRest } = ann.snap;
+  const { events: hEv, felled: _hFl, ...hostRest } = json(host.lastSnap);
+  assert.deepStrictEqual(annRest, hostRest, 'same world state');
+  assert.deepStrictEqual(aEv, json(sentEvents), 'events of the skipped ticks arrive with the catch-up, in order');
+  assert.deepStrictEqual(aFl, json(sentFelled), 'and so do the felled trees');
+  assert.ok(aEv.length > hEv.length, 'more than the last tick alone');
+  assert.equal(ann.resyncs, 0, 'no resync was needed');
+  assert.equal(host.clients.get(1).fulls, fulls, 'and no full snapshot either');
+  assert.deepEqual(new Set(ann.viewState.felledAll.map(String)), new Set(host.felledAll.map(String)));
+  assert.equal(felledSeen(ann), felledSeen(ben));
+  assert.equal(annEvents.filter((ev) => ev.type !== 'snapshot').length >= sentEvents.length, true);
+  await stepAndSync(host, clients, 5);
+  for (const c of clients) assert.equal(c.resyncs, 0);
+  host.stop();
+});
+
+test('sessions: a congested client that falls too far behind gets a full snapshot once its queue drains', async () => {
+  const { host, clients, conns } = makeGame({ clients: 1, units: 60 });
+  const [ann] = clients;
+  host.start();
+  await ann.ready;
+  await stepAndSync(host, clients, 5);
+  const c = host.clients.get(1);
+  conns.get(1).bufferedFn = () => MAX_CLIENT_BUFFER_BYTES * 4;
+  host.step(1);
+  assert.ok(c.held, 'events are held back while the queue is full');
+  host.holdSnapshot(c, { tick: 0, events: new Array(3000).fill({ type: 'levelUp', id: 1, level: 2 }), felled: [] });
+  assert.equal(c.held, null);
+  assert.equal(c.needsFull, true, 'too much to carry over: a full snapshot repairs it');
+  const fulls = c.fulls;
+  host.step(1);
+  assert.equal(c.fulls, fulls, 'no full snapshot is pushed onto a congested link');
+  conns.get(1).bufferedFn = null;
+  await sleep(RESYNC_MIN_INTERVAL_MS + 20);
+  host.step(1);
+  await waitFor(() => c.fulls === fulls + 1, 2000, 'full snapshot');
+  await waitFor(() => ann.snap.tick === host.lastSnap.tick, 3000, 'ann is current');
+  assert.deepStrictEqual(ann.snap, json(host.lastSnap));
+  host.stop();
+});
+
+test('ClientSession reports a quiet host (stalledMs) and drops the stale ping figure', async () => {
+  const { host, clients } = makeGame({ clients: 1, units: 20 });
+  const [ann] = clients;
+  host.start();
+  ann.start();
+  await ann.ready;
+  assert.equal(ann.stalledMs, 0);
+  assert.equal(ann.stalled, false);
+  await waitFor(() => ann.pingMs !== null, 2000, 'first pong');
+  ann.conn.silentMs = STALL_NOTICE_MS - 1;
+  assert.equal(ann.stalled, false);
+  ann.conn.silentMs = STALL_NOTICE_MS + 500;
+  assert.equal(ann.stalledMs, STALL_NOTICE_MS + 500);
+  assert.equal(ann.stalled, true);
+  ann.ping();
+  assert.equal(ann.pingMs, null, 'the HUD falls back to its "…" placeholder');
+  // Any frame from the host clears it; the next pong brings a fresh figure.
+  host.step(1);
+  await waitFor(() => ann.stalledMs === 0, 2000, 'frames resumed');
+  await waitFor(() => ann.pingMs !== null, 2000, 'fresh pong');
+  ann.stop();
+  ann.conn.silentMs = 10000;
+  assert.equal(ann.stalledMs, 0, 'a stopped session reports nothing');
   host.stop();
 });
 

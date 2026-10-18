@@ -530,7 +530,13 @@ tx, ty, size, amount`.
   ran: each heartbeat pulse adds at most `MAX_PULSE_GAP_MS` (1 s), any received frame resets it,
   so a main-thread stall or background tab never times a peer out before its queued messages
   are read. Timeout: `TIMEOUT_MS` 15 s in the lobby, `GAME_TIMEOUT_MS` 30 s in game
-  (`conn.setTimeoutMs`, sessions' `connTimeoutMs`).
+  (`conn.setTimeoutMs`, sessions' `connTimeoutMs`). A client that has heard nothing from the
+  host for `STALL_NOTICE_MS` (3 s) reports it (`ClientSession.stalledMs` / `stalled`) so the HUD
+  can say so long before the 30 s timeout; its ping figure then reads "…". On the host,
+  a client whose data-channel send queue (`conn.buffered`) is over `MAX_CLIENT_BUFFER_BYTES`
+  (128 KB) is skipped for that tick instead of queueing more: the next delta is encoded
+  against what it last received, so it catches up in one step, with the skipped snapshots'
+  events and felled trees carried over (a full snapshot, once the queue drains, if too many).
 - **Untrusted input**: a reassembled message may be at most 1 MB from a client and 32 MB from
   the host; more than 100 malformed frames in 10 s closes with 'protocol-error'. Token buckets
   per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `resync` at most one
@@ -542,7 +548,11 @@ tx, ty, size, amount`.
   GameSetup (else kicked with "invalid game setup"), snapshots (`isValidSnapshot`), deltas
   (apply failure → `resync`), chat, and end/kick reasons (≤ 300 chars, else 'host-quit').
 - Messages are JSON objects with `t`:
-  - client→host: `hello {name, version}`, `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`, `resync {}`
+  - client→host: `hello {name, version}` (`version` is `PROTOCOL_VERSION` from
+    src/net/wire-version.js: `GAME_VERSION` plus an 8-digit fingerprint of the message names,
+    `EVENT_SHAPES`, the command whitelist and the unit / building / ability / pantheon ids, so
+    a stale tab after a deploy is refused with the "Version mismatch" text; it is only ever
+    compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
     `delta {d}`, `chat {from, text}`, `pong {ts}`, `kick {reason}`, `end {reason}`
 - Delta codec (`src/net/delta.js`, wire format v2; the header comment lists every key): host
@@ -568,7 +578,13 @@ tx, ty, size, amount`.
   LobbyState: `{ roomCode, mapSize, slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
-  Can start when ≥ 2 teams have players and every human slot is connected.
+  Can start when ≥ 2 teams have players and every human slot is connected. `state.preset`
+  stays lit through pantheon / color / name edits and players joining or leaving, and clears
+  when a slot's kind, team or AI difficulty changes. In the GameSetup, repeated names get a
+  number (`AI (Normal)`, `AI (Normal) 2`); lobby slots keep theirs. `LobbyClient.join` and
+  `joinRoom` take an optional `signal` (AbortSignal): aborting rejects with `abortError()` and
+  closes the half-open link. Closing the lobby after the start also closes any game connection
+  still open one second later (a game that failed to load must not leave players hanging).
 - Sessions:
   - `HostSession({ setup, myIndex, conns, createWorld, createAI })`: owns the World, runs the
     ticker (`src/net/ticker.js`, a Worker-driven metronome so ticks keep running in a background
@@ -578,7 +594,7 @@ tx, ty, size, amount`.
     line is shown. Single-player = HostSession with no conns.
   - `ClientSession({ setup, myIndex, conn })`: decodes full/delta into its `ViewState`;
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
-    `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
+    `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
     'host-left' (connection lost), 'host-quit', 'game-over', or the host's sanitized reason.
   - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), onChat(cb), onEnd(cb), start(), stop() }`.
 - `ViewState` (`src/game/view-state.js`, used identically on host and client):
