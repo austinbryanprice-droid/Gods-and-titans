@@ -50,9 +50,14 @@ const GROUND_COLOR = 0x5a5638;
 const HEMI_INTENSITY = 0.85;
 const ENV_INTENSITY = 0.55;
 const EXPOSURE = 1.0;
-// Adaptive resolution: frame times (ms, smoothed) that lower / raise the scene scale
+// Adaptive resolution (frame times in ms, smoothed): slower than SLOW_FRAME_MS (and
+// well past the display's own frame period) lowers the scene scale a step; frames
+// that keep up with the display raise it again.
 const SLOW_FRAME_MS = 24;
-const FAST_FRAME_MS = 15;
+const SCALE_SETTLE = 90; // frames the average settles for after any step
+const SCALE_UP_WAIT = 240; // frames before a step up (doubled while steps up keep being undone)
+const SCALE_UP_WAIT_MAX = 3600;
+const MAX_VSYNC_MS = 34; // no display or browser cap runs slower than 30 Hz: longer is the GPU
 const AIR_RING_LIFT = AIR_HOVER_HEIGHT - 0.14; // flyers' rings: just under the hovering body
 const DEATH_SECONDS = 1.65; // keep animating 'dead' this long (topple + sink)
 const COLLAPSE_SECONDS = 1.6; // destroyed buildings sink this long
@@ -148,9 +153,9 @@ export class GameRenderer {
     this.post = typeof this.renderer.setRenderTarget === 'function' ? new PostFX(this.renderer, this.quality) : null;
     if (this.post) this.post.look.aoFloor = WATER_LEVEL; // no ambient occlusion on the lake bed under the water
     this.renderScale = 1;
-    this.frameMs = 16.7;
     this.lastRenderAt = 0;
-    this.scaleHold = 0;
+    this.vsyncMs = 1000 / 60; // the display's frame period (learned)
+    this.resetAdaptive();
     this.applyPixelRatio();
 
     // ---- scene, lights
@@ -464,6 +469,7 @@ export class GameRenderer {
     const Q = QUALITY[q];
     if (this.post) this.post.setQuality(q);
     this.setRenderScale(1);
+    this.resetAdaptive();
     this.resize(this.viewW, this.viewH);
     const was = this.renderer.shadowMap.enabled;
     this.renderer.shadowMap.enabled = Q.shadows;
@@ -501,30 +507,54 @@ export class GameRenderer {
     if (this.post) this.post.setRenderScale(s);
   }
 
+  /** Start adaptive resolution afresh (new quality: frame times measured before no longer apply). */
+  resetAdaptive() {
+    this.frameMs = this.vsyncMs;
+    this.scaleHold = SCALE_SETTLE; // first-frame shader compiles and uploads settle
+    this.upWait = 0;
+    this.upWaitNext = SCALE_UP_WAIT;
+    this.adaptN = 0;
+    this.upAt = -Infinity;
+  }
+
   /**
    * Adaptive resolution: while frames take longer than SLOW_FRAME_MS (smoothed),
-   * draw the scene a step smaller; when they are fast again, step back up.
-   * Only the 3D scene scales (the composite sharpens it back to the canvas);
-   * overlays and the HUD stay crisp.
+   * draw the scene a step smaller; when they keep up with the display again,
+   * step back up. Only the 3D scene scales (the composite sharpens it back to the
+   * canvas); overlays and the HUD stay crisp.
+   * @param {number} t frame timestamp (ms; the requestAnimationFrame time when there is one)
    */
   adaptResolution(t) {
     const last = this.lastRenderAt;
     this.lastRenderAt = t;
     if (!last || !this.post || !this.post.enabled) return;
     const ms = t - last;
-    if (!(ms > 0) || ms > 250) return; // tab was hidden, paused, or a hitch
-    this.frameMs += (ms - this.frameMs) * 0.05;
+    if (!(ms > 0) || ms > 250) return; // tab was hidden, paused, or a long stall
+    // The display's frame period: vsync holds frames at it however idle the GPU is.
+    // The shortest interval, creeping up so a lower rate (another screen, a 30 fps
+    // battery-saver cap) is learned within a minute; one far shorter is a timer glitch.
+    const v = (this.vsyncMs = Math.min(ms > this.vsyncMs * 0.4 ? ms : Infinity, this.vsyncMs + 0.01, MAX_VSYNC_MS));
+    const slowMs = Math.max(SLOW_FRAME_MS, v * 1.3);
+    // one long frame (garbage collection, a first-use shader) barely moves the average
+    this.frameMs += (Math.min(ms, 2 * slowMs) - this.frameMs) * 0.05;
+    const n = ++this.adaptN;
+    if (this.upWait > 0) this.upWait--;
     if (this.scaleHold > 0) {
       this.scaleHold--;
       return;
     }
     const Q = QUALITY[this.quality];
-    if (this.frameMs > SLOW_FRAME_MS && this.renderScale > Q.minScale + 0.01) {
+    if (this.frameMs > slowMs && this.renderScale > Q.minScale + 0.01) {
+      // undoing a step up made shortly before: wait longer before the next one
+      this.upWaitNext = n - this.upAt < 1800 ? Math.min(this.upWaitNext * 2, SCALE_UP_WAIT_MAX) : SCALE_UP_WAIT;
+      this.upWait = this.upWaitNext;
       this.setRenderScale(this.renderScale - 0.1);
-      this.scaleHold = 90; // let the average settle before deciding again
-    } else if (this.frameMs < FAST_FRAME_MS && this.renderScale < 0.99) {
+      this.scaleHold = SCALE_SETTLE;
+    } else if (this.frameMs < Math.max(v * 1.12, v + 1) && this.upWait <= 0 && this.renderScale < 0.99) {
       this.setRenderScale(this.renderScale + 0.1);
-      this.scaleHold = 240;
+      this.scaleHold = SCALE_SETTLE;
+      this.upWait = SCALE_UP_WAIT;
+      this.upAt = n;
     }
   }
 
@@ -1590,12 +1620,13 @@ export class GameRenderer {
 
   // ------------------------------------------------------------------ render
 
-  render() {
+  /** @param {number} [frameTime] the requestAnimationFrame timestamp (ms), for adaptive resolution */
+  render(frameTime) {
     if (this.disposed) return;
     const r = this.renderer;
     if (r.info && typeof r.info.reset === 'function') r.info.reset();
     if (this.post && this.post.enabled) {
-      this.adaptResolution(now());
+      this.adaptResolution(frameTime > 0 ? frameTime : now());
       // materials write linear values into the HDR target; a little under 2.2
       // because the tone curve's toe darkens the dimmed (remembered) ground further
       FOW_UNIFORMS.uFowPow.value = 1.7;

@@ -25,8 +25,13 @@ const { PLAYER_COLORS, DT } = await import('../../src/config.js');
 const W = 1280;
 const H = 720;
 
-function stubWebgl() {
-  return {
+/**
+ * A stand-in for THREE.WebGLRenderer. With `post`, it also has the render-target
+ * API, so medium / high / ultra draw through the post-processing pipeline
+ * (post.js) as in the browser; `log` lists every draw as [scene, target].
+ */
+function stubWebgl({ post = false } = {}) {
+  const gl = {
     shadowMap: { enabled: false, type: 0, autoUpdate: true },
     info: { render: { calls: 0, triangles: 0 } },
     renderLists: { dispose() {} },
@@ -41,8 +46,9 @@ function stubWebgl() {
       this.size = [w, h];
     },
     render(scene, camera) {
-      assert.ok(scene.isScene && camera.isCamera);
-      this.renders++;
+      assert.ok((scene.isScene || scene.isMesh) && camera.isCamera);
+      if (scene.isScene) this.renders++;
+      if (this.log) this.log.push([scene.name || scene.type, this.target ? this.target.texture.name : 'canvas']);
     },
     compile() {
       this.compiled++;
@@ -51,10 +57,29 @@ function stubWebgl() {
       this.disposed = true;
     },
   };
+  if (!post) return gl;
+  return Object.assign(gl, {
+    log: [],
+    target: null,
+    toneMapping: 0,
+    autoClear: true,
+    extensions: { has: (name) => name === 'EXT_color_buffer_float' },
+    capabilities: { maxSamples: 4 },
+    setRenderTarget(t) {
+      this.target = t;
+    },
+    getRenderTarget() {
+      return this.target;
+    },
+    getDrawingBufferSize(v) {
+      return v.set(this.size[0] * (this.pixelRatio || 1), this.size[1] * (this.pixelRatio || 1));
+    },
+    clear() {},
+  });
 }
 
 /** A small 2-player match: world, view state for player 0, renderer, and a frame stepper. */
-function makeMatch({ quality = 'medium', myIndex = 0, pantheons = ['greek', 'norse'] } = {}) {
+function makeMatch({ quality = 'medium', myIndex = 0, pantheons = ['greek', 'norse'], post = false } = {}) {
   const setup = {
     version: '0.1.0',
     seed: 4242,
@@ -65,7 +90,7 @@ function makeMatch({ quality = 'medium', myIndex = 0, pantheons = ['greek', 'nor
   const vs = new ViewState({ setup, mapData: world.mapData, myIndex, interpDelayMs: 50 });
   let now = 1000;
   vs.pushSnapshot(world.getSnapshot(), now);
-  const webgl = stubWebgl();
+  const webgl = stubWebgl({ post });
   const canvas = { clientWidth: W, clientHeight: H, width: W, height: H, style: {} };
   const r = new GameRenderer(canvas, { viewState: vs, setup, quality, webgl });
   let acc = 0;
@@ -296,4 +321,39 @@ test('GameRenderer: resize picks up a new devicePixelRatio (capped by quality); 
   } finally {
     if (!had) delete globalThis.window;
   }
+});
+
+test('GameRenderer: adaptive resolution lowers the scene scale on slow frames and restores it at the display rate', () => {
+  const { r } = makeMatch({ post: true });
+  assert.ok(r.post && r.post.enabled, 'medium draws through post-processing');
+  const run = (frames, ms, t0) => {
+    let t = t0;
+    for (let i = 0; i < frames; i++) r.adaptResolution((t += ms));
+    return t;
+  };
+  let t = run(600, 1000 / 60, 1000); // vsync-capped 60 Hz
+  assert.equal(r.renderScale, 1);
+  // one long stall (garbage collection, a shader compile) is not a slow stretch
+  t = run(1, 200, t);
+  t = run(600, 1000 / 60, t);
+  assert.equal(r.renderScale, 1, 'a single hitch keeps the full resolution');
+  // a heavy fight: the scene drops a step or more ...
+  t = run(300, 30, t);
+  assert.ok(r.renderScale < 1, `scale ${r.renderScale} during slow frames`);
+  assert.ok(r.post.sw < r.post.width, 'the scene target shrinks');
+  // ... and comes back once frames are at the display's 16.7 ms again (vsync never lets them go faster)
+  t = run(60 * 60, 1000 / 60, t);
+  assert.equal(r.renderScale, 1, 'full resolution again at a steady 60 Hz');
+  assert.equal(r.post.sw, r.post.width);
+  // a 30 fps cap (battery saver) is learned as the display rate: full resolution within a few minutes
+  t = run(30 * 180, 1000 / 30, t);
+  assert.equal(r.renderScale, 1, 'a 30 Hz cap does not keep the scene blurred');
+  // a quality change starts over at full scale
+  t = run(300, 60, t);
+  assert.ok(r.renderScale < 1, 'frames well past the 30 Hz period are still slow');
+  r.setQuality('high');
+  assert.equal(r.renderScale, 1);
+  t = run(30, 60, t);
+  assert.equal(r.renderScale, 1, 'the slow average measured at the old quality does not carry over');
+  r.dispose();
 });

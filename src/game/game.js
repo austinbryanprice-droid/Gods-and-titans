@@ -232,7 +232,7 @@ export class Game {
         this.selection.prune();
         this.input.update(dt);
         this.renderer.update(this.paused ? 0 : dt);
-        this.renderer.render();
+        this.renderer.render(now);
       }
       t1 = performance.now();
       const cam = this.renderer.camera;
