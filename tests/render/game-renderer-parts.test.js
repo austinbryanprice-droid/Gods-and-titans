@@ -19,7 +19,8 @@ export async function resolve(spec, ctx, next) {
 const THREE = await import('three');
 const { CameraController, CAMERA_DEFAULTS } = await import('../../src/render/camera.js');
 const { FogOfWar, FOW_UNIFORMS, FOW_VISIBLE, FOW_EXPLORED, FOW_UNEXPLORED, FOW_FADE_SECONDS, patchFowMaterial, patchFowObject } = await import('../../src/render/fog.js');
-const { buildTerrainGeometry, terrainColors, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
+const { buildTerrainGeometry, terrainColors, tileLayers, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
+const { LAYER, LAYER_COUNT, GROUND_SIZE, terrainTextureData } = await import('../../src/render/terrain-textures.js');
 const { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } = await import('../../src/render/overlays.js');
 const { PlacementLayer } = await import('../../src/render/placement.js');
 const { FireLayer, fireCount } = await import('../../src/render/fires.js');
@@ -252,6 +253,75 @@ test('terrain: water only over low tiles at the water level, a dark border, and 
   const t2 = createTerrain(dry);
   assert.ok(!t2.water || t2.water.geometry.attributes.position.count === 0);
   t2.dispose();
+});
+
+test('terrain: the water depth at every vertex is the depth of the ground below it', () => {
+  const map = hillyMap();
+  const t = createTerrain(map);
+  const geo = t.water.geometry;
+  const pos = geo.attributes.position;
+  const depth = geo.attributes.aDepth;
+  for (let i = 0; i < pos.count; i++) {
+    assert.ok(close(depth.getX(i), WATER_LEVEL - heightAt(map, pos.getX(i), pos.getZ(i)), 1e-5), `water vertex ${i}`);
+  }
+  // the terrain's own 8-triangle fans, so depth interpolates like the ground does
+  assert.equal(geo.index.count % 24, 0);
+  // no depth writes: rings, blob shadows and ground effects at the shore stay whole
+  assert.equal(t.water.material.depthWrite, false);
+  t.update(2.5);
+  assert.equal(t.water.material.uniforms.uTime.value, 2.5);
+  t.dispose();
+});
+
+test('terrain: ground layers per tile, procedural textures, quality tiers', () => {
+  const map = hillyMap();
+  const layers = tileLayers(map);
+  assert.equal(layers.length, map.width * map.height);
+  for (let i = 0; i < layers.length; i++) {
+    const t = map.terrain[i];
+    const l = layers[i];
+    if (t === TERRAIN.FOREST) assert.equal(l, LAYER.FOREST);
+    else if (t === TERRAIN.WATER) assert.equal(l, LAYER.BED);
+    else if (t === TERRAIN.ROCK) assert.equal(l, LAYER.ROCK);
+    else if (t === TERRAIN.GRASS) assert.ok(l === LAYER.GRASS || l === LAYER.DRY);
+  }
+  // painted once with typed arrays (no DOM): albedo + height per layer, all bytes used sensibly
+  const d = terrainTextureData();
+  assert.equal(d.ground.length, GROUND_SIZE * GROUND_SIZE * 4 * LAYER_COUNT);
+  assert.strictEqual(terrainTextureData(), d, 'shared, built once');
+  for (let l = 0; l < LAYER_COUNT; l++) {
+    let lo = 255;
+    let hi = 0;
+    const o = l * GROUND_SIZE * GROUND_SIZE * 4;
+    for (let i = 0; i < GROUND_SIZE * GROUND_SIZE; i++) {
+      lo = Math.min(lo, d.ground[o + i * 4 + 3]);
+      hi = Math.max(hi, d.ground[o + i * 4 + 3]);
+    }
+    assert.ok(lo === 0 && hi === 255, `layer ${l} height spans the byte range`);
+  }
+  const t = createTerrain(map, { quality: 'low' });
+  const mat = t.terrain.material;
+  assert.ok(mat.isMeshStandardMaterial && mat.userData.__fow && mat.userData.__world);
+  // the shader's tile map: lush and dry grass share one layer (R), split per
+  // pixel by the dryness field (G)
+  const tiles = mat.userData.terrainUniforms.uTiles.value.image.data;
+  assert.equal(tiles.length, map.width * map.height * 2);
+  for (let i = 0; i < layers.length; i++) {
+    assert.equal(tiles[i * 2], layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i]);
+    if (layers[i] === LAYER.DRY) assert.ok(tiles[i * 2 + 1] >= 0.64 * 255 - 1);
+  }
+  assert.ok(!('TERRAIN_BUMP' in mat.defines));
+  assert.ok(!('WATER_HQ' in t.water.material.defines));
+  t.setQuality('ultra');
+  assert.ok('TERRAIN_BUMP' in mat.defines && 'TERRAIN_ANTITILE' in mat.defines);
+  assert.ok('WATER_HQ' in t.water.material.defines);
+  // the water keeps its program when its detail does not change
+  const wv = t.water.material.version;
+  t.setQuality('high');
+  assert.equal(t.water.material.version, wv);
+  t.setQuality('nonsense');
+  assert.ok('TERRAIN_BUMP' in mat.defines);
+  t.dispose();
 });
 
 // ------------------------------------------------------------------ overlays
