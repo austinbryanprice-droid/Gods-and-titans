@@ -211,9 +211,13 @@ export const INTERNAL = {
       const main = sys.acquireRibbon(e, e.c, e.cc, e.k0);
       if (!main) return;
       main.u.uFade.value.set(0.02, 0.02);
+      main.u.uHot.value = 5; // white-hot channel: blooms
       for (let i = 0; i < e.k2; i++) {
         const b = sys.acquireRibbon(e, e.c, e.cc, e.k0 * 0.55);
-        if (b) b.u.uFade.value.set(0.02, 0.3);
+        if (b) {
+          b.u.uFade.value.set(0.02, 0.3);
+          b.u.uHot.value = 3;
+        }
       }
       e.timer = 0;
       this.relay(sys, e);
@@ -297,6 +301,7 @@ function summonStart(sys, e, S) {
   e.stage = 0;
   const height = 6 + 2.6 * S;
   sys.pillarFx(x, y, 0.45 + 0.34 * S, height, 1.4, pal.glow, pal.core, 1, 0.12, 0.55);
+  sys.flashLight(x, gz + 2, y, pal.glow, 7 + 3 * S, 5 + 2 * S, 1.6, 0.25);
   sys.boltFx(x, gz + height, y, x, gz + 0.05, y, 1.05, 0.28 + 0.14 * S, pal.glow, pal.core, 0, 0);
   sys.decalFx(STYLE.runes, x, y, 0.95 + 0.6 * S, 1.05 + 0.66 * S, 1.75, pal.glow, pal.core, 1, 0.22, 0.6, 1.3);
   sys.decalFx(STYLE.glowDisc, x, y, 0.6 + 0.4 * S, 0.8 + 0.5 * S, 1.5, pal.glow, pal.core, 0.6, 0.2, 0.6);
@@ -505,11 +510,13 @@ export const SHAPES = {
       if (main) {
         main.u.uStripes.value = 0.45;
         main.u.uFade.value.set(0.02, 0.02);
+        main.u.uHot.value = 3.5;
       }
       const halo = sys.acquireRibbon(e, pal.alt, pal.glow, e.k0 * 2.6);
       if (halo) halo.u.uFade.value.set(0.05, 0.05);
       e.g0 = sys.glows.alloc();
       e.g1 = sys.glows.alloc();
+      e.light = sys.holdLight(P[3], P[4] + 0.6, P[5], pal.glow, 5 + 3 * R, 4 + 2 * R, 0.12, 0.08);
       e.d0 = sys.acquireDecal(STYLE.glowDisc, pal.glow, pal.core);
       if (e.d0) e.d0.layout(sys.getHeight, P[3], P[5], Math.max(R, 0.8));
       if (pal.gloom) {
@@ -539,8 +546,12 @@ export const SHAPES = {
         r.u.uWidth.value = (k === 0 ? e.k0 : e.k0 * 2.6) * (0.3 + 0.7 * w) * (0.92 + 0.08 * Math.sin(t * 45));
         r.u.uOpacity.value = k === 0 ? w : w * 0.32;
       }
-      sys.glows.set(e.g0, P[0], P[1], P[2], (0.9 + 0.2 * Math.sin(t * 30)) * w, pal.glow, 1);
-      sys.glows.set(e.g1, P[3], P[4], P[5], (1.3 + 0.3 * e.k0 + 0.25 * Math.sin(t * 37)) * w, pal.core, 1);
+      sys.glows.set(e.g0, P[0], P[1], P[2], (0.9 + 0.2 * Math.sin(t * 30)) * w, pal.glow, 1, 0, 0, 1.4);
+      sys.glows.set(e.g1, P[3], P[4], P[5], (1.3 + 0.3 * e.k0 + 0.25 * Math.sin(t * 37)) * w, pal.core, 1, 0, 0, 2);
+      if (t > D - 0.25 && e.light >= 0) {
+        sys.lights.release(e.light, D - t);
+        e.light = -1;
+      }
       if (e.d0) {
         e.d0.u.uOpacity.value = w * 0.9;
         e.d0.u.uTime.value = t;
@@ -764,6 +775,8 @@ export const SHAPES = {
       }
       e.timer = 0;
       sys.decalFx(STYLE.ring, e.x, e.y, 0.3, R, 0.45, pal.glow, pal.core, 0.9, 0.03, 0.3);
+      // burning ground flickers a warm light (dim: flashes take precedence for the lights)
+      if (pal.el === 'fire') e.light = sys.holdLight(e.x, e.gz + 1.2, e.y, pal.mid, 1.6 + 0.8 * R, 2.5 + 1.6 * R, 0.4, 0.22);
     },
     update(sys, e, dt) {
       const t = e.t;
@@ -772,6 +785,10 @@ export const SHAPES = {
       const pal = e.pal;
       const R = e.k0;
       const a = env(t, D, 0.35, 0.6);
+      if (e.light >= 0 && t > D - 0.6) {
+        sys.lights.release(e.light, D - t);
+        e.light = -1;
+      }
       if (e.d0) {
         e.d0.u.uOpacity.value = a * 0.85;
         e.d0.u.uTime.value = t;
@@ -895,7 +912,8 @@ export const SHAPES = {
           sys.add.setEnd(p, pal.alt);
         }
       }
-      sys.glows.set(e.g0, e.x, e.gz + 0.4, e.y, (1.4 + 0.2 * Math.sin(t * 12)) * env(t, e.dur, 0.1, 0.4) * (area ? 1.6 : 1), pal.glow, 0.6);
+      // a buff lasts for seconds: its glow is barely hot, so it does not bloom all that time
+      sys.glows.set(e.g0, e.x, e.gz + 0.4, e.y, (1.4 + 0.2 * Math.sin(t * 12)) * env(t, e.dur, 0.1, 0.4) * (area ? 1.6 : 1), pal.glow, 0.6, 0, 0, 0.15);
       return true;
     },
   },
@@ -992,7 +1010,10 @@ export const SHAPES = {
         e.f0.u.uRays.value = 0;
         e.f0.u.uOpacity.value = 0.9;
         e.f0.u.uSize.value = 2 + 0.4 * R;
+        e.f0.u.uHot.value = 3;
       }
+      // the falling rock lights the ground more and more as it comes down
+      e.light = sys.holdLight(P[0], P[1], P[2], pal.mid, 9 + 2.5 * R, 7 + 2 * R, Math.max(0.1, e.dur * 0.8), 0.12);
       e.d0 = sys.acquireDecal(STYLE.tele, pal.glow, pal.core);
       if (e.d0) e.d0.layout(sys.getHeight, e.x, e.y, R * 1.05);
       e.k1 = rnd(-1, 1);
@@ -1020,7 +1041,8 @@ export const SHAPES = {
         _m.compose(_p, _q, _s);
         sys.batches.rock.setMatrix(e.rock, _m);
       }
-      sys.glows.set(e.g0, x, h, z, 1.6 + 0.3 * R, pal.core, 1);
+      sys.glows.set(e.g0, x, h, z, 1.6 + 0.3 * R, pal.core, 1, 0, 0, 2);
+      if (e.light >= 0) sys.moveLight(e.light, x, h, z);
       if (e.f0) {
         e.f0.mesh.position.set(x, h, z);
         e.f0.u.uSize.value = (2 + 0.45 * R) * (0.92 + 0.08 * Math.sin(t * 40));
@@ -1044,6 +1066,10 @@ export const SHAPES = {
       for (let i = 0; i < s; i++) sys.add.add(x, h, z, rnd(-1.5, 1.5), rnd(-0.5, 1.5), rnd(-1.5, 1.5), rnd(0.4, 0.7), 0.14, 0.03, COLORS.ember, 1, CELL.SPARK, 4);
       if (u >= 1) {
         e.stage = 1;
+        if (e.light >= 0) {
+          sys.lights.release(e.light, 0.1);
+          e.light = -1;
+        }
         if (e.rock >= 0) {
           sys.batches.rock.free(e.rock);
           e.rock = -1;
@@ -1413,6 +1439,7 @@ export const SHAPES = {
       if (main) {
         main.u.uStripes.value = 0.55;
         main.u.uFade.value.set(0.3, 0.05);
+        main.u.uHot.value = 2;
       }
       const halo = sys.acquireRibbon(e, pal.alt, pal.glow, e.k2 * 2.4);
       if (halo) halo.u.uFade.value.set(0.4, 0.1);
@@ -1448,7 +1475,7 @@ export const SHAPES = {
       const hx = e.fx + (e.x - e.fx) * u;
       const hy = e.fy + (e.y - e.fy) * u;
       const hg = sys.ground(hx, hy);
-      sys.glows.set(e.g0, hx, hg + 0.7, hy, t < T ? 1.3 : 1.3 * op, pal.glow, 1);
+      sys.glows.set(e.g0, hx, hg + 0.7, hy, t < T ? 1.3 : 1.3 * op, pal.glow, 1, 0, 0, 1.3);
       if (t < T) {
         const m = sys.rate(e, 'acc0', 45, dt);
         for (let i = 0; i < m; i++) {

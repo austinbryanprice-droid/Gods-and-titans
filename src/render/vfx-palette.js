@@ -2,6 +2,11 @@
 // dark hues are lifted so they still read with additive blending, and each element
 // gets a hot core, a secondary hue, a smoke/dust color and an optional dark
 // underlay (normal-blended) color for shadowy ground effects.
+//
+// Colors are authored (and lifted / mixed) in sRGB, then handed out LINEAR: the
+// VFX shaders work in linear light like every other world material (post.js
+// draws the world into a linear HDR target; on low quality the shaders tone map
+// and sRGB-encode at the end).
 import * as THREE from 'three';
 import { ELEMENT_COLORS } from '../config.js';
 
@@ -27,11 +32,21 @@ const EXTRA = {
   arcane: ['#fff0ff', '#8a60ff', '#4a3a60', null, true],
 };
 
-/** sRGB hex → { r, g, b } in 0..1 (shaders here work directly in sRGB). */
+/** sRGB hex → { r, g, b } in 0..1, still sRGB-encoded (see linear()). */
 export function hexToRgb(hex) {
   const n = parseInt(String(hex).replace('#', ''), 16);
   return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
 }
+
+const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+
+/** sRGB { r, g, b } → linear { r, g, b } (what the shaders and lights take). */
+export function linear(c) {
+  return { r: toLinear(c.r), g: toLinear(c.g), b: toLinear(c.b) };
+}
+
+/** sRGB hex → linear { r, g, b }. */
+export const hexToLinear = (hex) => linear(hexToRgb(hex));
 
 function lift(c, minLum) {
   const lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
@@ -58,7 +73,8 @@ const GLOOM = {
 const cache = new Map();
 
 /**
- * Palette for an element id (unknown ids fall back to arcane).
+ * Palette for an element id (unknown ids fall back to arcane). Every color is
+ * linear { r, g, b } in 0..1 (base keeps the authored sRGB hue).
  * @param {string} el
  * `tint` is the most saturated of glow / alt, used for large glowing areas so pale
  * elements (ice, wind, moon) still read as their hue over bright ground.
@@ -79,14 +95,14 @@ export function getPalette(el) {
   p = {
     el: key,
     base,
-    glow,
-    core,
-    mid: mixRgb(core, glow, 0.55),
-    alt,
-    tint,
-    smoke: hexToRgb(ex[2]),
-    dark: ex[3] ? hexToRgb(ex[3]) : null,
-    gloom: GLOOM[key] ? hexToRgb(GLOOM[key]) : null,
+    glow: linear(glow),
+    core: linear(core),
+    mid: linear(mixRgb(core, glow, 0.55)),
+    alt: linear(alt),
+    tint: linear(tint),
+    smoke: hexToLinear(ex[2]),
+    dark: ex[3] ? hexToLinear(ex[3]) : null,
+    gloom: GLOOM[key] ? hexToLinear(GLOOM[key]) : null,
     jagged: ex[4],
     linGlow: new THREE.Color().setRGB(glow.r, glow.g, glow.b, THREE.SRGBColorSpace),
     linAlt: new THREE.Color().setRGB(alt.r, alt.g, alt.b, THREE.SRGBColorSpace),
@@ -97,19 +113,19 @@ export function getPalette(el) {
   return p;
 }
 
-/** Fixed colors used by the non-elemental effects (dust, death, level up). */
+/** Fixed colors (linear) used by the non-elemental effects (dust, death, level up). */
 export const COLORS = {
-  dust: hexToRgb('#a08a6c'),
-  dustDark: hexToRgb('#6e5c48'),
-  debris: hexToRgb('#4a3a2c'),
-  soul: hexToRgb('#d8e8ff'),
-  gold: hexToRgb('#ffd24a'),
-  goldCore: hexToRgb('#fff6c8'),
+  dust: hexToLinear('#a08a6c'),
+  dustDark: hexToLinear('#6e5c48'),
+  debris: hexToLinear('#4a3a2c'),
+  soul: hexToLinear('#d8e8ff'),
+  gold: hexToLinear('#ffd24a'),
+  goldCore: hexToLinear('#fff6c8'),
   white: { r: 1, g: 1, b: 1 },
-  heal: hexToRgb('#7dff7a'),
-  healGold: hexToRgb('#ffe27a'),
-  scorch: hexToRgb('#140c08'),
-  cloud: hexToRgb('#2a3040'),
-  cloudLit: hexToRgb('#56607a'),
-  ember: hexToRgb('#ff9a3a'),
+  heal: hexToLinear('#7dff7a'),
+  healGold: hexToLinear('#ffe27a'),
+  scorch: hexToLinear('#140c08'),
+  cloud: hexToLinear('#2a3040'),
+  cloudLit: hexToLinear('#56607a'),
+  ember: hexToLinear('#ff9a3a'),
 };
