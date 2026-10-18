@@ -824,22 +824,30 @@ export class RallyFlags {
     }
   }
 
+  makeItem(color) {
+    const g = new THREE.Group();
+    g.name = 'rally-flag';
+    const pole = new THREE.Mesh(this.pole, this.poleMat);
+    const geo = this.flagGeo.clone();
+    const flag = new THREE.Mesh(geo, this.flagMat(color));
+    const disc = new THREE.Mesh(this.disc, this.discMat);
+    disc.position.y = 0.02;
+    g.add(pole, flag, disc);
+    this.parent.add(g);
+    const it = { g, flag, geo };
+    this.items.push(it);
+    return it;
+  }
+
+  /** One hidden flag, so the renderer's warm-up compile sees the pole and flag shaders (the first rally point would otherwise link them). */
+  prewarm() {
+    if (this.items.length) return;
+    this.makeItem('#ffffff').g.visible = false;
+  }
+
   add(x, y, z, color, time) {
     if (this.n >= this.max) return;
-    let it = this.items[this.n];
-    if (!it) {
-      const g = new THREE.Group();
-      g.name = 'rally-flag';
-      const pole = new THREE.Mesh(this.pole, this.poleMat);
-      const geo = this.flagGeo.clone();
-      const flag = new THREE.Mesh(geo, this.flagMat(color));
-      const disc = new THREE.Mesh(this.disc, this.discMat);
-      disc.position.y = 0.02;
-      g.add(pole, flag, disc);
-      this.parent.add(g);
-      it = { g, flag, geo };
-      this.items.push(it);
-    }
+    const it = this.items[this.n] || this.makeItem(color);
     this.n++;
     it.g.visible = true;
     it.g.position.set(x, y, z);

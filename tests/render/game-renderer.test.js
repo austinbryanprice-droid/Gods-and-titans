@@ -116,7 +116,10 @@ const tcOf = (vs, o) => [...vs.entities.values()].find((e) => e.k === 'b' && e.o
 
 test('GameRenderer: builds the scene, warms shaders, starts on the local town center', () => {
   const { vs, r, webgl, step } = makeMatch();
-  assert.ok(webgl.compiled >= 1, 'shader warm-up ran');
+  assert.ok(webgl.compiled >= 2, 'shader warm-up ran for the world and for the overlays');
+  assert.equal(r.flags.items.length, 1, 'one hidden rally flag is primed');
+  assert.equal(r.flags.items[0].g.visible, false);
+  assert.ok(r.placement.ghost && !r.placement.ghost.model.root.visible, 'a hidden placement ghost is primed');
   assert.deepEqual(webgl.size, [W, H]);
   step(0.5);
   const tc = tcOf(vs, 0);
