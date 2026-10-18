@@ -71,19 +71,23 @@ vec3 soft( vec3 c ) {
   rq = uThreshold.w * rq * rq;
   return c * max( rq, br - uThreshold.x ) / max( br, 1e-4 );
 }
-vec3 karis( vec3 c ) { return c / ( 1.0 + luma( c ) ); }
+// One tap, capped before the weighting: an overflowed (Inf) texel would turn into NaN
+// there and spread through the whole bloom chain as a block. NaN fails >= and is dropped.
+vec3 tap( vec2 uv ) {
+  vec3 c = texture2D( tSrc, uv ).rgb;
+  return ( c.r >= 0.0 && c.g >= 0.0 && c.b >= 0.0 ) ? min( c, vec3( 64.0 ) ) : vec3( 0.0 );
+}
 void main() {
   // 4 bilinear taps = a 4x4 box; Karis-weighted so single hot pixels do not flicker
-  vec3 a = texture2D( tSrc, vUv + uTexel * vec2( -1.0, -1.0 ) ).rgb;
-  vec3 b = texture2D( tSrc, vUv + uTexel * vec2( 1.0, -1.0 ) ).rgb;
-  vec3 c = texture2D( tSrc, vUv + uTexel * vec2( -1.0, 1.0 ) ).rgb;
-  vec3 d = texture2D( tSrc, vUv + uTexel * vec2( 1.0, 1.0 ) ).rgb;
+  vec3 a = tap( vUv + uTexel * vec2( -1.0, -1.0 ) );
+  vec3 b = tap( vUv + uTexel * vec2( 1.0, -1.0 ) );
+  vec3 c = tap( vUv + uTexel * vec2( -1.0, 1.0 ) );
+  vec3 d = tap( vUv + uTexel * vec2( 1.0, 1.0 ) );
   float wa = 1.0 / ( 1.0 + luma( a ) );
   float wb = 1.0 / ( 1.0 + luma( b ) );
   float wc = 1.0 / ( 1.0 + luma( c ) );
   float wd = 1.0 / ( 1.0 + luma( d ) );
   vec3 col = ( a * wa + b * wb + c * wc + d * wd ) / ( wa + wb + wc + wd );
-  col = min( col, vec3( 64.0 ) );
   gl_FragColor = vec4( soft( col ), 1.0 );
 }`;
 
