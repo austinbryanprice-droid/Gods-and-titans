@@ -20,7 +20,8 @@
 // detail from the object-space position and normal per surface class (stone
 // courses, bricks, planks, roof-tile rows, thatch), plus grime and ambient
 // occlusion near the ground and where a part stands on another. Glowing parts
-// (fires, lanterns, runes, lit doorways) store HDR colors so they bloom.
+// (fires, lanterns, runes) store HDR colors so they bloom; doorways and windows
+// are body parts that show only a faint warm light from inside.
 //
 // Styles (pantheon.style): roof drives the silhouette, wall the materials and
 // ornament the signature details. All values of DESIGN 4.7 are supported.
@@ -68,12 +69,13 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 /**
  * Surface classes: the procedural detail the fragment shader draws (keep in
  * sync with SURFACE_GLSL). WOOD resolves per part to planks (WOOD_*) or a beam
- * (BEAM_*) with the grain along the part's long axis.
+ * (BEAM_*) with the grain along the part's long axis. INTERIOR is an opening
+ * (doorway, window): unlit, only the light from inside (see Kit.hole).
  */
 const CLS = {
   PLAIN: 0, STONE: 1, SANDSTONE: 2, MARBLE: 3, PLASTER: 4, MUDBRICK: 5, BRICK: 6,
   WOOD_Y: 7, WOOD_X: 8, WOOD_Z: 9, TILE: 10, TURF: 11, THATCH: 12, METAL: 13, GOLD: 14,
-  CLOTH: 15, LACQUER: 16, ROCK: 17, EARTH: 18, BEAM_Y: 19, BEAM_X: 20, BEAM_Z: 21, WOOD: -1,
+  CLOTH: 15, LACQUER: 16, ROCK: 17, EARTH: 18, BEAM_Y: 19, BEAM_X: 20, BEAM_Z: 21, INTERIOR: 22, WOOD: -1,
 };
 const surf = (cls, rough, metal = 0) => Object.freeze({ cls, rough, metal });
 /** Surface tags: class + base roughness / metalness. */
@@ -102,6 +104,7 @@ const SURF = {
   rock: surf(CLS.ROCK, 0.86),
   earth: surf(CLS.EARTH, 0.97),
   water: surf(CLS.PLAIN, 0.08),
+  interior: surf(CLS.INTERIOR, 1),
 };
 
 /** A copy of `color` tagged as made of `s` (the tag survives C, shade, tint and mix). */
@@ -370,9 +373,12 @@ const CONTACT_RANGE = 2.5;
 // HDR gains of glowing parts (linear color × gain): over ~1 they bloom. Flames
 // stay moderate (tone mapping turns very bright orange pale), their cores hot.
 const GLOW = { flame: 1.35, core: 2.4, lamp: 2.1, paper: 1.7, halo: 1.9, rune: 1.7, portal: 2.3 };
-// Lit doorways and windows: a warm, dim interior (linear), brighter toward the floor.
-const INTERIOR_LOW = new THREE.Color(0.075, 0.028, 0.009);
-const INTERIOR_HIGH = new THREE.Color(0.008, 0.005, 0.004);
+// Doorways and windows: a dark interior (linear emissive) with warm light
+// pooling at the floor (INTERIOR_FLOOR) and fading out well below the lintel
+// (INTERIOR_DARK). The vertex color is what the unlit placement ghosts show.
+const INTERIOR_FLOOR = new THREE.Color(0.1, 0.04, 0.013);
+const INTERIOR_DARK = new THREE.Color(0.0025, 0.0018, 0.0015);
+const OPENING = made('#21180f', SURF.interior);
 
 class Kit {
   constructor(seed) {
@@ -478,16 +484,18 @@ class Kit {
     return this.add('glow', g, color, 0, anim, gain);
   }
 
-  /** Lit doorway / window opening: a glowing interior, warm at the floor (y0), dark at the lintel (y0 + h). */
+  /**
+   * Doorway / window opening from the floor (y0) to the lintel (y0 + h): a body
+   * part of class INTERIOR (so it is clipped with the walls on a building site
+   * and costs no extra draw call), unlit, with a faint warm light from inside.
+   * aSurf.w holds the height in the opening (0 floor, 1 lintel) instead of the
+   * contact height; the shader shapes the light from it.
+   */
   hole(g, y0, h) {
-    this.add('glow', g, INTERIOR_HIGH, 0);
+    this.add('body', g, OPENING, 0);
     const p = g.attributes.position;
-    const col = g.attributes.color;
-    // a pane only has floor and lintel vertices: a linear ramp between them
-    for (let i = 0; i < p.count; i++) {
-      const t = 1 - clamp01((p.getY(i) - y0) / Math.max(h, 1e-3));
-      col.setXYZ(i, INTERIOR_HIGH.r + (INTERIOR_LOW.r - INTERIOR_HIGH.r) * t, INTERIOR_HIGH.g + (INTERIOR_LOW.g - INTERIOR_HIGH.g) * t, INTERIOR_HIGH.b + (INTERIOR_LOW.b - INTERIOR_HIGH.b) * t);
-    }
+    const a = g.attributes.aSurf;
+    for (let i = 0; i < p.count; i++) a.array[i * 4 + 3] = Math.round(clamp01((p.getY(i) - y0) / Math.max(h, 1e-3)) * 255);
     return g;
   }
 
@@ -640,7 +648,7 @@ function detailTexture() {
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
-  tex.anisotropy = 4; // walls are mostly seen at a slant
+  tex.anisotropy = 2; // walls seen at a slant from the RTS camera: about 2:1, so 4× adds nothing visible
   tex.colorSpace = THREE.NoColorSpace;
   tex.name = 'building-detail';
   tex.needsUpdate = true;
@@ -698,6 +706,14 @@ varying vec3 vObjPos;
 varying vec3 vObjN;
 #define BLD_PLINTH ${PLINTH.toFixed(3)}
 #define BLD_CONTACT ${CONTACT_RANGE.toFixed(2)}
+#define BLD_INTERIOR ${CLS.INTERIOR.toFixed(1)}
+const vec3 BLD_IN_FLOOR = vec3( ${INTERIOR_FLOOR.toArray().map((v) => v.toFixed(4)).join(', ')} );
+const vec3 BLD_IN_DARK = vec3( ${INTERIOR_DARK.toArray().map((v) => v.toFixed(4)).join(', ')} );
+// Drawn straight to the canvas (low quality: tone mapped here) the surface
+// detail skips its coarse layer and the bump, the costly parts.
+#ifdef TONE_MAPPING
+#define BLD_LITE
+#endif
 
 // Bump mapping from the screen-space derivatives of a height (Mikkelsen 2010):
 // no UVs or tangents needed; the height is in world units, so the relief does
@@ -724,6 +740,14 @@ float bldHash( vec2 p ) {
 // light. The detail texture's mipmaps fade every pattern into its average with
 // distance, so buildings stay calm when zoomed out.
 void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb, out float rough, out float metal, out float h, out float ao ) {
+  // Openings (BLD_INTERIOR) take the plain path; SURF_COLOR makes them unlit.
+  // No early return for them: the texture fetches and fwidth below must stay
+  // in uniform control flow for every shader compiler (D3D's included).
+  alb = vec3( 1.0 );
+  rough = rough0;
+  metal = metal0;
+  h = 0.0;
+  ao = 1.0;
   vec3 P = vObjPos;
   vec3 N = normalize( vObjN );
   float sinS = length( N.xz );
@@ -733,8 +757,8 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   float u = dot( P.xz, tH );
   vec2 uv = level ? P.xz : vec2( u, P.y / max( sinS, 0.3 ) );
   bool mason = cls >= 1.0 && cls <= 6.0 && cls != 4.0;
-  bool wood = ( cls >= 7.0 && cls <= 9.0 ) || cls >= 19.0;
-  bool beam = cls >= 19.0;
+  bool beam = cls >= 19.0 && cls <= 21.0;
+  bool wood = ( cls >= 7.0 && cls <= 9.0 ) || beam;
   // world size of one texture tile (8 rows x 4 blocks); swap puts U along the grain
   vec2 ts = vec2( 0.6 );
   bool swap = false;
@@ -760,7 +784,11 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   vec2 uvT = uv / ts + seed * vec2( 0.3711, 0.6133 );
   vec4 d = texture2D( uDetail, uvT );
   // coarse layer: mottling (b) and, on walls, vertical weathering streaks (a)
+  #ifdef BLD_LITE
+  vec4 c = vec4( 0.5, 0.5, uDetailMean.b, 0.5 );
+  #else
   vec4 c = texture2D( uDetail, ( level ? P.xz * 0.27 : vec2( P.y * 0.22, u * 0.55 ) ) + seed * 0.173 );
+  #endif
   vec2 fw = fwidth( uvT );
   // zero-mean terms: patterns move a surface's tone around its vertex color, so
   // seen from afar (mipmapped to the average) it keeps the palette color
@@ -770,11 +798,6 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   float nz = d.b - uDetailMean.b;
   float stk = d.a - uDetailMean.a;
   float mot = c.b - uDetailMean.b;
-  alb = vec3( 1.0 );
-  rough = rough0;
-  metal = metal0;
-  h = 0.0;
-  ao = 1.0;
   if ( mason ) {
     // ashlar, marble, bricks: dark bevelled joints, a tint per block
     float jd = cls == 3.0 ? 0.16 : cls == 2.0 ? 0.3 : cls == 5.0 ? 0.24 : cls == 6.0 ? 0.28 : 0.42;
@@ -859,13 +882,14 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   if ( !level && ( mason || cls == 4.0 ) ) alb *= 1.0 - 0.08 * smoothstep( 0.05, 0.3, c.a - 0.5 );
   #ifndef BLD_BASE
   // grime and ambient occlusion toward the ground, and at the foot of a part
-  // standing on another (vertical faces only; contact height in vSurf.w)
-  float gnd = 1.0 - smoothstep( BLD_PLINTH, BLD_PLINTH + 0.42, P.y );
-  float grime = clamp( gnd * ( 0.65 + 1.2 * mot ), 0.0, 1.0 );
-  alb *= mix( vec3( 1.0 ), vec3( 0.68, 0.61, 0.52 ), grime * 0.55 );
-  rough = mix( rough, 1.0, grime * 0.4 );
-  float aoG = mix( 0.52, 1.0, smoothstep( BLD_PLINTH - 0.05, BLD_PLINTH + 0.5, P.y ) );
+  // standing on another (contact height in vSurf.w). Walls only: open floors
+  // near the ground (platforms, stylobates, yards) stay clean and sunlit.
   float vert = 1.0 - smoothstep( 0.5, 0.8, abs( N.y ) );
+  float gnd = ( 1.0 - smoothstep( BLD_PLINTH, BLD_PLINTH + 0.42, P.y ) ) * vert;
+  float grime = clamp( gnd * ( 0.65 + 1.2 * mot ), 0.0, 1.0 );
+  alb *= mix( vec3( 1.0 ), vec3( 0.68, 0.61, 0.52 ), grime * ( cls == 3.0 ? 0.4 : 0.55 ) );
+  rough = mix( rough, 1.0, grime * 0.4 );
+  float aoG = mix( mix( 1.0, 0.52, vert ), 1.0, smoothstep( BLD_PLINTH - 0.05, BLD_PLINTH + 0.5, P.y ) );
   float aoC = 1.0 - 0.38 * vert * ( 1.0 - smoothstep( 0.0, 0.16, vSurf.w * BLD_CONTACT ) );
   ao *= min( aoG, aoC );
   #endif
@@ -879,6 +903,8 @@ float bldRough;
 float bldMetal;
 float bldH;
 float bldAO;
+vec3 bldEmit = vec3( 0.0 );
+float bldLit = 1.0;
 {
   float code = floor( vSurf.z * 255.0 + 0.5 );
   float cls = floor( code / 8.0 );
@@ -906,6 +932,19 @@ float bldAO;
   bldSurface( cls, seed, rough0, metal0, bldAlb, bldRough, bldMetal, bldH, bldAO );
   // AO on direct light too (half): the stylized look wants dark feet even in sunlight
   diffuseColor.rgb *= bldAlb * mix( 1.0, bldAO, 0.5 );
+  if ( cls == BLD_INTERIOR ) {
+    // a doorway or window: no light falls on it (no diffuse, no specular), it
+    // only shows the light from inside pooling on the floor (vSurf.w is 0 at
+    // the floor, 1 at the lintel); the 4th power keeps most of it dark
+    float fl = 1.0 - vSurf.w;
+    #ifdef BLD_CLIP
+    fl = 0.0; // nobody lives on a building site yet
+    #endif
+    fl *= fl;
+    bldEmit = mix( BLD_IN_DARK, BLD_IN_FLOOR, fl * fl );
+    bldLit = 0.0;
+    diffuseColor.rgb = vec3( 0.0 );
+  }
 }`;
 
 /**
@@ -942,12 +981,19 @@ function patchBuilding(mat, { anim = null, clip = false, base = false } = {}) {
       .replace('#include <color_fragment>', `#include <color_fragment>\n${SURF_COLOR}`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = bldRough;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = bldMetal;')
-      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = bldBump( - vViewPosition, normal, vec2( dFdx( bldH ), dFdy( bldH ) ) );')
-      .replace('#include <aomap_fragment>', '#include <aomap_fragment>\nreflectedLight.indirectDiffuse *= bldAO;\nreflectedLight.indirectSpecular *= mix( 1.0, bldAO, 0.7 );');
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#ifndef BLD_LITE\nnormal = bldBump( - vViewPosition, normal, vec2( dFdx( bldH ), dFdy( bldH ) ) );\n#endif')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += bldEmit;')
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        reflectedLight.indirectDiffuse *= bldAO;
+        reflectedLight.indirectSpecular *= mix( 1.0, bldAO, 0.7 ) * bldLit;
+        reflectedLight.directSpecular *= bldLit;`,
+      );
     if (clip) fs = fs.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif ( vObjPos.y > uCut ) discard;');
     sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => `mythicwar-bld3-${anim || 'none'}-${clip ? 'clip' : 'full'}-${base ? 'base' : 'part'}`;
+  mat.customProgramCacheKey = () => `mythicwar-bld4-${anim || 'none'}-${clip ? 'clip' : 'full'}-${base ? 'base' : 'part'}`;
   return mat;
 }
 
