@@ -241,7 +241,10 @@ vec3 neutral( vec3 color ) {
   float newPeak = 1. - d * d / ( peak + d - StartCompression );
   color *= newPeak / peak;
   float g = 1. - 1. / ( Desaturation * ( peak - newPeak ) + 1. );
-  return mix( color, vec3( newPeak ), g );
+  // very bright warm light (fire, explosions) burns through yellow to white like a flame,
+  // instead of fading to peach
+  float warm = smoothstep( 0.5, 0.95, ( color.r - color.b ) / max( color.r, 1e-4 ) );
+  return mix( color, newPeak * mix( vec3( 1.0 ), vec3( 1.0, 0.78, 0.38 ), warm ), g );
 }
 vec3 toSRGB( vec3 c ) {
   return mix( pow( c, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), c * 12.92, vec3( lessThanEqual( c, vec3( 0.0031308 ) ) ) );

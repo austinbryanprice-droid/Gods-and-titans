@@ -92,6 +92,7 @@ export function setCloudShadows(strength) {
   WORLD_UNIFORMS.uCloud.value.x = strength;
 }
 
+const DIR_LIGHT_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
 const PARS_VERTEX = 'varying vec3 vWorldPos;';
 const VERTEX = `
 {
@@ -145,15 +146,22 @@ export function patchWorldMaterial(mat, { rim = 0, cloud = true, key = '' } = {}
       .replace('#include <project_vertex>', `#include <project_vertex>\n${VERTEX}`);
     let fs = shader.fragmentShader.replace('#include <common>', `#include <common>\n${WORLD_PARS_FRAGMENT}\nuniform float uRimStrength;`);
     if (cloud) {
-      fs = fs.replace(
-        '#include <lights_fragment_end>',
-        `#include <lights_fragment_end>
-        {
-          float cs = cloudShade( vWorldPos );
-          reflectedLight.directDiffuse *= cs;
-          reflectedLight.directSpecular *= cs;
-        }`,
-      );
+      // shade only the sunlight (not the spell and fire point lights): expand the light
+      // loop if no earlier patch did, then dim the directional light where it is read
+      const lit = fs.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin);
+      if (lit.includes(DIR_LIGHT_LINE)) {
+        fs = lit.split(DIR_LIGHT_LINE).join(`${DIR_LIGHT_LINE}\n\t\tdirectLight.color *= cloudShade( vWorldPos );`);
+      } else {
+        fs = fs.replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          {
+            float cs = cloudShade( vWorldPos );
+            reflectedLight.directDiffuse *= cs;
+            reflectedLight.directSpecular *= cs;
+          }`,
+        );
+      }
     }
     if (rim > 0) {
       fs = fs.replace(
