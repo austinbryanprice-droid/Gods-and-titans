@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEER_ID_PREFIX, GAME_VERSION } from '../../src/config.js';
+import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEER_ID_PREFIX } from '../../src/config.js';
 import {
   makeRoomCode, normalizeRoomCode, isValidRoomCode, peerIdFor, readNetParams, peerOptions, iceServers,
-  sanitizeName, sanitizeChat, encodeFrames, FrameDecoder, CHUNK_SIZE, PROTOCOL_VERSION, versionMismatchReason,
+  sanitizeName, sanitizeChat, encodeFrames, FrameDecoder, CHUNK_SIZE, versionMismatchReason,
   MAX_CHAT_LENGTH, MAX_NAME_LENGTH,
 } from '../../src/net/protocol.js';
 import { RNG } from '../../src/sim/rng.js';
@@ -18,7 +18,6 @@ test('room codes use the alphabet and length from config', () => {
   }
   assert.equal(makeRoomCode(() => 0.999999), ROOM_CODE_ALPHABET.at(-1).repeat(ROOM_CODE_LENGTH));
   assert.equal(peerIdFor('ABCDE'), `${PEER_ID_PREFIX}ABCDE`);
-  assert.equal(PROTOCOL_VERSION, GAME_VERSION);
 });
 
 test('normalizeRoomCode accepts typed codes, invite links and peer ids', () => {
@@ -29,6 +28,9 @@ test('normalizeRoomCode accepts typed codes, invite links and peer ids', () => {
   assert.equal(normalizeRoomCode('abcdefgh'), 'ABCDE');
   assert.equal(normalizeRoomCode('0O1I'), ''); // ambiguous characters are not in the alphabet
   assert.equal(normalizeRoomCode(null), '');
+  // A malformed %-escape in a pasted link must not throw: the text is used as it is.
+  assert.equal(normalizeRoomCode('?join=%E0%A4%A'), 'EA4A');
+  assert.equal(normalizeRoomCode('https://example.com/?join=XK%37PQ'), 'XK7PQ');
   assert.ok(!isValidRoomCode('ABCD'));
   assert.ok(!isValidRoomCode('ABCD0'));
 });

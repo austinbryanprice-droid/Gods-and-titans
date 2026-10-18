@@ -1,9 +1,10 @@
 // Network protocol (DESIGN 7): message names, room codes, URL overrides for the
 // PeerJS server / ICE servers, input sanitizing and the wire framing that
 // splits large JSON messages into ordered chunks. Pure: runs in Node too.
-import { GAME_VERSION, PEER_ID_PREFIX, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.js';
+import { PEER_ID_PREFIX, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.js';
 
-export const PROTOCOL_VERSION = GAME_VERSION;
+// The version two builds compare at join (HELLO.version) is PROTOCOL_VERSION in
+// wire-version.js: it needs the sanitizer and codec tables, which import this file.
 
 /** Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC; host→client: the rest (+ LOBBY, CHAT). */
 export const MSG = {
@@ -35,6 +36,13 @@ export const GAME_TIMEOUT_MS = 30000;
 // messages that queued up during the stall are delivered before the link is judged.
 export const MAX_PULSE_GAP_MS = 1000;
 export const PING_INTERVAL_MS = 2000; // in-game RTT pings (client → host)
+// A client that has heard nothing from the host for this long (a delta every 50 ms, a
+// pong every 2 s) tells the player the connection is in trouble; the link itself is
+// only dropped after GAME_TIMEOUT_MS. Above MAX_PULSE_GAP_MS so a local stall cannot raise it.
+export const STALL_NOTICE_MS = 3000;
+// A client whose send queue to the host's connection holds more than this is skipped
+// when deltas go out (see HostSession.broadcastSnapshot): queueing more only makes it lag.
+export const MAX_CLIENT_BUFFER_BYTES = 128 * 1024;
 export const JOIN_TIMEOUT_MS = 15000; // waiting for the signaling server / the host to answer a join
 export const CONNECT_TIMEOUT_MS = 15000; // waiting for the WebRTC data channel to open
 export const MAX_CHAT_LENGTH = 200;
@@ -84,7 +92,13 @@ export function makeRoomCode(rand = Math.random) {
 export function normalizeRoomCode(input) {
   let s = String(input ?? '').trim();
   const m = s.match(/[?&#]join=([^&#\s]+)/i);
-  if (m) s = decodeURIComponent(m[1]);
+  if (m) {
+    try {
+      s = decodeURIComponent(m[1]);
+    } catch {
+      s = m[1]; // a malformed %-escape: use the text as it is
+    }
+  }
   if (s.toLowerCase().startsWith(PEER_ID_PREFIX)) s = s.slice(PEER_ID_PREFIX.length);
   s = s.toUpperCase();
   let out = '';

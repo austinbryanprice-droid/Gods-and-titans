@@ -63,8 +63,8 @@ const plainKey = (k) => k.indexOf('.') < 0 && k[0] !== '+' && k[0] !== '~' && k 
 // Known event shapes (DESIGN 6.4 + sim extras). Only the key sets matter: an
 // event is packed when its keys are exactly 'type' + one of these lists. The
 // order of this table is part of the wire format (host and client run the same
-// version, checked at join).
-const EVENT_SHAPES = [
+// version, checked at join: wire-version.js fingerprints this table).
+export const EVENT_SHAPES = [
   ['hit', 'dst', 'amount', 'src'],
   ['attack', 'src', 'dst', 'ranged'],
   ['projectile', 'src', 'dst', 'kind', 'el', 'fx', 'fy', 'tx', 'ty', 'flight'],

@@ -9,11 +9,12 @@ import { PANTHEONS, PANTHEON_LIST } from '../data/index.js';
 import { RNG, hashSeed } from '../sim/rng.js';
 import * as mapgen from '../sim/mapgen.js';
 import {
-  MSG, REASONS, PROTOCOL_VERSION, JOIN_TIMEOUT_MS, GAME_TIMEOUT_MS, RateLimiter,
+  MSG, REASONS, JOIN_TIMEOUT_MS, GAME_TIMEOUT_MS, MAX_NAME_LENGTH, RateLimiter,
   sanitizeName, sanitizeChat, sanitizeReason, versionMismatchReason, normalizeRoomCode,
 } from './protocol.js';
+import { PROTOCOL_VERSION } from './wire-version.js';
 import { validateSetup } from './sanitize.js';
-import { hostRoom, joinRoom } from './transport.js';
+import { hostRoom, joinRoom, abortError } from './transport.js';
 
 export const SLOT_KINDS = ['host', 'human', 'ai', 'open', 'closed'];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
@@ -21,6 +22,10 @@ export const PRESETS = ['coop', '1v1', '2v2', 'ffa'];
 export const MAP_SIZE_NAMES = ['small', 'medium'];
 const HELLO_TIMEOUT_MS = 10000;
 const KICK_CLOSE_DELAY_MS = 300;
+// After the game started, closing the lobby (back at the title) also drops any game
+// connection still open, e.g. when the game never got to create its session. A normal
+// quit has closed them by then: the session closes each 300 ms after its `end`.
+const GAME_CLOSE_DELAY_MS = 1000;
 // Connections that have not said HELLO yet. An honest client says it as soon as
 // its link opens, so only a few are ever waiting; more are turned away at once
 // (they hold no member, limiters or timer), which bounds what a flood of
@@ -43,6 +48,33 @@ function intIn(v, lo, hi) {
   return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
 }
 const aiName = (difficulty) => `AI (${difficulty[0].toUpperCase()}${difficulty.slice(1)})`;
+
+/**
+ * Make player names distinct in a game: the second 'AI (Normal)' becomes 'AI (Normal) 2',
+ * so banners, stats and chat lines can tell them apart. Lobby slots keep their names.
+ */
+function distinctNames(names) {
+  const taken = new Set(names.map((n) => n.toLowerCase()));
+  const seen = new Set();
+  return names.map((name) => {
+    if (!seen.has(name.toLowerCase())) {
+      seen.add(name.toLowerCase());
+      return name;
+    }
+    for (let n = 2; ; n++) {
+      const suffix = ` ${n}`;
+      const cand = name.slice(0, MAX_NAME_LENGTH - suffix.length) + suffix;
+      if (!taken.has(cand.toLowerCase()) && !seen.has(cand.toLowerCase())) {
+        seen.add(cand.toLowerCase());
+        return cand;
+      }
+    }
+  });
+}
+
+// What a preset lays out for a slot. Humans and open slots count as one (a player
+// joining or leaving keeps the preset); a pantheon, color or name edit does not matter.
+const layoutOf = (s) => `${s.kind === 'human' ? 'open' : s.kind}|${s.team}|${s.kind === 'ai' ? s.difficulty : ''}`;
 
 function slotOf(kind, extra = {}) {
   return { kind, name: '', pantheon: 'random', team: 1, color: 0, difficulty: 'normal', peerId: null, ...extra };
@@ -113,12 +145,13 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   });
   const pantheons = resolvePantheons(active.map((a) => a.slot), seed);
   const slotToPlayer = new Map();
+  const names = distinctNames(active.map(({ slot }, index) => slot.name || (slot.kind === 'ai' ? aiName(slot.difficulty) : `Player ${index + 1}`)));
   const players = active.map(({ slot, slotIndex }, index) => {
     slotToPlayer.set(slotIndex, index);
     const ai = slot.kind === 'ai';
     return {
       index,
-      name: slot.name || (ai ? aiName(slot.difficulty) : `Player ${index + 1}`),
+      name: names[index],
       team: slot.team,
       pantheon: pantheons[index],
       color: PLAYER_COLORS[slot.color] || PLAYER_COLORS[index % PLAYER_COLORS.length],
@@ -325,6 +358,7 @@ export class LobbyHost {
     const s = this.state.slots[i];
     if (!s || !patch) return false;
     const before = JSON.stringify(s);
+    const layoutBefore = layoutOf(s);
     if (byHost && patch.kind !== undefined && patch.kind !== s.kind && i !== 0) {
       const kind = patch.kind;
       if (kind === 'ai' || kind === 'open' || kind === 'closed') {
@@ -358,6 +392,7 @@ export class LobbyHost {
       t.name = aiName(t.difficulty);
     }
     if (byHost && i === 0 && patch.name !== undefined) t.name = this.uniqueName(sanitizeName(patch.name, t.name), 0);
+    if (layoutOf(this.state.slots[i]) !== layoutBefore) this.state.preset = null; // no longer the preset's layout
     return JSON.stringify(this.state.slots[i]) !== before;
   }
 
@@ -383,10 +418,7 @@ export class LobbyHost {
   setSlot(i, patch) {
     if (this.started) return false;
     const ok = this.patchSlot(i, patch, true);
-    if (ok) {
-      this.state.preset = null;
-      this.changed();
-    }
+    if (ok) this.changed();
     return ok;
   }
 
@@ -527,12 +559,16 @@ export class LobbyHost {
 
   /**
    * Leave the lobby. Before the game starts this tells everyone and closes all
-   * connections; after the start it only stops accepting new players.
+   * connections; after the start it stops accepting new players and, a moment later,
+   * closes whatever game connection is still open (the session closes its own).
    */
   close() {
     if (this.closed) return;
     this.closed = true;
-    if (this.started) return;
+    if (this.started) {
+      setTimeout(() => this.endpoint.close(), GAME_CLOSE_DELAY_MS);
+      return;
+    }
     for (const m of [...this.members]) {
       for (const off of m.offs) off();
       clearTimeout(m.helloTimer);
@@ -553,17 +589,24 @@ export class LobbyClient {
    * @param {string} opts.name
    * @param {object} [opts.params]
    * @param {number} [opts.timeoutMs]
+   * @param {AbortSignal} [opts.signal] cancel the join: rejects with transport.abortError() and leaves nothing open
    * @param {string} [opts.version] protocol version (tests)
    * @returns {Promise<LobbyClient>}
    */
   static async join(opts = {}) {
-    const conn = await joinRoom({ transport: opts.transport || 'peer', roomCode: opts.roomCode, params: opts.params, timeoutMs: opts.timeoutMs });
+    const { signal } = opts;
+    const conn = await joinRoom({ transport: opts.transport || 'peer', roomCode: opts.roomCode, params: opts.params, timeoutMs: opts.timeoutMs, signal });
     const client = new LobbyClient(conn, opts);
+    const onAbort = () => client.pending && client.pending.reject(abortError());
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
     try {
       await client.handshake(opts.timeoutMs ?? JOIN_TIMEOUT_MS);
+      if (signal && signal.aborted) throw abortError();
     } catch (err) {
       conn.close('join-failed');
       throw err;
+    } finally {
+      if (signal) signal.removeEventListener('abort', onAbort);
     }
     return client;
   }
@@ -743,7 +786,10 @@ export class LobbyClient {
 
   /** Leave the lobby. */
   leave() {
-    if (this.started) return;
+    if (this.started) {
+      this.conn.close('left'); // the game session closes it too; this covers a game that never started
+      return;
+    }
     this.kicked = this.kicked || 'left';
     for (const off of this.offs) off();
     this.conn.close('left');
