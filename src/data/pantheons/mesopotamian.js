@@ -649,7 +649,7 @@ export default {
         aura: '#3aa0ff',
       },
       icon: '🧙',
-      description: 'One of the seven fish-cloaked sages of Enki who brought the arts of civilisation to humankind, purifying the wounded with holy water.',
+      description: 'One of the seven fish-cloaked sages of Enki who brought the arts of civilization to humankind, purifying the wounded with holy water.',
     },
     {
       id: 'mesopotamian_bull_of_heaven',

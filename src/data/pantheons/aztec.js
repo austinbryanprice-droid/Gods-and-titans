@@ -100,7 +100,7 @@ export default {
         extras: ['feather_cloak', 'wings', 'jewelry'],
         aura: '#7fe0b0',
       },
-      icon: '🪶',
+      icon: '🐍',
       description: 'The Feathered Serpent, lord of wind, dawn and learning, who journeyed to the underworld for the bones from which humankind was made and gave his people maize.',
     },
 
@@ -284,7 +284,7 @@ export default {
         extras: ['eye_glow', 'fur', 'jewelry', 'cape', 'long_hair'],
         aura: '#7a3cff',
       },
-      icon: '🪞',
+      icon: '🌌',
       description: 'The ever-present lord of night, sorcery and destiny, whose obsidian mirror shows all things and whose jaguar form stalks the dark.',
     },
 
@@ -458,13 +458,13 @@ export default {
       pop: 2,
       buildTime: 20,
       producedAt: 'shrine',
-      hp: 380,
+      hp: 400,
       armor: 1,
       speed: 3.5,
       radius: 0.38,
       sight: 9,
       air: false,
-      attack: { damage: 13, range: 0.5, cooldown: 1.2, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+      attack: { damage: 14, range: 0.5, cooldown: 1.2, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
       abilities: [],
       passives: [],
       visual: {
@@ -532,7 +532,7 @@ export default {
         extras: ['tail', 'fur', 'spikes'],
         aura: null,
       },
-      icon: '🦦',
+      icon: '🐕',
       description: 'A sleek water beast of Lake Texcoco with spiky wet fur and a grasping hand at the end of its tail, which drags the unwary beneath the surface.',
     },
     {
