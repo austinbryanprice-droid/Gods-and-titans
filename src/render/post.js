@@ -37,6 +37,7 @@ export const DEFAULT_LOOK = {
   aoStrength: 0.85,
   aoRadius: 0.75, // world units
   aoBias: 0.025,
+  aoFloor: -1e6, // world height below which AO fades out (the water surface)
   contrast: 1.04,
   saturation: 1.0,
   shadowTint: [0.98, 1.0, 1.03], // multiplied in, weighted to the dark end
@@ -126,10 +127,15 @@ uniform sampler2D tDepth;
 uniform vec2 uDepthTexel; // full-resolution texel
 uniform mat4 uProjInv;
 uniform vec4 uProj; // P[0][0], P[1][1], radius, bias
+uniform mat4 uViewInv;
+uniform vec2 uFloor; // world height below which the occlusion fades out, fade width
 uniform float uFrame;
 varying vec2 vUv;
 
 vec3 viewPos( vec2 uv ) {
+  // snap to the depth texel's center so the position matches the depth it was read from
+  // (half-resolution pixels sit on full-resolution texel edges; mixing them draws stripes)
+  uv = ( floor( uv / uDepthTexel ) + 0.5 ) * uDepthTexel;
   float d = texture2D( tDepth, uv ).r;
   vec4 p = uProjInv * vec4( uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
   return p.xyz / p.w;
@@ -139,12 +145,13 @@ float ign( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056
 void main() {
   float d0 = texture2D( tDepth, vUv ).r;
   if ( d0 >= 1.0 ) { gl_FragColor = vec4( 1.0 ); return; }
-  vec3 P = viewPos( vUv );
+  vec2 uv0 = ( floor( vUv / uDepthTexel ) + 0.5 ) * uDepthTexel;
+  vec3 P = viewPos( uv0 );
   // normal from the smaller of the two depth differences on each axis (no halos at silhouettes)
-  vec3 l = viewPos( vUv - vec2( uDepthTexel.x, 0.0 ) );
-  vec3 r = viewPos( vUv + vec2( uDepthTexel.x, 0.0 ) );
-  vec3 b = viewPos( vUv - vec2( 0.0, uDepthTexel.y ) );
-  vec3 t = viewPos( vUv + vec2( 0.0, uDepthTexel.y ) );
+  vec3 l = viewPos( uv0 - vec2( uDepthTexel.x, 0.0 ) );
+  vec3 r = viewPos( uv0 + vec2( uDepthTexel.x, 0.0 ) );
+  vec3 b = viewPos( uv0 - vec2( 0.0, uDepthTexel.y ) );
+  vec3 t = viewPos( uv0 + vec2( 0.0, uDepthTexel.y ) );
   vec3 dx = abs( r.z - P.z ) < abs( P.z - l.z ) ? r - P : P - l;
   vec3 dy = abs( t.z - P.z ) < abs( P.z - b.z ) ? t - P : P - b;
   vec3 N = normalize( cross( dx, dy ) );
@@ -160,13 +167,19 @@ void main() {
     float a = fi * 6.2831853 * 2.6180339 + phi; // 7 spiral turns, golden-ish spacing
     float rr = fi * fi; // denser near the center
     vec2 o = vec2( cos( a ), sin( a ) ) * rs * mix( 0.12, 1.0, rr );
-    vec3 v = viewPos( vUv + o ) - P;
+    vec3 v = viewPos( uv0 + o ) - P;
     float vv = dot( v, v );
     float vn = dot( v, N );
     float f = max( r2 - vv, 0.0 ) / r2;
-    occ += f * f * max( vn - uProj.w * -P.z * 0.02, 0.0 ) / ( vv + 0.01 );
+    // angle bias: samples only a few degrees above the tangent plane (depth steps on
+    // flat ground seen at a grazing angle) do not occlude
+    occ += f * f * max( vn - 0.12 * sqrt( vv ) - uProj.w * -P.z * 0.02, 0.0 ) / ( vv + 0.01 );
   }
-  occ = clamp( 1.0 - occ * ( 2.4 / float( AO_TAPS ) ), 0.0, 1.0 );
+  occ = clamp( occ * ( 2.4 / float( AO_TAPS ) ), 0.0, 1.0 );
+  // no occlusion under the water surface (the lake bed shows through transparent water)
+  float wy = ( uViewInv * vec4( P, 1.0 ) ).y;
+  occ *= smoothstep( uFloor.x - uFloor.y, uFloor.x, wy );
+  occ = 1.0 - occ;
   gl_FragColor = vec4( occ, occ, occ, 1.0 );
 }`;
 
@@ -387,6 +400,8 @@ export class PostFX {
         uDepthTexel: { value: new THREE.Vector2() },
         uProjInv: { value: this.projInv },
         uProj: { value: new THREE.Vector4() },
+        uViewInv: { value: new THREE.Matrix4() },
+        uFloor: { value: new THREE.Vector2(-1e6, 0.25) },
         uFrame: { value: 0 },
       }, { AO_TAPS: cfg.aoTaps });
     }
@@ -544,6 +559,8 @@ export class PostFX {
       u.tDepth.value = depthTex;
       u.uDepthTexel.value.set(1 / this.sw, 1 / this.sh);
       u.uProj.value.set(P[0], P[5], look.aoRadius, look.aoBias);
+      u.uViewInv.value.copy(camera.matrixWorld);
+      u.uFloor.value.set(look.aoFloor, 0.25);
       this.pass(this.aoMat, this.aoRaw);
       const b = this.aoBlur.uniforms;
       b.tDepth.value = depthTex;

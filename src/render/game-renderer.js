@@ -146,6 +146,7 @@ export class GameRenderer {
     if (this.renderer.info) this.renderer.info.autoReset = false; // several render() calls per frame
     // the post pipeline needs a real WebGLRenderer (tests draw through a stub)
     this.post = typeof this.renderer.setRenderTarget === 'function' ? new PostFX(this.renderer, this.quality) : null;
+    if (this.post) this.post.look.aoFloor = WATER_LEVEL; // no ambient occlusion on the lake bed under the water
     this.renderScale = 1;
     this.frameMs = 16.7;
     this.lastRenderAt = 0;
