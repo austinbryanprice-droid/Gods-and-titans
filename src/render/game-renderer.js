@@ -50,8 +50,10 @@ const ENV_INTENSITY = 0.55;
 const EXPOSURE = 1.0;
 // Adaptive resolution (frame times in ms, smoothed): slower than SLOW_FRAME_MS (and
 // well past the display's own frame period) lowers the scene scale a step; frames
-// that keep up with the display raise it again.
+// that keep up with the display, or run faster than FAST_FRAME_MS on a high-refresh
+// screen, raise it again.
 const SLOW_FRAME_MS = 24;
+const FAST_FRAME_MS = 15;
 const SCALE_SETTLE = 90; // frames the average settles for after any step
 const SCALE_UP_WAIT = 240; // frames before a step up (doubled while steps up keep being undone)
 const SCALE_UP_WAIT_MAX = 3600;
@@ -561,7 +563,7 @@ export class GameRenderer {
       this.upWait = this.upWaitNext;
       this.setRenderScale(this.renderScale - 0.1);
       this.scaleHold = SCALE_SETTLE;
-    } else if (this.frameMs < Math.max(v * 1.12, v + 1) && this.upWait <= 0 && this.renderScale < 0.99) {
+    } else if (this.frameMs < Math.max(v * 1.12, v + 1, FAST_FRAME_MS) && this.upWait <= 0 && this.renderScale < 0.99) {
       this.setRenderScale(this.renderScale + 0.1);
       this.scaleHold = SCALE_SETTLE;
       this.upWait = SCALE_UP_WAIT;
