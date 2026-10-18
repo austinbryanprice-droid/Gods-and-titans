@@ -4,7 +4,9 @@
 // sand, rock, forest floor, lake bed). A one-texel-per-tile map of ground
 // types is looked up through a noise-warped grid, so borders meander instead
 // of following tile edges, and neighboring types blend by their texture
-// heights (grass tufts poke through dirt, sand fills between pebbles). On
+// heights (grass tufts poke through dirt, sand fills between pebbles); roads
+// stay connected across diagonal steps, and lush and dry grass cross-fade
+// along a smooth per-pixel dryness field. On
 // top: macro color variation and a repetition breaker against visible tiling,
 // rock on steep slopes, a darker, glossier wet band along the shore, per-pixel
 // bump lighting from the texture heights (screen-space derivatives, no
@@ -68,18 +70,22 @@ const QUALITY_DEFINES = {
 };
 const ANISOTROPY = { low: 1, medium: 4, high: 8, ultra: 8 };
 
+/** Tile dryness above which grass counts as a dry meadow. */
+const DRY_AT = 0.64;
+
 /**
- * Ground layer of every tile (LAYER codes, row-major): the terrain type, with
- * grass split into lush and dry meadows by a broad noise (drier next to sand,
- * lusher next to forest).
- * @returns {Uint8Array}
+ * Meadow dryness of every tile (row-major, roughly 0..1): a broad noise, drier
+ * next to sand, lusher next to forest. Grass tiles above DRY_AT are dry
+ * meadows; the ground shader interpolates the field per pixel, so lush and dry
+ * grass meet along smooth curves instead of tile edges.
+ * @returns {Float32Array}
  */
-export function tileLayers(map) {
+function tileDryness(map) {
   const W = map.width;
   const H = map.height;
   const T = map.terrain;
   const seed = (Number(map.seed) | 0) || 7;
-  const out = new Uint8Array(W * H);
+  const out = new Float32Array(W * H);
   const near = (tx, ty, code) => {
     for (let oy = -1; oy <= 1; oy++) {
       for (let ox = -1; ox <= 1; ox++) {
@@ -92,20 +98,33 @@ export function tileLayers(map) {
   };
   for (let ty = 0; ty < H; ty++) {
     for (let tx = 0; tx < W; tx++) {
-      const i = ty * W + tx;
-      switch (T[i]) {
-        case TERRAIN.DIRT: out[i] = LAYER.DIRT; break;
-        case TERRAIN.SAND: out[i] = LAYER.SAND; break;
-        case TERRAIN.ROCK: out[i] = LAYER.ROCK; break;
-        case TERRAIN.FOREST: out[i] = LAYER.FOREST; break;
-        case TERRAIN.WATER: out[i] = LAYER.BED; break;
-        default: {
-          let dry = vnoise((tx + 0.5) / 15, (ty + 0.5) / 15, seed + 1) * 0.75 + vnoise((tx + 0.5) / 4, (ty + 0.5) / 4, seed + 2) * 0.25;
-          if (near(tx, ty, TERRAIN.SAND)) dry += 0.12;
-          if (near(tx, ty, TERRAIN.FOREST)) dry -= 0.1;
-          out[i] = dry > 0.64 ? LAYER.DRY : LAYER.GRASS;
-        }
-      }
+      let dry = vnoise((tx + 0.5) / 15, (ty + 0.5) / 15, seed + 1) * 0.75 + vnoise((tx + 0.5) / 4, (ty + 0.5) / 4, seed + 2) * 0.25;
+      if (near(tx, ty, TERRAIN.SAND)) dry += 0.12;
+      if (near(tx, ty, TERRAIN.FOREST)) dry -= 0.1;
+      out[ty * W + tx] = dry;
+    }
+  }
+  return out;
+}
+
+/**
+ * Ground layer of every tile (LAYER codes, row-major): the terrain type, with
+ * grass split into lush and dry meadows by tileDryness.
+ * @param {object} map mapData
+ * @param {Float32Array} [dryness] tileDryness(map), when already computed
+ * @returns {Uint8Array}
+ */
+export function tileLayers(map, dryness = tileDryness(map)) {
+  const T = map.terrain;
+  const out = new Uint8Array(map.width * map.height);
+  for (let i = 0; i < out.length; i++) {
+    switch (T[i]) {
+      case TERRAIN.DIRT: out[i] = LAYER.DIRT; break;
+      case TERRAIN.SAND: out[i] = LAYER.SAND; break;
+      case TERRAIN.ROCK: out[i] = LAYER.ROCK; break;
+      case TERRAIN.FOREST: out[i] = LAYER.FOREST; break;
+      case TERRAIN.WATER: out[i] = LAYER.BED; break;
+      default: out[i] = dryness[i] > DRY_AT ? LAYER.DRY : LAYER.GRASS;
     }
   }
   return out;
@@ -298,9 +317,20 @@ uniform float uWaterLevel;
 varying vec3 vTerrainW;
 varying vec3 vTerrainN;
 
-int tileLayer( ivec2 c ) {
+// tile texel: r = ground layer (lush and dry grass are both GRASS), g = dryness
+vec2 tileAt( ivec2 c ) {
   c = clamp( c, ivec2( 0 ), ivec2( uTileSize.xy ) - 1 );
-  return int( texelFetch( uTiles, c, 0 ).r * 255.0 + 0.5 );
+  return texelFetch( uTiles, c, 0 ).rg;
+}
+
+int layerOf( vec2 k ) {
+  return int( k.x * 255.0 + 0.5 );
+}
+
+// Which of two diagonal tile pairs stays connected through their shared
+// corner: roads (dirt) first, then beaches and fords (sand).
+int connectRank( int layer ) {
+  return layer == ${LAYER.DIRT} ? 2 : layer == ${LAYER.SAND} ? 1 : 0;
 }
 
 // One ground layer at world point p (tiles), with explicit gradients so it can
@@ -323,6 +353,21 @@ vec4 groundTex( int layer, vec2 p, vec2 dx, vec2 dy, float sel ) {
   #else
     return textureGrad( uGround, vec3( uv, fl ), dx * s, dy * s );
   #endif
+}
+
+// One ground type; the grass family cross-fades lush into dry meadow by the
+// per-pixel dryness, the taller texels of either side poking through.
+vec4 layerTex( int layer, vec2 p, vec2 dx, vec2 dy, float sel, float dry ) {
+  if ( layer != ${LAYER.GRASS} ) return groundTex( layer, p, dx, dy, sel );
+  vec4 a = vec4( 0.0 );
+  vec4 b = vec4( 0.0 );
+  if ( dry < 0.997 ) a = groundTex( ${LAYER.GRASS}, p, dx, dy, sel );
+  if ( dry > 0.003 ) b = groundTex( ${LAYER.DRY}, p, dx, dy, sel );
+  return mix( a, b, saturate( dry + ( b.a - a.a ) * 1.6 * dry * ( 1.0 - dry ) ) );
+}
+
+vec4 layerParams( int layer, float dry ) {
+  return layer == ${LAYER.GRASS} ? mix( uLayer[ ${LAYER.GRASS} ], uLayer[ ${LAYER.DRY} ], dry ) : uLayer[ layer ];
 }`;
 
 // replaces <map_fragment>: picks and blends the ground layers into the albedo
@@ -339,14 +384,35 @@ vec2 tg = tp + ( tnB.xy - 0.5 ) * 1.1 + ( tnA.zw - 0.5 ) * 0.8 - 0.5;
 vec2 ti = floor( tg );
 vec2 tf = tg - ti;
 ivec2 t0 = ivec2( ti );
-int c0 = tileLayer( t0 );
-int c1 = tileLayer( t0 + ivec2( 1, 0 ) );
-int c2 = tileLayer( t0 + ivec2( 0, 1 ) );
-int c3 = tileLayer( t0 + ivec2( 1, 1 ) );
+vec2 k0 = tileAt( t0 );
+vec2 k1 = tileAt( t0 + ivec2( 1, 0 ) );
+vec2 k2 = tileAt( t0 + ivec2( 0, 1 ) );
+vec2 k3 = tileAt( t0 + ivec2( 1, 1 ) );
+int c0 = layerOf( k0 );
+int c1 = layerOf( k1 );
+int c2 = layerOf( k2 );
+int c3 = layerOf( k3 );
 vec4 tw = vec4( ( 1.0 - tf.x ) * ( 1.0 - tf.y ), tf.x * ( 1.0 - tf.y ), ( 1.0 - tf.x ) * tf.y, tf.x * tf.y );
+// meadow dryness: the tiles' field interpolated like the weights (continuous,
+// so lush and dry grass meet along soft curves, not tile edges), noise-broken
+float tDry = smoothstep( ${(DRY_AT - 0.05).toFixed(3)}, ${(DRY_AT + 0.05).toFixed(3)}, dot( tw, vec4( k0.y, k1.y, k2.y, k3.y ) ) + ( tnB.z - 0.5 ) * 0.14 );
 if ( c1 == c0 ) { tw.x += tw.y; tw.y = 0.0; }
 if ( c2 == c0 ) { tw.x += tw.z; tw.z = 0.0; } else if ( c2 == c1 ) { tw.y += tw.z; tw.z = 0.0; }
 if ( c3 == c0 ) { tw.x += tw.w; tw.w = 0.0; } else if ( c3 == c1 ) { tw.y += tw.w; tw.w = 0.0; } else if ( c3 == c2 ) { tw.z += tw.w; tw.w = 0.0; }
+// Diagonal pairs (a checkerboard of two types): roads are 8-connected paths,
+// so two dirt tiles often meet only at a corner, where bilinear weights leave a
+// 50/50 saddle that pinches the road off. The pair that should stay connected
+// takes 1 - |fx - fy| (or 1 - |fx + fy - 1|) instead: a band along its
+// diagonal that equals the bilinear weight on the cell's border, so it joins
+// the neighboring cells seamlessly.
+if ( c0 == c3 && c1 == c2 && c0 != c1 ) {
+  int r03 = connectRank( c0 );
+  int r12 = connectRank( c1 );
+  if ( r03 != r12 ) {
+    float w = r03 > r12 ? 1.0 - abs( tf.x - tf.y ) : abs( tf.x + tf.y - 1.0 );
+    tw = vec4( w, 1.0 - w, 0.0, 0.0 );
+  }
+}
 // bare rock on steep slopes
 float tSlopeRock = smoothstep( 0.9, 0.78, normalize( vTerrainN ).y );
 tw *= 1.0 - tSlopeRock;
@@ -356,15 +422,15 @@ vec4 s1 = vec4( 0.0 );
 vec4 s2 = vec4( 0.0 );
 vec4 s3 = vec4( 0.0 );
 vec4 sR = vec4( 0.0 );
-if ( tw.x > 0.003 ) s0 = groundTex( c0, tp, tdx, tdy, tSel );
-if ( tw.y > 0.003 ) s1 = groundTex( c1, tp, tdx, tdy, tSel );
-if ( tw.z > 0.003 ) s2 = groundTex( c2, tp, tdx, tdy, tSel );
-if ( tw.w > 0.003 ) s3 = groundTex( c3, tp, tdx, tdy, tSel );
+if ( tw.x > 0.003 ) s0 = layerTex( c0, tp, tdx, tdy, tSel, tDry );
+if ( tw.y > 0.003 ) s1 = layerTex( c1, tp, tdx, tdy, tSel, tDry );
+if ( tw.z > 0.003 ) s2 = layerTex( c2, tp, tdx, tdy, tSel, tDry );
+if ( tw.w > 0.003 ) s3 = layerTex( c3, tp, tdx, tdy, tSel, tDry );
 if ( tSlopeRock > 0.003 ) sR = groundTex( ${LAYER.ROCK}, tp, tdx, tdy, tSel );
-vec4 L0 = uLayer[ c0 ];
-vec4 L1 = uLayer[ c1 ];
-vec4 L2 = uLayer[ c2 ];
-vec4 L3 = uLayer[ c3 ];
+vec4 L0 = layerParams( c0, tDry );
+vec4 L1 = layerParams( c1, tDry );
+vec4 L2 = layerParams( c2, tDry );
+vec4 L3 = layerParams( c3, tDry );
 vec4 LR = uLayer[ ${LAYER.ROCK} ];
 // Height blend: each type scores its weight plus its texel height, and only
 // the types within a small band of the best score show. Borders become
@@ -470,9 +536,20 @@ function setTerrainQuality(mat, quality) {
   mat.needsUpdate = true;
 }
 
-/** Ground type per tile as a texture (texelFetch'ed by the ground shader). */
+/**
+ * Ground per tile as a texture (texelFetch'ed by the ground shader): R the
+ * layer, with lush and dry grass both stored as GRASS (one family, split per
+ * pixel), G the meadow dryness (0..1).
+ */
 function tileTexture(map) {
-  const tex = new THREE.DataTexture(tileLayers(map), map.width, map.height, THREE.RedFormat, THREE.UnsignedByteType);
+  const dryness = tileDryness(map);
+  const layers = tileLayers(map, dryness);
+  const data = new Uint8Array(layers.length * 2);
+  for (let i = 0; i < layers.length; i++) {
+    data[i * 2] = layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i];
+    data[i * 2 + 1] = Math.round(Math.min(1, Math.max(0, dryness[i])) * 255);
+  }
+  const tex = new THREE.DataTexture(data, map.width, map.height, THREE.RGFormat, THREE.UnsignedByteType);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.generateMipmaps = false;

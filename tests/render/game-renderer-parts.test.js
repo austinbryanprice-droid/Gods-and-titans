@@ -266,6 +266,8 @@ test('terrain: the water depth at every vertex is the depth of the ground below 
   }
   // the terrain's own 8-triangle fans, so depth interpolates like the ground does
   assert.equal(geo.index.count % 24, 0);
+  // no depth writes: rings, blob shadows and ground effects at the shore stay whole
+  assert.equal(t.water.material.depthWrite, false);
   t.update(2.5);
   assert.equal(t.water.material.uniforms.uTime.value, 2.5);
   t.dispose();
@@ -300,11 +302,23 @@ test('terrain: ground layers per tile, procedural textures, quality tiers', () =
   const t = createTerrain(map, { quality: 'low' });
   const mat = t.terrain.material;
   assert.ok(mat.isMeshStandardMaterial && mat.userData.__fow && mat.userData.__world);
+  // the shader's tile map: lush and dry grass share one layer (R), split per
+  // pixel by the dryness field (G)
+  const tiles = mat.userData.terrainUniforms.uTiles.value.image.data;
+  assert.equal(tiles.length, map.width * map.height * 2);
+  for (let i = 0; i < layers.length; i++) {
+    assert.equal(tiles[i * 2], layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i]);
+    if (layers[i] === LAYER.DRY) assert.ok(tiles[i * 2 + 1] >= 0.64 * 255 - 1);
+  }
   assert.ok(!('TERRAIN_BUMP' in mat.defines));
   assert.ok(!('WATER_HQ' in t.water.material.defines));
   t.setQuality('ultra');
   assert.ok('TERRAIN_BUMP' in mat.defines && 'TERRAIN_ANTITILE' in mat.defines);
   assert.ok('WATER_HQ' in t.water.material.defines);
+  // the water keeps its program when its detail does not change
+  const wv = t.water.material.version;
+  t.setQuality('high');
+  assert.equal(t.water.material.version, wv);
   t.setQuality('nonsense');
   assert.ok('TERRAIN_BUMP' in mat.defines);
   t.dispose();

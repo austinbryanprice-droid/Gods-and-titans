@@ -352,20 +352,25 @@ function paintSand(cv, seed) {
   const n1 = fbm(S, 4, 4, seed + 1);
   const warp = fbm(S, 4, 3, seed + 2);
   const n3 = fbm(S, 32, 1, seed + 3);
+  const patches = fbm(S, 3, 3, seed + 4);
   const lo = C(0xb59d70);
   const hi = C(0xd5c08f);
   const TAU = Math.PI * 2;
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       const i = y * S + x;
-      // wind ripples: an integer wave vector keeps them tileable, fbm bends them
+      // wind ripples: integer wave vectors keep them tileable, fbm bends them; a
+      // main train and a weaker crossing one, both fading in and out in patches
+      // so beaches do not read as one striped carpet
       const ph = (TAU * (3 * x + 10 * y)) / S + warp[i] * 9;
-      const rip = Math.sin(ph + 0.6 * Math.sin(ph));
+      const ph2 = (TAU * (-7 * x + 5 * y)) / S + warp[i] * 6;
+      const p = patches[i];
+      const rip = Math.sin(ph + 0.6 * Math.sin(ph)) * (0.1 + 0.9 * smooth(0.42, 0.75, p)) + Math.sin(ph2 + 0.5 * Math.sin(ph2)) * 0.35 * (1 - smooth(0.2, 0.42, p));
       const t = clamp01((n1[i] - 0.5) * 1.5 + 0.5);
       cv.set(i, lo);
       cv.mix(i, hi, t);
-      cv.scale(i, 1 + 0.05 * rip + 0.07 * (hash(x, y, seed) - 0.5) + 0.04 * (n3[i] - 0.5));
-      cv.h[i] = 0.45 + 0.18 * rip + 0.2 * (t - 0.5) + 0.05 * n3[i];
+      cv.scale(i, 1 + 0.025 * rip + 0.07 * (hash(x, y, seed) - 0.5) + 0.04 * (n3[i] - 0.5));
+      cv.h[i] = 0.45 + 0.1 * rip + 0.2 * (t - 0.5) + 0.05 * n3[i];
     }
   }
   const bits = [C(0x8f8068), C(0xe8dcc0), C(0x9c8a6a)];

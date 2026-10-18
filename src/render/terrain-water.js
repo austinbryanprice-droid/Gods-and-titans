@@ -147,7 +147,7 @@ void main() {
   float fade = smoothstep( -0.012, 0.004, depth );
   col *= fade;
   alpha *= fade;
-  if ( alpha < 0.004 ) discard; // nothing to show: keep the depth buffer on the ground
+  if ( alpha < 0.004 ) discard; // nothing to show
 
   // straight color for the tone map / color space / fog / fog-of-war chunks,
   // premultiplied again at the end (premultiplied_alpha_fragment)
@@ -255,9 +255,10 @@ export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true } = 
     fragmentShader: WATER_FS,
     transparent: true,
     premultipliedAlpha: true,
-    // the surface writes depth, so ambient occlusion and later transparent
-    // effects see the water plane rather than the lake bed under it
-    depthWrite: true,
+    // no depth writes: selection rings, blob shadows, markers and ground spell
+    // effects of units at the shore (whose ground dips below the water level)
+    // depth-test against the ground and stay whole
+    depthWrite: false,
     fog: true,
   });
   mat.name = 'water';
@@ -273,7 +274,7 @@ export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true } = 
 /** Switch the water shader's detail (recompiles once). */
 export function setWaterQuality(mat, hq) {
   const want = !!hq;
-  const has = !!(mat.defines && mat.defines.WATER_HQ);
+  const has = !!mat.defines && 'WATER_HQ' in mat.defines;
   if (want === has && mat.defines) return;
   mat.defines = want ? { WATER_HQ: '' } : {};
   mat.needsUpdate = true;
