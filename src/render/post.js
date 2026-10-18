@@ -253,11 +253,13 @@ float rand( vec2 co ) { return fract( sin( dot( co, vec2( 12.9898, 78.233 ) ) ) 
 
 void main() {
   vec3 col = texture2D( tScene, vUv ).rgb;
-  #ifdef USE_SHARPEN
+  // only while the scene is drawn below the canvas size (a uniform, not a define, so
+  // adaptive resolution never compiles a new program mid-match)
+  if ( uSharpen > 0.0 ) {
     vec3 n = texture2D( tScene, vUv + vec2( 0.0, uSceneTexel.y ) ).rgb + texture2D( tScene, vUv - vec2( 0.0, uSceneTexel.y ) ).rgb
       + texture2D( tScene, vUv + vec2( uSceneTexel.x, 0.0 ) ).rgb + texture2D( tScene, vUv - vec2( uSceneTexel.x, 0.0 ) ).rgb;
     col = max( col + ( col * 4.0 - n ) * ( uSharpen * 0.25 ), vec3( 0.0 ) );
-  #endif
+  }
   #ifdef USE_AO
     float ao = texture2D( tAO, vUv ).r;
     // glows and lit sky-facing highlights keep most of their brightness
@@ -416,7 +418,6 @@ export class PostFX {
   buildComposite() {
     const defines = { USE_BLOOM: '' };
     if (this.cfg && this.cfg.aoTaps) defines.USE_AO = '';
-    if (this.renderScale < 0.999 && this.look.sharpen > 0) defines.USE_SHARPEN = '';
     const key = Object.keys(defines).sort().join(',');
     if (this.composite && this.compositeKey === key) return;
     if (this.composite) this.composite.dispose();
@@ -460,7 +461,6 @@ export class PostFX {
     s = Math.max(0.5, Math.min(1, s));
     if (Math.abs(s - this.renderScale) < 0.01) return;
     this.renderScale = s;
-    this.buildComposite();
     this.freeTargets();
     this.allocate();
   }
@@ -624,7 +624,7 @@ export class PostFX {
     c.uShadowTint.value.fromArray(look.shadowTint);
     c.uHighlightTint.value.fromArray(look.highlightTint);
     c.uVignette.value = look.vignette;
-    c.uSharpen.value = look.sharpen;
+    c.uSharpen.value = this.renderScale < 0.999 ? look.sharpen : 0;
     const aspect = this.width / Math.max(1, this.height);
     c.uAspect.value.set(aspect > 1 ? aspect : 1, aspect > 1 ? 1 : 1 / aspect);
     r.setRenderTarget(null);

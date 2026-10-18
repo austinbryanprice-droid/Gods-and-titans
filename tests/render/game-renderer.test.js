@@ -245,7 +245,7 @@ test('GameRenderer: events become effects, deaths play out, quality changes live
   vs.fields = [];
   r.syncFields();
   assert.equal(r.fieldShown.size, 0);
-  // quality: unit shadows only on high
+  // quality: unit shadows only on high and ultra
   let casts = 0;
   for (const v of r.units.values()) v.model.root.traverse((o) => {
     if (o.isMesh && o.castShadow) casts++;
@@ -306,7 +306,7 @@ test('GameRenderer: resize picks up a new devicePixelRatio (capped by quality); 
   const had = 'window' in globalThis;
   globalThis.window = { devicePixelRatio: 1 };
   try {
-    for (const [quality, cap] of [['low', 1], ['medium', 1.5], ['high', 2]]) {
+    for (const [quality, cap] of [['low', 1], ['medium', 1.5], ['high', 2], ['ultra', 2]]) {
       const { r, webgl } = makeMatch({ quality });
       assert.equal(webgl.pixelRatio, 1);
       assert.equal(webgl.shadowMap.type, THREE.PCFShadowMap, 'PCFSoftShadowMap is gone from three');
@@ -331,6 +331,7 @@ test('GameRenderer: adaptive resolution lowers the scene scale on slow frames an
     for (let i = 0; i < frames; i++) r.adaptResolution((t += ms));
     return t;
   };
+  const composite = r.post.composite;
   let t = run(600, 1000 / 60, 1000); // vsync-capped 60 Hz
   assert.equal(r.renderScale, 1);
   // one long stall (garbage collection, a shader compile) is not a slow stretch
@@ -341,10 +342,15 @@ test('GameRenderer: adaptive resolution lowers the scene scale on slow frames an
   t = run(300, 30, t);
   assert.ok(r.renderScale < 1, `scale ${r.renderScale} during slow frames`);
   assert.ok(r.post.sw < r.post.width, 'the scene target shrinks');
+  r.render((t += 30));
+  assert.ok(r.post.composite.uniforms.uSharpen.value > 0, 'the upscaled scene is sharpened');
+  assert.equal(r.post.composite, composite, 'without a new composite program');
   // ... and comes back once frames are at the display's 16.7 ms again (vsync never lets them go faster)
   t = run(60 * 60, 1000 / 60, t);
   assert.equal(r.renderScale, 1, 'full resolution again at a steady 60 Hz');
   assert.equal(r.post.sw, r.post.width);
+  r.render((t += 1000 / 60));
+  assert.equal(r.post.composite.uniforms.uSharpen.value, 0);
   // a 30 fps cap (battery saver) is learned as the display rate: full resolution within a few minutes
   t = run(30 * 180, 1000 / 30, t);
   assert.equal(r.renderScale, 1, 'a 30 Hz cap does not keep the scene blurred');
