@@ -35,6 +35,12 @@ export function cleanRoomCode(input) {
     }
   }
   s = s.toUpperCase();
+  // A pasted message ("room code: K7QX2"): take the standalone code-sized word, not letters from every word.
+  const words = s.split(/[^A-Z0-9]+/).filter(Boolean);
+  if (words.length > 1) {
+    const codes = words.filter((w) => isCompleteRoomCode(w));
+    if (codes.length) return codes.reverse().find((w) => /\d/.test(w)) || codes[0];
+  }
   let out = '';
   for (const ch of s) if (ROOM_CODE_ALPHABET.includes(ch)) out += ch;
   return out.slice(0, ROOM_CODE_LENGTH);
@@ -201,14 +207,21 @@ export function startBlockReason(state) {
  * Whether the host can start, with a reason when not. Uses lobby.startProblem()
  * when available, else lobby.canStart() (boolean or { ok, reason }).
  * @param {object} lobby
+ * @param {{ online?: boolean }} [ctx] online: friends can still join (shapes the "no opponent yet" hint)
  * @returns {{ ok: boolean, reason: string|null }}
  */
-export function startStatus(lobby) {
+export function startStatus(lobby, { online = false } = {}) {
   const state = lobby?.state;
   try {
     if (typeof lobby?.startProblem === 'function') {
       const problem = lobby.startProblem();
-      return problem ? { ok: false, reason: String(problem) } : { ok: true, reason: null };
+      if (!problem) return { ok: true, reason: null };
+      // Nobody to play against yet: say that, not the team rule (a lone host and an open seat).
+      const filled = (state?.slots || []).filter(isFilled).length;
+      if (state && filled < 2 && /different teams/i.test(String(problem))) {
+        return { ok: false, reason: online ? 'Waiting for a friend to join. Share the room code or invite link, or set a slot to AI.' : 'Set a slot to AI to have an opponent.' };
+      }
+      return { ok: false, reason: String(problem) };
     }
     const res = typeof lobby?.canStart === 'function' ? lobby.canStart() : null;
     if (res && typeof res === 'object') {

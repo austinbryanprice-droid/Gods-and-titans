@@ -88,7 +88,7 @@ function randomCard(selected, onPick) {
     ),
     selected ? h('span.mw-pcard-check', '✓ Chosen') : null,
   ),
-  h('p.mw-pcard-desc', 'A pantheon is drawn by lot when the battle begins. Nobody, not even you, knows which gods will answer your prayers until the first shrine is raised.'),
+  h('p.mw-pcard-desc', 'A pantheon is drawn by lot when the battle begins. Choose any other card to pick your gods yourself.'),
   h('div.mw-random-icons', { 'aria-hidden': 'true' }, icons),
   );
 }
@@ -113,6 +113,11 @@ export function openPantheonPicker({ host, current, title = 'Choose your pantheo
     close();
   };
   const onKey = (e) => {
+    if (overlay.isConnected === false) {
+      // The menu removed the overlay without closing it (the match started, or we were kicked).
+      document.removeEventListener('keydown', onKey, true);
+      return;
+    }
     if (e.key === 'Escape') {
       e.stopPropagation();
       e.preventDefault();
