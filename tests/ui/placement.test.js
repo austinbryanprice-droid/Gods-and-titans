@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
-import { checkPlacement, footprintAt, MINE_GAP, CANT_BUILD, TOO_CLOSE_TO_MINE } from '../../src/game/placement.js';
+import {
+  checkPlacement, footprintAt, MINE_GAP, CANT_BUILD, TOO_CLOSE_TO_MINE, TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY, UNEXPLORED,
+} from '../../src/game/placement.js';
+import * as simText from '../../src/sim/construction.js';
 import { makeWorld, spawn, place, clearUnits, run } from '../sim/helpers.js';
 
 /** A ViewState for player `me` fed one real snapshot from the world. */
@@ -94,9 +97,9 @@ test('drop-offs (Town Center, Storehouse) keep a 3-tile gap from gold mines', ()
   assert.equal(checkPlacement(vs, 0, 'storehouse', 36, 35).valid, true, 'gap 3 east and south');
   // Other buildings may hug a mine.
   assert.equal(checkPlacement(vs, 0, 'house', 28, 30).valid, true);
-  // A footprint overlapping the mine (or other trouble) is "Can't build there." even near a mine.
-  assert.equal(checkPlacement(vs, 0, 'storehouse', 29, 30).message, CANT_BUILD);
-  assert.equal(checkPlacement(vs, 0, 'house', 29, 30).message, CANT_BUILD);
+  // A footprint overlapping the mine is "in the way", not "too close", even for a drop-off.
+  assert.equal(checkPlacement(vs, 0, 'storehouse', 29, 30).message, MINE_IN_WAY);
+  assert.equal(checkPlacement(vs, 0, 'house', 29, 30).message, MINE_IN_WAY);
 });
 
 test('unexplored tiles are not buildable; explored but fogged ones are', () => {
@@ -204,7 +207,56 @@ test('planned buildings (ordered, not placed yet) block like buildings', () => {
   const planned = [{ b: 'house', tx: 7, ty: 12 }, { b: 'nope', tx: 0, ty: 0 }];
   const r = checkPlacement(vs, 0, 'house', 8, 12, planned);
   assert.equal(r.valid, false);
-  assert.equal(r.message, CANT_BUILD);
+  assert.equal(r.message, BUILDING_IN_WAY);
   assert.deepEqual(r.tiles, [false, true, false, true], 'only the overlapping column');
   assert.equal(checkPlacement(vs, 0, 'house', 9, 12, planned).valid, true, 'right next to it is fine');
+});
+
+test('refusal texts say why: fog, trees, a building, a mine, a unit; water and the map edge stay generic', () => {
+  const world = makeWorld({ map: { forest: [{ x: 20, y: 20, w: 2, h: 2 }], water: [{ x: 30, y: 4, w: 3, h: 3 }] } });
+  const vs = viewOf(world, 0, { seeAll: true });
+  const msg = (type, tx, ty) => checkPlacement(vs, 0, type, tx, ty).message;
+  assert.equal(msg('house', 14, 14), null);
+  assert.equal(msg('house', 19, 19), TREES_IN_WAY);
+  assert.equal(msg('house', 7, 7), BUILDING_IN_WAY, 'the Town Center');
+  assert.equal(msg('house', 13, 6), MINE_IN_WAY);
+  assert.equal(msg('house', 29, 3), CANT_BUILD, 'water');
+  assert.equal(msg('house', -1, 5), CANT_BUILD, 'off the map');
+  assert.equal(msg('town_center', 17, 6), TOO_CLOSE_TO_MINE);
+  assert.equal(msg('nope', 14, 14), CANT_BUILD);
+  // An enemy warrior in plain view.
+  spawn(world, 1, 'warrior', 15, 15);
+  const seen = viewOf(world, 0, { seeAll: true });
+  assert.equal(checkPlacement(seen, 0, 'house', 14, 14).message, UNIT_IN_WAY);
+  assert.equal(world.placementError(0, 'house', 14, 14), UNIT_IN_WAY);
+  // Several reasons at once: the first of terrain, building, mine, unit, gap names it.
+  assert.equal(checkPlacement(seen, 0, 'house', 19, 19).message, TREES_IN_WAY);
+});
+
+test('unexplored ground is named as such, whatever lies in it', () => {
+  const world = makeWorld({ map: { forest: [{ x: 30, y: 30, w: 4, h: 4 }], water: [{ x: 38, y: 30, w: 4, h: 4 }] } });
+  const vs = viewOf(world);
+  assert.equal(vs.explored[31 * vs.map.width + 31], 0);
+  // Open ground, trees and water that nobody has seen all read the same.
+  for (const [tx, ty] of [[24, 30], [31, 31], [39, 31], [33, 30]]) {
+    const r = checkPlacement(vs, 0, 'house', tx, ty);
+    assert.equal(r.valid, false, `${tx},${ty}`);
+    assert.equal(r.message, UNEXPLORED, `${tx},${ty}`);
+  }
+  // Once the area is explored the real reason shows.
+  vs.explored.fill(1);
+  assert.equal(checkPlacement(vs, 0, 'house', 31, 31).message, TREES_IN_WAY);
+  assert.equal(checkPlacement(vs, 0, 'house', 39, 31).message, CANT_BUILD);
+  assert.equal(checkPlacement(vs, 0, 'house', 24, 30).message, null);
+});
+
+test('the texts match the sim\'s (the fog text is the client\'s own)', () => {
+  assert.equal(CANT_BUILD, simText.CANT_BUILD);
+  assert.equal(TOO_CLOSE_TO_MINE, simText.TOO_CLOSE_TO_MINE);
+  assert.equal(TREES_IN_WAY, simText.TREES_IN_WAY);
+  assert.equal(BUILDING_IN_WAY, simText.BUILDING_IN_WAY);
+  assert.equal(MINE_IN_WAY, simText.MINE_IN_WAY);
+  assert.equal(UNIT_IN_WAY, simText.UNIT_IN_WAY);
+  const all = [CANT_BUILD, TOO_CLOSE_TO_MINE, TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY, UNEXPLORED];
+  assert.equal(new Set(all).size, all.length, 'no two reasons share a text');
 });
