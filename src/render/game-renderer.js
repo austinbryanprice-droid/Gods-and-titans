@@ -41,12 +41,12 @@ const QUALITY = {
 };
 
 // Light rig (linear, tone-mapped by post.js / the low path's Neutral mapping)
-const SUN_COLOR = 0xfff1dc;
-const SUN_INTENSITY = 2.6;
-const SKY_COLOR = 0xd6e4ff;
-const GROUND_COLOR = 0x5a5638;
-const HEMI_INTENSITY = 0.85;
-const ENV_INTENSITY = 0.55;
+const SUN_COLOR = 0xffe4bd;
+const SUN_INTENSITY = 3.0;
+const SKY_COLOR = 0xbccff2;
+const GROUND_COLOR = 0x4c4230;
+const HEMI_INTENSITY = 0.68;
+const ENV_INTENSITY = 0.5;
 const EXPOSURE = 1.0;
 // Adaptive resolution (frame times in ms, smoothed): slower than SLOW_FRAME_MS (and
 // well past the display's own frame period) lowers the scene scale a step; frames

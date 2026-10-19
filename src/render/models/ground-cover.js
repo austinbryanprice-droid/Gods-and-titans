@@ -44,9 +44,9 @@ export const GROUND_COVER_UNIFORMS = {
 };
 
 // Grass tufts per tile at full density, by ground class.
-const TUFTS = { meadow: 12, edge: 15, forest: 3.5, border: 3.5, sand: 1.6 };
+const TUFTS = { meadow: 15, edge: 18, forest: 3.5, border: 3.5, sand: 1.6 };
 // Accents per tile at full density.
-const FLOWERS = 3; // in flowering meadow patches
+const FLOWERS = 1.6; // in flowering meadow patches (sparse: clusters read as painted detail, not confetti)
 const PEBBLES = { meadow: 0.04, edge: 0.06, border: 0.3, dirt: 0.12, sand: 0.12, forest: 0.04 };
 const MUSHROOMS = { edge: 0.16, forest: 0.3 };
 
@@ -59,7 +59,7 @@ const OWN = 0;
 const TINT = 1;
 
 const lin = (hex) => new THREE.Color(hex); // sRGB hex → linear working color
-const FLOWER_COLORS = ['#f4f1e6', '#f2cc3a', '#dc4a3a', '#9a62d6', '#e676b4', '#5a8fe6', '#f6a63a'].map(lin);
+const FLOWER_COLORS = ['#ece6d2', '#e2bb44', '#c4583e', '#8c6cb8', '#d08aa8', '#e8a24a'].map(lin);
 const PEBBLE_COLORS = ['#a39e94', '#ada28e', '#c2bbab', '#948f86'].map(lin);
 const SAND_PEBBLES = ['#c9b58e', '#b8a582', '#d8cbb0'].map(lin);
 const CAP_COLORS = ['#8a5a3a', '#b8352c', '#c9a36e', '#a06a42'].map(lin);

@@ -277,10 +277,10 @@ function paintGrass(cv, seed, dry) {
   const n1 = fbm(S, 4, 4, seed + 1);
   const n2 = fbm(S, 16, 2, seed + 2);
   const cells = worley(S, 13, seed + 3);
-  const dark = C(dry ? 0x6f7346 : 0x4a6a30);
-  const mid = C(dry ? 0x8d915a : 0x668f3f);
+  const dark = C(dry ? 0x6f7346 : 0x3c5c2c);
+  const mid = C(dry ? 0x8d915a : 0x55793a);
   const soil = C(dry ? 0x76623f : 0x4a4a2e);
-  const tone = C(dry ? 0x9da368 : 0x7a9c4a);
+  const tone = C(dry ? 0x9da368 : 0x6a8a44);
   for (let i = 0; i < S * S; i++) {
     const t = clamp01((n1[i] - 0.5) * 0.9 + 0.5 + (n2[i] - 0.5) * 0.7);
     cv.set(i, dark);
@@ -304,8 +304,8 @@ function paintGrass(cv, seed, dry) {
       }
     }
   }
-  const palette = dry ? [C(0x898e54), C(0x969a5e), C(0x7d824c)] : [C(0x588038), C(0x668e42), C(0x507634)];
-  const tips = dry ? [C(0xaeb074), C(0xa4a86c), C(0x9ca266)] : [C(0x95b05e), C(0xa0b868), C(0x88a654)];
+  const palette = dry ? [C(0x898e54), C(0x969a5e), C(0x7d824c)] : [C(0x4a7036), C(0x5a7e3e), C(0x426632)];
+  const tips = dry ? [C(0xaeb074), C(0xa4a86c), C(0x9ca266)] : [C(0x8aa05a), C(0x96a862), C(0x7e9652)];
   grassBlades(cv, rand, dry ? 1600 : 2600, palette, tips, 0.9);
   // a few flowers / seed heads in lush grass, pale stalks in dry
   const dots = dry ? [C(0xd6c98a)] : [C(0xe8e4c8), C(0xe6cf56), C(0xb9a6d8)];

@@ -689,9 +689,9 @@ function treeTint(variant, r1, r2, n, out) {
   const h = (r2 - 0.5) * 0.24;
   if (variant === 'broadleaf') {
     const autumn = r2 * 0.75 + n * 0.5; // 0 … 1.25
-    if (autumn > 1.08) return out.setRGB(k * 4.2, k * 0.78, k * 0.55); // rust red-orange
-    if (autumn > 0.98) return out.setRGB(k * 3.0, k * 1.0, k * 0.5); // ochre
-    if (autumn > 0.84) return out.setRGB(k * 1.75, k * 1.12, k * 0.62); // yellow-green
+    if (autumn > 0.99) return out.setRGB(k * 4.2, k * 0.78, k * 0.55); // rust red-orange
+    if (autumn > 0.87) return out.setRGB(k * 3.0, k * 1.0, k * 0.5); // ochre
+    if (autumn > 0.74) return out.setRGB(k * 1.75, k * 1.12, k * 0.62); // yellow-green
     return out.setRGB(k * (1 + h), k * (1 + h * 0.3), k * (1 - h));
   }
   if (variant === 'birch') {
@@ -700,7 +700,7 @@ function treeTint(variant, r1, r2, n, out) {
   }
   if (variant === 'palm') return out.setRGB(k * (1 + h * 1.4), k, k * (1 - h));
   // pine: slightly blue-green to olive
-  return out.setRGB(k * (1 + h), k * (1 + h * 0.2), k * (1 - h * 0.5));
+  return out.setRGB(k * (0.78 + h), k * (0.92 + h * 0.2), k * (1.02 - h * 0.5)); // deep teal-green
 }
 
 // ---------------------------------------------------------------------------
