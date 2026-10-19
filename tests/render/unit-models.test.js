@@ -26,8 +26,11 @@ const { PLAYER_COLORS } = await import('../../src/config.js');
 
 // Mortals and gods have rounded, smooth-shaded limbs and layered clothing.
 // Even a full army (~100 mortals on screen) stays near 100k triangles, and the
-// draw-call budget (meshes per unit) is unchanged.
-const BUDGET = { mortal: 1000, god: 1400, titan: 2000, creature: 1200, minion: 1200 };
+// draw-call budget (meshes per unit) is unchanged. Gods carry layered
+// pauldrons, bracers and a pantheon piece (collar, halo, banners ...); a
+// player fields one or two at a time, so their extra hundred triangles is
+// noise next to an army.
+const BUDGET = { mortal: 1000, god: 1500, titan: 2000, creature: 1200, minion: 1200 };
 const STATES = ['idle', 'move', 'attack', 'gather', 'return', 'build', 'pray', 'cast', 'dead'];
 
 const unitClass = (u) => (MORTALS[u.id] ? 'mortal' : u.class || 'creature');

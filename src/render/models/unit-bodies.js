@@ -177,19 +177,29 @@ function addTail(b, pal, pts, r0, r1, color, { style = 'plain', tipColor, amp = 
   }
 }
 
-/** Team-colored saddle cloth draped over a back at height y. */
-function addSaddle(b, x, y, len, width, drop) {
-  y -= 0.012;
-  drop *= 0.8;
-  const top = box(len, 0.03, width);
-  T(top, [x, y, 0]);
-  b.add(top, TEAM(1));
-  const flap = box(len * 0.9, drop, 0.025);
-  T(flap, [x, y - drop / 2, width / 2]);
-  b.addSym(flap, TEAM(0.85));
-  const trim = box(len * 0.92, 0.03, 0.03);
-  T(trim, [x, y - drop, width / 2 + 0.005]);
-  b.addSym(trim, TEAM(0.55));
+/**
+ * Team caparison draped over a back whose top is at height y: a fitted
+ * cloth hugging the barrel (its front and back edges sink into the body like
+ * a saddle blanket), a trim band along its hem with tassels hanging from it,
+ * and a metal roundel on each flank.
+ */
+function addSaddle(b, x, y, len, width, drop, trim = TEAM(0.55)) {
+  const d = drop * 0.95;
+  const cloth = dome(1, 8, 2);
+  T(cloth, [x, y - d + 0.004, 0], [0, PI / 8, 0], [len * 0.62, d, width * 0.54]);
+  b.add(cloth, TEAM(1));
+  const hem = cyl(1, 1, 0.032, 8, true);
+  T(hem, [x, y - d + 0.012, 0], [0, PI / 8, 0], [len * 0.63, 1, width * 0.545]);
+  b.add(hem, trim);
+  for (let i = 0; i < 6; i++) {
+    const a = PI * (0.18 + (i % 3) * 0.32) * (i < 3 ? 1 : -1);
+    const t = cone(0.018, 0.07, 4);
+    T(t, [x + Math.cos(a) * len * 0.63, y - d - 0.02, Math.sin(a) * width * 0.545], [PI, 0, 0]);
+    b.add(t, trim);
+  }
+  const roundel = octa(Math.min(0.05, width * 0.16));
+  T(roundel, [x, y - d * 0.5, width * 0.535], [0, 0, 0], [1, 1, 0.35]);
+  b.addSym(roundel, trim, { glow: 0.25 });
 }
 
 /** Small seated rider (team tunic) on a mount, seat at the current origin. */
@@ -233,6 +243,27 @@ function addAuraRing(b, pal, center, r, drums, plane = 'yz') {
       T(o, p);
       b.add(o, tintC(pal.glow, 0.35), { glow: 1 });
     }
+  }
+}
+
+/**
+ * A crest of swept-back dorsal fins along a body chain (points i0..i1 of
+ * pts / rad), following its morphs: a continuous ridge that gives serpents
+ * and eastern dragons a jagged, readable back line instead of a bare tube.
+ */
+function addDorsalFins(b, pts, rad, i0, i1, color, morph, size = 1) {
+  for (let i = i0; i <= i1; i++) {
+    const p = pts[i];
+    const q = pts[Math.min(pts.length - 1, i + 1)];
+    const dx = q[0] - p[0];
+    const dy = q[1] - p[1];
+    const a = Math.atan2(-dy, -dx); // local +x toward the head, +y up off the spine
+    const r = rad[i];
+    const w = Math.max(0.05, Math.hypot(dx, dy) * 0.9);
+    const h = r * 1.5 * size;
+    const fin = slab([[w * 0.5, r * 0.7], [-w * 0.45, r * 0.7], [-w * 0.95, r + h], [-w * 0.2, r + h * 0.55]], Math.max(0.012, r * 0.18));
+    T(fin, p, [0, 0, a]);
+    b.add(fin, i % 2 ? color : shadeC(color, 0.8), { morph });
   }
 }
 
@@ -366,6 +397,17 @@ function buildArm(ctx, P, side, item, sizeK = 1) {
     const wr = cyl(P.armR * 0.95, P.armR * 0.92, P.fore * 0.3, 6, true);
     T(wr, [0, elbowY - P.fore * 0.8, 0]);
     b.add(wr, pal.leather, { morph: lower });
+  }
+  if (ctx.grand && ctx.lod > 0 && ctx.v.body !== 'spirit') {
+    // god bracer: a metal cuff carrying a band of glowing runes
+    if (!ex.has('armor') && !ex.has('multi_arms') && !ex.has('jewelry')) {
+      const cuff = cyl(P.armR * 1.16, P.armR * 1.04, P.fore * 0.42, 7, true);
+      T(cuff, [0, elbowY - P.fore * 0.6, 0]);
+      b.add(cuff, pal.accentMetal, { morph: lower });
+    }
+    const runes = cyl(P.armR * 1.28, P.armR * 1.2, 0.022, 7, true);
+    T(runes, [0, elbowY - P.fore * 0.55, 0]);
+    b.add(runes, tintC(pal.glow, 0.25), { glow: 0.9, morph: lower });
   }
   if (ex.has('jewelry')) {
     const band = cyl(P.armR * 1.3, P.armR * 1.3, 0.025, 6, true);
@@ -501,6 +543,165 @@ function addExtraArms(b, ctx, P, sh) {
   }
 }
 
+/**
+ * Layered pauldrons for gods, titans and creatures: three overlapping
+ * lames stepping down and out over the upper arm (a hard, armoured shoulder
+ * line instead of a round pad), the lowest edged in team paint, with a
+ * glowing stud on gods. Beasts and giants without armour get leather lames.
+ */
+function addPauldrons(b, ctx, P, sh) {
+  const { pal, ex } = ctx;
+  const plated = ctx.grand || ex.has('armor');
+  const top = plated ? pal.accentMetal : pal.leather;
+  const mid = plated ? shadeC(pal.accentMetal, 0.82) : shadeC(pal.leather, 0.8);
+  const R = P.padR * (ctx.grand ? 1.12 : 1);
+  for (const side of [1, -1]) {
+    for (let k = 0; k < 3; k++) {
+      const lame = dome(R * (1.12 - k * 0.1), 6, 2);
+      T(lame, [-k * 0.006, sh - 0.012 - k * R * 0.42, side * (P.shoulderZ * 1.02 + k * R * 0.22)],
+        [side * -(0.38 + k * 0.28), 0, 0], [1.18, 0.58, 1]);
+      b.add(lame, k === 2 ? TEAM(1, 'painted') : k === 0 ? top : mid);
+    }
+    if (ctx.grand) {
+      const stud = octa(R * 0.2);
+      T(stud, [0, sh - 0.012 + R * 0.62, side * P.shoulderZ * 1.04], [0, 0, 0], [1, 0.7, 1]);
+      b.add(stud, tintC(pal.glow, 0.2), { glow: 0.85 });
+    }
+  }
+}
+
+/** Pantheons whose gods get each signature piece (see addGodRegalia). */
+const REGALIA = {
+  egyptian: 'usekh', norse: 'mantle', hindu: 'halo', japanese: 'banner', chinese: 'flags',
+  aztec: 'fan', celtic: 'torc', mesopotamian: 'fleece', west_african: 'beads', greek: 'fibula',
+};
+
+/**
+ * God costume on top of the base torso: a jewelled medallion on the chest and
+ * one signature piece per pantheon that changes the silhouette (a broad
+ * collar, a flame halo, back banners, a feather fan ...). Giants keep the
+ * medallion only: their bulk already carries the silhouette.
+ */
+function addGodRegalia(b, ctx, P, sh) {
+  const { v, pal, ex } = ctx;
+  const k = P.chestW / 0.38;
+  const frontX = P.chestD * 0.5;
+  const backX = -P.chestD * 0.5 - 0.012;
+  const headY = P.headY - P.hipY;
+  // chest medallion: a gold ring around a glowing gem
+  const ring = torus(0.042 * k, 0.011 * k, 3, 6);
+  T(ring, [frontX + (ex.has('armor') ? 0.03 : 0.012), sh * 0.66, 0], [0, PI / 2, 0]);
+  b.add(ring, pal.accentMetal);
+  const gem = octa(0.032 * k);
+  T(gem, [frontX + (ex.has('armor') ? 0.035 : 0.018), sh * 0.66, 0], [0, 0, 0], [0.6, 1.2, 1]);
+  b.add(gem, tintC(pal.glow, 0.15), { glow: 1 });
+  if (v.body === 'giant') return;
+  const piece = REGALIA[ctx.unit.pantheon];
+  const team = TEAM(1, 'trim');
+  if (piece === 'usekh') {
+    // broad collar: banded rings fanning over the shoulders
+    const cols = [pal.accentMetal, TEAM(1, 'trim'), withMat('#2a9a9a', 'lacquer'), pal.accentMetal];
+    for (let i = 0; i < 4; i++) {
+      const c = cyl(P.chestW * (0.24 + i * 0.065), P.chestW * (0.3 + i * 0.065), 0.028, 10, true);
+      T(c, [0.012, sh - 0.005 - i * 0.026, 0], [0, 0, 0.06], [P.chestD / P.chestW * 1.25, 1, 1]);
+      b.add(c, cols[i], i === 0 ? { glow: 0.1 } : {});
+    }
+  } else if (piece === 'mantle' && !ex.has('fur')) {
+    // a wolf-fur mantle over the shoulders and back
+    for (let i = 0; i < 6; i++) {
+      const a = PI * (0.42 + i / 5 * 1.16);
+      const f = octa(P.chestW * 0.15);
+      T(f, [Math.cos(a) * P.chestD * 0.5 - 0.01, sh - 0.01, Math.sin(a) * P.chestW * 0.5], [a, a * 2, 0], [1.3, 0.75, 1.15]);
+      b.add(f, pal.fur, { mat: 'fur' });
+    }
+  } else if (piece === 'halo' && !ex.has('aura_ring')) {
+    // prabhavali: an arch of flames behind the head
+    const R = P.headR * 2.3;
+    const c = [backX - 0.06, headY - P.headR * 0.4, 0];
+    const arch = torus(R, R * 0.06, 3, 12, PI);
+    T(arch, c, [0, PI / 2, 0]);
+    b.add(arch, pal.accentMetal, { glow: 0.3 });
+    for (let i = 0; i <= 6; i++) {
+      const a = (i / 6) * PI;
+      const f = cone(R * 0.11, R * 0.32, 4);
+      T(f, [c[0], c[1] + Math.sin(a) * R * 1.12, Math.cos(a) * R * 1.12], [-(a - PI / 2), 0, 0]);
+      b.add(f, i % 2 ? pal.fire : pal.fireHot, { glow: 1 });
+    }
+  } else if (piece === 'banner' && !ex.has('aura_ring')) {
+    // sashimono: a tall team banner on a pole at the back
+    const x = backX - 0.04;
+    b.add(seg([x, sh - 0.22, 0], [x, sh + 0.78, 0], 0.012, 0.01, 4), pal.woodDark);
+    const flag = slab([[0, 0], [0.34, 0], [0.34, -0.5], [0, -0.5]], 0.012);
+    T(flag, [x - 0.004, sh + 0.74, -0.17], [0, PI / 2, 0]);
+    b.add(flag, team);
+    const mon = octa(0.06);
+    T(mon, [x - 0.02, sh + 0.5, 0], [0, 0, 0], [0.3, 1, 1]);
+    b.add(mon, pal.accent, { glow: 0.4 });
+  } else if (piece === 'flags' && ex.has('armor')) {
+    // kaoqi: four pennants fanned out behind a general's shoulders
+    for (let i = 0; i < 4; i++) {
+      const z = (i - 1.5) * 0.075;
+      const lean = (i - 1.5) * 0.16;
+      b.frame([backX - 0.05, sh - 0.15, z], [lean, 0, 0.08], 1, () => {
+        b.add(seg([0, 0, 0], [0, 0.82, 0], 0.01, 0.008, 4), pal.woodDark);
+        const f = slab([[0, 0], [0, -0.32], [0.2, -0.05]], 0.01);
+        T(f, [0, 0.8, 0], [0, PI / 2, 0]);
+        b.add(f, i % 2 ? team : TEAM(0.75, 'trim'));
+      });
+    }
+  } else if (piece === 'flags') {
+    // pibo: a celestial ribbon arcing over the shoulders
+    for (const side of [1, -1]) {
+      const pts = [[backX, sh + 0.02, side * 0.08], [backX - 0.12, sh + 0.14, side * 0.3], [backX - 0.08, sh - 0.18, side * 0.42], [backX - 0.02, -0.25, side * 0.4]];
+      for (const g of tube(pts, [0.016, 0.018, 0.018, 0.008], 4)) b.add(g, withMat(tintC(pal.secondary, 0.25), 'trim'), { glow: 0.15 });
+    }
+  } else if (piece === 'fan' && !ex.has('feather_cloak')) {
+    // quetzal feather fan rising behind the shoulders
+    const cols = [withMat('#1f9a6a', 'feather'), pal.accent, withMat('#2bb39a', 'feather'), pal.primary];
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 8 - 0.5) * 2.4;
+      const f = slab([[-0.035, 0], [0.035, 0], [0.025, 0.42], [0, 0.48], [-0.025, 0.42]], 0.012);
+      T(f, [backX - 0.06, sh - 0.05, 0], [a, PI / 2, 0]);
+      b.add(f, cols[i % 4], { glow: i % 4 === 1 ? 0.2 : 0 });
+    }
+  } else if (piece === 'torc') {
+    const torc = torus(P.headR * 0.95, 0.013 * k, 3, 10, PI * 1.7);
+    T(torc, [0.01, sh + 0.02, 0], [PI / 2, 0, PI * 0.15 + PI]);
+    b.add(torc, pal.accentMetal, { glow: 0.1 });
+    for (const side of [1, -1]) {
+      const knob = octa(0.022 * k);
+      T(knob, [P.headR * 0.85, sh + 0.02, side * 0.035]);
+      b.add(knob, pal.accentMetal, { glow: 0.3 });
+    }
+  } else if (piece === 'fleece') {
+    // kaunakes: tiered tufted fleece hanging from the waist or the shoulders
+    const tiers = ex.has('skirt') ? [[-0.1, 0.62, 0.74], [-0.22, 0.72, 0.84]] : [[sh - 0.04, 0.5, 0.62], [sh - 0.12, 0.58, 0.68]];
+    tiers.forEach(([y, r0, r1], i) => {
+      const t = cyl(P.chestW * r0, P.chestW * r1, 0.09, 10, true);
+      T(t, [0, y, 0], [0, PI / 10, 0], [P.chestD / P.chestW * 1.3, 1, 1]);
+      b.add(t, i ? shadeC(pal.secondary, 0.85) : pal.secondary, { mat: 'fur' });
+    });
+  } else if (piece === 'beads' && !ex.has('armor')) {
+    // a collar of beads and cowries
+    for (let i = 0; i < 11; i++) {
+      const a = PI * (-0.5 + i / 10);
+      const bead = octa(i % 2 ? 0.026 * k : 0.022 * k);
+      T(bead, [Math.cos(a) * P.chestD * 0.42 + 0.01, sh - 0.05 - Math.cos(a) * 0.06, Math.sin(a) * P.chestW * 0.36]);
+      b.add(bead, i % 2 ? pal.white : i % 4 === 0 ? pal.accentMetal : team);
+    }
+  } else if (piece === 'fibula') {
+    // a gold meander band over the chest and round brooches pinning the cloak
+    const band = box(P.chestD * 1.02, 0.028, P.chestW * 0.98);
+    T(band, [0, sh * 0.86, 0]);
+    b.add(band, pal.accentMetal);
+    for (const side of [1, -1]) {
+      const fib = cyl(0.03 * k, 0.03 * k, 0.012, 8);
+      T(fib, [frontX * 0.8, sh - 0.02, side * P.chestW * 0.36], [0, 0, PI / 2]);
+      b.add(fib, pal.accentMetal, { glow: 0.2 });
+    }
+  }
+}
+
 /** Torso mesh for humanoid-family bodies (pivot at hip height). */
 function buildTorso(ctx, P, opts = {}) {
   const { v, pal, ex, cls } = ctx;
@@ -570,9 +771,17 @@ function buildTorso(ctx, P, opts = {}) {
   }
   // loincloth flap (front) for bare bodies and gods without skirt
   if (bare || (!ex.has('skirt') && ctx.grand)) {
-    const flap = taper(0.03, 0.2, P.waistW * 0.55, 1, 0.8);
-    T(flap, [P.depth * 0.52, -0.24, 0]);
+    // gods wear a long team tabard with a metal hem; bare bodies a loincloth
+    const tab = ctx.grand && !bare;
+    const fl = tab ? 0.29 : 0.2;
+    const flap = taper(0.03, fl, P.waistW * (tab ? 0.62 : 0.55), 1, tab ? 0.72 : 0.8);
+    T(flap, [P.depth * 0.52, -0.04 - fl, 0]);
     b.add(flap, bare ? pal.primary : TEAM(0.9));
+    if (tab) {
+      const hem = box(0.036, 0.035, P.waistW * 0.6);
+      T(hem, [P.depth * 0.52, -0.04 - fl + 0.03, 0]);
+      b.add(hem, pal.accentMetal);
+    }
     const back = taper(0.03, 0.18, P.waistW * 0.55, 1, 0.8);
     T(back, [-P.depth * 0.52, -0.22, 0]);
     b.add(back, bare ? shadeC(pal.primary, 0.8) : TEAM(0.7));
@@ -626,23 +835,26 @@ function buildTorso(ctx, P, opts = {}) {
       b.add(s0, ctx.sleeve || cloth);
     }
   }
-  if ((!ctx.worker && !spirit && !ctx.mortal) || (ctx.mortal && ex.has('armor'))) {
+  if (ctx.mortal && ex.has('armor')) {
     for (const side of [1, -1]) {
-      const pad = dome(P.padR * (ctx.grand ? 1.1 : 1), 6, 2);
+      const pad = dome(P.padR, 6, 2);
       T(pad, [0, sh - 0.015, side * P.shoulderZ * 1.02], [side * -0.35, 0, 0], [1.1, 0.85, 1]);
-      b.add(pad, ctx.mortal ? pal.accentMetal : TEAM(1, 'painted'));
-      if ((ex.has('armor') || ctx.grand) && ctx.lod > 0) {
+      b.add(pad, pal.accentMetal);
+      if (ctx.lod > 0) {
         const rim = cyl(P.padR * 1.18, P.padR * 1.22, 0.03, 6, true);
         T(rim, [0, sh - 0.02, side * P.shoulderZ * 1.04], [side * -0.35, 0, 0]);
-        b.add(rim, ctx.mortal ? TEAM(1, 'painted') : pal.accentMetal);
-      }
-      if (ex.has('spikes')) {
-        const sp = cone(P.padR * 0.35, P.padR * 1.3, 4);
-        T(sp, [0, sh + P.padR * 0.7, side * P.shoulderZ * 1.15], [side * 0.5, 0, 0]);
-        b.add(sp, pal.horn);
+        b.add(rim, TEAM(1, 'painted'));
       }
     }
+  } else if (!ctx.worker && !spirit && !ctx.mortal) addPauldrons(b, ctx, P, sh);
+  if (!ctx.worker && !spirit && !ctx.mortal && ex.has('spikes')) {
+    for (const side of [1, -1]) {
+      const sp = cone(P.padR * 0.35, P.padR * 1.3, 4);
+      T(sp, [0, sh + P.padR * 0.7, side * P.shoulderZ * 1.15], [side * 0.5, 0, 0]);
+      b.add(sp, pal.horn);
+    }
   }
+  if (ctx.grand && !spirit && ctx.lod > 0) addGodRegalia(b, ctx, P, sh);
   if (ex.has('spikes')) {
     for (let i = 0; i < 3; i++) {
       const sp = cone(0.035, 0.12, 4);
@@ -987,7 +1199,7 @@ function quadTemplate(ctx) {
   // team saddle cloth (or a harness band on huge beasts)
   const topY = cy + Q.H * 0.5;
   if (!centaur && !ex.has('rider')) {
-    if (v.scale < 2.6) addSaddle(body, -0.02, topY + 0.005, Q.L * 0.36, Q.W * 1.02, Q.H * 0.55);
+    if (v.scale < 2.6) addSaddle(body, -0.02, topY + 0.005, Q.L * 0.36, Q.W * 1.02, Q.H * 0.55, pal.accentMetal);
     else {
       const band = cyl(Q.W * 0.56, Q.W * 0.56, Q.L * 0.12, 8, true);
       T(band, [-0.05, cy, 0], [0, 0, 0], [Q.H / Q.W, 1, 1]);
@@ -1075,7 +1287,7 @@ function quadTemplate(ctx) {
   if (centaur) {
     if (ctx.grand) CP.chestW *= 1.08;
     body.frame(torsoBase, [0, 0, 0], 1, () => buildTorso(ctx, CP, { noHips: true, into: body }));
-    addSaddle(body, -0.08, topY + 0.005, Q.L * 0.3, Q.W * 1.02, Q.H * 0.5);
+    addSaddle(body, -0.08, topY + 0.005, Q.L * 0.3, Q.W * 1.02, Q.H * 0.5, pal.accentMetal);
   }
 
   const bodyGeo = body.build();
@@ -1332,7 +1544,8 @@ function serpentTemplate(ctx) {
   const body = pal.skin;
   const band = pal.back;
   const pts = [[0.3, 0.72, 0], [0.32, 0.52, 0], [0.22, 0.3, 0], [0.05, 0.13, 0], [-0.18, 0.1, 0.12], [-0.42, 0.09, 0.2], [-0.66, 0.08, 0.08], [-0.84, 0.07, -0.12], [-1.02, 0.06, -0.18], [-1.2, 0.05, -0.06], [-1.32, 0.04, 0.06]];
-  const rad = [0.1, 0.11, 0.12, 0.13, 0.13, 0.125, 0.11, 0.095, 0.075, 0.05, 0.02];
+  // titans are thicker in the body: a world-ending serpent, not a big snake
+  const rad = [0.1, 0.11, 0.12, 0.13, 0.13, 0.125, 0.11, 0.095, 0.075, 0.05, 0.02].map((r) => r * (ctx.grand ? 1.3 : 1));
   const neckX = 0.1;
   const sOf = (p) => Math.max(0, neckX - p.x);
   const wave = waveMorph(sOf, (s) => 0.13 * Math.min(1, s / 0.5), 4.2, 'z');
@@ -1349,14 +1562,22 @@ function serpentTemplate(ctx) {
     T(plate, [p[0] + rad[i + 1] * 0.9, p[1], p[2]], [0, 0, 0.3]);
     b.add(plate, pal.belly, { morph });
   }
-  // team bands
+  // team bands, and on titans glowing rune rings between them
   for (const i of [3, 6]) {
     const p = pts[i];
     const r = cyl(rad[i] * 1.08, rad[i] * 1.08, 0.045, 7, true);
     T(r, p, [0, 0, PI / 2]);
     b.add(r, TEAM(1), { morph });
   }
-  if (ex.has('spikes') || ex.has('flames')) {
+  if (ctx.grand) {
+    for (const i of [2, 5, 8]) {
+      const r = cyl(rad[i] * 1.04, rad[i] * 1.04, 0.022, 7, true);
+      T(r, pts[i], [0, 0, PI / 2 + 0.3]);
+      b.add(r, tintC(pal.glow, 0.2), { glow: 0.9, morph });
+    }
+  }
+  if (ctx.grand || ex.has('spikes')) addDorsalFins(b, pts, rad, 1, pts.length - 3, mixC(pal.back, pal.horn, 0.35), morph, ctx.grand ? 1.2 : 0.9);
+  if (ex.has('flames')) {
     for (let i = 2; i < pts.length - 2; i++) {
       const p = pts[i];
       if (ex.has('flames') && i % 2 === 0) {
@@ -1476,7 +1697,7 @@ function dragonTemplate(ctx) {
     for (let i = 0; i <= N; i++) {
       const t = i / N;
       pts.push([0.55 - t * 1.75, 0.3 + Math.sin(t * PI * 2.0) * 0.12 + (1 - t) * 0.1, Math.sin(t * PI * 1.5) * 0.12]);
-      rad.push(0.1 * (1 - t * 0.8) + 0.012);
+      rad.push((0.1 * (1 - t * 0.8) + 0.012) * (ctx.grand ? 1.3 : 1));
     }
     const sOf = (p) => Math.max(0, 0.55 - p.x);
     const wave = waveMorph(sOf, (s) => 0.1 * Math.min(1, 0.4 + s / 1.2), 3.6, 'y');
@@ -1486,17 +1707,22 @@ function dragonTemplate(ctx) {
       const belly = box(0.03, 0.03, rad[i] * 1.2);
       T(belly, [p[0], p[1] - rad[i] * 0.95, p[2]]);
       b.add(belly, pal.belly, { morph: wave });
-      if (ex.has('mane') || ex.has('spikes')) {
-        const f = cone(rad[i] * 0.45, rad[i] * 1.4, 4);
-        T(f, [p[0], p[1] + rad[i] * 1.1, p[2]], [0, 0, 0.6]);
-        b.add(f, ex.has('mane') ? pal.primary : pal.horn, { morph: wave });
-      }
+    }
+    if (ex.has('mane') || ex.has('spikes') || ctx.grand) {
+      addDorsalFins(b, pts, rad, 1, N - 2, ex.has('mane') ? pal.primary : mixC(pal.back, pal.horn, 0.35), wave, ctx.grand ? 1.3 : 1);
     }
     for (const i of [2, 7]) {
       const p = pts[i];
       const r = cyl(rad[i] * 1.1, rad[i] * 1.1, 0.04, 7, true);
       T(r, p, [0, 0, PI / 2]);
       b.add(r, TEAM(1), { morph: wave });
+    }
+    if (ctx.grand) {
+      for (const i of [4, 10]) {
+        const r = cyl(rad[i] * 1.05, rad[i] * 1.05, 0.02, 7, true);
+        T(r, pts[i], [0, 0, PI / 2 + 0.3]);
+        b.add(r, tintC(pal.glow, 0.2), { glow: 0.9, morph: wave });
+      }
     }
     for (const [i, side] of [[2, 1], [2, -1], [8, 1], [8, -1]]) {
       const p = pts[i];
@@ -1581,7 +1807,7 @@ function dragonTemplate(ctx) {
       }
     }
     if (ex.has('rider')) b.frame([-0.05, cy + 0.17, 0], [0, 0, 0], 0.85, () => addRider(b, pal, ctx, 0.85));
-    else addSaddle(b, -0.04, cy + 0.165, 0.22, 0.24, 0.1);
+    else addSaddle(b, -0.04, cy + 0.165, 0.22, 0.24, 0.1, pal.accentMetal);
     if (ex.has('flames')) b.frame([0, cy + 0.15, 0], [0, 0, 0], 0.1, () => flameRow(b, pal, 4, 5));
     addWings(b, pal, 0.05, cy + 0.12, 0.1, { span: 0.95, style: 'bat', colA: pal.primary, colB: pal.back, sweep: 0.35, lift: 0.3 });
     rig = { eastern: false };
