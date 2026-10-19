@@ -4,7 +4,7 @@
 // what a (possibly buggy) host sends before it reaches the ViewState: the
 // GameSetup from `start` and every snapshot. Pure: runs in Node too.
 import { MAX_PLAYERS, PLAYER_COLORS } from '../config.js';
-import { UNITS, BUILDINGS, ABILITIES, PANTHEONS } from '../data/index.js';
+import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { sanitizeName } from './protocol.js';
 
 const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -36,6 +36,7 @@ const FIELD = {
   unitType: (v) => (hasOwn(UNITS, v) ? v : undefined),
   buildingType: (v) => (hasOwn(BUILDINGS, v) ? v : undefined),
   ability: (v) => (hasOwn(ABILITIES, v) ? v : undefined),
+  upgrade: (v) => (hasOwn(UPGRADES, v) ? v : undefined),
 };
 
 // Command type → { field: [kind, required] } (DESIGN 6.2). Anything else is dropped.
@@ -62,6 +63,9 @@ const COMMANDS = {
   hold: { units: U, queue: Q },
   cast: { unit: ['id', true], ability: ['ability', true], x: XO, y: YO, target: TGT, queue: Q },
   surrender: {},
+  repair: { units: U, target: ['id', true], queue: Q },
+  research: { building: ['id', true], upgrade: ['upgrade', true] },
+  autoRepair: { on: ['bool', false] },
 };
 export const COMMAND_TYPES = Object.keys(COMMANDS);
 export const COMMAND_SPECS = COMMANDS; // read-only: fingerprinted into the protocol version (wire-version.js)

@@ -1,8 +1,10 @@
 // Production: training queues with cost and population reserved up front,
-// god/titan summoning rules, reviving fallen gods, tier upgrades, rally
-// points and spawning at the footprint edge nearest the rally.
-import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT, DT } from '../config.js';
+// god/titan summoning rules, reviving fallen gods, tier upgrades, building
+// upgrade research, rally points and spawning at the footprint edge nearest
+// the rally.
+import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, REVIVE_COST_MULT, DT } from '../config.js';
 import { getUnitType, producibleAt } from '../data/index.js';
+import { getUpgrade, buildingMods } from '../data/upgrades.js';
 import { refund, tierMessage, requiresMessage } from './construction.js';
 import { hyp } from './common.js';
 
@@ -106,6 +108,31 @@ export function issueTierUp(world, player, b) {
   b.queue.push({ u: 'tier_up', time: up.time, elapsed: 0, cost: { ...up.cost }, pop: 0, revive: null, toTier: up.toTier });
 }
 
+/** Is this upgrade queued at any of the player's buildings? */
+export function researching(world, player, upId) {
+  for (const b of world.buildingList) {
+    if (!b.dead && b.owner === player && b.queue.some((q) => q.u === upId)) return true;
+  }
+  return false;
+}
+
+/** research: queue a building upgrade at a building of its type (one-time per player). */
+export function issueResearch(world, player, b, upId) {
+  if (!b || b.dead || b.kind !== 'building' || b.owner !== player || !b.constructed) return;
+  const up = getUpgrade(upId);
+  if (!up || up.building !== b.type) return;
+  const p = world.players[player];
+  if (p.upgrades[upId]) return world.error(player, 'Already researched.');
+  if (researching(world, player, upId)) return world.error(player, 'Already being researched.');
+  if (up.tier > p.tier) return world.error(player, tierMessage(up.tier));
+  if (b.queue.some((q) => q.u === 'tier_up')) return world.error(player, 'Your settlement is already growing.');
+  if (b.queue.length >= MAX_QUEUE) return world.error(player, 'Production queue is full.');
+  const msg = world.affordError(player, up.cost);
+  if (msg) return world.error(player, msg);
+  world.pay(player, up.cost);
+  b.queue.push({ u: upId, time: up.time, elapsed: 0, cost: { ...up.cost }, pop: 0, revive: null, research: true });
+}
+
 /** rally: point, mine (workers gather) or tree tile (workers chop). */
 export function setRally(world, player, b, x, y, targetId) {
   if (!b || b.dead || b.kind !== 'building' || b.owner !== player) return;
@@ -171,13 +198,19 @@ function followRally(world, b, u) {
 export function updateProduction(world, b) {
   if (!b.constructed || b.queue.length === 0) return;
   const item = b.queue[0];
-  item.elapsed += DT;
+  const p = world.players[b.owner];
+  const unit = item.u !== 'tier_up' && !item.research;
+  // Drill Yard / Widened Rift: units of this building train faster.
+  item.elapsed += unit && p ? DT * (1 + buildingMods(p.mods, b.type).train) : DT;
   if (item.elapsed < item.time - 1e-9) return;
   b.queue.shift();
-  const p = world.players[b.owner];
   if (item.u === 'tier_up') {
     b.tier = item.toTier;
     world.recomputeTier(b.owner);
+    return;
+  }
+  if (item.research) {
+    world.completeResearch(b.owner, item.u);
     return;
   }
   p.popUsed = Math.max(0, p.popUsed - item.pop);
@@ -185,11 +218,14 @@ export function updateProduction(world, b) {
   if (!def) return;
   const r = b.rally;
   const sp = spawnPoint(world, b, r ? r.x : b.x, r ? r.y : b.ty + b.size + 2, def.radius >= 0.75);
-  const u = world.spawnUnit(b.owner, item.u, sp.x, sp.y, {
-    level: item.revive ? item.revive.level : 1,
-    xp: item.revive ? item.revive.xp : 0,
-    facing: Math.atan2(sp.y - b.y, sp.x - b.x),
-  });
+  let level = item.revive ? item.revive.level : 1;
+  let xp = item.revive ? item.revive.xp : 0;
+  if (def.class === 'god' && p && p.mods.godLevel > 0) {
+    // Rite of Ascension: gods arrive at least godLevel levels above 1.
+    level = Math.min(GOD_MAX_LEVEL, Math.max(level, 1 + p.mods.godLevel));
+    xp = Math.max(xp, GOD_XP_LEVELS[level - 1] || 0);
+  }
+  const u = world.spawnUnit(b.owner, item.u, sp.x, sp.y, { level, xp, facing: Math.atan2(sp.y - b.y, sp.x - b.x) });
   p.stats.unitsTrained++;
   if (u) followRally(world, b, u);
 }

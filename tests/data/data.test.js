@@ -45,3 +45,22 @@ test('UI strings stay within Emoji 11 too (HUD chips, command card, menu, tips)'
     });
   }
 });
+
+test('every building has its own upgrades: at least two each, no effect shared with another building', async () => {
+  const { UPGRADES } = await import('../../src/data/upgrades.js');
+  const seen = new Map();
+  for (const b of Object.values(BUILDINGS)) {
+    const ups = b.upgrades || [];
+    assert.ok(ups.length >= 2, `${b.id} has ${ups.length} upgrades`);
+    for (const up of ups) {
+      assert.equal(UPGRADES[up.id].building, b.id);
+      assert.ok(!NEWER_EMOJI.test(up.icon), `${up.id} icon ${up.icon} needs Emoji 12 or newer`);
+      for (const e of up.effects) {
+        if (e.type === 'building') assert.ok(Object.hasOwn(BUILDINGS, e.building), `${up.id}: unknown building ${e.building}`);
+        const key = JSON.stringify(e);
+        assert.ok(!seen.has(key) || seen.get(key) === b.id, `${up.id} repeats an effect of ${seen.get(key)}`);
+        seen.set(key, b.id);
+      }
+    }
+  }
+});

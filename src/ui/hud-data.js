@@ -1,7 +1,8 @@
 // Shared lookups for the HUD, the command card and the input controller:
 // entity definitions, names, icons, subgroup ordering and small helpers that
 // read a ViewState. Pure (no DOM), so Node tests can use it.
-import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS } from '../data/index.js';
+import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES } from '../data/index.js';
+import { NO_MODS, computeMods } from '../data/upgrades.js';
 
 /** Subgroup order (WC3 sorts heroes first): lower comes first. */
 const CLASS_ORDER = { god: 0, titan: 1, creature: 2, infantry: 3, ranged: 4, siege: 5, support: 6, minion: 7, worker: 8 };
@@ -31,7 +32,7 @@ export function iconOf(e) {
 
 /** Icon for a unit / building type id. */
 export function typeIcon(typeId) {
-  const d = UNITS[typeId] || BUILDINGS[typeId];
+  const d = UNITS[typeId] || BUILDINGS[typeId] || UPGRADES[typeId];
   if (typeId === 'tier_up') return '⬆️';
   return (d && d.icon) || '❔';
 }
@@ -39,7 +40,7 @@ export function typeIcon(typeId) {
 /** Name for a unit / building type id. */
 export function typeName(typeId) {
   if (typeId === 'tier_up') return 'Growing';
-  const d = UNITS[typeId] || BUILDINGS[typeId];
+  const d = UNITS[typeId] || BUILDINGS[typeId] || UPGRADES[typeId];
   return (d && d.name) || String(typeId);
 }
 
@@ -131,4 +132,86 @@ export function stallText(session) {
   if (!session || session.isHost || session.stalled !== true) return '';
   const ms = Number.isFinite(session.stalledMs) ? session.stalledMs : 0;
   return `Connection problem: waiting for the host… (${Math.max(0, Math.floor(ms / 1000))}s)`;
+}
+
+// ---- Worshipper tasks (the snapshot's `tk`, see sim/snapshot.js workerTask)
+
+/** Task rows in display order. */
+export const WORKER_TASKS = [
+  { id: 'gold', icon: '⛏️', label: 'Mining gold' },
+  { id: 'wood', icon: '🌲', label: 'Chopping wood' },
+  { id: 'pray', icon: '🙏', label: 'Praying' },
+  { id: 'build', icon: '🔨', label: 'Building' },
+  { id: 'repair', icon: '🔧', label: 'Repairing' },
+  { id: 'idle', icon: '💤', label: 'Idle' },
+  { id: 'other', icon: '🚶', label: 'Walking or fighting' },
+];
+const TASK_IDS = new Set(WORKER_TASKS.map((t) => t.id));
+
+/** Task of a worshipper view entity ('other' when the host did not say). */
+export function taskOf(e) {
+  if (e.tk && TASK_IDS.has(e.tk)) return e.tk;
+  if (e.st === 'idle' && !e.bo) return 'idle';
+  return 'other';
+}
+
+/**
+ * Own worshippers by task: { counts: { gold: n, … }, ids: { gold: [id…], … }, total }.
+ * @param {object} vs ViewState
+ * @param {number[]} [only] limit to these entity ids (a selection)
+ */
+export function workerTasks(vs, only = null) {
+  const counts = {};
+  const ids = {};
+  for (const t of WORKER_TASKS) {
+    counts[t.id] = 0;
+    ids[t.id] = [];
+  }
+  let total = 0;
+  const list = only ? only.map((id) => vs.entities.get(id)) : vs.entities.values();
+  for (const e of list) {
+    if (!e || e.k !== 'u' || e.o !== vs.myIndex) continue;
+    const d = UNITS[e.t];
+    if (!d || d.class !== 'worker') continue;
+    const t = taskOf(e);
+    counts[t]++;
+    ids[t].push(e.id);
+    total++;
+  }
+  for (const t of WORKER_TASKS) ids[t.id].sort((a, b) => a - b);
+  return { counts, ids, total };
+}
+
+/** Own worshippers working at a building: { build, repair, pray } counts. */
+export function workersAt(vs, buildingId) {
+  const out = { build: 0, repair: 0, pray: 0 };
+  for (const e of vs.entities.values()) {
+    if (e.k !== 'u' || e.o !== vs.myIndex || e.tg !== buildingId) continue;
+    const t = taskOf(e);
+    if (t === 'build' || t === 'repair' || t === 'pray') out[t]++;
+  }
+  return out;
+}
+
+// ---- Upgrades
+
+/** Upgrade ids a player has researched (from the snapshot's players[i].up). */
+export function upgradesOf(vs, owner) {
+  const p = Number.isInteger(owner) && owner >= 0 ? vs.players[owner] : null;
+  return p && Array.isArray(p.up) ? p.up : [];
+}
+
+const modsCache = new Map();
+/** Combined upgrade effects of a player (data/upgrades.js computeMods), cached by upgrade list. */
+export function modsOf(vs, owner) {
+  const up = upgradesOf(vs, owner);
+  if (!up.length) return NO_MODS;
+  const key = up.join(',');
+  let m = modsCache.get(key);
+  if (!m) {
+    if (modsCache.size > 64) modsCache.clear();
+    m = computeMods(up);
+    modsCache.set(key, m);
+  }
+  return m;
 }

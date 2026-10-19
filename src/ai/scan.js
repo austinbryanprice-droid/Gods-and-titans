@@ -10,7 +10,8 @@ export function workerJob(u) {
     case 'gather': return o.mine ? 'gold' : 'wood';
     case 'return': return o.resume ? (o.resume.mine ? 'gold' : 'wood') : 'busy';
     case 'pray': return 'pray';
-    case 'build': return 'build';
+    case 'build':
+    case 'repair': return 'build';
     case 'attack':
     case 'attackMove': return 'fight';
     default: return 'busy';

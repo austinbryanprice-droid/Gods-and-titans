@@ -1214,6 +1214,52 @@
 }
 .hc-btn.is-unaffordable::after { height: 0.18em; background: linear-gradient(90deg, transparent, #e8483a 20%, #e8483a 80%, transparent); z-index: 3; }
 
+/* ------------------------------------------------------------ worshipper tasks + repair / research buttons */
+
+/* idle button and task counts share one row above the console */
+.hud-workers {
+  position: absolute;
+  left: 0.6em;
+  bottom: calc(var(--hb) + 0.55em);
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45em;
+  pointer-events: none;
+}
+.hud-workers .hud-idle { position: static; }
+.hud-tasks {
+  display: flex;
+  align-items: center;
+  gap: 0.1em;
+  height: 2.6em;
+  padding: 0 0.3em;
+  border-radius: 4px;
+  border-color: #000;
+  box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.5), inset 0 0 0 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(122, 90, 44, 0.6), 0 0.3em 0.9em rgba(0, 0, 0, 0.6);
+}
+.hud-task {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  height: 2em;
+  padding: 0 0.4em;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+}
+.hud-task:hover { background: rgba(255, 220, 150, 0.12); box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.55); }
+.hud-task-i { font-family: var(--mw-emoji); font-size: 1.1em; line-height: 1; }
+.hud-task-n { font: 700 0.95em/1 var(--mw-font-ui); color: #fff4d8; min-width: 0.8em; text-shadow: 0 1px 0 #000; }
+.hud-task.is-idle:not(.is-zero) .hud-task-n { color: #ffb15a; }
+.hud-task.is-zero { opacity: 0.4; cursor: default; }
+.hud-task.is-zero:hover { background: transparent; box-shadow: none; }
+.hi-grid-tasks { margin-left: 0.8em; color: var(--mw-ink); font-family: var(--mw-font-ui), var(--mw-emoji); }
+
+/* toggled-on command (Auto-Repair) */
+.hc-btn.is-active {
+  box-shadow: inset 0 0 0 1px #9fe8a8, inset 0 0 0.9em rgba(110, 220, 130, 0.45), 0 0 0.6em rgba(110, 220, 130, 0.35);
+}
+
 /* ------------------------------------------------------------ small screens */
 
 @media (max-aspect-ratio: 4/3) {

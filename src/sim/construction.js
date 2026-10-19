@@ -1,7 +1,9 @@
 // Construction: placement rules, build orders (cost paid up front, refunded if
 // abandoned before the site is placed), construction progress with helpers,
-// and cancelling unfinished buildings.
-import { BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT, TERRAIN } from '../config.js';
+// cancelling unfinished buildings, and repairing damaged ones.
+import {
+  BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT, TERRAIN, REPAIR_COST, REPAIR_TIME,
+} from '../config.js';
 import { BUILDINGS } from '../data/index.js';
 import { moveToRect, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
@@ -284,4 +286,100 @@ export function cancelBuild(world, player, b) {
   if (!b || b.dead || b.kind !== 'building' || b.owner !== player || b.constructed) return;
   refund(world, player, b.def.cost, CANCEL_BUILD_REFUND);
   world.removeBuilding(b);
+}
+
+// ---- Repair ----
+
+const REPAIR_ERROR_EVERY = 3; // seconds between "Not enough gold to repair." for one building
+
+/** A completed own building that is missing health (repair target). */
+export function needsRepair(b) {
+  return !!b && !b.dead && b.kind === 'building' && b.constructed && b.hp < b.maxHp;
+}
+
+/** What mending `hp` health of a building costs: REPAIR_COST of its build cost per full health bar. */
+export function repairCost(b, hp) {
+  const f = (hp / b.maxHp) * REPAIR_COST;
+  const c = b.def.cost;
+  return { gold: (c.gold || 0) * f, wood: (c.wood || 0) * f, faith: (c.faith || 0) * f };
+}
+
+/** issue repair: worshippers among `workers` walk to an own damaged building and mend it. */
+export function issueRepair(world, player, workers, b, queue) {
+  if (!b || b.dead || b.kind !== 'building' || b.owner !== player) return;
+  if (!b.constructed) {
+    for (const w of workers) world.setOrder(w, { type: 'build', b: b.type, tx: b.tx, ty: b.ty, paid: null, site: b.id, helper: true }, queue);
+    return;
+  }
+  if (!needsRepair(b)) return world.error(player, 'That building is not damaged.');
+  for (const w of workers) world.setOrder(w, { type: 'repair', target: b.id }, queue);
+}
+
+/**
+ * Repair order { type: 'repair', target }: walk to the building and mend it
+ * until it is whole, gone, or the owner runs out of resources. Returns true
+ * when the order is finished.
+ */
+export function updateRepair(world, u, o) {
+  const b = world.entities.get(o.target);
+  if (!b || b.owner !== u.owner || !needsRepair(b) || b.repairBlocked) return true;
+  if (distPointRect(u.x, u.y, b.tx, b.ty, b.tx + b.size, b.ty + b.size) - u.radius <= BUILD_REACH) {
+    if (u.mv) stopMove(u);
+    u.state = 'build'; // the hammer animation; the snapshot's task says 'repair'
+    u.target = b.id;
+    u.facing = Math.atan2(b.y - u.y, b.x - u.x);
+    b.repairers++;
+    return false;
+  }
+  u.state = 'move';
+  u.target = b.id;
+  const mv = moveToRect(world, u, b.tx, b.ty, b.size, `e${b.id}`);
+  if (mv.failed) {
+    stopMove(u);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Mend a completed building from this tick's repairers (like construction:
+ * each extra worshipper adds BUILD_HELPER_BONUS), paying as it goes. Short of
+ * resources, the repair stops and the repairers give up.
+ */
+export function updateBuildingRepair(world, b) {
+  const n = b.repairers;
+  b.repairers = 0;
+  if (n <= 0 || b.hp >= b.maxHp) {
+    b.repairBlocked = false;
+    return;
+  }
+  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) / (b.def.buildTime * REPAIR_TIME);
+  const hp = Math.min(b.maxHp * rate * DT, b.maxHp - b.hp);
+  const cost = repairCost(b, hp);
+  const msg = world.affordError(b.owner, cost);
+  if (msg) {
+    b.repairBlocked = true;
+    if (world.time - (b.repairErrT ?? -Infinity) >= REPAIR_ERROR_EVERY) {
+      b.repairErrT = world.time;
+      world.error(b.owner, msg.replace(/\.$/, ' to repair.'));
+    }
+    return;
+  }
+  world.pay(b.owner, cost);
+  b.hp = Math.min(b.maxHp, b.hp + hp);
+}
+
+/** Nearest own damaged building an idle worshipper with Auto-Repair on should mend, or null. */
+export function findRepairTarget(world, u, range) {
+  let best = null;
+  let bestD = range;
+  for (const b of world.buildingList) {
+    if (b.owner !== u.owner || b.repairBlocked || !needsRepair(b)) continue;
+    const d = distPointRect(u.x, u.y, b.tx, b.ty, b.tx + b.size, b.ty + b.size);
+    if (d > bestD) continue;
+    if (!world.canAfford(u.owner, repairCost(b, b.maxHp * 0.02))) continue;
+    bestD = d;
+    best = b;
+  }
+  return best;
 }

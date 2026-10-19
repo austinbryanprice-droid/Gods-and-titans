@@ -3,8 +3,8 @@
 import { formationSlots } from './movement.js';
 import { canAttackTarget } from './combat.js';
 import { reservePrayerSlot } from './economy.js';
-import { issueBuild, cancelBuild } from './construction.js';
-import { issueTrain, cancelTrain, issueTierUp, setRally } from './production.js';
+import { issueBuild, cancelBuild, issueRepair, needsRepair } from './construction.js';
+import { issueTrain, cancelTrain, issueTierUp, issueResearch, setRally } from './production.js';
 import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility } from './abilities.js';
 import { hyp } from './common.js';
 
@@ -15,7 +15,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -48,6 +48,7 @@ export function normalizeCommand(cmd, map) {
     const type = cmd.type;
     if (typeof type !== 'string' || !COMMAND_TYPES.has(type)) return null;
     const ability = cmd.ability;
+    const upgrade = cmd.upgrade;
     return {
       type,
       units: unitIds(cmd.units),
@@ -59,6 +60,8 @@ export function normalizeCommand(cmd, map) {
       building: nameOrId(cmd.building),
       unit: nameOrId(cmd.unit),
       ability: typeof ability === 'string' && ability.length <= MAX_NAME ? ability : undefined,
+      upgrade: typeof upgrade === 'string' && upgrade.length <= MAX_NAME ? upgrade : undefined,
+      on: cmd.on === true,
       index: Number.isSafeInteger(cmd.index) ? cmd.index : undefined,
       queue: !!cmd.queue,
     };
@@ -189,6 +192,10 @@ function smart(world, player, units, cmd) {
         world.setOrder(u, { type: 'build', b: t.type, tx: t.tx, ty: t.ty, paid: null, site: t.id, helper: true }, queue);
         continue;
       }
+      if (needsRepair(t)) {
+        world.setOrder(u, { type: 'repair', target: t.id }, queue);
+        continue;
+      }
       if (t.def.prayerSlots > 0) {
         if (!givePray(world, u, t, queue, state)) movers.push(u);
         continue;
@@ -317,6 +324,17 @@ export function applyCommand(world, player, cmd) {
       break;
     case 'cancelBuild':
       cancelBuild(world, player, ownBuilding(world, player, cmd.building));
+      break;
+    case 'repair': {
+      const workers = ownUnits(world, player, cmd.units).filter((u) => u.def.class === 'worker');
+      if (workers.length) issueRepair(world, player, workers, ownBuilding(world, player, cmd.target), queue);
+      break;
+    }
+    case 'research':
+      issueResearch(world, player, ownBuilding(world, player, cmd.building), cmd.upgrade);
+      break;
+    case 'autoRepair':
+      p.autoRepair = !!cmd.on;
       break;
     case 'rally':
       setRally(world, player, ownBuilding(world, player, cmd.building), cmd.x, cmd.y, cmd.target);

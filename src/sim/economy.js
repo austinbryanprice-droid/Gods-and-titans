@@ -5,9 +5,25 @@
 import { MINE_TIME, CARRY_AMOUNT, CHOP_INTERVAL, DT } from '../config.js';
 import { moveToRect, moveToPoint, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
+import { NO_MODS } from '../data/upgrades.js';
 
 const REACH = 0.5; // edge distance to work at a mine / tree / drop-off
 const SPOT_OFFSET = 0.42; // mining spots stand this far outside the mine's edge
+
+function modsOf(world, u) {
+  const p = world.players[u.owner];
+  return p ? p.mods : NO_MODS;
+}
+
+/** Gold ('g') or wood ('w') a worker brings back per trip (Iron Picks, Handcarts add to it). */
+export function carryCap(world, u, res) {
+  return CARRY_AMOUNT + modsOf(world, u).carry[res];
+}
+
+/** Seconds per wood chopped (Sharpened Axes shortens it). */
+function chopInterval(world, u) {
+  return CHOP_INTERVAL / (1 + modsOf(world, u).chop);
+}
 
 function reachRect(u, tx, ty, size) {
   return distPointRect(u.x, u.y, tx, ty, tx + size, ty + size) - u.radius <= REACH;
@@ -121,7 +137,7 @@ export function updateGather(world, u, o) {
   const want = o.mine ? 'g' : 'w';
   if (o.phase !== 'return') {
     if (u.carry && u.carry !== want && u.carryAmount > 0) o.phase = 'return';
-    else if (u.carry === want && u.carryAmount >= CARRY_AMOUNT) o.phase = 'return';
+    else if (u.carry === want && u.carryAmount >= carryCap(world, u, want)) o.phase = 'return';
   }
   if (o.phase === 'return') {
     u.state = 'return';
@@ -347,7 +363,7 @@ function gatherGold(world, u, o) {
     }
     if (world.tickCount > o.startT) o.timer -= DT;
     if (o.timer <= 1e-9) {
-      const take = Math.min(CARRY_AMOUNT, mine.amount);
+      const take = Math.min(carryCap(world, u, 'g'), mine.amount);
       mine.amount -= take;
       u.carry = 'g';
       u.carryAmount = take;
@@ -382,7 +398,7 @@ function gatherWood(world, u, o) {
     if (reachRect(u, tree.tx, tree.ty, 1)) {
       if (u.mv) stopMove(u);
       o.phase = 'work';
-      o.timer = CHOP_INTERVAL;
+      o.timer = chopInterval(world, u);
     } else {
       const mv = moveToRect(world, u, tree.tx, tree.ty, 1, `t${tree.tx},${tree.ty}`);
       if (mv.failed) {
@@ -399,7 +415,7 @@ function gatherWood(world, u, o) {
     u.facing = Math.atan2(tree.ty + 0.5 - u.y, tree.tx + 0.5 - u.x);
     o.timer -= DT;
     if (o.timer <= 1e-9) {
-      o.timer += CHOP_INTERVAL;
+      o.timer += chopInterval(world, u);
       const res = map.takeWood(tree.tx, tree.ty, 1);
       if (res.taken > 0) {
         if (u.carry !== 'w') {
@@ -410,7 +426,7 @@ function gatherWood(world, u, o) {
         o.fails = 0;
       }
       if (res.felled) world.onTreeFelled(tree.tx, tree.ty);
-      if (u.carryAmount >= CARRY_AMOUNT) {
+      if (u.carryAmount >= carryCap(world, u, 'w')) {
         o.phase = 'return';
       } else if (res.felled || res.taken === 0) {
         const next = nextTree(world, u.x, u.y, null);

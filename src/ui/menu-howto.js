@@ -17,7 +17,7 @@ function faithRate(id) {
 
 const HOTKEYS = [
   ['Units', [
-    [kbd('Right-click'), 'Smart command: move, attack, gather, pray, help build'],
+    [kbd('Right-click'), 'Smart command: move, attack, gather, pray, help build, repair'],
     [kbd('A'), 'Attack-move (then click the ground)'],
     [kbd('M'), 'Move'],
     [kbd('S'), 'Stop'],
@@ -30,6 +30,8 @@ const HOTKEYS = [
     [kbd('B'), 'Build menu: H House · B Barracks · S Shrine · O Storehouse · T Tower · E Temple · G Titan Gate · C Town Center'],
     [kbd('P'), 'Pray at a Shrine or Temple'],
     [kbd('C'), 'Return carried gold or wood'],
+    [kbd('R'), 'Repair a damaged building (costs a share of its price)'],
+    [kbd('T'), 'Auto-Repair on or off: idle worshippers mend nearby buildings'],
     [kbd('Shift'), 'Hold Shift while placing buildings to keep placing more; let go to finish'],
   ]],
   ['Buildings', [
@@ -38,6 +40,7 @@ const HOTKEYS = [
     [kbd('U'), 'Town Center: grow to Town, then City'],
     [keys('A', 'P', 'R'), 'Barracks: Archer · Priest · Battering Ram'],
     [keys('Q', 'W', 'E'), 'Shrine: creatures · Temple: gods (R for the fourth)'],
+    [kbd('Hotkey'), 'Every building has its own upgrades in the middle rows of its command card'],
     [kbd('T'), 'Titan Gate: summon the Titan'],
     [kbd('Y'), 'Set rally point'],
     [kbd('Esc'), 'Cancel construction / targeting; with a producer selected, take back its last queued unit'],

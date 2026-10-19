@@ -1,6 +1,7 @@
 // In-game HUD (DESIGN 9): a Warcraft III–style HTML overlay in #hud-root.
 //   top bar      gold, wood, faith (+rate), population, tier, clock, ping, menu
-//   top-left     god portraits (F1–F3), idle worshipper button
+//   top-left     god portraits (F1–F3)
+//   bottom-left  idle worshipper button and the worshipper task counts
 //   bottom       minimap | selection panel | 4×3 command card (+ tooltip)
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
 //   overlays     waiting, in-game menu (F10), game over, host left
@@ -9,7 +10,7 @@ import { UNITS } from '../data/index.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS } from './hud-data.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
@@ -91,6 +92,21 @@ export class Hud {
     this.idleBtn.addEventListener('click', (e) => game.input && game.input.cycleIdleWorker(e.shiftKey || e.ctrlKey));
     this.idleN = this.idleBtn.querySelector('.hud-idle-n');
     this.idleBtn.hidden = true;
+    // How many worshippers are on each task; click a count to select them.
+    this.taskEls = {};
+    this.tasks = el('div', 'hud-tasks hud-panel');
+    for (const t of WORKER_TASKS) {
+      const n = el('b', 'hud-task-n', '0');
+      const b = el('button', `hud-task is-${t.id}`, el('span', 'hud-task-i', t.icon), n);
+      b.type = 'button';
+      b.tabIndex = -1;
+      b.dataset.task = t.id;
+      b.addEventListener('click', (e) => this.selectTask(t.id, e.shiftKey));
+      this.taskEls[t.id] = { b, n, label: t.label };
+      this.tasks.appendChild(b);
+    }
+    this.taskIds = workerTasks(this.vs).ids;
+    this.workers = el('div', 'hud-workers', this.idleBtn, this.tasks);
 
     // Messages.
     this.msgs = el('div', 'hud-msgs');
@@ -139,10 +155,10 @@ export class Hud {
       el('div', 'hud-bottom-card', this.cardGrid));
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.idleBtn, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
-    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.chatBox, this.tip]) {
+    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip]) {
       p.addEventListener('mousedown', (e) => {
         if (e.target !== this.chatInput) e.preventDefault();
       });
@@ -346,6 +362,27 @@ export class Hud {
     const n = this.idleIds.length;
     setHidden(this.idleBtn, n === 0);
     setText(this.idleN, String(n));
+    const tasks = workerTasks(this.vs);
+    this.taskIds = tasks.ids;
+    for (const t of WORKER_TASKS) {
+      const te = this.taskEls[t.id];
+      const c = tasks.counts[t.id];
+      setText(te.n, String(c));
+      setClass(te.b, 'is-zero', c === 0);
+      const title = `${te.label}: ${c} Worshipper${c === 1 ? '' : 's'}${c ? ' (click to select, Shift+click to add)' : ''}`;
+      if (te.b.title !== title) te.b.title = title;
+    }
+    setHidden(this.tasks, tasks.total === 0);
+  }
+
+  /** Select the own worshippers on a task (add to the selection with shift). */
+  selectTask(task, add) {
+    const ids = (this.taskIds && this.taskIds[task]) || [];
+    if (!ids.length) return;
+    const sel = this.game.selection;
+    if (add) sel.add(ids);
+    else sel.set(ids);
+    if (this.game.input) this.game.input.afterSelect();
   }
 
   // ---------------------------------------------------------------- messages

@@ -121,7 +121,9 @@ See `src/data/buildings.js`. Key fields: `size` (square footprint N×N tiles), `
 `cost`, `buildTime`, `tier` (required tier), `requires` (building ids the player must own,
 completed), `produces` (array of unit ids, or `'creatures' | 'gods' | 'titan'` resolved per
 pantheon by `producibleAt()`), `popProvided`, `dropOff`, `prayerSlots`, `faithRate`
-(faith/s per praying worshipper), `attack` (towers), `tierUpgrades` (town center only).
+(faith/s per praying worshipper), `attack` (towers), `tierUpgrades` (town center only),
+`upgrades` (one-time researches made at that building type; every building has its own list,
+see `src/data/upgrades.js` for the effect types and the shared stat helpers the sim and HUD use).
 Gold mines are 3×3 resource entities placed by the map.
 
 ### 4.4 Ability
@@ -286,6 +288,14 @@ Pop used = pop of living units + pop of everything queued in production.
   says `Unexplored ground.` first for any fogged tile (the sim does not know the fog, and the
   text does not reveal what lies in it). Only the text depends on the reason, never validity.
 - `cancelBuild` on an unfinished building: removes it, refunds `CANCEL_BUILD_REFUND` (75%).
+- **Repair:** worshippers ordered to `repair` an own completed, damaged building walk to it and
+  mend it (state `build`, view task `tk: 'repair'`). One worshipper restores the full health bar
+  in `REPAIR_TIME` (75%) of the build time; each extra adds `BUILD_HELPER_BONUS`. A full bar
+  costs `REPAIR_COST` (35%) of the build cost, paid each tick as it heals; when the owner cannot
+  pay, the repairers give up and `Not enough gold to repair.` (wood / faith) is shown (at most
+  every 3 s per building). `autoRepair { on }` toggles Auto-Repair for the player: idle
+  worshippers look for a damaged building within `AUTO_REPAIR_RANGE` (10) tiles every second.
+  AI players switch it on.
 
 ### 5.4 Production
 - `train` puts an item in the building's queue (max 5). Cost and population are reserved
@@ -300,6 +310,12 @@ Pop used = pop of living units + pop of everything queued in production.
 - **Tier up:** `upgradeTier` on the Town Center queues a `tier_up` item (cost from
   `tierUpgrades`, `requires` buildings). While it runs, that Town Center cannot train.
   Player tier = highest tier among their completed Town Centers.
+- **Building upgrades:** `research` queues an upgrade at a completed building of its type (it
+  shares the production queue, cost paid up front and refunded by `cancelTrain`). Each is
+  researched once per player, needs its `tier`, and on completion (`researched` event) applies to
+  everything the player owns now and later: building hp / armor / pop / tower damage and range,
+  faith per prayer, training speed, unit damage / hp / armor / regen, carry amounts, chopping
+  speed, and the starting level of summoned gods. The list per building is in buildings.js.
 
 ### 5.5 Combat
 - Damage after armor (WC3): armor ≥ 0 → `× (1 − 0.06·a / (1 + 0.06·a))`; armor < 0 → `× (2 − 0.94^(−a))`.
@@ -384,6 +400,9 @@ counted in `world.perf.commandErrors`.
 { type: 'cancelTrain', building: id, index }
 { type: 'upgradeTier', building: id }
 { type: 'cancelBuild', building: id }
+{ type: 'repair',     units, target: buildingId, queue }   // on a construction site: help build
+{ type: 'research',   building: id, upgrade: upgradeId }
+{ type: 'autoRepair', on: bool }
 { type: 'rally',      building: id, x, y, target?: id }
 { type: 'stop',       units }
 { type: 'hold',       units }
@@ -393,7 +412,7 @@ counted in `world.perf.commandErrors`.
 **smart** resolution per unit: enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
-completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
+damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
 Units that cannot do the resolved action just move.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
@@ -405,6 +424,8 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `Your next god requires Town.` `Your next god requires City.` `You already have a Titan.`
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
+`That building is not damaged.` `Not enough gold to repair.` (wood / faith) `Already researched.`
+`Already being researched.`
 
 ### 6.3 ViewSnapshot (`world.getSnapshot()`)
 Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to integers.
@@ -413,6 +434,7 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   tick, time,                 // time in seconds
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
+              up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
               stats: { gathered, unitsTrained, kills, losses, buildings } }],
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
@@ -437,10 +459,11 @@ EntityView = {
   ex,             // seconds until a summoned minion expires (omitted if permanent)
   bo,             // pending build order for workers: { b: typeId, tx, ty } (omitted otherwise)
   mw,             // 1 while a worker waits its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
+  tk,             // workers: task 'gold'|'wood'|'pray'|'build'|'repair'|'idle'|'other' (HUD task counts)
   // buildings:
   tx, ty,         // footprint top-left tile
   bp,             // build progress 0..1 (1 = complete)
-  q,              // queue [{ u: typeId | 'tier_up', p: 0..1 }] (first item progressing)
+  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }] (first item progressing)
   tr,             // town center tier 1..3
   pr,             // praying worshipper count
   rp,             // rally [x, y] or null
@@ -463,6 +486,7 @@ EntityView = {
 { type: 'construction', id, t, o }                                   // building placed
 { type: 'buildingComplete', id, t, o }
 { type: 'tierUp',  player, tier }
+{ type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'levelUp', id, level }
 { type: 'treeFelled', tx, ty }
 { type: 'resourceDepleted', id }
@@ -548,7 +572,7 @@ tx, ty, size, amount`.
   the host; more than 100 malformed frames in 10 s closes with 'protocol-error'. Token buckets
   per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `resync` at most one
   per second (deferred); in the lobby `lobby` patches 5/10, `chat` 1/5, `ping` 4/8, one `hello`.
-  The host rebuilds every client command from a whitelist (src/net/sanitize.js: 17 types, typed
+  The host rebuilds every client command from a whitelist (src/net/sanitize.js: 20 types, typed
   fields, unit lists deduped and capped at 256, coordinates clamped, type ids own keys of the
   data tables, `player` never from the client). Names ≤ 20 and chat ≤ 200 code points with
   control/bidi characters stripped. Clients validate what the host sends: lobby states, the
@@ -712,8 +736,13 @@ per-frame budget, so a revealed army appears over a few frames.
   and defeated players.
 - Info panel (`src/ui/hud-info.js`): a selected gold mine shows "Gold left", "Miners n/2"
   (snapshot `mn` / `MINE_SLOTS`), how many of your Worshippers work there, and the
-  2-at-once rule. A worker's state line reads "Gathering gold", "Chopping wood", or "Waiting
-  its turn at the gold mine" (view key `mw`).
+  2-at-once rule. A worker's state line reads "Gathering gold", "Chopping wood", "Repairing", or
+  "Waiting its turn at the gold mine" (view key `mw`). An own building lists the Worshippers
+  building, repairing or praying there and the upgrades researched for its type; armor, tower
+  damage / range, housing and faith rates include the owner's upgrades (`players[i].up`).
+- Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
+  (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
+  (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
 - `input.js`: left click select, drag box select, shift add/remove, double-click selects same
   type on screen, Ctrl+1–9 groups, 1–9 recall (double tap centers), right-click smart command
   (shift queues), hotkeys from the command card, targeting modes (attack-move A, ability
@@ -726,9 +755,12 @@ per-frame budget, so a revealed army appears over a few frames.
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.
   Hotkeys: units M move, S stop, H hold, A attack; workers + G gather, B build (submenu: House H,
   Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C), P pray,
-  C return cargo; abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:
+  C return cargo, R repair (targets an own building), T Auto-Repair on/off (lit while on);
+  abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:
   Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R; Shrine: creatures Q W E;
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
+  Each building's upgrades fill the free middle / bottom slots with their data hotkey (no two
+  buttons of a card share a key); researched ones stay as dim "(researched)" buttons.
 - `minimap.js`: 2D canvas: terrain colors, mines, trees, units/buildings as team-colored dots
   (visible only), fog, camera quad; click/drag moves camera, right-click issues smart move.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with

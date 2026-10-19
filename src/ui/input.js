@@ -622,6 +622,22 @@ export class InputController {
         sfx.play('move');
         break;
       }
+      case 'repair': {
+        if (!target || target.k !== 'b' || target.o !== vs.myIndex) {
+          ok = false;
+          this.error('Must target one of your buildings.');
+          break;
+        }
+        if (isComplete(target) && !(target.hp < target.mhp)) {
+          ok = false;
+          this.error('That building is not damaged.');
+          break;
+        }
+        this.command({ type: 'repair', units: this.ownWorkers(), target: target.id, queue: !!shift });
+        this.marker(target.x, target.y, 'move');
+        sfx.play('move');
+        break;
+      }
       case 'rally': {
         const blds = this.sel.ownBuildings().filter((b) => isComplete(b) && this.produces(b));
         this.rally(blds, p, target);
@@ -856,6 +872,22 @@ export class InputController {
       }
       case 'cancelBuild':
         for (const e of this.sel.ownBuildings()) if (!isComplete(e)) this.command({ type: 'cancelBuild', building: e.id });
+        break;
+      case 'research': {
+        // The least busy finished building of the active group researches it.
+        const group = this.sel.activeGroup();
+        let pick = null;
+        for (const e of this.sel.ownBuildings()) {
+          if (!group || e.t !== group.type || !isComplete(e)) continue;
+          const q = e.q || [];
+          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE) continue;
+          if (!pick || q.length < (pick.q || []).length) pick = e;
+        }
+        if (pick) this.command({ type: 'research', building: pick.id, upgrade: a.upgrade });
+        break;
+      }
+      case 'autoRepair':
+        this.command({ type: 'autoRepair', on: !!a.on });
         break;
       default:
         break;

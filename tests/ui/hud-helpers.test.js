@@ -205,3 +205,30 @@ test('worker state line: gold, waiting its turn (sim key mw), wood, carrying; fo
   run(world, 0.5);
   assert.equal(unitStateText(viewOf(world).entities.get(ws[0].id), w, 0), 'Gathering gold');
 });
+
+test('worshipper task counts and the workers at a building come from the snapshot', async () => {
+  const { workerTasks, workersAt } = await import('../../src/ui/hud-data.js');
+  const { buildingWorkersText, taskSummaryText, researchedText } = await import('../../src/ui/hud-info.js');
+  const world = makeWorld();
+  Object.assign(world.players[0], { gold: 5000, wood: 5000, faith: 5000 });
+  const house = place(world, 0, 'house', 14, 14);
+  house.hp = 100;
+  const shrine = place(world, 0, 'shrine', 20, 10);
+  const ws = world.unitsOf(0).filter((u) => u.type === 'worshipper');
+  world.issueCommand(0, { type: 'repair', units: [ws[0].id, ws[1].id], target: house.id });
+  world.issueCommand(0, { type: 'pray', units: [ws[2].id], target: shrine.id });
+  world.issueCommand(0, { type: 'gather', units: [ws[3].id], target: world.mineList[0].id });
+  world.issueCommand(0, { type: 'stop', units: [ws[4].id] });
+  run(world, 3);
+  const vs = viewOf(world);
+  const t = workerTasks(vs);
+  assert.equal(t.total, 5);
+  assert.deepEqual(t.counts, { gold: 1, wood: 0, pray: 1, build: 0, repair: 2, idle: 1, other: 0 });
+  assert.deepEqual(t.ids.repair, [ws[0].id, ws[1].id].sort((a, b) => a - b));
+  assert.deepEqual(workerTasks(vs, [ws[0].id, ws[3].id]).counts.gold, 1, 'limited to a selection');
+  assert.deepEqual(workersAt(vs, house.id), { build: 0, repair: 2, pray: 0 });
+  assert.equal(buildingWorkersText(workersAt(vs, house.id)), '🔧 2 repairing');
+  assert.equal(taskSummaryText(t.counts), '⛏️ 1 · 🙏 1 · 🔧 2 · 💤 1');
+  assert.equal(unitStateText(vs.entities.get(ws[0].id), UNITS.worshipper, 0), 'Repairing');
+  assert.equal(researchedText(['house_stone_walls', 'tc_iron_picks'], 'house'), '🧱 Stone Walls');
+});

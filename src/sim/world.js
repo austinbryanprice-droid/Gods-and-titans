@@ -5,6 +5,7 @@ import {
   GOD_LEVEL_ARMOR, XP_RANGE, UNDER_ATTACK_COOLDOWN, NEUTRAL, PLAYER_COLORS, MINE_SLOTS,
 } from '../config.js';
 import { BUILDINGS, GOLD_MINE, PANTHEONS, PANTHEON_LIST, getUnitType, xpValue } from '../data/index.js';
+import { NO_MODS, computeMods, buildingMods, unitMods } from '../data/upgrades.js';
 import { RNG, hashSeed } from './rng.js';
 import { generateMap } from './mapgen.js';
 import { MapState } from './map-state.js';
@@ -15,7 +16,7 @@ import { computeDerived, tickStatuses, updateAuras } from './status.js';
 import { dealDamage, updateProjectiles, updateTower } from './combat.js';
 import { updateDelayed, updateFields } from './abilities.js';
 import { computePrayerSpots, mineSpots, nearestMine } from './economy.js';
-import { canPlace, placementError, findPlacement, updateConstruction } from './construction.js';
+import { canPlace, placementError, findPlacement, updateConstruction, updateBuildingRepair } from './construction.js';
 import { updateProduction } from './production.js';
 import { spawnCreeps } from './creeps.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
@@ -87,6 +88,10 @@ export class World {
         popCap: 0,
         defeated: false,
         fallen: {},
+        upgrades: {}, // researched upgrade id -> true
+        upList: [], // the same ids in the order they finished (snapshot)
+        mods: NO_MODS, // their combined effects (data/upgrades.js computeMods)
+        autoRepair: false, // idle worshippers mend nearby damaged buildings
         lastAlert: -Infinity,
         stats: { gathered: 0, unitsTrained: 0, kills: 0, losses: 0, buildings: 0 },
       };
@@ -150,15 +155,19 @@ export class World {
   createBuilding(owner, typeId, tx, ty, constructed, silent = false) {
     const def = BUILDINGS[typeId];
     const id = this.nextId++;
+    const p = this.players && this.players[owner];
+    const m = buildingMods(p ? p.mods : NO_MODS, typeId);
+    const maxHp = def.hp + m.hp;
     const b = {
       id, kind: 'building', type: typeId, owner, def,
       tx, ty, size: def.size, x: tx + def.size / 2, y: ty + def.size / 2, radius: def.size / 2,
-      hp: constructed ? def.hp : def.hp * 0.1, maxHp: def.hp, armor: def.armor,
+      hp: constructed ? maxHp : maxHp * 0.1, maxHp, armor: def.armor + m.armor,
       constructed: !!constructed, buildProgress: constructed ? 1 : 0, builders: 0,
+      repairers: 0, repairBlocked: false, rangeBonus: m.range,
       queue: [], rally: null, tier: typeId === 'town_center' ? 1 : 0,
       prayers: def.prayerSlots > 0 ? new Array(def.prayerSlots).fill(0) : [], praySpots: null, prayingCount: 0,
       attackCd: 0, target: 0, state: 'idle', order: null, facing: Math.PI / 2, dead: false,
-      baseDamage: def.attack ? def.attack.damage : 0, dmgMult: 1, atkSpeedMult: 1,
+      baseDamage: def.attack ? def.attack.damage : 0, dmgMult: 1 + m.damage, atkSpeedMult: 1,
       carry: 0, level: 0, xp: 0, cooldowns: {}, amount: 0, claimers: null,
     };
     this.entities.set(id, b);
@@ -210,7 +219,7 @@ export class World {
       big: def.radius >= 0.75 && !def.air, air: !!def.air,
       level: def.class === 'god' ? Math.max(1, opts.level || 1) : 1, xp: def.class === 'god' ? opts.xp || 0 : 0,
       hp: def.hp, maxHp: def.hp, baseArmor: def.armor, baseDamage: def.attack ? def.attack.damage : 0,
-      baseSpeed: def.speed, baseRegen: regen, passiveLifesteal: lifesteal, evasion, thorns,
+      baseSpeed: def.speed, baseRegen: regen, regen0: regen, passiveLifesteal: lifesteal, evasion, thorns,
       state: 'idle', order: null, orders: [], target: 0, carry: 0, carryAmount: 0,
       cooldowns: {}, statuses: [], aura: null, attackCd: 0,
       mv: null, forced: null, moving: false, ghost: false, arrivedGroup: null,
@@ -224,7 +233,7 @@ export class World {
       // ticks blocked, last progress check, the melee attack spot, and attackers claiming spots on us.
       engId: 0, engT: 0, blockedT: 0, engD: 0, engCk: 0, atk: null, claimers: null,
     };
-    this.applyLevelStats(u, true);
+    this.applyUnitStats(u, true);
     computeDerived(u);
     this.entities.set(id, u);
     this.unitList.push(u);
@@ -235,16 +244,49 @@ export class World {
     return u;
   }
 
-  /** God level scaling of hp, damage and armor. */
-  applyLevelStats(u, full = false) {
-    if (u.def.class !== 'god') return;
-    const lv = u.level - 1;
-    const newMax = Math.round(u.def.hp * (1 + GOD_LEVEL_HP * lv));
+  /**
+   * Max hp, damage, armor and regen from the unit type, god level and the
+   * owner's upgrades. full: a new unit starts at full health; otherwise the
+   * hp gained or lost with the max is added to the current hp.
+   */
+  applyUnitStats(u, full = false) {
+    const def = u.def;
+    const p = u.owner >= 0 ? this.players[u.owner] : null;
+    const m = unitMods(p ? p.mods : NO_MODS, def);
+    const lv = def.class === 'god' ? u.level - 1 : 0;
+    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp);
+    const newMax = hpMult === 1 ? def.hp : Math.round(def.hp * hpMult);
     if (full) u.hp = newMax;
-    else u.hp = Math.min(newMax, u.hp + (newMax - u.maxHp));
+    else u.hp = Math.max(1, Math.min(newMax, u.hp + (newMax - u.maxHp)));
     u.maxHp = newMax;
-    u.baseDamage = u.def.attack ? u.def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) : 0;
-    u.baseArmor = u.def.armor + GOD_LEVEL_ARMOR * lv;
+    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) : 0;
+    u.baseArmor = def.armor + GOD_LEVEL_ARMOR * lv + m.armor;
+    u.baseRegen = u.regen0 + m.regen;
+  }
+
+  /** Max hp, armor, damage and range of a building from its type and the owner's upgrades. */
+  applyBuildingStats(b) {
+    const p = this.players[b.owner];
+    const m = buildingMods(p ? p.mods : NO_MODS, b.type);
+    const newMax = b.def.hp + m.hp;
+    b.hp = Math.max(1, Math.min(newMax, b.hp + (newMax - b.maxHp)));
+    b.maxHp = newMax;
+    b.armor = b.def.armor + m.armor;
+    b.dmgMult = 1 + m.damage;
+    b.rangeBonus = m.range;
+  }
+
+  /** A building upgrade finished: remember it and apply it to everything the player owns. */
+  completeResearch(i, upId) {
+    const p = this.players[i];
+    if (!p || p.upgrades[upId]) return;
+    p.upgrades[upId] = true;
+    p.upList.push(upId);
+    p.mods = computeMods(p.upList);
+    for (const u of this.unitList) if (!u.dead && u.owner === i) this.applyUnitStats(u);
+    for (const b of this.buildingList) if (!b.dead && b.owner === i) this.applyBuildingStats(b);
+    this.recomputePopCap(i);
+    this.emit({ type: 'researched', player: i, up: upId });
   }
 
   gainXp(u, amount) {
@@ -252,7 +294,7 @@ export class World {
     u.xp += amount;
     while (u.level < GOD_MAX_LEVEL && u.xp >= GOD_XP_LEVELS[u.level]) {
       u.level++;
-      this.applyLevelStats(u);
+      this.applyUnitStats(u);
       this.emit({ type: 'levelUp', id: u.id, level: u.level });
     }
   }
@@ -516,7 +558,9 @@ export class World {
     const p = this.players[i];
     if (!p) return;
     let cap = 0;
-    for (const b of this.buildingList) if (!b.dead && b.owner === i && b.constructed) cap += b.def.popProvided || 0;
+    for (const b of this.buildingList) {
+      if (!b.dead && b.owner === i && b.constructed && b.def.popProvided) cap += b.def.popProvided + buildingMods(p.mods, b.type).pop;
+    }
     p.popCap = Math.min(POP_MAX, cap);
   }
 
@@ -621,6 +665,7 @@ export class World {
       if (b.dead) continue;
       if (!b.constructed) updateConstruction(this, b);
       else {
+        updateBuildingRepair(this, b);
         updateProduction(this, b);
         if (b.def.attack) updateTower(this, b);
       }
@@ -657,7 +702,7 @@ export class World {
       b.prayingCount = n;
       const p = this.players[b.owner];
       if (p && n > 0) {
-        const rate = n * b.def.faithRate;
+        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith);
         p.faithRate += rate;
         p.faith += rate * DT;
       }
