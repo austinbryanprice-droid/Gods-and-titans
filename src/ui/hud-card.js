@@ -15,12 +15,13 @@ export class CardView {
   /**
    * @param {HTMLElement} grid container for the 12 slots
    * @param {HTMLElement} tip tooltip element
-   * @param {{ onActivate: (b: object, e: MouseEvent) => void }} o
+   * @param {{ onActivate: (b: object, e: MouseEvent) => void, onToggle?: (b: object) => void }} o
    */
-  constructor(grid, tip, { onActivate }) {
+  constructor(grid, tip, { onActivate, onToggle }) {
     this.grid = grid;
     this.tip = tip;
     this.onActivate = onActivate;
+    this.onToggle = onToggle;
     this.card = new Array(12).fill(null);
     this.slots = [];
     this.hoverSlot = -1;
@@ -44,7 +45,12 @@ export class CardView {
         const b = this.card[i];
         if (b && this.onActivate) this.onActivate(b, e);
       });
-      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        // Right-click an ability: autocast on / manual (WC3).
+        const b = this.card[i];
+        if (b && b.toggle && this.onToggle) this.onToggle(b);
+      });
       btn.addEventListener('mouseenter', () => {
         this.hoverSlot = i;
         this.renderTip();
@@ -147,7 +153,8 @@ export class CardView {
       tip.appendChild(row);
     }
     if (b.description) tip.appendChild(el('div', 'ht-desc', b.description));
-    if (b.autocast) tip.appendChild(el('div', 'ht-note', 'Casts automatically.'));
+    if (b.toggle) tip.appendChild(el('div', 'ht-note', b.autocast ? 'Casts automatically. Right-click to cast it yourself.' : 'Manual: cast it yourself. Right-click to cast automatically.'));
+    else if (b.autocast) tip.appendChild(el('div', 'ht-note', 'Casts automatically.'));
     if (b.passive) tip.appendChild(el('div', 'ht-note', 'Passive.'));
     if (b.reason && b.state !== 'cooldown') tip.appendChild(el('div', 'ht-reason', b.reason));
     setHidden(tip, false);

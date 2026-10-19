@@ -14,7 +14,7 @@ import { SpatialHash } from './spatial.js';
 import { updateMovement } from './movement.js';
 import { computeDerived, tickStatuses, updateAuras } from './status.js';
 import { dealDamage, updateProjectiles, updateTower } from './combat.js';
-import { updateDelayed, updateFields } from './abilities.js';
+import { updateDelayed, updateFields, defaultManualMask, refreshAutocast } from './abilities.js';
 import { computePrayerSpots, mineSpots, nearestMine } from './economy.js';
 import { canPlace, placementError, findPlacement, updateConstruction, updateBuildingRepair } from './construction.js';
 import { updateProduction } from './production.js';
@@ -224,7 +224,7 @@ export class World {
       cooldowns: {}, statuses: [], aura: null, attackCd: 0,
       mv: null, forced: null, moving: false, ghost: false, arrivedGroup: null,
       summoned: !!opts.summoned, expire: opts.expire || 0,
-      autocast: (def.abilities || []).filter((a) => a.autocast),
+      autocast: null, manualMask: defaultManualMask(def, owner),
       dmgMult: 1, armorNow: def.armor, speedNow: def.speed, atkSpeedMult: 1, lifesteal, regen, shield: 0,
       stunned: false, invuln: false, slowPct: 0,
       dead: false, constructed: true, buildProgress: 1, queue: null, size: 0, amount: 0,
@@ -233,6 +233,7 @@ export class World {
       // ticks blocked, last progress check, the melee attack spot, and attackers claiming spots on us.
       engId: 0, engT: 0, blockedT: 0, engD: 0, engCk: 0, atk: null, claimers: null,
     };
+    refreshAutocast(u);
     this.applyUnitStats(u, true);
     computeDerived(u);
     this.entities.set(id, u);

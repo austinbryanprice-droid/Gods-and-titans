@@ -16,7 +16,8 @@
 //   cost,               // { gold, wood, faith, pop, time } or null
 //   cooldown, cooldownLeft, // fraction 0..1 and seconds of the ability cooldown
 //   queued,             // how many of this unit are queued in the selected buildings
-//   autocast, level,    // ability extras (unlock level)
+//   autocast, level,    // ability extras: autocast on for the whole group, unlock level
+//   toggle,             // right-click action (ability autocast on/off), else null
 //   action,             // what input.js does: { kind: 'move' | 'stop' | … }
 // }
 import {
@@ -62,6 +63,7 @@ function button(slot, o) {
     cooldownLeft: o.cooldownLeft || 0,
     queued: o.queued || 0,
     autocast: !!o.autocast,
+    toggle: o.toggle || null,
     level: o.level || 0,
     passive: !!o.passive,
     action: o.action || null,
@@ -447,6 +449,10 @@ function unitCard(card, vs, group, ownIds, mode) {
       const lockText = def.class === 'god' && (ab.unlockLevel || 1) > 1 && unlockedUnits.length < activeUnits.length && unlockedUnits.length
         ? ` Unlocks at level ${ab.unlockLevel}.` : '';
       const lv = def.class === 'god' ? Math.max(1, ...activeUnits.map((u) => u.lv || 1)) : 1;
+      // Autocast mark when every own unit of the group has it on (view key mc: manual bits).
+      const bit = 1 << def.abilities.indexOf(ab);
+      const mine = activeUnits.filter((u) => u.k === 'u' && u.o === vs.myIndex);
+      const autocast = mine.length > 0 && mine.every((u) => !((u.mc || 0) & bit));
       const levelText = lv > 1 ? abilityLevelText(ab, lv) : '';
       card[slot] = button(slot, {
         id: `ability:${ab.id}`,
@@ -459,7 +465,8 @@ function unitCard(card, vs, group, ownIds, mode) {
         cooldown: left > 0 ? Math.min(1, left / ab.cooldown) : 0,
         cooldownLeft: left,
         cost: { cooldown: ab.cooldown, range: ab.target === 'none' ? 0 : ab.range, target: TARGET_TEXT[ab.target] || '' },
-        autocast: ab.autocast,
+        autocast,
+        toggle: mine.length ? { kind: 'autocast', ability: ab.id, unitType: group.type, on: !autocast } : null,
         level: ab.unlockLevel || 1,
         action: { kind: ab.target === 'none' ? 'cast' : 'target', order: 'cast', ability: ab.id, target: ab.target, unitType: group.type },
       });
