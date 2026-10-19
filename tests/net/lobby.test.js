@@ -5,7 +5,7 @@ import { PROTOCOL_VERSION } from '../../src/net/wire-version.js';
 import { joinRoom, abortError } from '../../src/net/transport.js';
 import { PANTHEONS } from '../../src/data/index.js';
 import { PLAYER_COLORS, GAME_VERSION } from '../../src/config.js';
-import { generateMap, mapHash } from '../../src/sim/mapgen.js';
+import { generateMap, mapHash, mapOptions } from '../../src/sim/mapgen.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(cond, ms = 2000, what = 'condition') {
@@ -129,7 +129,7 @@ test('lobby flow: join, presets, setMine, chat, kick on version mismatch, start'
   assert.equal(setup.players[1].color, PLAYER_COLORS[5]);
   for (const p of setup.players) assert.ok(PANTHEONS[p.pantheon], `resolved pantheon ${p.pantheon}`);
   assert.ok(Number.isInteger(setup.seed) && setup.seed > 0);
-  assert.equal(setup.mapHash, mapHash(generateMap({ seed: setup.seed, mapSize: setup.mapSize, playerCount: 4 })));
+  assert.equal(setup.mapHash, mapHash(generateMap(mapOptions(setup))), 'the map groups teammates, so the hash covers the teams');
   assert.equal(starts[0][1].conn, bob.conn);
 
   // Late joiners are turned away.

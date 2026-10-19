@@ -161,7 +161,7 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   });
   const setup = { version, seed, mapSize: state.mapSize, players };
   if (typeof mapgen.mapHash === 'function') {
-    setup.mapHash = mapgen.mapHash(mapgen.generateMap({ seed, mapSize: state.mapSize, playerCount: players.length }));
+    setup.mapHash = mapgen.mapHash(mapgen.generateMap(mapgen.mapOptions(setup)));
   }
   return { setup, slotToPlayer };
 }

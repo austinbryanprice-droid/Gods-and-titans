@@ -685,6 +685,14 @@ export class Game {
           sfx.play('tier_up');
         }
         break;
+      case 'trade': {
+        const what = `${ev.got} ${ev.res}`;
+        if (ev.to === me) {
+          hud.message(`${this.playerName(ev.from)} sent you ${what}.`, 'good');
+          sfx.play('mine', { volume: 0.8 });
+        } else if (ev.from === me) hud.message(`Sent ${what} to ${this.playerName(ev.to)} (the market kept ${ev.amt - ev.got}).`, 'info');
+        break;
+      }
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system');
         break;

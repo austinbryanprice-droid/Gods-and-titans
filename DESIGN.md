@@ -366,7 +366,18 @@ Pop used = pop of living units + pop of everything queued in production.
 - Abilities unlock at their `unlockLevel`. Gods regenerate 1 hp/s.
 - When a god dies, it goes to the player's `fallen` list (with level & xp).
 
-### 5.7 Victory
+### 5.7 Team market
+`trade { to, res, amount }` sends `amount` (whole number, at least `TRADE_MIN` 20) of
+`gold`, `wood` or `faith` from the issuing player to a living teammate. The sender pays
+`amount`; the market keeps `TRADE_TAX_PCT` (10%, rounded up) and the teammate receives the
+rest, so feeding one player always costs the team. Enemies, defeated players and oneself
+cannot be sent to; there is no cooldown. Each transfer emits
+`{ type: 'trade', from, to, res, amt, got }`. Rules live in `src/sim/trade.js` (shared with
+the HUD). AI players send part of their spare gold / wood (above 700 / 450, after the
+think's purchases) to the poorest teammate who is nearly broke (under 120 gold / 60 wood),
+from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid).
+
+### 5.8 Victory
 A player is **defeated** when they own no buildings (finished or not). Their remaining units
 die. A team wins when every player not on that team is defeated (neutral excluded).
 `surrender` defeats the issuing player. Then `gameOver: { winningTeam }`.
@@ -418,6 +429,7 @@ counted in `world.perf.commandErrors`.
 { type: 'repair',     units, target: buildingId, queue }   // on a construction site: help build
 { type: 'research',   building: id, upgrade: upgradeId }
 { type: 'autoRepair', on: bool }
+{ type: 'trade',      to: playerIndex, res: 'gold'|'wood'|'faith', amount }   // team market (5.7)
 { type: 'autocast',   units, ability?: abilityId, on: bool }   // set autocast for one ability (or all) of own units
 { type: 'rally',      building: id, x, y, target?: id }
 { type: 'stop',       units }
@@ -441,7 +453,9 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
 `That building is not damaged.` `Not enough gold to repair.` (wood / faith) `Already researched.`
-`Already being researched.`
+`Already being researched.` Trades: `Choose a teammate to send to.` `You can only send resources
+to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
+`Choose gold, wood or faith to send.` `You cannot trade now.`
 
 ### 6.3 ViewSnapshot (`world.getSnapshot()`)
 Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to integers.
@@ -504,6 +518,7 @@ EntityView = {
 { type: 'buildingComplete', id, t, o }
 { type: 'tierUp',  player, tier }
 { type: 'researched', player, up }                                   // a building upgrade finished
+{ type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
 { type: 'levelUp', id, level }
 { type: 'treeFelled', tx, ty }
 { type: 'resourceDepleted', id }
@@ -537,7 +552,19 @@ tx, ty, size, amount`.
 → `Uint8Array visible` (1 = visible). Circles, no line-of-sight blocking. Used client-side.
 
 ### 6.7 Map data (`src/sim/mapgen.js`)
-`generateMap({ seed, mapSize, playerCount })` → pure deterministic function (same input → identical output in every browser and in Node):
+`generateMap({ seed, mapSize, playerCount, teams })` → pure deterministic function (same input → identical output in every browser and in Node).
+`mapOptions(setup)` builds these options from a GameSetup (`teams` = each player's team); host,
+clients, World and the lobby's `mapHash` all use it, so teammates are grouped identically everywhere.
+**Start positions** (`startPlan(playerCount, teams)`): 1–2 players and free-for-all use the
+classic corners (2: top-left / bottom-right; 3: top-left, bottom-right, top-right; 4: top-left,
+bottom-left, top-right, bottom-right). When a team has two players (2v2, 2v1, 2v1v1, co-op 2 vs 2)
+the **team layout** is used: 180° symmetry, two bases along the top edge (about 27% in from each
+side) for the larger / first team and their mirror images along the bottom edge for the rest,
+so teammates start about 0.46 map widths apart and the nearest enemy about 0.67; each side gets a
+natural per base on its side edge and a shared expansion between its two bases (no river). In
+the 2v1 the spare bottom-left base becomes a rich expansion. A team of three (3v1) takes three
+neighbouring corners in order (top-left, top-right, bottom-right) and the lone player the last.
+`meta.layout` is `'corners'` or `'teams'`.
 ```js
 {
   width, height, seed,
@@ -744,6 +771,11 @@ per-frame budget, so a revealed army appears over a few frames.
   portrait/icon, name, hp, armor, damage, level/xp bar, statuses, queue with progress and
   cancel; multi-select grid of icons with hp), command card (right, 4×3 buttons with hotkeys,
   tooltips with cost/description, cooldown overlays, disabled when unaffordable/locked).
+  Market button (⚖️, top bar, only while a teammate is alive) opens the team market panel
+  (`src/ui/hud-market.js`): teammate picker with their gold / wood / faith, resource choice,
+  amount with +50 / +100 / +250 / +500, Max and Clear, a line saying what arrives after the
+  market's cut, and Send (disabled with the reason while the trade would be refused). Received
+  and sent shipments show as messages.
   God portraits top-left (click selects, double-click centers). Messages (errors, alerts,
   "Kronos is being summoned!"), chat (Enter), game-over overlay with stats, menu (surrender, quit).
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →

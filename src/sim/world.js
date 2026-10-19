@@ -7,7 +7,7 @@ import {
 import { BUILDINGS, GOLD_MINE, PANTHEONS, PANTHEON_LIST, getUnitType, xpValue } from '../data/index.js';
 import { NO_MODS, computeMods, buildingMods, unitMods } from '../data/upgrades.js';
 import { RNG, hashSeed } from './rng.js';
-import { generateMap } from './mapgen.js';
+import { generateMap, mapOptions } from './mapgen.js';
 import { MapState } from './map-state.js';
 import { PathService } from './pathfinding.js';
 import { SpatialHash } from './spatial.js';
@@ -763,6 +763,6 @@ export class World {
  * @returns {World}
  */
 export function createWorld(setup) {
-  const mapData = generateMap({ seed: setup.seed, mapSize: setup.mapSize, playerCount: setup.players.length });
+  const mapData = generateMap(mapOptions(setup));
   return new World(setup, mapData);
 }
