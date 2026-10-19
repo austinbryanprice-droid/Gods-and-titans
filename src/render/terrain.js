@@ -668,6 +668,31 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
     update(timeSec) {
       time.value = timeSec;
     },
+    /**
+     * Wear the meadow around a building down to bare earth: the footprint and a
+     * ring around it (ragged corners) turn to dirt, so towns stand in trodden
+     * yards rather than on clean grass. Other ground (sand, rock, forest) keeps
+     * its look. Cosmetic only; the yard stays after the building is gone.
+     */
+    paintYard(tx, ty, size, ring = 1) {
+      const W = map.width;
+      const H = map.height;
+      const data = tiles.image.data;
+      let changed = false;
+      for (let y = ty - ring; y < ty + size + ring; y++) {
+        for (let x = tx - ring; x < tx + size + ring; x++) {
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          const corner = (x < tx || x >= tx + size) && (y < ty || y >= ty + size);
+          if (corner && ((x * 7 + y * 13) & 3) !== 0) continue;
+          const i = y * W + x;
+          if (data[i * 2] !== LAYER.GRASS) continue;
+          data[i * 2] = LAYER.DIRT;
+          changed = true;
+        }
+      }
+      if (changed) tiles.needsUpdate = true;
+      return changed;
+    },
     /** Shader detail and texture filtering for a quality tier. */
     setQuality(next) {
       if (!QUALITY_DEFINES[next]) return;

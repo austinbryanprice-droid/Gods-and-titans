@@ -347,6 +347,86 @@ export class GameRenderer {
     this.forest = createForest({ ...this.map, terrain }, this.heightFn);
     this.scene.add(this.forest.object3d);
     patchFowObject(this.forest.object3d);
+    // Undergrowth and shore stones (render only): bushes, ferns and boulders
+    // soften the hard line where a forest meets open ground, and half-sunk
+    // stones break up the shoreline. A felled tile loses its undergrowth.
+    this.undergrowth = this.buildUndergrowth(terrain);
+    if (this.undergrowth) {
+      this.scene.add(this.undergrowth.object3d);
+      patchFowObject(this.undergrowth.object3d);
+      for (const [tx, ty] of this.vs.felledAll || []) this.undergrowth.hideInRect(tx, ty, tx + 1, ty + 1);
+      const fell = this.forest.fell;
+      this.forest.fell = (tx, ty) => {
+        const ok = fell(tx, ty);
+        if (ok) this.undergrowth.hideInRect(tx, ty, tx + 1, ty + 1);
+        return ok;
+      };
+    }
+  }
+
+  /** Render-only undergrowth on forest edges (and some interior gaps) plus stones along shores. */
+  buildUndergrowth(T) {
+    const W = this.width;
+    const H = this.height;
+    const { FOREST, WATER, ROCK } = TERRAIN;
+    const rich = this.quality !== 'low';
+    const decor = [];
+    const rnd = (x, y, k) => {
+      const h = Math.sin(x * 12.9898 + y * 78.233 + k * 37.719) * 43758.5453;
+      return h - Math.floor(h);
+    };
+    const at = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? FOREST : T[y * W + x]);
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (let ty = 0; ty < H; ty++) {
+      for (let tx = 0; tx < W; tx++) {
+        const t = T[ty * W + tx];
+        if (t === FOREST) {
+          let ox = 0;
+          let oy = 0;
+          for (const [dx, dy] of DIRS) {
+            const n = at(tx + dx, ty + dy);
+            if (n !== FOREST && n !== WATER && n !== ROCK) { ox += dx; oy += dy; }
+          }
+          const r1 = rnd(tx, ty, 1);
+          const r2 = rnd(tx, ty, 2);
+          const r3 = rnd(tx, ty, 3);
+          if (ox || oy) {
+            // edge: a bank of shrubs toward the open side, now and then a boulder or fern
+            const len = Math.hypot(ox, oy) || 1;
+            const ex = tx + 0.5 + (ox / len) * 0.32;
+            const ey = ty + 0.5 + (oy / len) * 0.32;
+            const sx = -oy / len;
+            const sy = ox / len;
+            decor.push({ x: ex + sx * (r1 - 0.5) * 0.7, y: ey + sy * (r1 - 0.5) * 0.7, kind: 'bush', rot: r2 * 6.28, scale: 1.7 + r3 * 0.9 });
+            if (rich && r2 > 0.35) decor.push({ x: ex - sx * (r3 - 0.2) * 0.6, y: ey - sy * (r3 - 0.2) * 0.6, kind: r1 > 0.55 ? 'bush' : 'grass', rot: r3 * 6.28, scale: 1.2 + r1 * 0.8 });
+            if (r3 > 0.9) decor.push({ x: ex + sx * 0.25, y: ey + sy * 0.25, kind: 'rock', rot: r1 * 6.28, scale: 1.1 + r2 * 0.9 });
+            else if (rich && r3 < 0.12) decor.push({ x: ex, y: ey, kind: 'flowers', rot: r2 * 6.28, scale: 1 });
+          } else if (rich && r1 < 0.16) {
+            // interior: fill some gaps under the canopy
+            decor.push({ x: tx + 0.2 + r2 * 0.6, y: ty + 0.2 + r3 * 0.6, kind: r2 < 0.85 ? 'bush' : 'rock', rot: r3 * 6.28, scale: 1.3 + r1 * 2 });
+          }
+        } else if (t === WATER) {
+          // shore stones, half in the water on the land side of an edge tile
+          let ox = 0;
+          let oy = 0;
+          for (const [dx, dy] of DIRS) {
+            const n = at(tx + dx, ty + dy);
+            if (n !== WATER) { ox += dx; oy += dy; }
+          }
+          if (!ox && !oy) continue;
+          const r1 = rnd(tx, ty, 4);
+          if (r1 > (rich ? 0.55 : 0.8)) continue;
+          const r2 = rnd(tx, ty, 5);
+          const len = Math.hypot(ox, oy) || 1;
+          decor.push({ x: tx + 0.5 + (ox / len) * 0.3 + (r2 - 0.5) * 0.4, y: ty + 0.5 + (oy / len) * 0.3 + (r1 - 0.3) * 0.4, kind: 'rock', rot: r2 * 6.28, scale: 0.8 + r1 * 1.2 });
+          if (rich && r2 > 0.6) decor.push({ x: tx + 0.5 + (ox / len) * 0.42, y: ty + 0.5 + (oy / len) * 0.42 + (r2 - 0.8), kind: 'grass', rot: r1 * 6.28, scale: 1.2 });
+        }
+      }
+    }
+    if (!decor.length) return null;
+    const d = createDecor({ ...this.map, decor }, this.heightFn);
+    d.object3d.name = 'undergrowth';
+    return d;
   }
 
   /** A few boulders on every impassable rock tile so cliffs read as rock. */
@@ -1328,6 +1408,7 @@ export class GameRenderer {
       this.entityRoot.add(model.root);
       this.decor.hideInRect(tx - 0.2, ty - 0.2, tx + def.size + 0.2, ty + def.size + 0.2);
       this.groundCover.hideInRect(tx - 0.1, ty - 0.1, tx + def.size + 0.1, ty + def.size + 0.1);
+      if (this.terrain.paintYard) this.terrain.paintYard(tx, ty, def.size);
       this.buildings.set(e.id, b);
       b.bp = -1;
       b.tr = e.tr || 1;
@@ -1863,6 +1944,7 @@ export class GameRenderer {
     this.decor.dispose();
     this.groundCover.dispose();
     if (this.rockDecor) this.rockDecor.dispose();
+    if (this.undergrowth) this.undergrowth.dispose();
     this.terrain.dispose();
     this.fow.dispose();
     if (this.sun.shadow.map) this.sun.shadow.map.dispose();
