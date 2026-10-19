@@ -56,7 +56,6 @@ export class AIPlayer {
     this.cmdMemo = new Map(); // unit id -> { type, x, y, tick } of its last move-like order
     this._focusAt = 0; // focus-fire rotation through the army
     this._tmp = []; // scratch arrays for spatial-hash queries
-    this._mtmp = [];
     this._ftmp = [];
     this.homeAnchor = null;
     this._rally = null;

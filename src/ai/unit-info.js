@@ -4,9 +4,7 @@
 import { getUnitType, godsFor, creaturesFor, titanFor } from '../data/index.js';
 import { GOD_LEVEL_HP, GOD_LEVEL_DAMAGE } from '../config.js';
 
-const HARMFUL = new Set(['damage', 'stun', 'slow', 'dot', 'chain', 'line', 'knockback', 'pull', 'dash']);
 const infoCache = new Map();
-const abilityCache = new Map();
 
 /** Cost of a type in "gold equivalents" (faith is the scarcer currency). */
 export function costValue(cost) {
@@ -165,57 +163,8 @@ export function forcePower(f) {
 
 // ------------------------------------------------------------- abilities
 
-/**
- * Static profile of an ability (cached): what it does, where it lands and
- * how big it is. Used by the casting logic to score candidate targets.
- */
-export function abilityProfile(ab) {
-  let p = abilityCache.get(ab.id);
-  if (p) return p;
-  const effs = ab.effects || [];
-  const has = (t) => effs.some((e) => e.type === t);
-  const moves = has('blink') ? 'blink' : has('dash') ? 'dash' : null;
-  let radius = 0;
-  let lineLen = 0;
-  let lineWidth = 0;
-  let harmful = false;
-  let helpful = false;
-  let friendlyFire = false;
-  for (const e of effs) {
-    const harm = HARMFUL.has(e.type) || (e.type === 'buff' && e.amount < 0) || (e.type === 'field' && (e.dps > 0 || e.slowPct > 0));
-    if (harm) harmful = true;
-    if (!harm && e.type !== 'blink' && e.type !== 'reveal') helpful = true;
-    if (harm && e.affects === 'all') friendlyFire = true;
-    if (e.type === 'line') {
-      lineLen = Math.max(lineLen, e.length || ab.range || 6);
-      lineWidth = Math.max(lineWidth, e.width || 1.5);
-    } else if (e.type === 'dash') {
-      lineWidth = Math.max(lineWidth, e.width || 1.5);
-    } else {
-      radius = Math.max(radius, e.radius || 0);
-    }
-  }
-  p = {
-    id: ab.id,
-    ab,
-    use: (ab.ai && ab.ai.use) || (has('heal') ? 'heal' : has('summon') ? 'summon' : harmful ? 'damage' : 'buff'),
-    target: ab.target,
-    range: ab.range || 0,
-    cooldown: ab.cooldown || 0,
-    unlock: ab.unlockLevel || 1,
-    moves,
-    radius,
-    lineLen,
-    lineWidth,
-    harmful,
-    helpful,
-    friendlyFire,
-    ultimate: (ab.cooldown || 0) >= 55,
-    effects: effs,
-  };
-  abilityCache.set(ab.id, p);
-  return p;
-}
+// Ability profiles live with the shared cast scoring in the sim.
+export { abilityProfile } from '../sim/cast-choice.js';
 
 // ------------------------------------------------------------- god roles
 

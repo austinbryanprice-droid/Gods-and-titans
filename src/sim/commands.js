@@ -5,7 +5,7 @@ import { canAttackTarget } from './combat.js';
 import { reservePrayerSlot } from './economy.js';
 import { issueBuild, cancelBuild, issueRepair, needsRepair } from './construction.js';
 import { issueTrain, cancelTrain, issueTierUp, issueResearch, setRally } from './production.js';
-import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility } from './abilities.js';
+import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility, setAutocast } from './abilities.js';
 import { issueTrade } from './trade.js';
 import { hyp } from './common.js';
 
@@ -16,7 +16,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -342,6 +342,10 @@ export function applyCommand(world, player, cmd) {
       break;
     case 'trade':
       issueTrade(world, player, cmd.to, cmd.res, cmd.amount);
+      break;
+    case 'autocast':
+      // One ability (cmd.ability) or, without one, every ability of the units.
+      for (const u of ownUnits(world, player, cmd.units)) setAutocast(u, cmd.ability, !!cmd.on);
       break;
     case 'rally':
       setRally(world, player, ownBuilding(world, player, cmd.building), cmd.x, cmd.y, cmd.target);

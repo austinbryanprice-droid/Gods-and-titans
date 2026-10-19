@@ -177,6 +177,7 @@ export class Hud {
 
     this.cardView = new CardView(this.cardGrid, this.tip, {
       onActivate: (b, e) => game.input && game.input.activate(b, { shift: e.shiftKey, fromClick: true }),
+      onToggle: (b) => game.input && game.input.toggleAutocast(b),
     });
     const sel = game.selection;
     this.infoView = new InfoView(this.infoRoot, {

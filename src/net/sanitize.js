@@ -69,6 +69,7 @@ const COMMANDS = {
   research: { building: ['id', true], upgrade: ['upgrade', true] },
   autoRepair: { on: ['bool', false] },
   trade: { to: ['index', true], res: ['resource', true], amount: ['amount', true] },
+  autocast: { units: U, ability: ['ability', false], on: ['bool', false] },
 };
 export const COMMAND_TYPES = Object.keys(COMMANDS);
 export const COMMAND_SPECS = COMMANDS; // read-only: fingerprinted into the protocol version (wire-version.js)

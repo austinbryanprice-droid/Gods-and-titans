@@ -131,7 +131,9 @@ Gold mines are 3×3 resource entities placed by the map.
 {
   id: 'greek_zeus_thunderbolt', name: 'Thunderbolt', key: 'Q',
   unlockLevel: 1,
-  autocast: false,            // creatures/priest: sim casts automatically when a valid target exists
+  autocast: false,            // light always-on spell (creatures/priest): quick picker, cast whenever a valid target exists.
+                              // Every fighting unit's abilities autocast by default anyway (see Autocast below); this flag
+                              // only picks the quick picker over the scored choice and keeps worshippers' spells on.
   cooldown: 9,                // seconds
   target: 'point',            // none (self-centered, instant) | point | unit (any) | ally | enemy
   range: 8,                   // max cast distance (center to target point/unit edge)
@@ -296,6 +298,19 @@ Pop used = pop of living units + pop of everything queued in production.
   every 3 s per building). `autoRepair { on }` toggles Auto-Repair for the player: idle
   worshippers look for a damaged building within `AUTO_REPAIR_RANGE` (10) tiles every second.
   AI players switch it on.
+- **Autocast:** every ability of a player's fighting unit (creatures, gods, titans, priests,
+  minions; not worshippers) is on autocast when it spawns. Every 6 ticks a unit that is idle,
+  attacking, attack-moving, holding or following tries its ready autocast abilities: data
+  `autocast: true` spells use the quick picker; the others go through the scored choice in
+  `sim/cast-choice.js` (the same scoring the AI casts with: damage and crowd control where they
+  hit enough enemies or a hero, heals when enough health is missing (also after a fight), buffs
+  and shields on engaged allies, summons only near enemies, ultimates only on big fights,
+  escapes below ~32% health). Autocasts never chase, keep the current order and resume it.
+  `autocast { units, ability?, on }` sets one ability (or all) to autocast or manual; a cast
+  the player orders always runs, whatever the setting. Neutral creeps keep only their data
+  `autocast` spells. The HUD toggles one ability with a right-click on its button and every
+  ability of the selection with the `` ` `` key; easy AIs set their casters to manual and cast
+  with their own, pickier threshold.
 
 ### 5.4 Production
 - `train` puts an item in the building's queue (max 5). Cost and population are reserved
@@ -415,6 +430,7 @@ counted in `world.perf.commandErrors`.
 { type: 'research',   building: id, upgrade: upgradeId }
 { type: 'autoRepair', on: bool }
 { type: 'trade',      to: playerIndex, res: 'gold'|'wood'|'faith', amount }   // team market (5.7)
+{ type: 'autocast',   units, ability?: abilityId, on: bool }   // set autocast for one ability (or all) of own units
 { type: 'rally',      building: id, x, y, target?: id }
 { type: 'stop',       units }
 { type: 'hold',       units }
@@ -471,6 +487,7 @@ EntityView = {
   cd,             // { abilityId: secondsRemaining } (only abilities on cooldown)
   fx,             // status codes: subset of ['stun','slow','shield','invuln','buff','debuff','dot']
   ex,             // seconds until a summoned minion expires (omitted if permanent)
+  mc,             // player units: abilities set to manual, bit i = def.abilities[i] (omitted when all autocast)
   bo,             // pending build order for workers: { b: typeId, tx, ty } (omitted otherwise)
   mw,             // 1 while a worker waits its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
   tk,             // workers: task 'gold'|'wood'|'pray'|'build'|'repair'|'idle'|'other' (HUD task counts)

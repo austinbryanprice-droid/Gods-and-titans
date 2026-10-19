@@ -202,6 +202,7 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     stop: { units: [1] }, hold: { units: [1] }, cast: { unit: 1, ability: 'greek_zeus_thunderbolt', target: 5 }, surrender: {},
     repair: { units: [1], target: 2 }, research: { building: 2, upgrade: 'house_stone_walls' }, autoRepair: { on: true },
     trade: { to: 1, res: 'gold', amount: 100 },
+    autocast: { units: [1], ability: 'greek_zeus_thunderbolt', on: true },
   };
   assert.deepEqual(Object.keys(good).sort(), [...COMMAND_TYPES].sort());
   for (const [type, f] of Object.entries(good)) assert.deepEqual(sanitizeCommand({ type, ...f }, b), { type, ...f }, type);
