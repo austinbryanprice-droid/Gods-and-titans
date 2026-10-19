@@ -12,6 +12,30 @@ function pendingBuild(u) {
   return null;
 }
 
+/**
+ * What a worshipper is busy with, for the HUD's task counts: 'gold', 'wood',
+ * 'pray', 'build', 'repair', 'idle', or 'other' (walking, fighting, following).
+ */
+export function workerTask(u) {
+  const o = u.order;
+  if (!o) {
+    if (pendingBuild(u)) return 'build';
+    return u.orders.length ? 'other' : 'idle';
+  }
+  switch (o.type) {
+    case 'gather': return o.mine ? 'gold' : 'wood';
+    case 'return': {
+      const r = o.resume;
+      if (r) return r.mine ? 'gold' : 'wood';
+      return u.carry === 'g' ? 'gold' : u.carry === 'w' ? 'wood' : 'other';
+    }
+    case 'pray': return 'pray';
+    case 'build': return 'build';
+    case 'repair': return 'repair';
+    default: return pendingBuild(u) ? 'build' : 'other';
+  }
+}
+
 function unitView(u) {
   const v = {
     id: u.id, k: 'u', t: u.type, o: u.owner,
@@ -32,6 +56,7 @@ function unitView(u) {
   if (u.def.class === 'worker') {
     const b = pendingBuild(u);
     if (b) v.bo = { b: b.b, tx: b.tx, ty: b.ty };
+    v.tk = workerTask(u);
   }
   // waiting its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
   const o = u.order;
@@ -89,6 +114,7 @@ export function buildSnapshot(world) {
       gold: Math.floor(p.gold), wood: Math.floor(p.wood), faith: Math.floor(p.faith + 1e-6), faithRate: r2(p.faithRate),
       pop: p.popUsed, popCap: p.popCap, tier: p.tier, defeated: p.defeated,
       gods: gods[i], fallen, titan: titan[i],
+      up: p.upList.slice(), ar: p.autoRepair,
       stats: { ...p.stats },
     };
   });

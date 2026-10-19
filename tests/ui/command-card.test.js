@@ -41,8 +41,11 @@ test('worker card: WC3 layout, hotkeys and states', () => {
   const vs = viewOf(world);
   const workers = workersOf(world);
   const card = getCommandCard({ ids: ids(workers) }, vs);
-  assert.deepEqual(slotsOf(card), ['0:move', '1:stop', '2:hold', '3:attack', '4:gather', '5:return', '6:pray', '8:build']);
-  assert.deepEqual(card.filter(Boolean).map((b) => b.key), ['M', 'S', 'H', 'A', 'G', 'C', 'P', 'B']);
+  assert.deepEqual(slotsOf(card), ['0:move', '1:stop', '2:hold', '3:attack', '4:gather', '5:return', '6:pray', '7:repair', '8:build', '9:auto-repair']);
+  assert.deepEqual(card.filter(Boolean).map((b) => b.key), ['M', 'S', 'H', 'A', 'G', 'C', 'P', 'R', 'B', 'T']);
+  assert.deepEqual(byId(card, 'repair').action, { kind: 'target', order: 'repair', target: 'repair' });
+  assert.equal(byId(card, 'auto-repair').title, 'Auto-Repair: Off');
+  assert.deepEqual(byId(card, 'auto-repair').action, { kind: 'autoRepair', on: true });
   assert.equal(byId(card, 'return').state, 'disabled', 'nobody carries anything yet');
   assert.equal(byId(card, 'pray').state, 'locked');
   assert.equal(byId(card, 'pray').reason, 'Requires a Shrine.');
@@ -113,7 +116,7 @@ test('Town Center: Worshipper, Grow (with requirement), Rally, queue count, grow
   const world = makeWorld();
   const tc = tcOf(world);
   let card = getCommandCard([tc.id], viewOf(world));
-  assert.deepEqual(slotsOf(card), ['0:train:worshipper', '1:tier', '11:rally']);
+  assert.deepEqual(slotsOf(card), ['0:train:worshipper', '1:tier', '4:research:tc_iron_picks', '5:research:tc_palisade', '11:rally']);
   const w = card[0];
   assert.equal(w.key, 'W');
   assert.equal(w.state, 'ready');
@@ -178,7 +181,10 @@ test('Barracks: Warrior W, Archer A, Priest P (Town), Ram R (Town); several barr
   rich(world);
   const vs = viewOf(world);
   const card = getCommandCard([b1.id, b2.id], vs);
-  assert.deepEqual(slotsOf(card), ['0:train:warrior', '1:train:archer', '2:train:priest', '3:train:battering_ram', '11:rally']);
+  assert.deepEqual(slotsOf(card), [
+    '0:train:warrior', '1:train:archer', '2:train:priest', '3:train:battering_ram',
+    '4:research:barracks_bronze_weapons', '5:research:barracks_hoplite_shields', '6:research:barracks_drill_yard', '11:rally',
+  ]);
   assert.deepEqual(card.slice(0, 4).map((b) => b.key), ['W', 'A', 'P', 'R']);
   assert.equal(card[0].state, 'ready');
   assert.equal(card[2].state, 'locked');
@@ -199,7 +205,10 @@ test('Shrine creatures Q W E with tier locks; Titan Gate titan T', () => {
   rich(world);
   let vs = viewOf(world);
   let card = getCommandCard([shrine.id], vs);
-  assert.deepEqual(slotsOf(card), ['0:train:greek_centaur', '1:train:greek_pegasus', '2:train:greek_cyclops', '11:rally']);
+  assert.deepEqual(slotsOf(card), [
+    '0:train:greek_centaur', '1:train:greek_pegasus', '2:train:greek_cyclops',
+    '4:research:shrine_sacred_chants', '5:research:shrine_blessed_beasts', '11:rally',
+  ]);
   assert.deepEqual(card.slice(0, 3).map((b) => b.key), ['Q', 'W', 'E']);
   assert.equal(card[0].state, 'ready');
   assert.equal(card[0].title, 'Summon Centaur');
@@ -207,7 +216,7 @@ test('Shrine creatures Q W E with tier locks; Titan Gate titan T', () => {
   assert.equal(card[2].reason, 'Requires City.');
 
   card = getCommandCard([gate.id], vs);
-  assert.deepEqual(slotsOf(card), ['0:train:greek_kronos', '11:rally']);
+  assert.deepEqual(slotsOf(card), ['0:train:greek_kronos', '4:research:titan_gate_primordial_bond', '5:research:titan_gate_widened_rift', '11:rally']);
   assert.equal(card[0].key, 'T');
   assert.equal(card[0].reason, 'Requires City.');
   tcOf(world).tier = 3;
@@ -230,7 +239,10 @@ test('Temple: four gods, god limits by tier, duplicates, and Revive for the fall
   rich(world);
   world.players[0].popCap = 150;
   let card = getCommandCard([temple.id], viewOf(world));
-  assert.deepEqual(slotsOf(card), ['0:train:greek_zeus', '1:train:greek_athena', '2:train:greek_poseidon', '3:train:greek_hades', '11:rally']);
+  assert.deepEqual(slotsOf(card), [
+    '0:train:greek_zeus', '1:train:greek_athena', '2:train:greek_poseidon', '3:train:greek_hades',
+    '4:research:temple_incense', '5:research:temple_divine_favor', '6:research:temple_rite_of_ascension', '11:rally',
+  ]);
   assert.deepEqual(card.slice(0, 4).map((b) => b.key), ['Q', 'W', 'E', 'R']);
   assert.ok(card.slice(0, 4).every((b) => b.state === 'ready'));
   assert.deepEqual(card[0].cost, { gold: 100, wood: 0, faith: 200, pop: 5, time: 35 });
@@ -350,11 +362,63 @@ test('construction site: only Cancel Construction (Esc)', () => {
   assert.deepEqual(card[11].action, { kind: 'cancelBuild' });
 });
 
-test('houses and storehouses have no commands; towers neither', () => {
+test('houses, storehouses and towers show only their upgrades', () => {
   const world = makeWorld();
   const h = place(world, 0, 'house', 6, 13);
   const t = place(world, 0, 'tower', 9, 13);
+  const s = place(world, 0, 'storehouse', 12, 13);
   const vs = viewOf(world);
-  assert.ok(getCommandCard([h.id], vs).every((b) => b === null));
-  assert.ok(getCommandCard([t.id], vs).every((b) => b === null));
+  assert.deepEqual(slotsOf(getCommandCard([h.id], vs)), ['4:research:house_large_families', '5:research:house_stone_walls']);
+  assert.deepEqual(slotsOf(getCommandCard([t.id], vs)), ['4:research:tower_burning_arrows', '5:research:tower_lookout', '6:research:tower_iron_bracing']);
+  assert.deepEqual(slotsOf(getCommandCard([s.id], vs)), ['4:research:storehouse_sharp_axes', '5:research:storehouse_handcarts']);
+});
+
+test('research buttons: cost, tier lock, in progress, researched; hotkeys never clash on a card', () => {
+  const world = makeWorld();
+  const h = place(world, 0, 'house', 6, 13);
+  rich(world);
+  let card = getCommandCard([h.id], viewOf(world));
+  const stone = byId(card, 'research:house_stone_walls');
+  assert.equal(stone.key, 'W');
+  assert.equal(stone.state, 'ready');
+  assert.deepEqual(stone.cost, { gold: 75, wood: 100, faith: 0, pop: 0, time: 30 });
+  assert.deepEqual(stone.action, { kind: 'research', upgrade: 'house_stone_walls' });
+  assert.equal(byId(card, 'research:house_large_families').state, 'locked');
+  assert.equal(byId(card, 'research:house_large_families').reason, 'Requires Town.');
+  world.issueCommand(0, { type: 'research', building: h.id, upgrade: 'house_stone_walls' });
+  run(world, 0.1);
+  card = getCommandCard([h.id], viewOf(world));
+  assert.equal(byId(card, 'research:house_stone_walls').reason, 'Already being researched.');
+  assert.equal(byId(card, 'research:house_stone_walls').queued, 1);
+  run(world, 31);
+  card = getCommandCard([h.id], viewOf(world));
+  const done = byId(card, 'research:house_stone_walls');
+  assert.equal(done.state, 'passive');
+  assert.equal(done.title, 'Stone Walls (researched)');
+  assert.equal(done.key, null);
+
+  // Every building's full card (all unlocked, nothing researched) keeps one button per key.
+  const w2 = makeWorld();
+  rich(w2);
+  tcOf(w2).tier = 3;
+  w2.recomputeTier(0);
+  const types = ['barracks', 'shrine', 'temple', 'tower', 'titan_gate', 'house', 'storehouse'];
+  const blds = types.map((type, i) => place(w2, 0, type, 4 + (i % 4) * 5, 14 + Math.floor(i / 4) * 6));
+  const vs2 = viewOf(w2);
+  for (const b of [tcOf(w2), ...blds]) {
+    const keys = getCommandCard([b.id], vs2).filter(Boolean).map((x) => x.key).filter(Boolean);
+    assert.equal(new Set(keys).size, keys.length, `${b.type}: ${keys.join(' ')}`);
+  }
+});
+
+test('Auto-Repair button shows when it is on', () => {
+  const world = makeWorld();
+  world.issueCommand(0, { type: 'autoRepair', on: true });
+  run(world, 0.1);
+  const card = getCommandCard({ ids: ids(workersOf(world)) }, viewOf(world));
+  const b = byId(card, 'auto-repair');
+  assert.equal(b.state, 'active');
+  assert.equal(b.enabled, true);
+  assert.equal(b.title, 'Auto-Repair: On');
+  assert.deepEqual(b.action, { kind: 'autoRepair', on: false });
 });

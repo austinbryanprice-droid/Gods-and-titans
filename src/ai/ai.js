@@ -9,7 +9,7 @@ import { profileFor } from './profiles.js';
 import { scanWorld } from './scan.js';
 import { refreshEconomy, manageWorkers, minersFor } from './economy.js';
 import { planBuildings, resumeSites } from './build.js';
-import { planProduction } from './production.js';
+import { planProduction, planResearch } from './production.js';
 import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
@@ -100,6 +100,8 @@ export class AIPlayer {
     this.thinks++;
     if (this.thinks % 64 === 0) this.pruneMemory();
     lap('scan');
+    // Idle worshippers mend damaged buildings (the sim does the repairing).
+    if (!s.p.autoRepair) this.issue({ type: 'autoRepair', on: true });
     this.updateHome(s);
     refreshEconomy(this, s);
     this.updateExpansion(s);
@@ -113,6 +115,7 @@ export class AIPlayer {
     if (this.debug) this.debug = [];
     planBuildings(this, s, wants);
     planProduction(this, s, wants);
+    planResearch(this, s, wants);
     this.spend(s, wants);
     this.updateRallies(s);
     lap('plan');

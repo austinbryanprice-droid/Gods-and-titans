@@ -39,6 +39,9 @@ export const EXPANSION_MINE_AMOUNT = 15000;
 export const MAX_QUEUE = 5; // production queue length
 export const BUILD_HELPER_BONUS = 0.5; // each extra builder adds +50% build speed
 export const CANCEL_BUILD_REFUND = 0.75;
+export const REPAIR_COST = 0.35; // repairing a building from 0 to full health costs this share of its build cost
+export const REPAIR_TIME = 0.75; // ... and takes this share of its build time with one worshipper (helpers add BUILD_HELPER_BONUS each)
+export const AUTO_REPAIR_RANGE = 10; // idle worshippers with Auto-Repair on look this far for a damaged building
 
 // ---- Gods & titans ----
 export const MAX_GODS = 3; // alive + queued per player

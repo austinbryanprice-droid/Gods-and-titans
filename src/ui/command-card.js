@@ -21,10 +21,11 @@
 // }
 import {
   MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
-  MINE_SLOTS, MINE_TIME, CARRY_AMOUNT, DROPOFF_MINE_GAP,
+  MINE_SLOTS, MINE_TIME, CARRY_AMOUNT, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE,
 } from '../config.js';
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt } from '../data/index.js';
-import { selectionIds, subgroups, isComplete, ownBuildings, tierName } from './hud-data.js';
+import { upgradesFor } from '../data/upgrades.js';
+import { selectionIds, subgroups, isComplete, ownBuildings, tierName, upgradesOf } from './hud-data.js';
 
 export const CARD_SLOTS = 12;
 
@@ -200,6 +201,31 @@ export function buildCheck(vs, typeId) {
   return { state: 'ready', reason: null, cost };
 }
 
+/**
+ * Can the local player research upgrade `up` at one of `buildings` now?
+ * state 'passive' = already researched.
+ * @returns {{ state: string, reason: string|null, cost: object, queued: number }}
+ */
+export function researchCheck(vs, up, buildings) {
+  const me = vs.me;
+  const cost = { gold: up.cost.gold || 0, wood: up.cost.wood || 0, faith: up.cost.faith || 0, pop: 0, time: up.time };
+  let queued = 0;
+  for (const b of ownBuildings(vs)) for (const q of b.q || []) if (q.u === up.id) queued++;
+  const res = (state, reason) => ({ state, reason, cost, queued });
+  if (!me) return res('disabled', null);
+  if (upgradesOf(vs, vs.myIndex).includes(up.id)) return res('passive', null);
+  if (queued) return res('disabled', 'Already being researched.');
+  if (up.tier > (me.tier || 1)) return res('locked', tierReason(up.tier));
+  const ready = buildings.filter((b) => isComplete(b));
+  if (!ready.length) return res('disabled', null);
+  const free = ready.filter((b) => !(b.q || []).some((q) => q.u === 'tier_up'));
+  if (!free.length) return res('disabled', 'Your settlement is already growing.');
+  if (free.every((b) => (b.q || []).length >= MAX_QUEUE)) return res('disabled', 'Production queue is full.');
+  const a = affordReason(me, cost);
+  if (a) return res('unaffordable', a);
+  return res('ready', null);
+}
+
 /** Tier-up check for a Town Center view entity. */
 export function tierUpCheck(vs, tc) {
   const up = (BUILDINGS.town_center.tierUpgrades || [])[tc.tr || 1];
@@ -245,6 +271,9 @@ export function describePassive(p) {
     default: return '';
   }
 }
+
+const REPAIR_TEXT = `Mend a damaged building. A full repair costs ${Math.round(REPAIR_COST * 100)}% of the building's cost, paid as it heals; more Worshippers repair faster.`;
+const AUTO_REPAIR_TEXT = `Idle Worshippers repair damaged buildings within ${AUTO_REPAIR_RANGE} tiles by themselves. Applies to all your Worshippers.`;
 
 const GATHER_TEXT = `Mine gold from a gold mine or chop wood from a forest. Up to ${MINE_SLOTS} Worshippers mine one gold mine at a time (${MINE_TIME} s per ${CARRY_AMOUNT} gold); the others wait their turn, so about 5–6 per mine is plenty.`;
 
@@ -384,7 +413,14 @@ function unitCard(card, vs, group, ownIds, mode) {
       id: 'pray', key: 'P', icon: '🙏', title: 'Pray', description: PRAY_TEXT,
       state: canPray ? 'ready' : 'locked', reason: canPray ? null : 'Requires a Shrine.', action: { kind: 'target', order: 'pray', target: 'prayer' },
     });
+    card[7] = button(7, { id: 'repair', key: 'R', icon: '🔧', title: 'Repair', description: REPAIR_TEXT, action: { kind: 'target', order: 'repair', target: 'repair' } });
     card[8] = button(8, { id: 'build', key: 'B', icon: '🔨', title: 'Build', description: 'Open the list of buildings this worshipper can raise.', action: { kind: 'submenu', menu: 'build' } });
+    const auto = !!(vs.me && vs.me.ar);
+    card[9] = button(9, {
+      id: 'auto-repair', key: 'T', icon: '🛠️', title: `Auto-Repair: ${auto ? 'On' : 'Off'}`,
+      description: `${AUTO_REPAIR_TEXT} Click to turn it ${auto ? 'off' : 'on'}.`,
+      state: auto ? 'active' : 'ready', action: { kind: 'autoRepair', on: !auto },
+    });
     return card;
   }
 
@@ -520,6 +556,24 @@ function buildingCard(card, vs, group) {
     default:
       break;
   }
+  // Building upgrades fill the free slots of the middle and bottom rows.
+  const free = [4, 5, 6, 7, 8, 9, 10].filter((i) => !card[i]);
+  upgradesFor(group.type).slice(0, free.length).forEach((up, i) => {
+    const chk = researchCheck(vs, up, buildings);
+    const done = chk.state === 'passive';
+    card[free[i]] = button(free[i], {
+      id: `research:${up.id}`,
+      key: done ? null : up.hotkey,
+      icon: up.icon,
+      title: done ? `${up.name} (researched)` : `Research ${up.name}`,
+      description: up.description,
+      state: chk.state,
+      reason: chk.reason,
+      cost: done ? null : chk.cost,
+      queued: chk.queued,
+      action: { kind: 'research', upgrade: up.id },
+    });
+  });
   if (units.length && def) {
     card[11] = button(11, {
       id: 'rally', key: 'Y', icon: '🚩', title: 'Set Rally Point',

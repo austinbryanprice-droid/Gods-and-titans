@@ -3,17 +3,19 @@
 import { moveToPoint, moveToUnit, stopMove } from './movement.js';
 import { engage, findTarget, findReachableTarget, targetCategory, acquisitionRange, canTarget } from './combat.js';
 import { updateGather, updateReturn, updatePray, releasePrayerSlot } from './economy.js';
-import { updateBuild, refund } from './construction.js';
+import { updateBuild, updateRepair, findRepairTarget, refund } from './construction.js';
 import { updateCastOrder, tryAutocast } from './abilities.js';
 import { updateCreep, aggroCamp } from './creeps.js';
 import { isMelee } from './surround.js';
 import { hyp, edgeDist } from './common.js';
+import { AUTO_REPAIR_RANGE } from '../config.js';
 
 const SCAN_EVERY = 4; // ticks between target scans for attack-move / idle units
 const AUTOCAST_EVERY = 6;
 const RETARGET_TICKS = 20; // ~1 s approaching / blocked before attack-move and auto-acquire look for a closer target
 const SKIP_TICKS = 40; // an unreachable target is not re-acquired for this long
 const SPOT_OPTS = { spots: true };
+const AUTO_REPAIR_EVERY = 20; // ticks between an idle worshipper's looks for something to repair
 
 /** Undo side effects of an order that will never run (refund builds, free prayer slots). */
 export function discardOrder(world, u, o) {
@@ -103,7 +105,15 @@ function idle(world, u) {
   u.state = 'idle';
   u.target = 0;
   if (u.mv) stopMove(u);
-  if (!u.def.attack || u.def.class === 'worker') return;
+  if (u.def.class === 'worker') {
+    const p = world.players[u.owner];
+    if (p && p.autoRepair && (world.tickCount + u.id) % AUTO_REPAIR_EVERY === 0) {
+      const b = findRepairTarget(world, u, AUTO_REPAIR_RANGE);
+      if (b) u.order = { type: 'repair', target: b.id, auto: true };
+    }
+    return;
+  }
+  if (!u.def.attack) return;
   if (!scanTick(world, u)) return;
   const t = findTarget(world, u, acquisitionRange(u), isMelee(u) ? SPOT_OPTS : undefined);
   if (t) {
@@ -254,6 +264,7 @@ function runOrder(world, u, o) {
       return done;
     }
     case 'build': return u.def.class !== 'worker' || updateBuild(world, u, o);
+    case 'repair': return u.def.class !== 'worker' || updateRepair(world, u, o);
     case 'pray': return u.def.class !== 'worker' || updatePray(world, u, o);
     case 'cast': return updateCastOrder(world, u, o);
     default: return true;

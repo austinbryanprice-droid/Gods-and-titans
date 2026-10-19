@@ -1,7 +1,8 @@
 // Data registry: every unit, building and pantheon in one place.
 import { MORTALS } from './mortals.js';
 import { BUILDINGS, GOLD_MINE, BUILD_MENU } from './buildings.js';
-import { validatePantheon, validateUnit } from './schema.js';
+import { UPGRADES } from './upgrades.js';
+import { validatePantheon, validateUnit, validateUpgrade } from './schema.js';
 import greek from './pantheons/greek.js';
 import norse from './pantheons/norse.js';
 import egyptian from './pantheons/egyptian.js';
@@ -13,7 +14,7 @@ import celtic from './pantheons/celtic.js';
 import mesopotamian from './pantheons/mesopotamian.js';
 import west_african from './pantheons/west_african.js';
 
-export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS };
+export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS, UPGRADES };
 
 export const PANTHEON_LIST = [greek, norse, egyptian, hindu, japanese, chinese, aztec, celtic, mesopotamian, west_african];
 export const PANTHEONS = Object.fromEntries(PANTHEON_LIST.map((p) => [p.id, p]));
@@ -85,6 +86,14 @@ export function validateData() {
   for (const u of Object.values(UNITS)) for (const a of u.abilities) {
     if (abilityIds.has(a.id)) errors.push(`duplicate ability id ${a.id}`);
     abilityIds.add(a.id);
+  }
+  const upgradeIds = new Set();
+  for (const b of Object.values(BUILDINGS)) {
+    for (const up of b.upgrades || []) {
+      if (upgradeIds.has(up.id)) errors.push(`duplicate upgrade id ${up.id}`);
+      upgradeIds.add(up.id);
+      validateUpgrade(up, b.id, errors, unitIds);
+    }
   }
   return errors;
 }

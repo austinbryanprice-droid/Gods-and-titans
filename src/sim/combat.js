@@ -380,7 +380,7 @@ export function engage(world, u, t, chase = true) {
 export function updateTower(world, b) {
   if (!b.constructed || !b.def.attack) return;
   if (b.attackCd > 0) b.attackCd -= DT;
-  const range = b.def.attack.range;
+  const range = b.def.attack.range + (b.rangeBonus || 0); // Lookout Platforms
   let t = b.target ? world.entities.get(b.target) : null;
   if (t && (t.dead || !canTarget(world, b, t) || edgeDist(b, t) > range)) t = null;
   if (!t && (world.tickCount + b.id) % 3 === 0) {

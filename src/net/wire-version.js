@@ -1,13 +1,13 @@
 // Protocol version (DESIGN 7): GAME_VERSION plus a short fingerprint of what two
 // builds must agree on to talk to each other: message names, the packed event
 // shapes of the delta codec, the command whitelist and the unit / building /
-// ability / pantheon ids that snapshots and setups refer to. A friend with a
+// ability / pantheon / upgrade ids that snapshots and setups refer to. A friend with a
 // stale tab (or cached modules) after a deploy gets different tables, so the
 // host refuses the join with "reload the page" instead of the game breaking with
 // resync loops. HELLO.version is only ever compared as a string: nothing on the
 // wire changes shape.
 import { GAME_VERSION } from '../config.js';
-import { UNITS, BUILDINGS, ABILITIES, PANTHEONS } from '../data/index.js';
+import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { MSG } from './protocol.js';
 import { COMMAND_SPECS } from './sanitize.js';
 import { EVENT_SHAPES } from './delta.js';
@@ -26,7 +26,7 @@ function fnv1a(str) {
 export function wireFingerprint() {
   const ids = (o) => Object.keys(o).sort();
   return fnv1a(JSON.stringify([
-    MSG, EVENT_SHAPES, COMMAND_SPECS, ids(UNITS), ids(BUILDINGS), ids(ABILITIES), ids(PANTHEONS),
+    MSG, EVENT_SHAPES, COMMAND_SPECS, ids(UNITS), ids(BUILDINGS), ids(ABILITIES), ids(PANTHEONS), ids(UPGRADES),
   ]));
 }
 

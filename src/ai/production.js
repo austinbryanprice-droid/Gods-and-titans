@@ -1,6 +1,7 @@
 // AI production planning: worshippers, tier upgrades, gods (by role, with
-// revives), the Titan, and a mixed army from the Barracks and Shrine.
-import { BUILDINGS, getUnitType } from '../data/index.js';
+// revives), the Titan, a mixed army from the Barracks and Shrine, and building
+// upgrades from a surplus.
+import { BUILDINGS, UPGRADES, getUnitType } from '../data/index.js';
 import { MAX_GODS, GOD_SLOT_TIER, REVIVE_COST_MULT, MAX_QUEUE, POP_MAX } from '../config.js';
 import { countOf, doneOf } from './scan.js';
 import { unitInfo, godRoles } from './unit-info.js';
@@ -257,6 +258,42 @@ export function planProduction(ai, s, wants) {
         s.queued.set(pick, (s.queued.get(pick) || 0) + 1);
       }
     }
+  }
+}
+
+// Building upgrades the AI researches, in order, one at a time and only from a surplus
+// (they share the queues with the army).
+const RESEARCH_ORDER = [
+  'tc_iron_picks', 'storehouse_sharp_axes', 'barracks_bronze_weapons', 'tower_burning_arrows', 'shrine_sacred_chants',
+  'house_stone_walls', 'temple_incense', 'barracks_hoplite_shields', 'storehouse_handcarts', 'shrine_blessed_beasts',
+  'temple_divine_favor', 'tc_palisade', 'house_large_families', 'barracks_drill_yard', 'tower_iron_bracing',
+  'tower_lookout', 'temple_rite_of_ascension', 'titan_gate_primordial_bond', 'titan_gate_widened_rift',
+];
+const RESEARCH_FROM = { t: 300, gold: 500, wood: 300 };
+
+/** Want the next building upgrade on the list when the bank is full and nothing threatens. */
+export function planResearch(ai, s, wants) {
+  const p = s.p;
+  if (ai.threat || s.t < RESEARCH_FROM.t || p.gold < RESEARCH_FROM.gold || p.wood < RESEARCH_FROM.wood) return;
+  for (const list of s.done.values()) {
+    for (const b of list) if (b.queue.some((q) => Object.hasOwn(UPGRADES, q.u))) return;
+  }
+  for (const id of RESEARCH_ORDER) {
+    const up = UPGRADES[id];
+    if (!up || p.upgrades[id] || up.tier > p.tier) continue;
+    const at = (s.done.get(up.building) || []).find((b) => b.queue.length === 0);
+    if (!at) continue;
+    wants.push({
+      prio: 50,
+      cost: up.cost,
+      reserve: false,
+      label: `research:${id}`,
+      run: () => {
+        ai.issue({ type: 'research', building: at.id, upgrade: id });
+        return true;
+      },
+    });
+    return;
   }
 }
 

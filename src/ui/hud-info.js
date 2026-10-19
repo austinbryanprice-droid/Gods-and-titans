@@ -1,12 +1,16 @@
 // Selection panel (bottom centre): a portrait and full stats for a single
 // selection, or a grid of icons with health bars for a group. Building queues
 // (click an item to cancel it), construction progress, prayer counts, god
-// level / xp, status effects and carried resources.
+// level / xp, status effects, carried resources, the worshippers working at a
+// building, and stats with the owner's researched upgrades.
 import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE, MINE_SLOTS, MINE_TIME, CARRY_AMOUNT } from '../config.js';
-import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
+import { UNITS, BUILDINGS, GOLD_MINE, UPGRADES } from '../data/index.js';
+import { buildingMods, unitMods, upgradesFor } from '../data/upgrades.js';
 import { sanitizeName } from '../net/protocol.js';
 import { el, setText, setStyle, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName } from './hud-data.js';
+import {
+  defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName, workersAt, workerTasks, modsOf, upgradesOf, WORKER_TASKS,
+} from './hud-data.js';
 
 const STATUS = {
   stun: ['💫', 'Stunned'],
@@ -72,10 +76,30 @@ export function unitStateText(e, def, myIndex) {
   let st = STATE_TEXT[e.st] || '';
   // `mw` (requested from the sim, see notes/interface-requests.md): waiting for one of the mining spots.
   if (e.st === 'gather' && def && def.class === 'worker') st = e.tg ? (e.mw ? 'Waiting its turn at the gold mine' : 'Gathering gold') : 'Chopping wood';
+  if (e.tk === 'repair') st = e.st === 'build' ? 'Repairing' : 'On the way to repair';
   if (e.c) st += `${st ? ' · ' : ''}Carrying ${e.c === 'g' ? 'gold' : 'wood'}`;
   if (e.bo && BUILDINGS[e.bo.b]) st = `On the way to build a ${BUILDINGS[e.bo.b].name}`;
   if (e.ex) st += `${st ? ' · ' : ''}Vanishes in ${Math.ceil(e.ex)}s`;
   return st;
+}
+
+/** "🔨 2 building · 🔧 1 repairing" for the worshippers at a building ('' when none). */
+export function buildingWorkersText(n) {
+  const parts = [];
+  if (n.build) parts.push(`🔨 ${n.build} building`);
+  if (n.repair) parts.push(`🔧 ${n.repair} repairing`);
+  if (n.pray) parts.push(`🙏 ${n.pray} praying`);
+  return parts.join(' · ');
+}
+
+/** "⛏️ 3 · 🌲 2 · 💤 1": the tasks of a group of worshippers (only tasks with someone on them). */
+export function taskSummaryText(counts) {
+  return WORKER_TASKS.filter((t) => counts[t.id] > 0).map((t) => `${t.icon} ${counts[t.id]}`).join(' · ');
+}
+
+/** Researched upgrades of a building type for a player: "🧱 Stone Walls, 👪 Large Families" ('' when none). */
+export function researchedText(up, typeId) {
+  return upgradesFor(typeId).filter((u) => up.includes(u.id)).map((u) => `${u.icon} ${u.name}`).join(', ');
 }
 
 /** Shape of an entity that needs a panel rebuild when it changes. */
@@ -223,6 +247,10 @@ export class InfoView {
       extra.appendChild(el('div', 'hi-progress', el('div', 'hi-progress-label', 'Under construction'), bar, txt));
       s.parts.buildFill = bar.children[0];
       s.parts.buildText = txt;
+      if (e.o === vs.myIndex) {
+        s.parts.workers = el('div', 'hi-note');
+        extra.appendChild(s.parts.workers);
+      }
       return;
     }
     const queueing = e.o === vs.myIndex && e.q && e.q.length;
@@ -236,7 +264,7 @@ export class InfoView {
       big.addEventListener('click', () => this.o.onCancelQueue(e.id, 0));
       const bar = el('div', 'hi-bar is-train', el('i', 'hi-bar-fill'));
       const cls = UNITS[first.u] ? UNITS[first.u].class : '';
-      const verb = cls === 'god' || cls === 'titan' || cls === 'creature' ? 'Summoning' : 'Training';
+      const verb = UPGRADES[first.u] ? 'Researching' : cls === 'god' || cls === 'titan' || cls === 'creature' ? 'Summoning' : 'Training';
       const label = first.u === 'tier_up' ? `Growing into a ${tierName((e.tr || 1) + 1)}` : `${verb} ${typeName(first.u)}`;
       big.append(el('span', 'hi-q-icon', typeIcon(first.u)));
       const info = el('div', 'hi-q-info', el('div', 'hi-q-label', label), bar);
@@ -261,6 +289,12 @@ export class InfoView {
       s.parts.pray = el('div', 'hi-note');
       extra.appendChild(s.parts.pray);
     }
+    if (e.o === vs.myIndex) {
+      s.parts.workers = el('div', 'hi-note');
+      extra.appendChild(s.parts.workers);
+    }
+    s.parts.researched = el('div', 'hi-note is-dim');
+    extra.appendChild(s.parts.researched);
     if (queueing) return;
     if (e.t === 'town_center' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', 'Trains Worshippers. Gold and wood are delivered here.'));
@@ -295,12 +329,13 @@ export class InfoView {
     const p = s.parts;
     if (e.k === 'u' && def) {
       const isGod = def.class === 'god';
+      const um = unitMods(modsOf(vs, e.o), def);
       if (p.dmg) {
-        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1);
+        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage);
         setText(p.dmg, `${Math.round(dmg)}${def.attack.splash ? ' (splash)' : ''}`);
         setText(p.range, rangeText(def.attack));
       }
-      const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0);
+      const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0) + um.armor;
       setText(p.armor, String(Math.round(armor * 10) / 10));
       setText(p.speed, String(def.speed));
       if (p.xpFill) {
@@ -329,12 +364,21 @@ export class InfoView {
         }
       }
     } else if (e.k === 'b' && def) {
-      setText(p.armor, String(def.armor));
+      const bm = buildingMods(modsOf(vs, e.o), e.t);
+      setText(p.armor, String(def.armor + bm.armor));
       if (p.dmg) {
-        setText(p.dmg, String(def.attack.damage));
-        setText(p.range, String(def.attack.range));
+        setText(p.dmg, String(Math.round(def.attack.damage * (1 + bm.damage))));
+        setText(p.range, String(def.attack.range + bm.range));
       }
-      if (p.popp) setText(p.popp, `+${def.popProvided}`);
+      if (p.popp) setText(p.popp, `+${def.popProvided + bm.pop}`);
+      if (p.workers) {
+        const n = workersAt(vs, e.id);
+        setText(p.workers, buildingWorkersText({ build: n.build, repair: n.repair }) || (isComplete(e) ? '' : 'No Worshippers are building it.'));
+      }
+      if (p.researched) {
+        const t = researchedText(upgradesOf(vs, e.o), e.t);
+        setText(p.researched, t ? `Upgrades: ${t}` : '');
+      }
       if (p.buildFill) {
         setStyle(p.buildFill, 'width', pct(e.bp || 0));
         setText(p.buildText, `${Math.floor((e.bp || 0) * 100)}%`);
@@ -342,7 +386,8 @@ export class InfoView {
       if (p.trainFill && e.q && e.q[0]) setStyle(p.trainFill, 'width', pct(e.q[0].p || 0));
       if (p.pray) {
         const n = e.pr || 0;
-        setText(p.pray, `🙏 Praying: ${n} / ${def.prayerSlots}${n ? ` · +${(n * def.faithRate).toFixed(1)} faith/s` : ''}`);
+        const rate = def.faithRate * (1 + buildingMods(modsOf(vs, e.o), e.t).faith);
+        setText(p.pray, `🙏 Praying: ${n} / ${def.prayerSlots}${n ? ` · +${(n * rate).toFixed(1)} faith/s` : ''}`);
       }
     } else if (e.k === 'm') {
       // Out of sight: the gold left when last seen, and nobody knows who mines there.
@@ -381,16 +426,23 @@ export class InfoView {
       cells.push({ id: e.id, fill: bar.children[0] });
     }
     const label = el('div', 'hi-grid-label');
+    let tasks = null;
     if (active) {
       const def = UNITS[active.type] || BUILDINGS[active.type] || GOLD_MINE;
       label.append(el('b', null, def.name), ` × ${active.ids.length}`, el('span', 'hi-grid-hint', ents.length > active.ids.length ? '  ·  Tab: next group' : ''));
     }
+    if (ents.some((e) => e.k === 'u' && e.o === vs.myIndex && UNITS[e.t] && UNITS[e.t].class === 'worker')) {
+      tasks = el('span', 'hi-grid-tasks');
+      tasks.title = WORKER_TASKS.map((t) => `${t.icon} ${t.label}`).join('\n');
+      label.appendChild(tasks);
+    }
     this.root.appendChild(el('div', 'hi-multi', label, grid));
-    this.multi = { cells };
+    this.multi = { cells, tasks, ids: ents.map((e) => e.id) };
   }
 
   updateMulti() {
     const vs = this.o.viewState;
+    if (this.multi.tasks) setText(this.multi.tasks, taskSummaryText(workerTasks(vs, this.multi.ids).counts));
     for (const c of this.multi.cells) {
       const e = vs.entities.get(c.id);
       if (!e) continue;

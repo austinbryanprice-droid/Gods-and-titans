@@ -149,3 +149,40 @@ export function validatePantheon(p, errors, unitIds) {
     validateUnit(u, errors, unitIds);
   }
 }
+
+// ---- Building upgrades (src/data/upgrades.js) ----
+export const UPGRADE_EFFECTS = {
+  building: ['hp', 'armor', 'pop', 'range', 'damage', 'faith', 'train'],
+  unit: ['damage', 'hp', 'armor', 'regen'],
+  carry: null,
+  chop: null,
+  godLevel: null,
+};
+
+/** Validate one upgrade listed in a building's `upgrades`. */
+export function validateUpgrade(up, buildingId, errors, unitIds) {
+  const w = `building(${buildingId}).upgrade(${up && up.id})`;
+  if (!up || typeof up !== 'object') return errors.push(`${w}: not an object`);
+  for (const f of ['id', 'name', 'icon', 'description']) if (typeof up[f] !== 'string' || !up[f]) errors.push(`${w}: missing ${f}`);
+  if (typeof up.hotkey !== 'string' || !/^[A-Z]$/.test(up.hotkey)) errors.push(`${w}: hotkey must be one capital letter`);
+  if (!up.cost || ['gold', 'wood', 'faith'].some((k) => !isNum(up.cost[k]) || up.cost[k] < 0)) errors.push(`${w}: bad cost`);
+  if (!isNum(up.time) || up.time <= 0) errors.push(`${w}: bad time`);
+  if (![1, 2, 3].includes(up.tier)) errors.push(`${w}: bad tier`);
+  if (!Array.isArray(up.effects) || up.effects.length === 0) errors.push(`${w}: needs effects`);
+  for (const e of up.effects || []) {
+    if (!e || !Object.hasOwn(UPGRADE_EFFECTS, e.type)) {
+      errors.push(`${w}: bad effect type ${e && e.type}`);
+      continue;
+    }
+    const stats = UPGRADE_EFFECTS[e.type];
+    if (stats && !stats.includes(e.stat)) errors.push(`${w}: bad ${e.type} stat ${e.stat}`);
+    if (!isNum(e.amount)) errors.push(`${w}: bad amount`);
+    if (e.type === 'carry' && e.resource !== 'g' && e.resource !== 'w') errors.push(`${w}: carry resource must be g or w`);
+    if (e.type === 'building' && typeof e.building !== 'string') errors.push(`${w}: building effect needs a building`);
+    if (e.type === 'unit') {
+      if (!e.units && !e.classes) errors.push(`${w}: unit effect needs units or classes`);
+      for (const id of e.units || []) if (!unitIds.has(id)) errors.push(`${w}: unknown unit ${id}`);
+      for (const c of e.classes || []) if (!UNIT_CLASSES.includes(c)) errors.push(`${w}: unknown class ${c}`);
+    }
+  }
+}

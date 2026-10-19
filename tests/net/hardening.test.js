@@ -177,6 +177,8 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
   for (const unit of ['__proto__', 'constructor', 'dragon_of_doom', 3]) assert.equal(sanitizeCommand({ type: 'train', building: 5, unit }, b), null);
   assert.deepEqual(sanitizeCommand({ type: 'train', building: 5, unit: 'worshipper' }, b), { type: 'train', building: 5, unit: 'worshipper' });
   assert.equal(sanitizeCommand({ type: 'train', building: '5', unit: 'worshipper' }, b), null);
+  for (const upgrade of ['__proto__', 'constructor', 'tier_up', 'worshipper', 5]) assert.equal(sanitizeCommand({ type: 'research', building: 5, upgrade }, b), null);
+  assert.deepEqual(sanitizeCommand({ type: 'autoRepair', on: 'yes' }, b), { type: 'autoRepair' }, 'only a strict true turns it on');
   assert.equal(sanitizeCommand({ type: 'cast', unit: 2, ability: '__proto__' }, b), null);
   assert.deepEqual(sanitizeCommand({ type: 'cast', unit: 2, ability: 'greek_zeus_thunderbolt', x: 4, y: 5, target: 0 }, b), { type: 'cast', unit: 2, ability: 'greek_zeus_thunderbolt', x: 4, y: 5 });
   assert.deepEqual(sanitizeCommand({ type: 'cancelTrain', building: 9, index: 99 }, b), { type: 'cancelTrain', building: 9 });
@@ -193,6 +195,7 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     returnCargo: { units: [1] }, build: { units: [1], building: 'barracks', tx: 3, ty: 3 }, train: { building: 2, unit: 'warrior' },
     cancelTrain: { building: 2, index: 0 }, upgradeTier: { building: 2 }, cancelBuild: { building: 2 }, rally: { building: 2, x: 3, y: 3 },
     stop: { units: [1] }, hold: { units: [1] }, cast: { unit: 1, ability: 'greek_zeus_thunderbolt', target: 5 }, surrender: {},
+    repair: { units: [1], target: 2 }, research: { building: 2, upgrade: 'house_stone_walls' }, autoRepair: { on: true },
   };
   assert.deepEqual(Object.keys(good).sort(), [...COMMAND_TYPES].sort());
   for (const [type, f] of Object.entries(good)) assert.deepEqual(sanitizeCommand({ type, ...f }, b), { type, ...f }, type);
