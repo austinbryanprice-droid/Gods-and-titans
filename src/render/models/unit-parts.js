@@ -189,7 +189,7 @@ function headHuman(b, pal, v, opts, kind) {
   const nose = tetra(0.2);
   T(nose, [0.95, -0.08, 0], [0.6, 0.78, 0], [1.1, 1.3, 0.8]);
   b.add(nose, pal.skinDark);
-  if (opts.lod !== 0 || kind === 'demon') {
+  if ((opts.lod !== 0 && !opts.noEars) || kind === 'demon') {
     const ear = kind === 'demon' ? cone(0.18, 0.55, 3) : tetra(0.22);
     T(ear, kind === 'demon' ? [-0.05, 0.25, 0.95] : [-0.05, 0, 0.9], kind === 'demon' ? [1.1, 0, 0] : [0.6, 0, 0.3], kind === 'demon' ? 1 : [0.7, 1.3, 0.6]);
     b.addSym(ear, pal.skin);
@@ -585,7 +585,7 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
         // team-colored crest, readable from the top-down camera
         const crest = slab([[-1.2, 0], [-0.8, 0.55], [0.3, 0.75], [0.9, 0.35], [0.7, 0]], 0.26);
         T(crest, [back, top - 0.05, 0]);
-        b.add(crest, opts.crest === false ? pal.secondary : TEAM(1));
+        b.add(crest, opts.crest === false ? pal.secondary : opts.crestColor || TEAM(1));
       } else if (kind === 'horned_helmet') {
         const a = seg([back, top - 0.3, 0.75], [back + 0.15, top + 0.05, 1.35], 0.22, 0.16, 5);
         b.addSym(a, pal.horn);
@@ -642,17 +642,23 @@ export function addHeadgear(b, pal, v, kind, anchor, opts = {}) {
       break;
     }
     case 'hood': {
-      const col = opts.teamHood ? TEAM(0.95) : pal.secondary;
-      // pulled back off the face: the front opening sits behind the eyes
-      const d = dome(1.12, 7, 3);
-      T(d, [back - 0.38, top - 0.95, 0], [0, 0, 0.28], [1.0, 1.08, 1.04]);
+      const col = opts.hoodColor || pal.secondary;
+      // a cloth cowl fitted to the skull, open at the face, with a peak at
+      // the back and a mantle over the shoulders
+      const d = dome(1.1, 8, 3);
+      T(d, [back - 0.16, top - 0.92, 0], [0, 0, 0.32], [1.0, 1.0, 1.02]);
       b.add(d, col);
-      const drape = cyl(0.95, 1.12, 0.6, 7, true);
-      T(drape, [back - 0.45, top - 1.55, 0], [0, 0, 0.2]);
-      b.add(drape, opts.teamHood ? TEAM(0.8) : shadeC(pal.secondary, 0.85));
-      const brim = box(0.18, 0.22, 1.8);
-      T(brim, [back + 0.5, top - 0.3, 0], [0, 0, 0.25]);
-      b.add(brim, opts.teamHood ? TEAM(0.7) : shadeC(pal.secondary, 0.7));
+      // the cowl's point falls down the back of the head
+      const peak = cone(0.4, 0.75, 6);
+      T(peak, [back - 1.0, top - 0.75, 0], [0, 0, 2.35]);
+      b.add(peak, col);
+      const drape = cyl(0.9, 1.25, 0.45, 8, true);
+      T(drape, [back - 0.55, top - 1.95, 0], [0, 0, 0.25], [0.85, 1, 1.08]);
+      b.add(drape, shadeC(col, 0.88));
+      // rolled edge framing the face (over the brow, down both cheeks)
+      const rim = torus(0.97, 0.1, 3, 8, PI * 1.2);
+      T(rim, [back + 0.26, top - 0.95, 0], [0, PI / 2, -0.1 * PI]);
+      b.add(rim, shadeC(col, 0.72));
       break;
     }
     case 'nemes': {

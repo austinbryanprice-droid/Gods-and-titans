@@ -179,7 +179,7 @@ export function getUnitMaterial(teamColor, morphCount = 0, ghost = false) {
   const key = `${col.getHexString()}|${morphCount}|${ghost ? 1 : 0}`;
   let m = MATERIALS.get(key);
   if (m) return m;
-  m = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, metalness: 1 });
+  m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1 });
   m.userData.uTeamColor = { value: col };
   if (ghost) {
     m.transparent = true;

@@ -263,17 +263,17 @@ const groundAO = (h) => (p) => 0.58 + 0.42 * smooth01(p.y / h);
  * One drooping pine tier: a mid ring and a jagged rim of n branch tips (2n
  * triangles). The tier's top is left open: the tier above (or the tip) covers it.
  */
-function pineTier(R, h, n, rot, rng) {
+function pineTier(R, h, n, rot, rng, droop = 0.07) {
   const mid = [];
   const rim = [];
   for (let i = 0; i < n; i++) {
-    const a = rot + (i / n) * PI * 2;
+    const a = rot + ((i + (rng.next() - 0.5) * 0.35) / n) * PI * 2;
     const long = i % 2 === 0;
-    const rm = R * (0.5 + rng.next() * 0.08);
-    const rr = R * (long ? 1 : 0.8) * (0.94 + rng.next() * 0.12);
-    mid.push([Math.cos(a) * rm, h * 0.42, Math.sin(a) * rm]);
+    const rm = R * (0.46 + rng.next() * 0.1);
+    const rr = R * (long ? 1 : 0.74) * (0.9 + rng.next() * 0.2);
+    mid.push([Math.cos(a) * rm, h * (0.44 + rng.next() * 0.06), Math.sin(a) * rm]);
     // branch tips droop below the tier's base, the short ones less
-    rim.push([Math.cos(a) * rr, long ? -0.07 : 0.0, Math.sin(a) * rr]);
+    rim.push([Math.cos(a) * rr, long ? -droop * (0.8 + rng.next() * 0.4) : -droop * 0.15, Math.sin(a) * rr]);
   }
   const tris = [];
   for (let i = 0; i < n; i++) {
@@ -283,43 +283,60 @@ function pineTier(R, h, n, rot, rng) {
   return triGeo(orient(tris, (m) => _d.set(m.x, R * 0.6, m.z)));
 }
 
+/**
+ * Spruce: a tall, narrow spire of seven drooping tiers (dark and blue-green
+ * low in the shade, fresher toward the light at the branch tips and the
+ * crown), on a short flared trunk.
+ */
 function pineGeo() {
   const r = new RNG(11);
-  const parts = [shade(cyl(0.045, 0.085, 0.62, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.42) })];
-  const tiers = [[0.7, 0.6, 0.34, '#2d5c2b'], [0.57, 0.55, 0.65, '#326530'], [0.45, 0.5, 0.95, '#386e35'], [0.32, 0.46, 1.23, '#3e773a']];
+  const parts = [shade(cyl(0.04, 0.09, 0.5, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.3) })];
+  const tiers = [
+    [0.6, 0.5, 0.26, '#26502a'], [0.53, 0.46, 0.5, '#2a572c'], [0.46, 0.43, 0.74, '#2e5e2f'], [0.39, 0.4, 0.97, '#336632'],
+    [0.32, 0.37, 1.19, '#386d35'], [0.25, 0.34, 1.4, '#3d7438'], [0.18, 0.3, 1.6, '#427b3b'],
+  ];
   tiers.forEach(([R, h, y, col], ti) => {
-    const g = pineTier(R, h, 7, r.next() * PI, r).translate(0, y, 0);
+    const g = pineTier(R, h, 8, r.next() * PI, r, 0.05 + R * 0.12).translate(0, y, 0);
     const c = new THREE.Vector3(0, y - h * 0.1, 0);
-    const tierK = 0.86 + ti * 0.05; // lower tiers sit in the shade of the upper ones
+    const tierK = 0.82 + ti * 0.03; // lower tiers sit in the shade of the upper ones
     // darker only deep inside, toward the trunk; the outer branches stay bright
-    const ao = (p) => tierK * (0.7 + 0.3 * smooth01(Math.hypot(p.x, p.z) / R * 1.15 - 0.1));
+    const ao = (p) => tierK * (0.66 + 0.34 * smooth01(Math.hypot(p.x, p.z) / R * 1.15 - 0.1));
     // branch tips catch the light: a fresher, yellower green
-    const grad = { to: '#5a8a3e', t: (p) => 0.55 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.5) };
+    const grad = { to: '#5e8c40', t: (p) => 0.6 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.5) };
     // normals only a little rounded: the faceted tiers keep a crisp lit / shaded side
     parts.push(shade(g, col, r, { jit: 0.14, leaf: 1, center: c, soft: 0.2, ao, grad }));
   });
-  // the tip is wide enough at its base to close the open top of the last tier
-  const tip = cone(0.23, 0.52, 6).translate(0, 1.39, 0);
-  wobble(tip, 0.02, r);
-  parts.push(shade(tip, '#437e3e', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.45, 0), soft: 0.25 }));
-  return finish(parts, { height: 1.95, bend: 0.075, flutter: 0.008 });
+  // the leader: a slim spike wide enough at its base to close the top tier
+  const tip = cone(0.12, 0.46, 5).translate(0, 1.72, 0);
+  wobble(tip, 0.015, r);
+  parts.push(shade(tip, '#467f3f', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.8, 0), soft: 0.25 }));
+  return finish(parts, { height: 2.2, bend: 0.075, flutter: 0.008 });
 }
 
+/**
+ * Oak-like broadleaf: a forked trunk carrying an irregular crown of six leaf
+ * clusters at different heights (a broad, lumpy silhouette with gaps), lit
+ * as one soft volume.
+ */
 function broadleafGeo() {
   const r = new RNG(12);
   const C = new THREE.Vector3(0, 1.08, 0);
-  const parts = [shade(cyl(0.055, 0.1, 0.8, 5), '#523727', r, { jit: 0.08, ao: trunkAO(0.66) })];
-  for (const [a, b, rad] of [[[0, 0.55, 0], [0.26, 0.92, 0.1], 0.035], [[0, 0.62, 0], [-0.22, 0.95, -0.12], 0.03]]) {
+  const parts = [shade(cyl(0.05, 0.11, 0.78, 5), '#523727', r, { jit: 0.08, ao: trunkAO(0.6) })];
+  for (const [a, b, rad] of [[[0, 0.5, 0], [0.32, 0.92, 0.12], 0.04], [[0, 0.58, 0], [-0.28, 0.96, -0.16], 0.035], [[0, 0.66, 0], [-0.05, 1.02, 0.3], 0.03]]) {
     parts.push(shade(limb(a, b, rad), '#4a3122', r, { jit: 0.06, ao: () => 0.7 }));
   }
-  const lobes = [[0.47, 0, 1.08, 0, '#4c8836'], [0.37, 0.31, 0.95, 0.15, '#54903a'], [0.35, -0.29, 0.98, -0.13, '#468233'], [0.31, 0.05, 0.9, -0.34, '#4f8a37'], [0.31, 0.04, 1.39, 0.03, '#5c9a42']];
+  const lobes = [
+    [0.4, 0.02, 1.16, 0.0, '#4a8636'], [0.34, 0.36, 0.98, 0.14, '#538f3a'], [0.32, -0.33, 1.0, -0.17, '#447f32'],
+    [0.29, -0.06, 0.94, 0.38, '#4e8a37'], [0.27, 0.16, 0.92, -0.34, '#4b8735'], [0.27, 0.06, 1.46, 0.05, '#5c9a42'],
+  ];
   for (const [rad, x, y, z, col] of lobes) {
     const g = ico(rad);
-    squashBottom(g, 0.66);
-    wobble(g, rad * 0.24, r);
-    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.08, leaf: 1, center: C, soft: 0.65, ao: canopyAO(C, 0.66, 0.56) }));
+    squashBottom(g, 0.62);
+    wobble(g, rad * 0.28, r);
+    const grad = { to: '#78a64a', t: (p) => 0.45 * smooth01((p.y - 1.0) / 0.5) };
+    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.09, leaf: 1, center: C, soft: 0.62, ao: canopyAO(C, 0.72, 0.5), grad }));
   }
-  return finish(parts, { height: 1.75, bend: 0.07, flutter: 0.014 });
+  return finish(parts, { height: 1.8, bend: 0.07, flutter: 0.014 });
 }
 
 function birchGeo() {
@@ -699,7 +716,12 @@ function treeTint(variant, r1, r2, n, out) {
     return out.setRGB(k * (1 + h), k, k * (1 - h));
   }
   if (variant === 'palm') return out.setRGB(k * (1 + h * 1.4), k, k * (1 - h));
-  // pine: slightly blue-green to olive
+  // pine: mostly deep teal-green, with stands of olive spruce and a few
+  // golden larches turning (the mixed conifer edge of the reference look)
+  const larch = r2 * 0.7 + n * 0.45; // 0 … 1.15
+  if (larch > 1.0) return out.setRGB(k * 2.6, k * 1.25, k * 0.55);
+  if (larch > 0.86) return out.setRGB(k * 1.35, k * 1.08, k * 0.72);
+  // slightly blue-green to olive
   return out.setRGB(k * (0.78 + h), k * (0.92 + h * 0.2), k * (1.02 - h * 0.5)); // deep teal-green
 }
 
@@ -783,7 +805,8 @@ export function createForest(mapData, heightFn) {
         let b = buckets.get(key);
         if (!b) buckets.set(key, (b = { variant: v, list: [] }));
         const tree = {
-          tile: i, x, y, h: hf(x, y) - 0.04, rot: r1 * PI * 2, sx: s, sy: s * (0.92 + r2 * 0.2), tilt: (r2 - 0.5) * 0.12,
+          // spruces vary more in height than in girth: a ragged skyline
+          tile: i, x, y, h: hf(x, y) - 0.04, rot: r1 * PI * 2, sx: s, sy: s * (v === 'pine' ? 0.82 + r2 * 0.42 : 0.92 + r2 * 0.2), tilt: (r2 - 0.5) * 0.12,
           tint: r3, r2: ihash(tx * 5 + j, ty * 3 + j * 11, seed + 6), n: autumnN, bucket: b, index: b.list.length,
         };
         b.list.push(tree);
