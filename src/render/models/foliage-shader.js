@@ -69,7 +69,93 @@ const INSTANCED_WIND = /* glsl */ `
 }
 #endif`;
 
-const FOLIAGE_VERTEX_PARS = `attribute vec3 aFol;\nvarying float vLeaf;\nuniform vec3 uSunDirW;\n${WIND_GLSL}`;
+const FOLIAGE_VERTEX_PARS = `attribute vec3 aFol;\nvarying float vLeaf;\nvarying vec3 vFolP;\nuniform vec3 uSunDirW;\n${WIND_GLSL}`;
+
+// Leaf detail coordinates: the plant's own local position (before wind, so the
+// pattern does not swim), shifted per instance so neighbours differ.
+const FOLIAGE_DETAIL_VERTEX = /* glsl */ `
+vFolP = position;
+#ifdef USE_INSTANCING
+  vFolP += vec3( instanceMatrix[ 3 ].x * 0.37, 0.0, instanceMatrix[ 3 ].z * 0.29 );
+#endif`;
+
+/**
+ * Leaf detail (fragment): a 3D value-noise canopy texture in place of flat
+ * facets. Clumps of leaves (or, with uFolDetail.w = 1, radial needle sprays)
+ * lighten and darken the albedo with a little hue shift, bend the normal by
+ * the noise slope (bump through screen derivatives, faded out where the
+ * pattern gets finer than a pixel), and the crown's silhouette is cut ragged:
+ * fragments seen edge-on are discarded where the clump noise is low, so a
+ * faceted lobe outline breaks up into leafy tufts. Bark (vLeaf = 0) is left as is.
+ * uFolDetail: x = clump frequency (per local unit), y = albedo contrast,
+ * z = edge cut strength, w = needle style (0 / 1).
+ */
+const FOLIAGE_DETAIL_PARS = /* glsl */ `
+uniform vec4 uFolDetail;
+varying vec3 vFolP;
+float folHash( vec3 p ) {
+  p = fract( p * 0.3183099 + 0.1 );
+  p *= 17.0;
+  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
+}
+float folNoise( vec3 x ) {
+  vec3 i = floor( x );
+  vec3 f = fract( x );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( mix( folHash( i ), folHash( i + vec3( 1, 0, 0 ) ), f.x ),
+                   mix( folHash( i + vec3( 0, 1, 0 ) ), folHash( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+              mix( mix( folHash( i + vec3( 0, 0, 1 ) ), folHash( i + vec3( 1, 0, 1 ) ), f.x ),
+                   mix( folHash( i + vec3( 0, 1, 1 ) ), folHash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
+}
+float folCoarse = 0.5; // the smooth first octave: drives the bump (finer ones show the pixel quads)
+float folLeaves( vec3 p ) {
+  vec3 q = p * uFolDetail.x;
+  if ( uFolDetail.w > 0.5 ) {
+    // needles: fine sprays running out from the trunk, broken up along their length
+    float r = length( p.xz );
+    vec3 s = vec3( atan( p.z, p.x ) * 13.0, p.y * uFolDetail.x * 1.4, r * uFolDetail.x * 0.9 );
+    // the finer octave fades to its mean where it would get smaller than a pixel
+    float fs = 1.0 - smoothstep( 0.3, 0.7, length( fwidth( s ) ) * 2.1 );
+    folCoarse = folNoise( s );
+    return folCoarse * 0.45 + mix( 0.5, folNoise( s * vec3( 2.1, 1.7, 2.3 ) + 3.1 ), fs ) * 0.3 + folNoise( q * 2.6 ) * 0.25;
+  }
+  // leaf clumps: rounded blobs (squared noise) with leaf-sized grain on top
+  float c = folNoise( q );
+  c = smoothstep( 0.2, 0.85, c );
+  folCoarse = c;
+  float fq = 1.0 - smoothstep( 0.3, 0.7, length( fwidth( q ) ) * 5.1 );
+  return c * 0.55 + folNoise( q * 2.3 + 4.7 ) * 0.27 + mix( 0.5, folNoise( q * 5.1 + 1.3 ), fq ) * 0.18;
+}`;
+
+const FOLIAGE_DETAIL_FRAGMENT = /* glsl */ `
+float folN = 0.5;
+if ( vLeaf > 0.5 && uFolDetail.y > 0.0 ) {
+  folN = folLeaves( vFolP );
+  // ragged silhouette: cut away low-noise texels where the surface turns edge-on
+  vec3 folV = normalize( vViewPosition );
+  float folEdge = 1.0 - abs( dot( normalize( vNormal ), folV ) );
+  if ( folN < uFolDetail.z * pow( folEdge, 1.5 ) * 1.4 - 0.08 ) discard;
+  float folC = ( folN - 0.5 ) * uFolDetail.y;
+  diffuseColor.rgb *= 1.0 + folC * 2.0;
+  // lit clumps lean yellow, the gaps between them blue-green
+  diffuseColor.rgb += vec3( 0.05, 0.035, -0.04 ) * folC * diffuseColor.g * 4.0;
+  diffuseColor.rgb = max( diffuseColor.rgb, vec3( 0.0 ) );
+}`;
+
+const FOLIAGE_BUMP_FRAGMENT = /* glsl */ `
+if ( vLeaf > 0.5 && uFolDetail.y > 0.0 ) {
+  vec3 folDpx = dFdx( - vViewPosition );
+  vec3 folDpy = dFdy( - vViewPosition );
+  float folHx = dFdx( folCoarse );
+  float folHy = dFdy( folCoarse );
+  // fade the bump where one noise cell spans less than a couple of pixels
+  float folFade = 1.0 - smoothstep( 0.18, 0.45, abs( folHx ) + abs( folHy ) );
+  vec3 folR1 = cross( folDpy, normal );
+  vec3 folR2 = cross( normal, folDpx );
+  float folDet = dot( folDpx, folR1 );
+  vec3 folGrad = sign( folDet ) * ( folHx * folR1 + folHy * folR2 );
+  normal = normalize( abs( folDet ) * normal - folGrad * 1.6 * folFade );
+}`;
 
 // Leaves on the far side of a crown look their sun shadow up on the crown's
 // sunlit side: the lookup point moves toward the sun by about a crown's depth
@@ -140,7 +226,7 @@ const FOLIAGE_LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(
  * @param {{ wrap?: number, translucency?: number, filter?: number }} [o] filter: share of the
  *   light that still reaches leaves in shadow (0 = hard shadows)
  */
-export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4 } = {}) {
+export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, detail = null } = {}) {
   if (!mat || mat.userData.__foliage) return mat;
   if (!FOLIAGE_LIGHTS.includes('uFoliage') || !FOLIAGE_LIGHTS_BEGIN.includes('folLightColor = directLight.color')) {
     throw new Error('foliage lighting patch did not apply');
@@ -148,6 +234,10 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
   mat.userData.__foliage = true;
   const uFoliage = { value: new THREE.Vector3(wrap, translucency, filter) };
   mat.userData.uFoliage = uFoliage;
+  // leaf detail: [clump frequency, contrast, edge cut, needles]; null = flat (flowers, grass)
+  const d = detail || [1, 0, 0, 0];
+  const uFolDetail = { value: new THREE.Vector4(d[0], d[1], d[2], d[3]) };
+  mat.userData.uFolDetail = uFolDetail;
   const prev = mat.onBeforeCompile;
   const prevKey = typeof mat.customProgramCacheKey === 'function' ? String(mat.customProgramCacheKey()) : '';
   mat.onBeforeCompile = function foliageCompile(shader, renderer) {
@@ -156,17 +246,20 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
     shader.uniforms.uSunDirW = WORLD_UNIFORMS.uSunDirW;
     shader.uniforms.uWind = WIND_UNIFORMS.uWind;
     shader.uniforms.uFoliage = uFoliage;
+    shader.uniforms.uFolDetail = uFolDetail;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}`)
-      .replace('#include <color_vertex>', FOLIAGE_COLOR_VERTEX)
+      .replace('#include <color_vertex>', `${FOLIAGE_COLOR_VERTEX}\n${FOLIAGE_DETAIL_VERTEX}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${INSTANCED_WIND}`)
       .replace('#include <shadowmap_vertex>', FOLIAGE_SHADOW_VERTEX);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vLeaf;\nuniform vec3 uFoliage;\nvec3 folLightColor = vec3( 0.0 );')
+      .replace('#include <common>', `#include <common>\nvarying float vLeaf;\nuniform vec3 uFoliage;\nvec3 folLightColor = vec3( 0.0 );\n${FOLIAGE_DETAIL_PARS}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${FOLIAGE_DETAIL_FRAGMENT}`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${FOLIAGE_BUMP_FRAGMENT}`)
       .replace('#include <lights_lambert_pars_fragment>', FOLIAGE_LIGHTS)
       .replace('#include <lights_fragment_begin>', FOLIAGE_LIGHTS_BEGIN);
   };
-  mat.customProgramCacheKey = () => `${prevKey}|foliage3`;
+  mat.customProgramCacheKey = () => `${prevKey}|foliage4`;
   mat.needsUpdate = true;
   return mat;
 }

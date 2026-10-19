@@ -54,16 +54,59 @@ const UNIT_PARS_VERTEX = `
 attribute vec4 aFx;
 attribute float aAo;
 uniform vec3 uTeamColor;
-varying vec4 vUnitFx; // glow, roughness, metalness, occlusion`;
+varying vec4 vUnitFx; // glow, roughness, metalness, occlusion
+varying vec3 vUnitP; // part-local position (surface detail coordinates)`;
 const UNIT_VERTEX = `
 #if defined( USE_COLOR )
   if ( aFx.x > 0.0 ) vColor.rgb = uTeamColor * aFx.x;
 #endif
   vUnitFx = vec4( aFx.yzw, aAo );`;
+const UNIT_POS_VERTEX = `
+vUnitP = transformed;
+#include <project_vertex>`;
 const UNIT_PARS_FRAGMENT = `
 uniform vec4 uUnitLook;
 uniform vec2 uUnitSheen;
-varying vec4 vUnitFx;`;
+varying vec4 vUnitFx;
+varying vec3 vUnitP;
+float unitHash( vec3 p ) {
+  p = fract( p * 0.3183099 + 0.1 );
+  p *= 17.0;
+  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
+}
+float unitNoise( vec3 x ) {
+  vec3 i = floor( x );
+  vec3 f = fract( x );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( mix( unitHash( i ), unitHash( i + vec3( 1, 0, 0 ) ), f.x ),
+                   mix( unitHash( i + vec3( 0, 1, 0 ) ), unitHash( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+              mix( mix( unitHash( i + vec3( 0, 0, 1 ) ), unitHash( i + vec3( 1, 0, 1 ) ), f.x ),
+                   mix( unitHash( i + vec3( 0, 1, 1 ) ), unitHash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
+}`;
+// Surface detail in place of textures: two octaves of value noise in the
+// part's own coordinates. The coarse one (unitWear) mottles cloth and tarnishes
+// metal in patches; the fine one (unitGrain: weave, leather grain, brushed
+// scratches) fades to its mean where it would shimmer below a pixel. Metal
+// gets the most, glowing parts none. The same noise varies roughness, so
+// metal catches the light unevenly instead of reading as flat plastic. (A
+// derivative bump was tried: at unit size it shows the 2x2 pixel quads.)
+const UNIT_DETAIL = `
+float unitWear = unitNoise( vUnitP * 7.0 );
+float unitGrain = 0.5;
+float unitDetailK = 1.0 - saturate( vUnitFx.x * 3.0 );
+{
+  // each octave fades to its mean once a noise cell gets near pixel size
+  vec3 unitQ = vUnitP * 22.0;
+  float unitFw = length( fwidth( unitQ ) );
+  float unitFadeA = 1.0 - smoothstep( 0.22, 0.5, unitFw );
+  float unitFadeB = 1.0 - smoothstep( 0.22, 0.5, unitFw * 2.3 );
+  unitGrain = 0.5 + ( unitNoise( unitQ ) - 0.5 ) * 0.65 * unitFadeA + ( unitNoise( unitQ * 2.3 + 3.7 ) - 0.5 ) * 0.35 * unitFadeB;
+  float unitMetalK = saturate( vUnitFx.z * 2.0 );
+  float unitAmp = mix( mix( 0.2, 0.28, smoothstep( 0.75, 0.9, vUnitFx.y ) ), 0.42, unitMetalK );
+  diffuseColor.rgb *= 1.0 + ( ( unitWear - 0.5 ) * 2.6 + ( unitGrain - 0.5 ) * 3.0 ) * unitAmp * unitDetailK;
+}`;
+const UNIT_DETAIL_ROUGHNESS = `
+roughnessFactor = clamp( roughnessFactor + ( ( unitWear - 0.5 ) * 0.4 * saturate( vUnitFx.z * 2.0 ) + ( unitGrain - 0.5 ) * 0.16 ) * unitDetailK, 0.05, 1.0 );`;
 // Glow: g * (0.85 + gain * g^2) keeps faint glints (jewelry, 0.15) subtle and
 // pushes full glow into HDR. The gain stops where the strongest channel
 // reaches 1.6, so pale glow (lightning, souls, gold) blooms while saturated
@@ -155,6 +198,7 @@ function patchUnitShader(mat) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${UNIT_PARS_VERTEX}`)
       .replace('#include <color_vertex>', `#include <color_vertex>\n${UNIT_VERTEX}`)
+      .replace('#include <project_vertex>', UNIT_POS_VERTEX)
       .replace('#include <shadowmap_vertex>', UNIT_SHADOW_VERTEX);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${UNIT_PARS_FRAGMENT}`)
@@ -162,12 +206,13 @@ function patchUnitShader(mat) {
       .replace('#include <lights_fragment_begin>', UNIT_LIGHTS)
       .replace('#include <lights_fragment_maps>', UNIT_IBL)
       // per-vertex surface: the material's own roughness / metalness are 1
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n\troughnessFactor *= vUnitFx.y;')
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${UNIT_DETAIL}`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\n\troughnessFactor *= vUnitFx.y;${UNIT_DETAIL_ROUGHNESS}`)
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tmetalnessFactor *= vUnitFx.z;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${UNIT_EMISSIVE}`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>\n${UNIT_AO}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-unit-v3';
+  mat.customProgramCacheKey = () => 'mythicwar-unit-v4';
 }
 
 /**

@@ -617,7 +617,8 @@ function shared() {
   // Closed crowns (broadleaf, birch, bushes) cast from their back faces, the default.
   const plant = new THREE.MeshLambertMaterial({ vertexColors: true });
   plant.name = 'props-plant';
-  patchWorldMaterial(patchFoliageMaterial(plant), { cloud: true, rim: 0.12 });
+  // leafy crowns: clumped leaf texture with ragged edges (foliage-shader.js uFolDetail)
+  patchWorldMaterial(patchFoliageMaterial(plant, { detail: [9, 0.4, 0.85, 0] }), { cloud: true, rim: 0.12 });
   // Pine tiers are open skirts flatter than the sun is high: with the default
   // back-face shadow pass they would cast only thin rings, so both faces cast.
   // Same program as `plant`; only the shadow pass differs.
@@ -625,7 +626,7 @@ function shared() {
   plantOpen.name = 'props-plant-open';
   plantOpen.shadowSide = THREE.DoubleSide;
   // less wrap than the round crowns: needles keep a crisp lit and shaded side
-  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3 }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, detail: [8, 0.34, 0.55, 1] }), { cloud: true, rim: 0.12 });
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
   patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45 }), { cloud: true, rim: 0.12 });
