@@ -240,10 +240,13 @@ function addAuraRing(b, pal, center, r, drums, plane = 'yz') {
 function headAssembly(b, ctx, headKind, opts = {}) {
   const { v, pal, ex } = ctx;
   const giant = v.body === 'giant';
-  const anchor = addHead(b, pal, v, headKind, { jaw: opts.jaw, lod: opts.lod ?? ctx.lod, cyclops: giant && ex.has('third_eye') && headKind === 'human' });
+  const gear = opts.headgear ?? v.headgear;
+  const anchor = addHead(b, pal, v, headKind, {
+    jaw: opts.jaw, lod: opts.lod ?? ctx.lod, cyclops: giant && ex.has('third_eye') && headKind === 'human',
+    noEars: headgearCoversHair(gear) && gear !== 'flame', // ears would poke through hoods and helmets
+  });
   if (!anchor) return null;
   const animal = isAnimalHead(headKind);
-  const gear = opts.headgear ?? v.headgear;
   if (anchor.hair && !headgearCoversHair(gear) && gear !== 'topknot') hairCap(b, pal);
   else if (anchor.hair && gear === 'topknot') hairCap(b, pal);
   if (ex.has('long_hair') && anchor.hair) {
@@ -281,7 +284,12 @@ function headAssembly(b, ctx, headKind, opts = {}) {
     T(m, [-0.35, -0.2, 0], [0, 0, 0], [0.8, 1.05, 1.2]);
     b.add(m, pal.hair);
   }
-  addHeadgear(b, pal, v, gear, anchor, { animal, teamHood: ctx.mortal, crest: true, lod: opts.lod ?? ctx.lod });
+  addHeadgear(b, pal, v, gear, anchor, {
+    animal, crest: true, lod: opts.lod ?? ctx.lod,
+    // mortals wear their team color on cloth and shields, not on caps
+    hoodColor: ctx.mortal ? (ctx.worker ? pal.secondary : shadeC(pal.primary, ctx.cls === 'support' ? 0.95 : 0.8)) : null,
+    crestColor: ctx.mortal ? pal.primary : null,
+  });
   return anchor;
 }
 
@@ -296,10 +304,10 @@ function holdsAloft(v) {
 
 const PROFILES = {
   humanoid: {
-    hipY: 0.42, hipZ: 0.095, thigh: 0.205, legR: 0.062, footL: 0.17, footH: 0.07,
-    waistW: 0.27, chestW: 0.38, depth: 0.19, chestD: 0.23, shoulderY: 0.77, shoulderZ: 0.215,
-    upper: 0.155, fore: 0.15, armR: 0.05, handR: 0.058, headR: 0.15, headY: 0.94, headX: 0.01,
-    padR: 0.085, lean: 0, bare: false, weaponSize: 1,
+    hipY: 0.5, hipZ: 0.085, thigh: 0.245, legR: 0.056, footL: 0.15, footH: 0.06,
+    waistW: 0.25, chestW: 0.36, depth: 0.17, chestD: 0.21, shoulderY: 0.86, shoulderZ: 0.2,
+    upper: 0.185, fore: 0.17, armR: 0.044, handR: 0.048, headR: 0.122, headY: 1.0, headX: 0.012,
+    padR: 0.075, lean: 0, bare: false, weaponSize: 1,
   },
   giant: {
     hipY: 0.36, hipZ: 0.135, thigh: 0.175, legR: 0.1, footL: 0.24, footH: 0.08,
@@ -318,7 +326,7 @@ const PROFILES = {
 function armColorFor(ctx, P) {
   const { pal, ex } = ctx;
   if (P.bare || ctx.v.body === 'spirit') return { upper: P.bare ? pal.skin : pal.primary, fore: P.bare ? pal.skin : pal.skin };
-  return { upper: ex.has('armor') ? shadeC(pal.primary, 0.9) : pal.primary, fore: pal.skin };
+  return { upper: ctx.sleeve || (ex.has('armor') ? shadeC(pal.primary, 0.9) : pal.primary), fore: pal.skin };
 }
 
 /**
@@ -331,21 +339,33 @@ function buildArm(ctx, P, side, item, sizeK = 1) {
   const cols = armColorFor(ctx, P);
   const elbowY = -P.upper;
   const lower = hingeMorphs(b, [null, 'e45', 'e90'], KNEE_SAMPLES, [0, elbowY, 0], [0, 0, 1]);
-  b.add(seg([0, 0.02, 0], [0, elbowY, 0], P.armR * 1.15, P.armR, 5, true), cols.upper);
+  const armSides = ctx.lod > 0 ? 6 : 5;
+  b.add(seg([0, 0.02, 0], [0, elbowY, 0], P.armR * 1.2, P.armR * 0.95, armSides, true), cols.upper);
+  if (ctx.mortal && !P.bare) {
+    // short sleeve cuff over the upper arm
+    const cuff = cyl(P.armR * 1.32, P.armR * 1.38, 0.035, armSides, true);
+    T(cuff, [0, elbowY * 0.62, 0]);
+    b.add(cuff, ctx.sleeveTrim || shadeC(pal.secondary, 1));
+  }
   if (ctx.lod > 0) {
     const elbow = joint(ctx, P.armR * 1.02);
     T(elbow, [0, elbowY, 0]);
     b.add(elbow, cols.fore, { morph: lower });
   }
   const handY = elbowY - P.fore - P.handR * 0.55;
-  b.add(seg([0, elbowY, 0], [0, elbowY - P.fore, 0], P.armR, P.armR * 0.85, 5, true), cols.fore, { morph: lower });
-  const hand = box(P.handR * 1.6, P.handR * 1.8, P.handR * 1.45);
-  T(hand, [0.008, handY, 0]);
+  b.add(seg([0, elbowY, 0], [0, elbowY - P.fore, 0], P.armR * 0.95, P.armR * 0.72, armSides, true), cols.fore, { morph: lower });
+  const hand = ctx.lod > 0 ? dodeca(P.handR) : box(P.handR * 1.6, P.handR * 1.8, P.handR * 1.45);
+  T(hand, [0.008, handY, 0], [0, 0, 0], ctx.lod > 0 ? [0.85, 1.05, 0.8] : 1);
   b.add(hand, ctx.v.body === 'spirit' ? pal.skin : pal.skin, { morph: lower });
   if (ex.has('armor')) {
-    const br = cyl(P.armR * 1.25, P.armR * 1.15, P.fore * 0.55, ctx.lod ? 6 : 5, true);
+    const br = cyl(P.armR * 1.25, P.armR * 1.1, P.fore * 0.55, ctx.lod ? 6 : 5, true);
     T(br, [0, elbowY - P.fore * 0.55, 0]);
-    b.add(br, pal.accentMetal, { morph: lower });
+    b.add(br, ctx.mortal ? pal.leather : pal.accentMetal, { morph: lower });
+  } else if (ctx.mortal && ctx.lod > 0) {
+    // leather wrist wrap
+    const wr = cyl(P.armR * 0.95, P.armR * 0.92, P.fore * 0.3, 6, true);
+    T(wr, [0, elbowY - P.fore * 0.8, 0]);
+    b.add(wr, pal.leather, { morph: lower });
   }
   if (ex.has('jewelry')) {
     const band = cyl(P.armR * 1.3, P.armR * 1.3, 0.025, 6, true);
@@ -411,13 +431,25 @@ function buildLeg(ctx, P, side) {
     T(foot, [P.footL * 0.32, -L + P.footH / 2, 0]);
     b.add(foot, boot, { morph: lower });
   } else {
-    b.add(seg([0, 0.03, 0], [0, kneeY, 0], P.legR * 1.15, P.legR, 5, true), pants);
+    const ls = ctx.lod > 0 ? 6 : 5;
+    b.add(seg([0, 0.03, 0], [0, kneeY, 0], P.legR * 1.25, P.legR * 0.98, ls, true), pants);
     const knee = joint(ctx, P.legR * 0.98);
     T(knee, [0, kneeY, 0]);
     b.add(knee, pants, { morph: lower });
-    b.add(seg([0, kneeY, 0], [0, -L + P.footH, 0], P.legR, P.legR * 0.85, 5, true), P.bare ? pal.skin : pants, { morph: lower });
-    const foot = box(P.footL, P.footH, P.legR * 2.15);
-    T(foot, [P.footL * 0.25, -L + P.footH / 2, 0]);
+    const shinY = -L + P.footH;
+    if (ctx.mortal && !P.bare) {
+      // trouser to mid-shin, then a boot shaft with a cuff
+      const mid = kneeY + (shinY - kneeY) * 0.38;
+      b.add(seg([0, kneeY, 0], [0, mid, 0], P.legR * 0.98, P.legR * 0.88, ls, true), pants, { morph: lower });
+      b.add(seg([0, mid, 0], [0, shinY, 0], P.legR * 0.98, P.legR * 0.9, ls, true), boot, { morph: lower });
+      const cuffB = cyl(P.legR * 1.12, P.legR * 1.08, 0.03, ls, true);
+      T(cuffB, [0, mid, 0]);
+      b.add(cuffB, shadeC(boot, 0.8), { morph: lower });
+    } else {
+      b.add(seg([0, kneeY, 0], [0, shinY, 0], P.legR, P.legR * 0.85, ls, true), P.bare ? pal.skin : pants, { morph: lower });
+    }
+    const foot = taper(P.footL, P.footH, P.legR * 2.0, 1, 0.8);
+    T(foot, [P.footL * 0.25, -L, 0], [0, 0, 0]);
     b.add(foot, boot, { morph: lower });
     if (ex.has('armor') && ctx.lod > 0) {
       const gr = box(P.legR * 1.4, (L - P.thigh) * 0.6, P.legR * 2.2);
@@ -476,16 +508,29 @@ function buildTorso(ctx, P, opts = {}) {
   const sh = P.shoulderY - P.hipY;
   const bare = P.bare && !ex.has('armor');
   const spirit = v.body === 'spirit';
-  const cloth = pal.primary;
+  const cloth = ctx.tunic || pal.primary;
   if (!opts.noHips && bare) {
     const hips = taper(P.depth * 1.02, 0.16, P.waistW, 1, 1);
     T(hips, [0, -0.09, 0]);
     b.add(hips, shadeC(pal.primary, 0.85));
   }
   const y0 = opts.noHips || bare ? 0.04 : -0.09;
-  const torso = taper(P.depth, sh - y0 + 0.01, P.waistW * 0.96, P.chestD / P.depth, P.chestW / (P.waistW * 0.96), 0.012);
-  T(torso, [0, y0, 0]);
-  b.add(torso, bare ? pal.skin : cloth);
+  const tH = sh - y0 + 0.01;
+  if (ctx.lod > 0 && !bare) {
+    // rounded tunic: an elliptical barrel, broad at the chest, with a
+    // rounded top over the shoulders
+    const sx = (P.chestD / P.chestW + P.depth / P.waistW) / 2;
+    const torso = cyl(P.chestW / 2, P.waistW * 0.48, tH * 0.86, 8);
+    T(torso, [0, y0 + tH * 0.43, 0], [0, 0, 0], [sx, 1, 1]);
+    b.add(torso, cloth);
+    const top = cyl(P.chestW * 0.3, P.chestW / 2, tH * 0.14, 8);
+    T(top, [0, y0 + tH * 0.93, 0], [0, 0, 0], [sx, 1, 1]);
+    b.add(top, cloth);
+  } else {
+    const torso = taper(P.depth, tH, P.waistW * 0.96, P.chestD / P.depth, P.chestW / (P.waistW * 0.96), 0.012);
+    T(torso, [0, y0, 0]);
+    b.add(torso, bare ? pal.skin : cloth);
+  }
   if (bare) {
     const pec = box(0.05, sh * 0.25, P.chestW * 0.7);
     T(pec, [P.chestD / 2 - 0.005, sh * 0.72, 0]);
@@ -494,16 +539,34 @@ function buildTorso(ctx, P, opts = {}) {
   // belt + team sash
   const belt = box(P.depth * 1.08, 0.055, P.waistW * 1.04);
   T(belt, [0, 0.06, 0]);
-  b.add(belt, ctx.worker || spirit ? TEAM(0.9) : pal.secondary, { mat: 'leather' });
+  b.add(belt, ctx.mortal ? pal.leather : spirit ? TEAM(0.9) : pal.secondary, { mat: 'leather' });
   if (ctx.lod > 0) {
     const buckle = box(0.03, 0.05, 0.06);
     T(buckle, [P.depth * 0.55, 0.06, 0]);
     b.add(buckle, pal.accentMetal);
   }
   if (!spirit) {
-    const sash = box(P.chestD * 1.06, 0.06, P.chestW * 1.08);
+    // team sash; over a team tunic it is a leather baldric instead
+    const sash = box(P.chestD * 1.06, ctx.tunic ? 0.04 : 0.06, P.chestW * 1.08);
     T(sash, [0.004, sh * 0.5, 0], [0.72, 0, 0]);
-    b.add(sash, TEAM(1));
+    b.add(sash, ctx.tunic ? pal.leather : TEAM(1), ctx.tunic ? { mat: 'leather' } : {});
+  }
+  if (ctx.mortal && cls === 'support') {
+    // priest's stole: two team bands hanging down the front of the robe
+    for (const side of [1, -1]) {
+      const st = box(0.02, sh * 0.95 + 0.2, 0.05);
+      T(st, [P.chestD * 0.47, sh * 0.5 - 0.16, side * P.chestW * 0.16], [0, 0, 0.08]);
+      b.add(st, TEAM(1), { mat: 'trim' });
+    }
+  }
+  if (ctx.mortal && ex.has('armor')) {
+    // pteruges: a short team kilt of leather-edged strips under the cuirass
+    const k = cyl(P.waistW * 0.55, P.waistW * 0.68, 0.17, 8, true);
+    T(k, [0, -0.13, 0], [0, 0, 0], [P.depth / P.waistW * 1.3, 1, 1]);
+    b.add(k, TEAM(0.8));
+    const hem = cyl(P.waistW * 0.69, P.waistW * 0.7, 0.03, 8, true);
+    T(hem, [0, -0.2, 0], [0, 0, 0], [P.depth / P.waistW * 1.3, 1, 1]);
+    b.add(hem, pal.leather);
   }
   // loincloth flap (front) for bare bodies and gods without skirt
   if (bare || (!ex.has('skirt') && ctx.grand)) {
@@ -520,10 +583,10 @@ function buildTorso(ctx, P, opts = {}) {
     const sides = ctx.lod ? 8 : 6;
     const sk = cyl(P.waistW * 0.56, P.waistW * (long ? 0.86 : 0.78), h, sides, true);
     T(sk, [0, 0.03 - h / 2, 0], [0, PI / sides, 0], [P.depth / P.waistW * 1.2, 1, 1]);
-    b.add(sk, pal.primary);
+    b.add(sk, ctx.skirt || pal.primary);
     const trim = cyl(P.waistW * (long ? 0.87 : 0.79), P.waistW * (long ? 0.88 : 0.8), 0.035, sides, true);
     T(trim, [0, 0.03 - h + 0.015, 0], [0, PI / sides, 0], [P.depth / P.waistW * 1.2, 1, 1]);
-    b.add(trim, pal.secondary);
+    b.add(trim, ctx.mortal && cls === 'support' ? TEAM(0.9, 'trim') : pal.secondary);
   }
   if (ex.has('armor')) {
     const plate = taper(P.depth * 0.55, sh * 0.62, P.waistW * 0.9, P.chestD / P.depth, P.chestW / P.waistW * 0.95, 0.02);
@@ -554,16 +617,24 @@ function buildTorso(ctx, P, opts = {}) {
       if (!anchor) anchor = a;
     });
   }
-  // shoulder pads (team) for everyone but workers and spirits
-  if (!ctx.worker && !spirit) {
+  // shoulders: armored mortals wear metal pauldrons, other mortals rounded
+  // sleeves; gods and creatures keep team-painted pads
+  if (ctx.mortal && !spirit && !ex.has('armor') && ctx.lod > 0) {
     for (const side of [1, -1]) {
-      const pad = dome(P.padR * (ctx.grand ? 1.15 : 1), 6, 2);
-      T(pad, [0, sh - 0.015, side * P.shoulderZ * 1.02], [side * -0.35, 0, 0], [1.1, 0.9, 1]);
-      b.add(pad, TEAM(1, 'painted'));
+      const s0 = dome(P.armR * 1.6, 6, 2);
+      T(s0, [0, sh - 0.045, side * P.shoulderZ * 0.98], [side * -0.5, 0, 0], [1.05, 1, 1]);
+      b.add(s0, ctx.sleeve || cloth);
+    }
+  }
+  if ((!ctx.worker && !spirit && !ctx.mortal) || (ctx.mortal && ex.has('armor'))) {
+    for (const side of [1, -1]) {
+      const pad = dome(P.padR * (ctx.grand ? 1.1 : 1), 6, 2);
+      T(pad, [0, sh - 0.015, side * P.shoulderZ * 1.02], [side * -0.35, 0, 0], [1.1, 0.85, 1]);
+      b.add(pad, ctx.mortal ? pal.accentMetal : TEAM(1, 'painted'));
       if ((ex.has('armor') || ctx.grand) && ctx.lod > 0) {
         const rim = cyl(P.padR * 1.18, P.padR * 1.22, 0.03, 6, true);
         T(rim, [0, sh - 0.02, side * P.shoulderZ * 1.04], [side * -0.35, 0, 0]);
-        b.add(rim, pal.accentMetal);
+        b.add(rim, ctx.mortal ? TEAM(1, 'painted') : pal.accentMetal);
       }
       if (ex.has('spikes')) {
         const sp = cone(P.padR * 0.35, P.padR * 1.3, 4);
@@ -718,7 +789,6 @@ function humanoidTemplate(ctx, profileName) {
   if (ctx.grand && profileName === 'humanoid') {
     P.chestW *= 1.08;
     P.headR *= 1.0;
-    P.padR *= 1.1;
     P.weaponSize = 1.15;
   }
   const parts = [];
@@ -1752,8 +1822,22 @@ export function buildTemplate(unitType) {
     mortal: !unitType.pantheon,
     worker: cls === 'worker',
     grand: cls === 'god' || cls === 'titan',
-    lod: cls === 'god' || cls === 'titan' ? 2 : !unitType.pantheon || cls === 'minion' ? 0 : 1,
+    lod: cls === 'god' || cls === 'titan' ? 2 : cls === 'minion' && unitType.pantheon ? 0 : 1,
   };
+  if (ctx.mortal && !v.body.startsWith('ram')) {
+    // mortal clothing: workers and soldiers wear team tunics; archers and
+    // priests keep their own colors with a team cape / stole / sash
+    const teamTunic = ctx.worker || ctx.ex.has('armor');
+    if (teamTunic) {
+      ctx.tunic = TEAM(0.92);
+      ctx.sleeve = TEAM(0.8);
+      ctx.sleeveTrim = shadeC(pal.secondary, 0.9);
+      ctx.skirt = ctx.worker ? pal.primary : null;
+    } else {
+      ctx.sleeve = shadeC(pal.primary, 0.9);
+      ctx.sleeveTrim = cls === 'support' ? pal.secondary : pal.leather;
+    }
+  }
   switch (v.body) {
     case 'giant': return humanoidTemplate(ctx, 'giant');
     case 'beast_biped': return humanoidTemplate(ctx, 'beast_biped');

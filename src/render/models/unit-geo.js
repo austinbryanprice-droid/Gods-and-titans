@@ -275,6 +275,70 @@ export function sumMorph(...fns) {
  * Collects colored pieces under a transform stack and merges them into one
  * geometry. Morph functions receive positions in the builder's root frame.
  */
+/** Default crease angle: facets of 5- to 8-sided limbs, domes and dodecahedra blend; box edges stay hard. */
+export const SMOOTH_CREASE = 76 * (Math.PI / 180);
+
+const _fa = new THREE.Vector3();
+const _fb = new THREE.Vector3();
+const _fc = new THREE.Vector3();
+
+/**
+ * Normals for a non-indexed position array, item by item: within one range
+ * [start, count, cosCrease], vertices at the same spot average the
+ * (area-weighted) normals of the faces whose direction lies within the crease
+ * angle of their own face; cosCrease >= 1 gives plain facet normals. Ranges
+ * never share normals, so pieces stay distinct. Positions outside every
+ * range get zero normals.
+ */
+export function creasedNormals(pos, ranges) {
+  const out = new Float32Array(pos.length);
+  const key = (i) => `${Math.round(pos[i * 3] * 4096)},${Math.round(pos[i * 3 + 1] * 4096)},${Math.round(pos[i * 3 + 2] * 4096)}`;
+  for (const [start, count, cosC] of ranges) {
+    const nf = count / 3;
+    const fn = new Float32Array(nf * 3); // unnormalized face normals (area weighted)
+    const fu = new Float32Array(nf * 3); // unit face normals
+    for (let f = 0; f < nf; f++) {
+      const i = (start + f * 3) * 3;
+      _fa.set(pos[i], pos[i + 1], pos[i + 2]);
+      _fb.set(pos[i + 3], pos[i + 4], pos[i + 5]).sub(_fa);
+      _fc.set(pos[i + 6], pos[i + 7], pos[i + 8]).sub(_fa);
+      _fb.cross(_fc);
+      fn[f * 3] = _fb.x; fn[f * 3 + 1] = _fb.y; fn[f * 3 + 2] = _fb.z;
+      const l = _fb.length() || 1;
+      fu[f * 3] = _fb.x / l; fu[f * 3 + 1] = _fb.y / l; fu[f * 3 + 2] = _fb.z / l;
+    }
+    if (cosC >= 0.9999) {
+      for (let v = 0; v < count; v++) {
+        const f = Math.floor(v / 3);
+        out.set(fu.subarray(f * 3, f * 3 + 3), (start + v) * 3);
+      }
+      continue;
+    }
+    const groups = new Map();
+    for (let v = 0; v < count; v++) {
+      const k = key(start + v);
+      let g = groups.get(k);
+      if (!g) groups.set(k, (g = []));
+      g.push(v);
+    }
+    for (const g of groups.values()) {
+      for (const v of g) {
+        const f = Math.floor(v / 3);
+        let x = 0; let y = 0; let z = 0;
+        for (const w of g) {
+          const h = Math.floor(w / 3);
+          if (fu[f * 3] * fu[h * 3] + fu[f * 3 + 1] * fu[h * 3 + 1] + fu[f * 3 + 2] * fu[h * 3 + 2] < cosC) continue;
+          x += fn[h * 3]; y += fn[h * 3 + 1]; z += fn[h * 3 + 2];
+        }
+        const l = Math.hypot(x, y, z) || 1;
+        const o = (start + v) * 3;
+        out[o] = x / l; out[o + 1] = y / l; out[o + 2] = z / l;
+      }
+    }
+  }
+  return out;
+}
+
 export class PartBuilder {
   constructor() {
     this.items = [];
@@ -323,8 +387,12 @@ export class PartBuilder {
     if (this.matrix.determinant() < 0) flipWinding(geo);
     const team = color && typeof color === 'object' && 'team' in color ? color.team : 0;
     const c = team ? WHITE : C(color);
-    const mat = MATS[opts.mat] || MATS[team ? color.mat : c.mat] || MATS.cloth;
-    this.items.push({ geo, color: c, team, glow: opts.glow || 0, mat, morph: opts.morph || null });
+    const matKey = MATS[opts.mat] ? opts.mat : team ? color.mat : c.mat;
+    const mat = MATS[matKey] || MATS.cloth;
+    // shading: facets meeting at less than `crease` blend smoothly (rounded
+    // limbs, heads and cloth); gems keep hard facets
+    const crease = opts.crease ?? (opts.flat || matKey === 'gem' ? 0 : SMOOTH_CREASE);
+    this.items.push({ geo, color: c, team, glow: opts.glow || 0, mat, crease, morph: opts.morph || null });
     return geo;
   }
 
@@ -383,7 +451,15 @@ export class PartBuilder {
     }
     const merged = mergeGeometries(geos, false);
     for (const g of geos) g.dispose();
-    merged.computeVertexNormals();
+    const ranges = [];
+    let start = 0;
+    for (const it of this.items) {
+      const n = it.geo.attributes.position.count;
+      ranges.push([start, n, Math.cos(it.crease)]);
+      start += n;
+    }
+    const baseNormals = creasedNormals(merged.attributes.position.array, ranges);
+    merged.setAttribute('normal', new THREE.BufferAttribute(baseNormals, 3));
 
     const names = [];
     for (const it of this.items) if (it.morph) for (const k of Object.keys(it.morph)) if (!names.includes(k)) names.push(k);
@@ -416,6 +492,23 @@ export class PartBuilder {
         off += n;
       }
       merged.morphAttributes.position = attrs;
+      // matching normal deltas, so bent knees / elbows / wings shade right
+      // (only the ranges a morph moves are recomputed)
+      const base = pos.array;
+      merged.morphAttributes.normal = attrs.map((a, mi) => {
+        const moved = new Float32Array(base.length);
+        for (let i = 0; i < base.length; i++) moved[i] = base[i] + a.array[i];
+        const sub = [];
+        this.items.forEach((it, k) => {
+          if (it.morph && it.morph[names[mi]]) sub.push(ranges[k]);
+        });
+        const nn = creasedNormals(moved, sub);
+        const d = new Float32Array(base.length);
+        for (const [s0, n] of sub) for (let i = s0 * 3; i < (s0 + n) * 3; i++) d[i] = nn[i] - baseNormals[i];
+        const na = new THREE.Float32BufferAttribute(d, 3);
+        na.name = a.name;
+        return na;
+      });
       merged.morphTargetsRelative = true;
     }
     merged.computeBoundingBox();

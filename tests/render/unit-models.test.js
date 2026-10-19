@@ -24,7 +24,10 @@ const { UNITS, MORTALS } = await import('../../src/data/index.js');
 const { BODIES, HEADS, HEADGEAR, WEAPONS, OFFHANDS, EXTRAS } = await import('../../src/data/schema.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
 
-const BUDGET = { mortal: 500, god: 1200, titan: 2000, creature: 1200, minion: 1200 };
+// Mortals and gods have rounded, smooth-shaded limbs and layered clothing.
+// Even a full army (~100 mortals on screen) stays near 100k triangles, and the
+// draw-call budget (meshes per unit) is unchanged.
+const BUDGET = { mortal: 1000, god: 1400, titan: 2000, creature: 1200, minion: 1200 };
 const STATES = ['idle', 'move', 'attack', 'gather', 'return', 'build', 'pray', 'cast', 'dead'];
 
 const unitClass = (u) => (MORTALS[u.id] ? 'mortal' : u.class || 'creature');
@@ -279,7 +282,7 @@ test('unit surfaces carry material classes and baked occlusion', () => {
 
 test('unit material: PBR shader patch survives fade clones', () => {
   const mat = getUnitMaterial(PLAYER_COLORS[5], 0);
-  assert.ok(mat.isMeshStandardMaterial && mat.vertexColors && mat.flatShading);
+  assert.ok(mat.isMeshStandardMaterial && mat.vertexColors && !mat.flatShading, 'smooth shaded: geometry carries creased normals');
   const compile = (m) => {
     const shader = {
       uniforms: {},
@@ -367,5 +370,35 @@ test('preload and cache clearing rebuild cleanly', () => {
   for (const [name, attr] of after) {
     assert.notEqual(attr, before.get(name), `${name}: new geometry after the clear`);
     assert.deepEqual([...attr.array], [...before.get(name).array], `${name}: same baked occlusion`);
+  }
+});
+
+test('unit geometry: creased normals round limbs, keep box edges hard, and bend with morphs', async () => {
+  const { creasedNormals, SMOOTH_CREASE, PartBuilder, cyl, box, T } = await import('../../src/render/models/unit-geo.js');
+  const normalsOf = (g, crease) => creasedNormals(g.attributes.position.array, [[0, g.attributes.position.count, Math.cos(crease)]]);
+  // 8-sided limb: the side normals of a corner shared by two faces agree (smooth)
+  const c = cyl(1, 1, 1, 8, true);
+  const n = normalsOf(c, SMOOTH_CREASE);
+  const pos = c.attributes.position.array;
+  const byPos = new Map();
+  for (let i = 0; i < pos.length / 3; i++) {
+    const k = `${pos[i * 3].toFixed(3)},${pos[i * 3 + 1].toFixed(3)},${pos[i * 3 + 2].toFixed(3)}`;
+    (byPos.get(k) || byPos.set(k, []).get(k)).push([n[i * 3], n[i * 3 + 1], n[i * 3 + 2]]);
+  }
+  for (const list of byPos.values()) for (const v of list) assert.ok(Math.abs(v[0] - list[0][0]) + Math.abs(v[2] - list[0][2]) < 1e-5, 'smooth limb');
+  // box: every normal stays axis aligned (90° edges are creases)
+  const bn = normalsOf(box(1, 1, 1), SMOOTH_CREASE);
+  for (let i = 0; i < bn.length; i += 3) assert.ok(Math.max(Math.abs(bn[i]), Math.abs(bn[i + 1]), Math.abs(bn[i + 2])) > 0.999, 'hard box edge');
+  // a morph that turns a piece upside down (half a turn about z) turns its normals with it
+  const b = new PartBuilder();
+  const g = cyl(0.1, 0.1, 0.5, 6);
+  T(g, [0, 0.25, 0]);
+  b.add(g, '#888888', { morph: { flip: (p, out) => out.set(-2 * p.x, -2 * p.y, 0) } });
+  const geo = b.build();
+  assert.equal(geo.morphAttributes.normal.length, geo.morphAttributes.position.length);
+  const N = geo.attributes.normal.array;
+  const dN = geo.morphAttributes.normal[0].array;
+  for (let i = 0; i < N.length; i += 3) {
+    assert.ok(Math.abs(N[i] + dN[i] + N[i]) < 1e-4 && Math.abs(N[i + 1] + dN[i + 1] + N[i + 1]) < 1e-4, 'x / y normals turn with the piece');
   }
 });
