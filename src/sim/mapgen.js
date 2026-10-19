@@ -1,6 +1,6 @@
 // Procedural melee map generator (DESIGN.md 6.7).
 //
-// generateMap({ seed, mapSize, playerCount }) is a pure function. Every client
+// generateMap({ seed, mapSize, playerCount, teams }) is a pure function. Every client
 // regenerates the map from the seed, so terrain, wood, starts, mines and camps
 // must be bit-identical in every browser and in Node. Everything above the
 // RENDER-ONLY marker therefore uses only the seeded RNG, integer math, + - * /
@@ -11,6 +11,12 @@
 // center (180° for 1–2 players, 90° for 3–4) so every start gets the same base
 // pocket, wood line, expansions and routes. Image k of the symmetry maps the
 // top-left corner to: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left.
+//
+// Team games (DESIGN 6.7, startPlan): when a team has two players, the map
+// switches to a team layout: 180° symmetry with two canonical bases along the
+// top edge, so each team shares one side of the map (teammates about 0.46 of
+// the map apart, the nearest enemy about 0.67) and gets a shared expansion
+// between its two bases. A team of three takes three neighbouring corners.
 
 import { RNG, hashSeed } from './rng.js';
 import { MAP_SIZES, TERRAIN, TREE_WOOD, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT } from '../config.js';
@@ -41,6 +47,43 @@ const SQRT_HALF = Math.sqrt(0.5);
 // 2 players: top-left, bottom-right. 3: top-left, bottom-right, top-right.
 // 4: top-left, bottom-left, top-right, bottom-right (players 0,1 west, 2,3 east).
 const START_IMAGES = { 1: [0], 2: [0, 2], 3: [0, 2, 1], 4: [0, 3, 1, 2] };
+
+/**
+ * Where each player starts, from the team of each player (DESIGN 6.7).
+ * Returns { mode, slots }: slots[player] is a symmetry image k in 'corners'
+ * mode, or a team-layout position in 'teams' mode (0 top-left, 1 top-right,
+ * 2 bottom-right, 3 bottom-left; 0/1 and 2/3 share a side of the map).
+ * - 1–2 players, or every team a single player: the classic corners.
+ * - a team of two (2v2, 2v1, 2v1v1): team layout, that team on the top side,
+ *   the other players on the bottom side.
+ * - a team of three (3v1): three neighbouring corners, the last one opposite.
+ * Groups are ordered by size, then by their lowest player index, so the
+ * result depends only on the teams (deterministic in every browser).
+ */
+export function startPlan(playerCount, teams = null) {
+  const pc = Math.min(4, Math.max(1, Math.floor(Number(playerCount)) || 2));
+  const classic = { mode: 'corners', slots: START_IMAGES[pc].slice() };
+  if (pc <= 2 || !Array.isArray(teams)) return classic;
+  const groups = new Map();
+  for (let i = 0; i < pc; i++) {
+    const t = teams[i] ?? i + 1;
+    const key = typeof t === 'number' || typeof t === 'string' ? String(t) : `#${i}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+  const list = [...groups.values()].sort((a, b) => b.length - a.length || a[0] - b[0]);
+  const big = list[0].length;
+  if (big <= 1 || big >= pc) return classic;
+  const order = list.flat();
+  const slots = new Array(pc);
+  if (big === 2) {
+    order.forEach((p, j) => { slots[p] = j; });
+    return { mode: 'teams', slots };
+  }
+  // A team of three: corners around the map in order (top-left, top-right, bottom-right, bottom-left).
+  order.forEach((p, j) => { slots[p] = j; });
+  return { mode: 'corners', slots };
+}
 
 // Neighbour offsets: the first 4 are orthogonal (step cost 10), the last 4 diagonal (14).
 const NX = [1, -1, 0, 0, 1, 1, -1, -1];
@@ -401,16 +444,17 @@ function ringTiles(n, x, y, s) {
 // ---------------------------------------------------------------------------
 // Layout planning
 
-function planLayout(rng, sym, pc) {
+function planLayout(rng, sym, pc, plan) {
   const { n, order, ks } = sym;
   const half = n / 2;
   const sc = n / 96;
-  const used = START_IMAGES[pc];
+  const teamMode = plan.mode === 'teams';
   const edge = n >= 112 ? 8 : 7; // mine distance from the map edge for edge expansions
 
   // Canonical start (top-left). Town center center (cx, cy), footprint top-left (tx, ty).
+  // The team layout moves it along the top edge toward the middle, and adds its mirror.
   const B = Math.round(n * 0.165);
-  const cx = B + rng.int(-1, 1);
+  const cx = (teamMode ? Math.round(n * 0.27) : B) + rng.int(-1, 1);
   const cy = B + rng.int(-1, 1);
   const tx = cx - TC_SIZE / 2;
   const ty = cy - TC_SIZE / 2;
@@ -419,27 +463,41 @@ function planLayout(rng, sym, pc) {
   const west = rng.chance(0.5);
   const smx = west ? tx - START_MINE_GAP - MINE_SIZE : tx - side;
   const smy = west ? ty - side : ty - START_MINE_GAP - MINE_SIZE;
+  const canonBases = [{ tx, ty, mx: smx, my: smy }];
+  if (teamMode) canonBases.push({ tx: n - TC_SIZE - tx, ty, mx: n - MINE_SIZE - smx, my: smy });
+  // Player at a base: corners mode keys by image k, team mode by position (ci + 2 on the far side).
+  const playerAt = (ci, k) => plan.slots.indexOf(teamMode ? ci + (k === 0 ? 0 : 2) : k);
 
   const bases = [];
-  for (const k of ks) {
-    const [btx, bty] = sym.rect(k, tx, ty, TC_SIZE);
-    const [bmx, bmy] = sym.rect(k, smx, smy, MINE_SIZE);
-    const bcx = btx + TC_SIZE / 2;
-    const bcy = bty + TC_SIZE / 2;
-    const [ux, uy] = unit(half - bcx, half - bcy);
-    bases.push({ k, tx: btx, ty: bty, cx: bcx, cy: bcy, ux, uy, mx: bmx, my: bmy, player: used.indexOf(k) });
-  }
+  canonBases.forEach((c, ci) => {
+    for (const k of ks) {
+      const [btx, bty] = sym.rect(k, c.tx, c.ty, TC_SIZE);
+      const [bmx, bmy] = sym.rect(k, c.mx, c.my, MINE_SIZE);
+      const bcx = btx + TC_SIZE / 2;
+      const bcy = bty + TC_SIZE / 2;
+      const [ux, uy] = unit(half - bcx, half - bcy);
+      bases.push({ ci, k, tx: btx, ty: bty, cx: bcx, cy: bcy, ux, uy, mx: bmx, my: bmy, player: playerAt(ci, k) });
+    }
+  });
 
   // Canonical expansions: mine top-left and the "front" direction the open clearing faces.
   const canon = [];
-  const frontFrom = (mx, my, wHome) => {
+  const frontFrom = (mx, my, wHome, hx = cx, hy = cy) => {
     const mcx = mx + MINE_SIZE / 2;
     const mcy = my + MINE_SIZE / 2;
     const [ax, ay] = unit(half - mcx, half - mcy);
-    const [bx, by] = unit(cx - mcx, cy - mcy);
+    const [bx, by] = unit(hx - mcx, hy - mcy);
     return unit(ax + wHome * bx, ay + wHome * by);
   };
-  if (order === 2) {
+  if (teamMode) {
+    // Each base gets a natural on its outer flank, partway down the side edge.
+    const along = Math.round(n * 0.4) + rng.int(-2, 1);
+    canon.push({ mx: edge, my: along - 1, f: frontFrom(edge, along - 1, 0.5), level: 2 });
+    const rmx = n - edge - MINE_SIZE;
+    canon.push({ mx: rmx, my: along - 1, f: frontFrom(rmx, along - 1, 0.5, n - cx, cy), level: 2 });
+    // The team's shared expansion, between its two bases on the top edge.
+    canon.push({ mx: half - 2, my: edge, f: [0, 1], level: 2 });
+  } else if (order === 2) {
     // Natural: on the start's flank, partway along the map edge.
     const along = Math.round(n * 0.43) + rng.int(-2, 2);
     const natWest = rng.chance(0.5);
@@ -497,7 +555,8 @@ function planLayout(rng, sym, pc) {
 
   // Center feature.
   const roll = rng.next();
-  const kind = order === 2 ? (roll < 0.34 ? 'river' : roll < 0.67 ? 'lake' : 'camp') : (roll < 0.5 ? 'lake' : 'camp');
+  // (No river in the team layout: its lakes would sit in the top-right base.)
+  const kind = order === 2 && !teamMode ? (roll < 0.34 ? 'river' : roll < 0.67 ? 'lake' : 'camp') : (roll < 0.5 ? 'lake' : 'camp');
   const center = { kind, x: half, y: half, r: 0, level: n >= 112 ? 3 : 2 };
   const lakes = []; // all images: { x, y, r }
   let river = null;
@@ -584,11 +643,12 @@ function resolveSize(mapSize) {
   return MAP_SIZES[mapSize] || MAP_SIZES.small;
 }
 
-function buildMap(seed, n, pc, attempt) {
-  const order = pc <= 2 ? 2 : 4;
+function buildMap(seed, n, pc, attempt, plan) {
+  const teamMode = plan.mode === 'teams';
+  const order = pc <= 2 || teamMode ? 2 : 4;
   const sym = new Symmetry(n, order);
   const { ks } = sym;
-  const rng = new RNG(hashSeed(`mythicwar-map|${seed}|${n}|${pc}|${attempt}`));
+  const rng = new RNG(hashSeed(`mythicwar-map|${seed}|${n}|${pc}|${attempt}${teamMode ? '|teams' : ''}`));
   const N = n * n;
   const half = n / 2;
   const sc = n / 96;
@@ -619,7 +679,7 @@ function buildMap(seed, n, pc, attempt) {
   const fShape = new Float64Array(N);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) fShape[y * n + x] = fDetail[x * n + y];
 
-  const L = planLayout(rng.fork('layout'), sym, pc);
+  const L = planLayout(rng.fork('layout'), sym, pc, plan);
   const lrng = rng.fork('local');
 
   // ---- Footprints (all images) ----
@@ -801,7 +861,7 @@ function buildMap(seed, n, pc, attempt) {
   const nodes = [];
   for (const b of L.bases) {
     const f = frontTile(n, b.cx, b.cy, FRONT_DIST);
-    nodes.push({ type: 'b', idx: 0, k: b.k, x: f % n, y: Math.floor(f / n) });
+    nodes.push({ type: 'b', idx: b.ci, k: b.k, x: f % n, y: Math.floor(f / n) });
   }
   for (const e of L.expansions) nodes.push({ type: 'e', idx: e.ci, k: e.k, x: Math.floor(e.ex), y: Math.floor(e.ey) });
   const centerNode = { type: 'c', idx: 0, k: 0, x: half, y: half };
@@ -824,7 +884,7 @@ function buildMap(seed, n, pc, attempt) {
     const others = nodes.filter((b) => b !== a).sort((p, q) => dist(a.x, a.y, p.x, p.y) - dist(a.x, a.y, q.x, q.y) || nodes.indexOf(p) - nodes.indexOf(q));
     addLane(a, others[0]);
     addLane(a, others[1]);
-    if (a.type === 'b') addLane(a, L.center.kind === 'lake' ? nodes.find((b) => b.type === 'b' && b.k === 2) : centerNode);
+    if (a.type === 'b') addLane(a, L.center.kind === 'lake' ? nodes.find((b) => b.type === 'b' && b.idx === a.idx && b.k === 2) : centerNode);
   }
   // Lanes keep two tiles away from uncarvable tiles where they can, so they stay wide.
   const hug = new Uint8Array(N);
@@ -1034,7 +1094,7 @@ function buildMap(seed, n, pc, attempt) {
     mines: minesOut,
     camps,
     decor: [],
-    meta: { symmetry: order, center: L.center.kind, lakes: L.lakes.length + (L.center.kind === 'lake' ? 1 : 0), river: !!L.river },
+    meta: { symmetry: order, layout: plan.mode, center: L.center.kind, lakes: L.lakes.length + (L.center.kind === 'lake' ? 1 : 0), river: !!L.river },
   };
   const layout = { bases: L.bases, expansions: L.expansions, center: L.center, road, sc };
   return { map, layout };
@@ -1277,19 +1337,27 @@ export function mapHash(map) {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
+/** generateMap options for a GameSetup: everyone (host, clients, tests) must build the same map. */
+export function mapOptions(setup) {
+  const players = (setup && setup.players) || [];
+  return { seed: setup.seed, mapSize: setup.mapSize, playerCount: players.length, teams: players.map((p) => p.team) };
+}
+
 /**
  * Generate a melee map (DESIGN.md 6.7). Pure and deterministic.
- * @param {{ seed: number|string, mapSize?: 'small'|'medium'|number, playerCount?: number }} opts
+ * `teams` (team of each player, optional) groups teammates (startPlan).
+ * @param {{ seed: number|string, mapSize?: 'small'|'medium'|number, playerCount?: number, teams?: Array<number|string> }} opts
  * @returns {{ width:number, height:number, seed:number|string, terrain:Uint8Array, heights:Float32Array,
  *   wood:Uint16Array, starts:{x:number,y:number}[], mines:{tx:number,ty:number,amount:number}[],
  *   camps:{x:number,y:number,level:number}[], decor:{x:number,y:number,kind:string,rot:number,scale:number}[] }}
  */
-export function generateMap({ seed = 1, mapSize = 'small', playerCount = 2 } = {}) {
+export function generateMap({ seed = 1, mapSize = 'small', playerCount = 2, teams = null } = {}) {
   const n = resolveSize(mapSize);
   const pc = Math.min(4, Math.max(1, Math.floor(Number(playerCount)) || 2));
+  const plan = startPlan(pc, teams);
   let built = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    built = buildMap(seed, n, pc, attempt);
+    built = buildMap(seed, n, pc, attempt, plan);
     built.map.meta.attempt = attempt;
     if (validateMap(built.map).length === 0) break;
   }

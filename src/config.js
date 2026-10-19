@@ -42,6 +42,11 @@ export const CANCEL_BUILD_REFUND = 0.75;
 export const REPAIR_COST = 0.35; // repairing a building from 0 to full health costs this share of its build cost
 export const REPAIR_TIME = 0.75; // ... and takes this share of its build time with one worshipper (helpers add BUILD_HELPER_BONUS each)
 export const AUTO_REPAIR_RANGE = 10; // idle worshippers with Auto-Repair on look this far for a damaged building
+// Team market: teammates send each other gold, wood or faith; the market keeps a cut.
+export const TRADE_RESOURCES = ['gold', 'wood', 'faith'];
+export const TRADE_TAX_PCT = 10; // percent of every transfer the market keeps (rounded up)
+export const TRADE_MIN = 20; // smallest transfer
+export const TRADE_MAX = 100000; // largest single transfer a command may carry
 
 // ---- Gods & titans ----
 export const MAX_GODS = 3; // alive + queued per player

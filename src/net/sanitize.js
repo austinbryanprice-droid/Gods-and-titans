@@ -3,7 +3,7 @@
 // types and typed fields before they reach World.issueCommand. Clients check
 // what a (possibly buggy) host sends before it reaches the ViewState: the
 // GameSetup from `start` and every snapshot. Pure: runs in Node too.
-import { MAX_PLAYERS, PLAYER_COLORS } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX } from '../config.js';
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { sanitizeName } from './protocol.js';
 
@@ -37,6 +37,8 @@ const FIELD = {
   buildingType: (v) => (hasOwn(BUILDINGS, v) ? v : undefined),
   ability: (v) => (hasOwn(ABILITIES, v) ? v : undefined),
   upgrade: (v) => (hasOwn(UPGRADES, v) ? v : undefined),
+  resource: (v) => (TRADE_RESOURCES.includes(v) ? v : undefined),
+  amount: (v) => (Number.isSafeInteger(v) && v > 0 && v <= TRADE_MAX ? v : undefined),
 };
 
 // Command type → { field: [kind, required] } (DESIGN 6.2). Anything else is dropped.
@@ -66,6 +68,7 @@ const COMMANDS = {
   repair: { units: U, target: ['id', true], queue: Q },
   research: { building: ['id', true], upgrade: ['upgrade', true] },
   autoRepair: { on: ['bool', false] },
+  trade: { to: ['index', true], res: ['resource', true], amount: ['amount', true] },
 };
 export const COMMAND_TYPES = Object.keys(COMMANDS);
 export const COMMAND_SPECS = COMMANDS; // read-only: fingerprinted into the protocol version (wire-version.js)

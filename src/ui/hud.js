@@ -1,5 +1,6 @@
 // In-game HUD (DESIGN 9): a Warcraft III–style HTML overlay in #hud-root.
-//   top bar      gold, wood, faith (+rate), population, tier, clock, ping, menu
+//   top bar      gold, wood, faith (+rate), population, tier, clock, ping, menu, market
+//   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
 //   bottom       minimap | selection panel | 4×3 command card (+ tooltip)
@@ -16,6 +17,7 @@ import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
+import { MarketView, marketPartners } from './hud-market.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 
 const CARD_REFRESH_MS = 120;
@@ -64,6 +66,12 @@ export class Hud {
     this.menuBtn.type = 'button';
     this.menuBtn.tabIndex = -1;
     this.menuBtn.addEventListener('click', () => this.overlays.toggleMenu());
+    this.marketBtn = el('button', 'hud-menu-btn hud-market-btn', el('span', 'hud-menu-ico', '⚖️'), el('span', null, 'Market'));
+    this.marketBtn.type = 'button';
+    this.marketBtn.tabIndex = -1;
+    this.marketBtn.title = 'Market — send gold, wood or faith to a teammate';
+    this.marketBtn.hidden = true;
+    this.marketBtn.addEventListener('click', () => this.toggleMarket());
     this.clock = el('span', 'hud-clock');
     this.ping = el('span', 'hud-ping');
     const res = (cls, icon, title) => {
@@ -80,7 +88,7 @@ export class Hud {
     this.rPop = res('is-pop', '👥', 'Population — build Houses to raise the limit');
     this.rTier = res('is-tier', '🏛️', 'Settlement tier');
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.ping),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.ping),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -154,11 +162,13 @@ export class Hud {
       el('div', 'hud-bottom-info', this.infoRoot),
       el('div', 'hud-bottom-card', this.cardGrid));
 
+    this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
+
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
-    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip]) {
+    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root]) {
       p.addEventListener('mousedown', (e) => {
         if (e.target !== this.chatInput) e.preventDefault();
       });
@@ -258,6 +268,7 @@ export class Hud {
     if (now - this.lastIdle >= IDLE_REFRESH_MS) {
       this.lastIdle = now;
       this.updateIdle();
+      this.updateMarket();
     }
 
     this.infoView.update();
@@ -373,6 +384,21 @@ export class Hud {
       if (te.b.title !== title) te.b.title = title;
     }
     setHidden(this.tasks, tasks.total === 0);
+  }
+
+  /** The Market button shows only while there is a living teammate to trade with. */
+  updateMarket() {
+    const me = this.vs.me;
+    const canTrade = !!me && !me.defeated && marketPartners(this.vs).length > 0;
+    setHidden(this.marketBtn, !canTrade);
+    if (!canTrade && this.market.isOpen) this.market.close();
+    setClass(this.marketBtn, 'is-on', this.market.isOpen);
+    this.market.update();
+  }
+
+  toggleMarket() {
+    this.market.toggle();
+    this.updateMarket();
   }
 
   /** Select the own worshippers on a task (add to the selection with shift). */

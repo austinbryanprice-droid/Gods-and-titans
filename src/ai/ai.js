@@ -13,6 +13,7 @@ import { planProduction, planResearch } from './production.js';
 import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
+import { runAid } from './team.js';
 
 const DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
 
@@ -116,14 +117,15 @@ export class AIPlayer {
     planBuildings(this, s, wants);
     planProduction(this, s, wants);
     planResearch(this, s, wants);
-    this.spend(s, wants);
+    const left = this.spend(s, wants);
+    runAid(this, left);
     this.updateRallies(s);
     lap('plan');
     runMicro(this, s);
     lap('micro');
   }
 
-  /** Buy wants in priority order; unaffordable high-priority wants reserve their cost. */
+  /** Buy wants in priority order; unaffordable high-priority wants reserve their cost. Returns what is left. */
   spend(s, wants) {
     const p = s.p;
     const budget = { gold: p.gold, wood: p.wood, faith: p.faith };
@@ -156,6 +158,7 @@ export class AIPlayer {
       }
       if (this.debug) this.debug.push(`${w.label}:${w.prio}:${status}`);
     }
+    return budget;
   }
 
   /** Send a command to the world (remembering which units were ordered when). */

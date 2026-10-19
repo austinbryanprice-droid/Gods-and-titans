@@ -1271,3 +1271,68 @@
 @media (prefers-reduced-motion: reduce) {
   .hi-portrait-icon, .hc-auto, .hud-res.is-pop.is-capped .hud-res-v { animation: none; }
 }
+
+/* ------------------------------------------------------------ team market
+   Panel under the top bar, opened by the Market button: teammate picker,
+   resource choice, amount with quick-add buttons, what arrives after the cut. */
+
+.hud-market-btn[hidden] { display: none; }
+.hud-market-btn.is-on { color: #fff3cf; box-shadow: inset 0 0 0 1px #ffe39a, inset 0 0 0.8em rgba(255, 200, 100, 0.45); }
+
+.hud-market {
+  position: absolute;
+  top: 3.1em;
+  left: 0.6em;
+  z-index: 6;
+  width: 22em;
+  max-width: 44vw;
+  padding: 0.55em 0.7em 0.65em;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  animation: hud-msg-in 0.25s ease-out;
+}
+.hud-market[hidden] { display: none; }
+.hud-market-head { display: flex; align-items: center; gap: 0.5em; }
+.hud-market-title { flex: 1; font: 600 0.9em/1.2 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold-hi); }
+.hud-market-close {
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid rgba(196, 146, 72, 0.45);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--mw-ink-dim);
+}
+.hud-market-close:hover { color: #fff; border-color: var(--mw-gold); }
+.hud-market-label { font: 600 0.7em/1 var(--mw-font-ui); letter-spacing: 0.16em; text-transform: uppercase; color: var(--mw-ink-mute); margin-top: 0.25em; }
+.hud-market-partners, .hud-market-res, .hud-market-steps { display: flex; flex-wrap: wrap; gap: 0.3em; }
+.hud-market-partners { flex-direction: column; }
+.hud-market button:not(.hud-market-close) {
+  border: 1px solid #000;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(255, 236, 180, 0.08), transparent 50%), linear-gradient(180deg, #33281a, #17110a);
+  box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.35), 0 1px 2px rgba(0, 0, 0, 0.8);
+  color: #efdcae;
+}
+.hud-market button:not(.hud-market-close):hover:not(:disabled) { box-shadow: inset 0 0 0 1px #ffe39a, 0 0 0.6em rgba(227, 184, 79, 0.3); color: #fff3cf; }
+.hud-market button.is-on { box-shadow: inset 0 0 0 2px #ffe39a, inset 0 0 0.9em rgba(255, 200, 100, 0.35); color: #fff3cf; }
+.hud-market-partner { display: grid; grid-template-columns: 0.9em minmax(0, 1fr); column-gap: 0.45em; align-items: center; padding: 0.3em 0.5em; text-align: left; }
+.hud-market-swatch { width: 0.9em; height: 0.9em; border-radius: 50%; box-shadow: 0 0 0 1px #000, 0 0 0 2px rgba(233, 196, 106, 0.5); grid-row: span 2; }
+.hud-market-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-market-stock { font-size: 0.78em; color: var(--mw-ink-dim); white-space: pre; font-variant-numeric: tabular-nums; }
+.hud-market-empty { font-size: 0.85em; color: var(--mw-ink-mute); }
+.hud-market-resbtn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.15em; padding: 0.3em 0.2em; font-size: 0.85em; }
+.hud-market-have { font-size: 0.85em; color: var(--mw-ink-dim); font-variant-numeric: tabular-nums; }
+.hud-market-amountrow { display: flex; align-items: center; gap: 0.5em; }
+.hud-market-amount { min-width: 3.6em; padding: 0.25em 0.4em; text-align: right; font-size: 1.15em; font-variant-numeric: tabular-nums; background: rgba(0, 0, 0, 0.45); border-radius: 2px; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(233, 196, 106, 0.25); }
+.hud-market-step { padding: 0.25em 0.45em; font-size: 0.8em; font-variant-numeric: tabular-nums; }
+.hud-market-summary { font-size: 0.85em; line-height: 1.35; color: #cfe8b0; min-height: 2.3em; }
+.hud-market-summary.is-bad { color: #f0a58a; }
+.hud-market-send { padding: 0.4em; font: 600 0.9em/1 var(--mw-font-display); letter-spacing: 0.16em; text-transform: uppercase; }
+.hud-market-send:disabled { opacity: 0.45; cursor: default; }
+.hud-market-send[hidden] { display: none; }
+.hud-market-note { font-size: 0.72em; color: var(--mw-ink-mute); }

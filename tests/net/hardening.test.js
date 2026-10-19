@@ -186,6 +186,11 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
   const many = sanitizeCommand({ type: 'stop', units: Array.from({ length: 10000 }, (_, i) => i + 1) }, b);
   assert.equal(many.units.length, 256, 'unit lists are capped');
   assert.equal(sanitizeCommand(null, b), null);
+  // Trades: a known resource, a positive whole amount and a player index, or nothing.
+  for (const bad of [{ to: 1, res: 'mana', amount: 50 }, { to: 1, res: 'gold', amount: -5 }, { to: 1, res: 'gold', amount: 2.5 },
+    { to: -1, res: 'gold', amount: 50 }, { res: 'gold', amount: 50 }, { to: 1, res: 'gold', amount: 1e9 }, { to: 1, res: '__proto__', amount: 50 }]) {
+    assert.equal(sanitizeCommand({ type: 'trade', ...bad }, b), null, JSON.stringify(bad));
+  }
   assert.equal(sanitizeCommand([{ type: 'stop' }], b), null);
   assert.equal(sanitizeCommand('stop', b), null);
   // Every whitelisted type accepts a well-formed command.
@@ -196,6 +201,7 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     cancelTrain: { building: 2, index: 0 }, upgradeTier: { building: 2 }, cancelBuild: { building: 2 }, rally: { building: 2, x: 3, y: 3 },
     stop: { units: [1] }, hold: { units: [1] }, cast: { unit: 1, ability: 'greek_zeus_thunderbolt', target: 5 }, surrender: {},
     repair: { units: [1], target: 2 }, research: { building: 2, upgrade: 'house_stone_walls' }, autoRepair: { on: true },
+    trade: { to: 1, res: 'gold', amount: 100 },
   };
   assert.deepEqual(Object.keys(good).sort(), [...COMMAND_TYPES].sort());
   for (const [type, f] of Object.entries(good)) assert.deepEqual(sanitizeCommand({ type, ...f }, b), { type, ...f }, type);

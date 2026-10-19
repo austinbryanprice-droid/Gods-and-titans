@@ -121,7 +121,7 @@ export class HostSession extends SessionBase {
     this.autoTick = autoTick;
     this.world = createWorld(setup);
     this.mapData = this.world.mapData
-      || mapgen.generateMap({ seed: setup.seed, mapSize: setup.mapSize, playerCount: setup.players.length });
+      || mapgen.generateMap(mapgen.mapOptions(setup));
     this.viewState = new ViewState({ setup, mapData: this.mapData, myIndex, interpDelayMs: viewDelayMs });
     this.pingMs = 0;
     this.ais = new Map();
@@ -455,7 +455,7 @@ export class ClientSession extends SessionBase {
     this.isHost = false;
     this.conn = conn;
     this.pingIntervalMs = pingIntervalMs;
-    this.mapData = mapData || generateMap({ seed: setup.seed, mapSize: setup.mapSize, playerCount: setup.players.length });
+    this.mapData = mapData || generateMap(mapgen.mapOptions(setup));
     this.mapMismatch = false;
     if (setup.mapHash && typeof mapgen.mapHash === 'function') {
       const mine = mapgen.mapHash(this.mapData);

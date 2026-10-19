@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { generateMap, mapHash, validateMap, START_MINE_GAP, CAMP_MIN_START_DIST } from '../../src/sim/mapgen.js';
+import { generateMap, mapHash, validateMap, startPlan, mapOptions, START_MINE_GAP, CAMP_MIN_START_DIST } from '../../src/sim/mapgen.js';
 import { TERRAIN, TREE_WOOD, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT, MAP_SIZES } from '../../src/config.js';
 
 const { GRASS, DIRT, WATER, FOREST, SAND } = TERRAIN;
@@ -110,6 +110,107 @@ test('start positions follow the corner order for each player count', () => {
     assert.deepEqual(map(1, size, 3).starts.map(corner), ['LT', 'RB', 'RT']);
     assert.deepEqual(map(1, size, 4).starts.map(corner), ['LT', 'LB', 'RT', 'RB']);
   }
+});
+
+// ---- Team spawns: teammates share a side of the map ----
+
+const TEAM_LAYOUTS = {
+  '2v2': [1, 1, 2, 2],
+  '2v2 interleaved': [1, 2, 1, 2],
+  '2v2 swapped': [2, 1, 1, 2],
+  '2v1': [1, 2, 1],
+  '1v2': [3, 1, 1],
+  '2v1v1': [1, 2, 3, 1],
+  '3v1': [1, 2, 1, 1],
+  'co-op 1 human vs 3 AI': [1, 2, 2, 2],
+};
+const teamMap = (seed, size, teams) => generateMap({ seed, mapSize: size, playerCount: teams.length, teams });
+const centerOf = (s) => [s.x + 2, s.y + 2];
+const between = (a, b) => Math.hypot(centerOf(a)[0] - centerOf(b)[0], centerOf(a)[1] - centerOf(b)[1]);
+
+test('startPlan: teams of two share a side, teams of three take neighbouring corners, otherwise the classic corners', () => {
+  assert.deepEqual(startPlan(2, [1, 2]), { mode: 'corners', slots: [0, 2] });
+  assert.deepEqual(startPlan(4, [1, 2, 3, 4]), { mode: 'corners', slots: [0, 3, 1, 2] }, 'free-for-all keeps the classic corners');
+  assert.deepEqual(startPlan(4), { mode: 'corners', slots: [0, 3, 1, 2] });
+  assert.deepEqual(startPlan(4, [1, 1, 2, 2]), { mode: 'teams', slots: [0, 1, 2, 3] });
+  assert.deepEqual(startPlan(4, [1, 2, 1, 2]), { mode: 'teams', slots: [0, 2, 1, 3] });
+  assert.deepEqual(startPlan(3, [2, 1, 1]), { mode: 'teams', slots: [2, 0, 1] }, 'the pair goes first, by size');
+  assert.deepEqual(startPlan(4, [1, 2, 3, 1]), { mode: 'teams', slots: [0, 2, 3, 1] });
+  assert.deepEqual(startPlan(4, [2, 1, 2, 2]), { mode: 'corners', slots: [0, 3, 1, 2] }, '3v1: trio on three neighbouring corners');
+  assert.deepEqual(startPlan(4, [1, 1, 1, 1]), { mode: 'corners', slots: [0, 3, 1, 2] }, 'one team only: classic');
+  // Same teams in any order of team numbers give the same plan.
+  assert.deepEqual(startPlan(4, [7, 7, 3, 3]), startPlan(4, [1, 1, 2, 2]));
+});
+
+test('team games: teammates start closer to each other than to any enemy, on every layout and size', () => {
+  for (const size of SIZES) {
+    for (const [name, teams] of Object.entries(TEAM_LAYOUTS)) {
+      for (const seed of [1, 42, 'mythic']) {
+        const m = teamMap(seed, size, teams);
+        const where = `${size} ${name} seed ${seed}`;
+        assert.deepEqual(validateMap(m), [], where);
+        assert.equal(m.starts.length, teams.length, where);
+        let mate = Infinity;
+        let foe = Infinity;
+        m.starts.forEach((a, i) => m.starts.forEach((b, j) => {
+          if (i === j) return;
+          if (teams[i] === teams[j]) mate = Math.min(mate, between(a, b));
+          else if (teams.filter((t) => t === teams[i]).length > 1) foe = Math.min(foe, between(a, b));
+        }));
+        if (Math.max(...teams.map((t) => teams.filter((u) => u === t).length)) === 2) {
+          // Every player in a pair: partner clearly nearer than the nearest enemy.
+          assert.ok(mate * 1.3 < foe, `${where}: teammate ${mate.toFixed(1)} vs enemy ${foe.toFixed(1)}`);
+          assert.equal(m.meta.layout, 'teams', where);
+        } else {
+          assert.ok(mate <= foe + 1e-9, `${where}: teammates no farther than enemies`);
+        }
+      }
+    }
+  }
+});
+
+test('team layout: the two teams face each other across the map (top side vs bottom side)', () => {
+  for (const size of SIZES) {
+    const n = MAP_SIZES[size];
+    const side = (s) => (s.y + 2 < n / 2 ? 'T' : 'B');
+    assert.deepEqual(teamMap(5, size, [1, 1, 2, 2]).starts.map(side), ['T', 'T', 'B', 'B']);
+    assert.deepEqual(teamMap(5, size, [1, 2, 1, 2]).starts.map(side), ['T', 'B', 'T', 'B']);
+    assert.deepEqual(teamMap(5, size, [2, 1, 2]).starts.map(side), ['T', 'B', 'T']);
+  }
+});
+
+test('team layout is deterministic, 180° symmetric (fair between the teams) and the hash covers the teams', () => {
+  const teams = [1, 2, 1, 2];
+  const a = teamMap(777, 'medium', teams);
+  const b = generateMap(mapOptions({ seed: 777, mapSize: 'medium', players: teams.map((team) => ({ team })) }));
+  assert.equal(mapHash(a), mapHash(b));
+  assert.deepEqual(a.starts, b.starts);
+  assert.deepEqual(a.decor, b.decor);
+  assert.notEqual(mapHash(a), mapHash(generateMap({ seed: 777, mapSize: 'medium', playerCount: 4 })), 'FFA and team maps differ');
+  for (const size of SIZES) {
+    const m = teamMap(3, size, [1, 1, 2, 2]);
+    const n = m.width;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) assert.equal(m.terrain[(n - 1 - y) * n + (n - 1 - x)], m.terrain[y * n + x]);
+    // Each team's two bases are the 180° images of the other team's.
+    const [p0, p1, p2, p3] = m.starts;
+    assert.deepEqual([p2.x, p2.y], [n - 4 - p0.x, n - 4 - p0.y]);
+    assert.deepEqual([p3.x, p3.y], [n - 4 - p1.x, n - 4 - p1.y]);
+  }
+});
+
+test('a World built from a team setup puts each town center on its grouped start', async () => {
+  const { createWorld } = await import('../../src/sim/world.js');
+  const players = [1, 2, 1, 2].map((team, i) => ({ index: i, name: `P${i}`, team, pantheon: 'greek', color: '#d63a3a', kind: 'ai', difficulty: 'normal' }));
+  const setup = { version: '0.1.0', seed: 99, mapSize: 'small', players };
+  const w = createWorld(setup);
+  const m = generateMap(mapOptions(setup));
+  const tcs = w.buildingList.filter((b) => b.type === 'town_center');
+  for (let i = 0; i < 4; i++) {
+    const tc = tcs.find((b) => b.owner === i);
+    assert.deepEqual([tc.tx, tc.ty], [m.starts[i].x, m.starts[i].y]);
+  }
+  const d = (i, j) => Math.hypot(tcs[i].x - tcs[j].x, tcs[i].y - tcs[j].y);
+  assert.ok(d(0, 2) < d(0, 1) && d(0, 2) < d(0, 3), 'player 0 is next to its teammate, player 2');
 });
 
 test('start mines sit exactly 3 tiles from the town center, facing away from the center', () => {
