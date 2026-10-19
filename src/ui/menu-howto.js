@@ -22,7 +22,9 @@ const HOTKEYS = [
     [kbd('M'), 'Move'],
     [kbd('S'), 'Stop'],
     [kbd('H'), 'Hold position'],
-    [keys('Q', 'W', 'E', 'R'), 'God and creature abilities'],
+    [keys('Q', 'W', 'E', 'R'), 'God and creature abilities (they also cast themselves by default)'],
+    [kbd('Right-click'), 'On an ability button: autocast on or off (manual) for that ability'],
+    [kbd('`'), 'Every ability of the selected units to manual, or back to autocast'],
     [kbd('Hotkey'), 'While aiming or placing, another command hotkey replaces the pending order'],
   ]],
   ['Worshippers', [

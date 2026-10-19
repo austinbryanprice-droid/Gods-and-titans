@@ -344,6 +344,7 @@ test('reveal grants team vision in the snapshot; resource grants resources', () 
     ab('t_rev', [{ type: 'reveal', radius: 8, duration: 2 }], { range: 30 }),
     ab('t_res', [{ type: 'resource', gold: 50, wood: 20, faith: 30 }], { key: 'W', target: 'none', ai: { use: 'economy' } }),
   ]);
+  w.issueCommand(0, { type: 'autocast', units: [c.id], on: false }); // manual: it would cast itself on its own
   cast(w, c, 't_rev', { x: 40, y: 40 });
   const snap = w.getSnapshot();
   assert.equal(snap.reveals.length, 1);

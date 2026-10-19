@@ -52,6 +52,8 @@ function unitView(u) {
   for (const k in u.cooldowns) cd[k] = r1(u.cooldowns[k]);
   v.cd = cd;
   v.fx = statusCodes(u);
+  // abilities set to manual (bit i = def.abilities[i]); omitted when all autocast
+  if (u.manualMask && u.owner >= 0) v.mc = u.manualMask;
   if (u.summoned && u.expire > 0) v.ex = r1(u.expire);
   if (u.def.class === 'worker') {
     const b = pendingBuild(u);

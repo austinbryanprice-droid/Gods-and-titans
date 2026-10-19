@@ -894,6 +894,37 @@ export class InputController {
     }
   }
 
+  /** Right-click on an ability button: autocast on / manual for the selected units of that type. */
+  toggleAutocast(b) {
+    const t = b && b.toggle;
+    if (!t || t.kind !== 'autocast' || this.disposed) return;
+    const units = this.ownUnits().filter((id) => {
+      const e = this.vs.entities.get(id);
+      return e && e.t === t.unitType;
+    });
+    if (!units.length) return;
+    sfx.play('click');
+    this.command({ type: 'autocast', units, ability: t.ability, on: !!t.on });
+  }
+
+  /** ` key: every ability of the selected units to manual, or back to autocast when all are manual. */
+  toggleAllAutocast() {
+    const units = [];
+    let anyOn = false;
+    for (const id of this.ownUnits()) {
+      const e = this.vs.entities.get(id);
+      const def = e && UNITS[e.t];
+      if (!def || def.class === 'worker' || !def.abilities.length) continue;
+      units.push(id);
+      const all = (1 << def.abilities.length) - 1;
+      if (((e.mc || 0) & all) !== all) anyOn = true;
+    }
+    if (!units.length) return;
+    sfx.play('click');
+    this.command({ type: 'autocast', units, on: !anyOn });
+    this.hud.message(anyOn ? 'Abilities set to manual.' : 'Abilities set to autocast.', 'info');
+  }
+
   // ---------------------------------------------------------------- keyboard
 
   onKeyDown(e) {
@@ -992,6 +1023,11 @@ export class InputController {
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts alone
+    if (key === '`' || e.code === 'Backquote') {
+      e.preventDefault();
+      if (!rep) this.toggleAllAutocast();
+      return;
+    }
     if (key === 'Escape') {
       e.preventDefault();
       if (rep) return;

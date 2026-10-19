@@ -1,16 +1,71 @@
 // Abilities: cast orders (walk into range, wind-up, cooldown), every effect
 // type from DESIGN 4.4 (with delays and god level scaling), ground fields,
-// reveals, and autocast for creatures and priests.
+// reveals, and autocast: every fighting unit's abilities cast themselves by
+// default; a player can set any ability to manual per unit.
 import { DT, ABILITY_LEVEL_SCALE, TICK_RATE } from '../config.js';
 import { getUnitType } from '../data/index.js';
 import { dealDamage, heal, acquisitionRange } from './combat.js';
 import { addStatus } from './status.js';
 import { moveToPoint, moveToEntity, stopMove } from './movement.js';
 import { hyp, distToEntity, round2 } from './common.js';
+import { chooseCast } from './cast-choice.js';
 
 const HARMFUL = new Set(['damage', 'stun', 'slow', 'dot', 'chain', 'line', 'knockback', 'pull', 'dash']);
 const FIELD_TICK = 0.5;
 const DASH_SPEED = 20;
+
+/**
+ * Is an ability on autocast when its unit spawns? Every fighting unit's
+ * abilities are; a worshipper's only when the data marks them autocast.
+ */
+export function autocastByDefault(def, ab) {
+  return def.class !== 'worker' || !!ab.autocast;
+}
+
+/** Manual-cast bit mask a new unit of this type starts with (bit i = abilities[i] is manual). */
+export function defaultManualMask(def, owner = 0) {
+  const list = def.abilities || [];
+  let mask = 0;
+  for (let i = 0; i < list.length && i < 31; i++) {
+    // Neutral creeps keep their designed behaviour: only data-autocast abilities.
+    const auto = owner < 0 ? !!list[i].autocast : autocastByDefault(def, list[i]);
+    if (!auto) mask |= 1 << i;
+  }
+  return mask;
+}
+
+/** Rebuild u.autocast (the abilities tryAutocast looks at) from u.manualMask. */
+export function refreshAutocast(u) {
+  const list = u.def.abilities || [];
+  u.autocast = list.filter((ab, i) => i < 31 && !(u.manualMask & (1 << i)));
+}
+
+/** Is this ability of the unit on autocast? */
+export function isAutocastOn(u, ab) {
+  const i = u.def.abilities.indexOf(ab);
+  return i >= 0 && i < 31 && !(u.manualMask & (1 << i));
+}
+
+/**
+ * Turn autocast on or off for one ability of a unit (abilityId) or for all of
+ * them (abilityId undefined). Returns true when anything changed.
+ */
+export function setAutocast(u, abilityId, on) {
+  const list = u.def.abilities || [];
+  let mask = u.manualMask;
+  for (let i = 0; i < list.length && i < 31; i++) {
+    if (abilityId !== undefined && list[i].id !== abilityId) continue;
+    if (on) mask &= ~(1 << i);
+    else mask |= 1 << i;
+  }
+  if (mask === u.manualMask) return false;
+  u.manualMask = mask;
+  refreshAutocast(u);
+  // A cast autocast had already started for an ability now set to manual is dropped.
+  const o = u.order;
+  if (!on && o && o.type === 'cast' && o.auto && !isAutocastOn(u, findAbility(u, o.ability))) o.phase = 'drop';
+  return true;
+}
 
 export function findAbility(u, abilityId) {
   const list = u.def.abilities;
@@ -66,7 +121,7 @@ export function resolveCastTarget(world, u, ab, x, y, targetId) {
  */
 export function updateCastOrder(world, u, o) {
   const ab = findAbility(u, o.ability);
-  if (!ab) return true;
+  if (!ab || o.phase === 'drop') return true;
   const t = o.target ? world.entities.get(o.target) : null;
   if (o.target && (!t || t.dead)) return true;
   if (u.stunned) {
@@ -637,19 +692,34 @@ export function pickAutocastTarget(world, u, ab) {
 }
 
 /**
- * Try autocast abilities. When one fires, the current order is kept and
- * resumed after the cast. Returns true if a cast order was started.
+ * Try autocast abilities. Light always-on spells (data autocast: priests'
+ * heals, creatures' strikes) use the quick picker above; every other ability
+ * on autocast goes through the cast scoring the AI uses (cast-choice.js), so
+ * big spells wait for a worthwhile target. When one fires, the current order
+ * is kept and resumed after the cast. Returns true if a cast order was started.
  */
 export function tryAutocast(world, u) {
   const list = u.autocast;
+  let scored = null;
   for (let i = 0; i < list.length; i++) {
     const ab = list[i];
     if (cooldownLeft(u, ab) > 0 || !isUnlocked(u, ab)) continue;
+    if (!ab.autocast) {
+      (scored || (scored = [])).push(ab);
+      continue;
+    }
     const tgt = pickAutocastTarget(world, u, ab);
-    if (!tgt) continue;
-    if (u.order) u.orders.unshift(u.order);
-    u.order = { type: 'cast', ability: ab.id, x: tgt.x, y: tgt.y, target: tgt.target ? tgt.target.id : 0, phase: 'approach', timer: 0, auto: true };
-    return true;
+    if (tgt) return startAutocast(u, ab, tgt);
+  }
+  if (scored) {
+    const best = chooseCast(world, u, { abilities: scored });
+    if (best) return startAutocast(u, best.ab, best);
   }
   return false;
+}
+
+function startAutocast(u, ab, tgt) {
+  if (u.order) u.orders.unshift(u.order);
+  u.order = { type: 'cast', ability: ab.id, x: tgt.x, y: tgt.y, target: tgt.target ? tgt.target.id : 0, phase: 'approach', timer: 0, auto: true };
+  return true;
 }
