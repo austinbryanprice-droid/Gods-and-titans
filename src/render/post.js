@@ -45,11 +45,11 @@ export const DEFAULT_LOOK = {
   aoRadius: 0.75, // world units
   aoBias: 0.025,
   aoFloor: -1e6, // world height below which AO fades out (the water surface)
-  contrast: 1.04,
-  saturation: 1.0,
-  shadowTint: [0.98, 1.0, 1.03], // multiplied in, weighted to the dark end
-  highlightTint: [1.02, 1.0, 0.97], // … and the bright end
-  vignette: 0.2,
+  contrast: 1.1,
+  saturation: 1.04,
+  shadowTint: [0.93, 0.98, 1.08], // multiplied in, weighted to the dark end
+  highlightTint: [1.07, 1.01, 0.9], // … and the bright end
+  vignette: 0.34,
   sharpen: 0.35, // only when the scene renders below the canvas resolution
 };
 
@@ -284,6 +284,10 @@ void main() {
   // grade in a perceptual-ish space
   float l = luma( col );
   col = mix( vec3( l ), col, uSaturation );
+  // studio grade: tame acid lime greens toward olive and push the rest of the
+  // palette apart, so foliage reads painterly instead of toy-like
+  float lime = clamp( ( col.g - max( col.r, col.b ) ) / max( col.g, 1e-3 ), 0.0, 1.0 );
+  col = mix( col, vec3( col.g * 0.86, col.g * 0.9, col.g * 0.5 ) * 0.5 + col * 0.5, lime * 0.55 );
   float w = smoothstep( 0.0, 0.6, l );
   col *= mix( uShadowTint, uHighlightTint, w );
   col = max( col, vec3( 0.0 ) );

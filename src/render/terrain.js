@@ -450,8 +450,15 @@ float tRough = dot( tb, vec4( L0.w, L1.w, L2.w, L3.w ) ) + tbR * LR.w;
 // macro variation: broad brightness and hue drift hides what repetition is left
 // (the layers carry little low-frequency content of their own for that reason)
 float tMacro = tnA.x * 0.6 + tnB.x * 0.25 + tnB.w * 0.15;
-tAlbedo *= 0.85 + 0.3 * tMacro;
+tAlbedo *= 0.8 + 0.4 * tMacro;
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.08, 1.03, 0.88 ), smoothstep( 0.45, 0.85, tnA.y ) * 0.5 );
+// painted meadow: on grass only, broad russet / olive autumn drifts and darker
+// teal moss hollows break the single green into a hand-painted patchwork
+float tGreen = clamp( ( tAlbedo.g - max( tAlbedo.r, tAlbedo.b ) ) * 9.0, 0.0, 1.0 );
+float tAut = smoothstep( 0.38, 0.74, tnA.w * 0.7 + tnB.y * 0.3 );
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.42, 0.98, 0.62 ), tAut * tGreen * 0.75 );
+float tMoss = smoothstep( 0.5, 0.82, tnA.z * 0.75 + tnB.w * 0.25 );
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.74, 0.9, 0.86 ), tMoss * tGreen * 0.6 );
 // shore: wet (darker, glossier) just above the water line, which laps a little
 float tAbove = vTerrainW.y - uWaterLevel;
 float tLap = 0.012 * sin( uTTime * 1.3 + tp.x * 0.7 + tp.y * 0.5 );

@@ -70,7 +70,7 @@ vec3 fowApply( vec3 c, vec2 p ) {
   if ( shroud > 0.0 ) {
     vec2 q = p * 0.045 + vec2( uFowTime * 0.006, uFowTime * 0.0035 );
     float m = texture2D( uFowNoise, q ).g * 0.6 + texture2D( uFowNoise, q * 2.7 + 0.3 ).r * 0.4;
-    vec3 mist = vec3( 0.075, 0.085, 0.1 ) * ( 0.35 + 0.9 * smoothstep( 0.3, 0.8, m ) );
+    vec3 mist = vec3( 0.1, 0.092, 0.085 ) * ( 0.35 + 0.9 * smoothstep( 0.3, 0.8, m ) );
     vec2 d = min( p, uFowSize.xy - p );
     mist *= smoothstep( -0.4, 1.6, min( d.x, d.y ) );
     c += pow( mist, vec3( uFowPow ) ) * shroud;
