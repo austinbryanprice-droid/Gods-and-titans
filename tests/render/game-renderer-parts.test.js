@@ -264,6 +264,20 @@ test('terrain: water only over low tiles at the water level, a dark border, and 
   t2.dispose();
 });
 
+test('terrain: a building wears its yard to dirt on grass only, once', () => {
+  const map = hillyMap();
+  map.terrain.fill(TERRAIN.GRASS);
+  const t = createTerrain(map);
+  assert.equal(t.paintYard(2, 2, 2), true);
+  assert.equal(t.paintYard(2, 2, 2), false, 'already dirt');
+  t.dispose();
+  const wood = hillyMap();
+  wood.terrain.fill(TERRAIN.FOREST);
+  const t2 = createTerrain(wood);
+  assert.equal(t2.paintYard(2, 2, 2), false, 'forest keeps its floor');
+  t2.dispose();
+});
+
 test('terrain: the water depth at every vertex is the depth of the ground below it', () => {
   const map = hillyMap();
   const t = createTerrain(map);
