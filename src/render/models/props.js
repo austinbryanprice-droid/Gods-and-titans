@@ -24,7 +24,9 @@ import { TERRAIN } from '../../config.js';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import { heightAt } from '../height.js';
 import { patchWorldMaterial } from '../shading.js';
-import { patchFoliageMaterial, patchStoneMaterial, foliageDepthMaterial } from './foliage-shader.js';
+import {
+  patchFoliageMaterial, patchStoneMaterial, foliageDepthMaterial, PINE_TIERS, PINE_TOP, PINE_PRESETS, pineLayout,
+} from './foliage-shader.js';
 
 // Forest chunk size (tiles). Every variant in a chunk is one InstancedMesh,
 // culled as a whole in the main and the shadow pass: at close and default zoom
@@ -283,33 +285,45 @@ function pineTier(R, h, n, rot, rng, droop = 0.07) {
   return triGeo(orient(tris, (m) => _d.set(m.x, R * 0.6, m.z)));
 }
 
+/** Per-vertex spruce layout for the vertex-shader reshaping (foliage-shader.js pineMorph). */
+function pineTag(g, tier, y, R, h) {
+  const n = g.attributes.position.count;
+  const a = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) a.set([tier, y, R, h], i * 4);
+  g.setAttribute('aPine', new THREE.BufferAttribute(a, 4));
+  return g;
+}
+
 /**
- * Spruce: a tall, narrow spire of seven drooping tiers (dark and blue-green
- * low in the shade, fresher toward the light at the branch tips and the
- * crown), on a short flared trunk.
+ * Spruce: eight drooping tiers around a slim trunk and a leader. The shared
+ * geometry is the default (7 of its 8 tiers in use by the 'classic' preset, see
+ * PINE_PRESETS); the vertex shader reshapes it per tree (tier count and spacing,
+ * skirt width and profile, droop, a little twist) so a stand holds a family of
+ * spruces: tall firs, broad old trees, open ones with the trunk showing.
+ * Dark and blue-green low in the shade, fresher at the branch tips and crown
+ * (the shader adds a vertical brightness gradient over the tiers actually used).
  */
 function pineGeo() {
   const r = new RNG(11);
-  const parts = [shade(cyl(0.04, 0.09, 0.5, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.3) })];
-  const tiers = [
-    [0.6, 0.5, 0.26, '#26502a'], [0.53, 0.46, 0.5, '#2a572c'], [0.46, 0.43, 0.74, '#2e5e2f'], [0.39, 0.4, 0.97, '#336632'],
-    [0.32, 0.37, 1.19, '#386d35'], [0.25, 0.34, 1.4, '#3d7438'], [0.18, 0.3, 1.6, '#427b3b'],
-  ];
-  tiers.forEach(([R, h, y, col], ti) => {
+  // a slim trunk running up into the crown: it shows between the lower tiers
+  const parts = [pineTag(shade(cyl(0.022, 0.085, 1.12, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.45) }), -1, 0, 1, 1)];
+  const layout = (i) => pineLayout(i, PINE_PRESETS[0]);
+  const cols = ['#24492a', '#275029', '#2b572c', '#2f5e2f', '#336532', '#386c35', '#3d7338', '#427b3b'];
+  for (let ti = 0; ti < PINE_TIERS; ti++) {
+    const { y, R, h } = layout(Math.min(ti, PINE_PRESETS[0][0] - 1));
     const g = pineTier(R, h, 8, r.next() * PI, r, 0.05 + R * 0.12).translate(0, y, 0);
     const c = new THREE.Vector3(0, y - h * 0.1, 0);
-    const tierK = 0.82 + ti * 0.03; // lower tiers sit in the shade of the upper ones
-    // darker only deep inside, toward the trunk; the outer branches stay bright
-    const ao = (p) => tierK * (0.66 + 0.34 * smooth01(Math.hypot(p.x, p.z) / R * 1.15 - 0.1));
+    // dark in the shade of the tier above and toward the trunk; the outer branches catch the light
+    const ao = (p) => 0.36 + 0.7 * smooth01((Math.hypot(p.x, p.z) / R - 0.28) / 0.55);
     // branch tips catch the light: a fresher, yellower green
-    const grad = { to: '#5e8c40', t: (p) => 0.6 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.5) };
+    const grad = { to: '#6a9446', t: (p) => 0.6 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.55) };
     // normals only a little rounded: the faceted tiers keep a crisp lit / shaded side
-    parts.push(shade(g, col, r, { jit: 0.14, leaf: 1, center: c, soft: 0.2, ao, grad }));
-  });
+    parts.push(pineTag(shade(g, cols[ti], r, { jit: 0.12, leaf: 1, center: c, soft: 0.2, ao, grad }), ti, y, R, h));
+  }
   // the leader: a slim spike wide enough at its base to close the top tier
-  const tip = cone(0.12, 0.46, 5).translate(0, 1.72, 0);
+  const tip = cone(0.12, 0.46, 5).translate(0, PINE_TOP + 0.12, 0);
   wobble(tip, 0.015, r);
-  parts.push(shade(tip, '#467f3f', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.8, 0), soft: 0.25 }));
+  parts.push(pineTag(shade(tip, '#467f3f', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.8, 0), soft: 0.25 }), 99, 0, 1, 1));
   return finish(parts, { height: 2.2, bend: 0.075, flutter: 0.008 });
 }
 
@@ -626,7 +640,7 @@ function shared() {
   plantOpen.name = 'props-plant-open';
   plantOpen.shadowSide = THREE.DoubleSide;
   // less wrap than the round crowns: needles keep a crisp lit and shaded side
-  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, detail: [8, 0.34, 0.55, 1] }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, detail: [8, 0.34, 0.55, 1], pine: true }), { cloud: true, rim: 0.12 });
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
   patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45 }), { cloud: true, rim: 0.12 });
@@ -637,6 +651,7 @@ function shared() {
   SHARED = {
     mat: { plant, plantOpen, plant2, stone },
     depth: foliageDepthMaterial(),
+    depthPine: foliageDepthMaterial({ pine: true }),
     trees: { pine: pineGeo(), broadleaf: broadleafGeo(), birch: birchGeo(), palm: palmGeo() },
     stump: stumpGeo(),
     decor: {
@@ -722,6 +737,9 @@ function treeTint(variant, r1, r2, n, out) {
   const larch = r2 * 0.7 + n * 0.45; // 0 … 1.15
   if (larch > 1.0) return out.setRGB(k * 2.6, k * 1.25, k * 0.55);
   if (larch > 0.86) return out.setRGB(k * 1.35, k * 1.08, k * 0.72);
+  // a few frosted blue spruces and fresher young green ones among the deep teal
+  if (r2 < 0.14) return out.setRGB(k * 0.7, k * 0.96, k * 1.22);
+  if (r2 > 0.42 && r2 < 0.56) return out.setRGB(k * (0.95 + h), k * 1.06, k * 0.78);
   // slightly blue-green to olive
   return out.setRGB(k * (0.78 + h), k * (0.92 + h * 0.2), k * (1.02 - h * 0.5)); // deep teal-green
 }
@@ -805,10 +823,21 @@ export function createForest(mapData, heightFn) {
         const key = `${chunk}|${v}`;
         let b = buckets.get(key);
         if (!b) buckets.set(key, (b = { variant: v, list: [] }));
+        // Spruce shape: one of the PINE_PRESETS plus three small jitters, a pure function of
+        // the tile (and map seed): stable across reloads, no gameplay RNG. Half the trees
+        // follow the preset of their stand (low-frequency noise), so neighbours resemble
+        // each other the way a real stand does; the rest are drawn at random.
+        let shape = null;
+        if (v === 'pine') {
+          const stand = Math.floor(valueNoise(tx / 6.5, ty / 6.5, seed + 21) * PINE_PRESETS.length * 0.999);
+          const draw = Math.floor(ihash(tx * 3 + j, ty * 7 + j * 5, seed + 22) * PINE_PRESETS.length);
+          const preset = ihash(tx * 13 + j, ty * 3 + j, seed + 23) < 0.5 ? stand : draw;
+          shape = [preset, ihash(tx + j * 9, ty * 5, seed + 24) * 2 - 1, ihash(tx * 5, ty + j * 9, seed + 25) * 2 - 1, ihash(tx * 7 + j, ty * 11, seed + 26) * 2 - 1];
+        }
         const tree = {
           // spruces vary more in height than in girth: a ragged skyline
-          tile: i, x, y, h: hf(x, y) - 0.04, rot: r1 * PI * 2, sx: s, sy: s * (v === 'pine' ? 0.82 + r2 * 0.42 : 0.92 + r2 * 0.2), tilt: (r2 - 0.5) * 0.12,
-          tint: r3, r2: ihash(tx * 5 + j, ty * 3 + j * 11, seed + 6), n: autumnN, bucket: b, index: b.list.length,
+          tile: i, x, y, h: hf(x, y) - 0.04, rot: r1 * PI * 2, sx: s, sy: s * (shape ? (0.82 + r2 * 0.42) * PINE_PRESETS[shape[0]][7] : 0.92 + r2 * 0.2), tilt: (r2 - 0.5) * 0.12,
+          tint: r3, r2: ihash(tx * 5 + j, ty * 3 + j * 11, seed + 6), n: autumnN, shape, bucket: b, index: b.list.length,
         };
         b.list.push(tree);
         trees.push(tree);
@@ -818,11 +847,22 @@ export function createForest(mapData, heightFn) {
 
   const meshes = [];
   for (const b of buckets.values()) {
-    const mesh = new THREE.InstancedMesh(S.trees[b.variant], S.mat[TREE_MAT[b.variant]], b.list.length);
+    let geo = S.trees[b.variant];
+    if (b.variant === 'pine') {
+      // own geometry object (shared position / colour buffers) carrying this chunk's per-tree spruce shapes
+      geo = new THREE.BufferGeometry();
+      for (const [name, attr] of Object.entries(S.trees.pine.attributes)) geo.setAttribute(name, attr);
+      geo.boundingBox = S.trees.pine.boundingBox;
+      geo.boundingSphere = S.trees.pine.boundingSphere;
+      const sh = new Float32Array(b.list.length * 4);
+      b.list.forEach((t, idx) => sh.set(t.shape, idx * 4));
+      geo.setAttribute('aShape', new THREE.InstancedBufferAttribute(sh, 4));
+    }
+    const mesh = new THREE.InstancedMesh(geo, S.mat[TREE_MAT[b.variant]], b.list.length);
     mesh.name = `forest-${b.variant}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.customDepthMaterial = S.depth;
+    mesh.customDepthMaterial = b.variant === 'pine' ? S.depthPine : S.depth;
     b.list.forEach((t, idx) => {
       _e.set(t.tilt, t.rot, t.tilt * 0.6);
       _q.setFromEuler(_e);
@@ -890,7 +930,11 @@ export function createForest(mapData, heightFn) {
     },
     dispose() {
       if (group.parent) group.parent.remove(group);
-      for (const m of meshes) m.dispose();
+      for (const m of meshes) {
+        m.dispose();
+        // per-chunk spruce geometry objects (the shared buffers are re-uploaded on next use)
+        if (m.geometry !== S.trees.pine && m.geometry.attributes.aShape) m.geometry.dispose();
+      }
       stumps.dispose();
     },
   };
