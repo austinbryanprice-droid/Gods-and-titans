@@ -52,6 +52,108 @@ vec3 windOffset( vec2 root, vec3 p, float bend, float flutter ) {
   return o;
 }`;
 
+// ---------------------------------------------------------------------------
+// Spruce family: one shared spruce geometry (props.js pineGeo) is reshaped per
+// instance in the vertex shader (no extra draw calls, no extra triangles). Each
+// tree carries aShape = (preset, a, b, c): a preset index into PINE_PRESETS plus
+// three small jitters in -1..1, all derived from its tile in props.js. A preset
+// sets how many of the geometry's tiers are used (the others collapse onto the
+// axis), how wide the skirts are, how steeply they narrow, how the tiers are
+// spaced, and how far the branch tips droop.
+// ---------------------------------------------------------------------------
+
+/** Tier count of the shared spruce geometry (the most any preset can use). */
+export const PINE_TIERS = 8;
+/** Height of the top tier's base and of the lowest tier's base (default), geometry units. */
+export const PINE_TOP = 1.6;
+export const PINE_BOTTOM = 0.26;
+/**
+ * [tiers, droop, profile, wide, spacing, lift, tierHeight, height] per preset.
+ * profile: skirt radius ~ (1 - t)^profile (1 straight cone, < 1 rounded, > 1 spire);
+ * spacing: tier base height ~ t^spacing (> 1 packs the tiers low); lift: bare trunk added
+ * under the lowest tier; height: instance height multiplier (used by props.js).
+ */
+export const PINE_PRESETS = [
+  [7, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0], // classic spruce
+  [8, 0.7, 1.2, 0.68, 0.92, 0.05, 0.95, 1.25], // tall narrow fir, short drooping tips
+  [6, 1.4, 0.8, 1.28, 1.1, 0.0, 1.1, 0.84], // broad old spruce, heavy skirts
+  [5, 1.8, 1.0, 1.0, 1.0, 0.22, 0.55, 0.98], // open: few wide tiers with the trunk showing between
+  [7, 1.1, 0.5, 1.08, 1.3, 0.04, 0.95, 0.88], // rounded egg, tiers packed low
+  [8, 0.9, 1.7, 0.8, 0.85, 0.02, 0.9, 1.12], // thin spire
+];
+export const PINE_UNIFORMS = {
+  uPine: { value: PINE_PRESETS.flatMap((p) => [new THREE.Vector4(p[0], p[1], p[2], p[3]), new THREE.Vector4(p[4], p[5], p[6], p[7])]) },
+};
+
+/**
+ * Layout of tier i of a spruce (same maths as the vertex shader's pineMorph, minus the
+ * per-tree jitter): base height, skirt radius and skirt height, geometry units.
+ */
+export function pineLayout(i, preset = PINE_PRESETS[0]) {
+  const [n, , profile, wide, spacing, lift, tierH] = preset;
+  const t = Math.min(1, i / (n - 1));
+  const yb = PINE_BOTTOM + lift;
+  const y = yb + (PINE_TOP - yb) * Math.pow(t, spacing);
+  const R = (0.18 + 0.42 * Math.pow(1 - t, profile)) * wide;
+  const h = ((PINE_TOP - yb) / (n - 1)) * 2.2 * tierH * (1 - 0.22 * t);
+  return { t, y, R, h };
+}
+
+const PINE_VERTEX_PARS = /* glsl */ `
+attribute vec4 aPine; // tier index (-1 trunk, 99 leader), base height, radius, skirt height of the default tier
+attribute vec4 aShape;
+uniform vec4 uPine[ ${PINE_PRESETS.length * 2} ];
+vec3 pineMorph( vec3 p, out float gain ) {
+  gain = 1.0;
+  float i = aPine.x;
+  if ( i < - 0.5 ) return p;
+  int k = int( aShape.x + 0.5 ) * 2;
+  vec4 A = uPine[ k ];
+  vec4 B = uPine[ k + 1 ];
+  float n = A.x;
+  float wide = A.w * ( 1.0 + 0.09 * aShape.z );
+  if ( i > 50.0 ) { // the leader follows the top tier
+    gain = 1.1;
+    return vec3( p.x * wide, p.y, p.z * wide );
+  }
+  if ( i > n - 0.5 ) { // unused tiers collapse onto the axis (zero-area triangles)
+    return vec3( 0.0, ${PINE_TOP.toFixed(2)}, 0.0 );
+  }
+  float t = i / ( n - 1.0 );
+  float yb = ${PINE_BOTTOM.toFixed(2)} + B.y * ( 1.0 + 0.3 * aShape.w );
+  float y = yb + ( ${PINE_TOP.toFixed(2)} - yb ) * pow( t, B.x );
+  float R = ( 0.18 + 0.42 * pow( 1.0 - t, A.z ) ) * wide * ( 1.0 + 0.13 * sin( i * 5.3 + aShape.y * 9.0 ) );
+  float h = ( ( ${PINE_TOP.toFixed(2)} - yb ) / ( n - 1.0 ) ) * 2.2 * B.z * ( 1.0 - 0.22 * t );
+  vec3 q = p - vec3( 0.0, aPine.y, 0.0 );
+  float kr = R / aPine.z;
+  vec2 xz = q.xz * kr;
+  float ry = q.y >= 0.0 ? q.y * h / aPine.w : q.y * A.y * ( 1.0 + 0.3 * aShape.y ) * sqrt( kr );
+  // a slow twist and a little lean from tier to tier: no two crowns stack alike
+  float ang = i * aShape.w * 0.3;
+  float ca = cos( ang );
+  float sa = sin( ang );
+  xz = vec2( ca * xz.x - sa * xz.y, sa * xz.x + ca * xz.y );
+  xz += vec2( sin( i * 12.9 + aShape.y * 5.0 ), cos( i * 7.3 + aShape.z * 5.0 ) ) * ( 0.035 * R );
+  gain = mix( 0.8, 1.14, t );
+  return vec3( xz.x, y + ry, xz.y );
+}`;
+
+// the depth pass has no vertex colors
+const PINE_DEPTH_MORPH = /* glsl */ `
+{
+  float pineGain;
+  transformed = pineMorph( transformed, pineGain );
+}`;
+
+const PINE_MORPH = /* glsl */ `
+{
+  float pineGain;
+  transformed = pineMorph( transformed, pineGain );
+  #if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+    vColor.rgb *= pineGain;
+  #endif
+}`;
+
 // Instanced meshes: the displacement is computed in world space and brought
 // back into the instance's local frame (inverse of rotation · scale =
 // scale⁻² · transpose), so everything after begin_vertex (shadow coordinates,
@@ -129,13 +231,23 @@ float folLeaves( vec3 p ) {
 
 const FOLIAGE_DETAIL_FRAGMENT = /* glsl */ `
 float folN = 0.5;
+float folFade = 0.0; // 1 = full leaf detail, 0 = averaged (noise cells smaller than ~2 pixels)
 if ( vLeaf > 0.5 && uFolDetail.y > 0.0 ) {
+  // how many noise cells one pixel spans: past ~0.5 the pattern would only shimmer, so
+  // the albedo detail and the ragged cut fade into their average (no popping, no sparkle)
+  folFade = 1.0 - smoothstep( 0.2, 0.55, length( fwidth( vFolP * uFolDetail.x ) ) );
   folN = folLeaves( vFolP );
-  // ragged silhouette: cut away low-noise texels where the surface turns edge-on
+  // ragged silhouette: cut away low-noise texels where the surface turns edge-on, with a
+  // one-pixel soft edge (alpha to coverage on the multisampled target, a plain cut elsewhere)
   vec3 folV = normalize( vViewPosition );
   float folEdge = 1.0 - abs( dot( normalize( vNormal ), folV ) );
-  if ( folN < uFolDetail.z * pow( folEdge, 1.5 ) * 1.4 - 0.08 ) discard;
-  float folC = ( folN - 0.5 ) * uFolDetail.y;
+  float folM = folN - ( uFolDetail.z * pow( folEdge, 1.5 ) * 1.4 - 0.08 ) * folFade;
+  float folCov = clamp( folM / max( fwidth( folM ) * 1.25, 0.02 ) + 0.5, 0.0, 1.0 );
+  if ( uFolMS > 0.5 ) {
+    if ( folCov <= 0.0 ) discard;
+    diffuseColor.a = folCov;
+  } else if ( folCov < 0.5 ) discard;
+  float folC = ( folN - 0.5 ) * uFolDetail.y * folFade;
   diffuseColor.rgb *= 1.0 + folC * 2.0;
   // lit clumps lean yellow, the gaps between them blue-green
   diffuseColor.rgb += vec3( 0.05, 0.035, -0.04 ) * folC * diffuseColor.g * 4.0;
@@ -149,12 +261,12 @@ if ( vLeaf > 0.5 && uFolDetail.y > 0.0 ) {
   float folHx = dFdx( folCoarse );
   float folHy = dFdy( folCoarse );
   // fade the bump where one noise cell spans less than a couple of pixels
-  float folFade = 1.0 - smoothstep( 0.18, 0.45, abs( folHx ) + abs( folHy ) );
+  float folBF = folFade * ( 1.0 - smoothstep( 0.18, 0.45, abs( folHx ) + abs( folHy ) ) );
   vec3 folR1 = cross( folDpy, normal );
   vec3 folR2 = cross( normal, folDpx );
   float folDet = dot( folDpx, folR1 );
   vec3 folGrad = sign( folDet ) * ( folHx * folR1 + folHy * folR2 );
-  normal = normalize( abs( folDet ) * normal - folGrad * 1.6 * folFade );
+  normal = normalize( abs( folDet ) * normal - folGrad * 1.6 * folBF );
 }`;
 
 // Leaves on the far side of a crown look their sun shadow up on the crown's
@@ -209,7 +321,11 @@ const FOLIAGE_LIGHTS = THREE.ShaderChunk.lights_lambert_pars_fragment.replace(
   float dotNL = saturate( ( rawNL + wrap ) / ( 1.0 + wrap ) );
   vec3 lightColor = mix( directLight.color, folLightColor, uFoliage.z * vLeaf );
   vec3 irradiance = dotNL * lightColor;
-  irradiance += lightColor * vec3( 1.0, 1.06, 0.62 ) * ( uFoliage.y * vLeaf * saturate( - rawNL ) );`,
+  irradiance += lightColor * vec3( 1.0, 1.06, 0.62 ) * ( uFoliage.y * vLeaf * saturate( - rawNL ) );
+  // back-lit crowns: looking toward the sun, the thin outer leaves glow a little (view dependent)
+  float backLit = saturate( - dot( geometryViewDir, directLight.direction ) );
+  float thinLeaf = 1.0 - saturate( dot( geometryNormal, geometryViewDir ) );
+  irradiance += lightColor * vec3( 1.0, 0.92, 0.5 ) * ( uFoliage.y * vLeaf * 0.8 * backLit * backLit * ( 0.3 + 0.7 * thinLeaf ) );`,
 );
 
 // The light loop, remembering each light's color before its shadow is applied.
@@ -223,10 +339,11 @@ const FOLIAGE_LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(
  * used by instanced plants (geometry with an `aFol` attribute). Call before
  * patchWorldMaterial / patchFowMaterial (they keep this hook). Idempotent.
  * @param {THREE.MeshLambertMaterial} mat
- * @param {{ wrap?: number, translucency?: number, filter?: number }} [o] filter: share of the
- *   light that still reaches leaves in shadow (0 = hard shadows)
+ * @param {{ wrap?: number, translucency?: number, filter?: number, detail?: number[], pine?: boolean }} [o]
+ *   filter: share of the light that still reaches leaves in shadow (0 = hard shadows);
+ *   pine: reshape the shared spruce geometry per instance (aPine / aShape attributes, PINE_PRESETS)
  */
-export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, detail = null } = {}) {
+export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, detail = null, pine = false } = {}) {
   if (!mat || mat.userData.__foliage) return mat;
   if (!FOLIAGE_LIGHTS.includes('uFoliage') || !FOLIAGE_LIGHTS_BEGIN.includes('folLightColor = directLight.color')) {
     throw new Error('foliage lighting patch did not apply');
@@ -238,6 +355,18 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
   const d = detail || [1, 0, 0, 0];
   const uFolDetail = { value: new THREE.Vector4(d[0], d[1], d[2], d[3]) };
   mat.userData.uFolDetail = uFolDetail;
+  // Cut leaf edges ride on alpha to coverage where the target is multisampled (post.js
+  // MSAA); on the plain canvas (low) the shader falls back to a hard cut.
+  const uFolMS = { value: 0 };
+  if (detail) {
+    mat.alphaToCoverage = true;
+    const prevBefore = mat.onBeforeRender;
+    mat.onBeforeRender = function foliageBeforeRender(renderer, ...rest) {
+      const rt = renderer.getRenderTarget ? renderer.getRenderTarget() : null;
+      uFolMS.value = rt && rt.samples > 0 ? 1 : 0;
+      if (typeof prevBefore === 'function') prevBefore.call(this, renderer, ...rest);
+    };
+  }
   const prev = mat.onBeforeCompile;
   const prevKey = typeof mat.customProgramCacheKey === 'function' ? String(mat.customProgramCacheKey()) : '';
   mat.onBeforeCompile = function foliageCompile(shader, renderer) {
@@ -247,42 +376,48 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
     shader.uniforms.uWind = WIND_UNIFORMS.uWind;
     shader.uniforms.uFoliage = uFoliage;
     shader.uniforms.uFolDetail = uFolDetail;
+    shader.uniforms.uFolMS = uFolMS;
+    if (pine) shader.uniforms.uPine = PINE_UNIFORMS.uPine;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}`)
+      .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}${pine ? PINE_VERTEX_PARS : ''}`)
       .replace('#include <color_vertex>', `${FOLIAGE_COLOR_VERTEX}\n${FOLIAGE_DETAIL_VERTEX}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${INSTANCED_WIND}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_MORPH : ''}${INSTANCED_WIND}`)
       .replace('#include <shadowmap_vertex>', FOLIAGE_SHADOW_VERTEX);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying float vLeaf;\nuniform vec3 uFoliage;\nvec3 folLightColor = vec3( 0.0 );\n${FOLIAGE_DETAIL_PARS}`)
+      .replace('#include <common>', `#include <common>\nvarying float vLeaf;\nuniform vec3 uFoliage;\nuniform float uFolMS;\nvec3 folLightColor = vec3( 0.0 );\n${FOLIAGE_DETAIL_PARS}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${FOLIAGE_DETAIL_FRAGMENT}`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${FOLIAGE_BUMP_FRAGMENT}`)
       .replace('#include <lights_lambert_pars_fragment>', FOLIAGE_LIGHTS)
       .replace('#include <lights_fragment_begin>', FOLIAGE_LIGHTS_BEGIN);
   };
-  mat.customProgramCacheKey = () => `${prevKey}|foliage4`;
+  mat.customProgramCacheKey = () => `${prevKey}|foliage5${pine ? 'p' : ''}`;
   mat.needsUpdate = true;
   return mat;
 }
 
-let DEPTH = null;
+const DEPTH = {};
 /**
  * Shadow-map material that sways like the foliage (shared; set it as
- * `customDepthMaterial` on every casting instanced plant mesh).
+ * `customDepthMaterial` on every casting instanced plant mesh). `pine` reshapes
+ * the spruce geometry like its colour pass does.
+ * @param {{ pine?: boolean }} [o]
  * @returns {THREE.MeshDepthMaterial}
  */
-export function foliageDepthMaterial() {
-  if (DEPTH) return DEPTH;
+export function foliageDepthMaterial({ pine = false } = {}) {
+  const key = pine ? 'pine' : 'plain';
+  if (DEPTH[key]) return DEPTH[key];
   const mat = new THREE.MeshDepthMaterial();
-  mat.name = 'foliage-depth';
+  mat.name = pine ? 'foliage-depth-pine' : 'foliage-depth';
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WORLD_UNIFORMS.uTime;
     shader.uniforms.uWind = WIND_UNIFORMS.uWind;
+    if (pine) shader.uniforms.uPine = PINE_UNIFORMS.uPine;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 aFol;\n${WIND_GLSL}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${INSTANCED_WIND}`);
+      .replace('#include <common>', `#include <common>\nattribute vec3 aFol;\n${WIND_GLSL}${pine ? PINE_VERTEX_PARS : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_DEPTH_MORPH : ''}${INSTANCED_WIND}`);
   };
-  mat.customProgramCacheKey = () => 'foliage-depth1';
-  DEPTH = mat;
+  mat.customProgramCacheKey = () => (pine ? 'foliage-depth1p' : 'foliage-depth1');
+  DEPTH[key] = mat;
   return mat;
 }
 
