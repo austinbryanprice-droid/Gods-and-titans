@@ -3,6 +3,7 @@
 // and prop models.
 //
 //   node tools/shot-buildings.mjs [--port 8102] [--out DIR] [--only grid,row-greek,...] [--width 1600] [--height 1000]
+//                                 [--extra "name=query;name2=query2"]   (custom gallery queries, e.g. close-ups: zoom=3)
 //
 // Starts a static server on the port unless one already answers there, then
 // captures: the full grid (registry pantheons), one close row per pantheon, the
@@ -49,6 +50,11 @@ const shots = [
   { name: 'map-overview', q: 'view=map&seed=7&size=medium&overview=1&t=1.2' },
   { name: 'mix-team', q: 'team=mix&types=tc3,temple,tower&t=1.2' },
 ];
+
+for (const spec of opt('extra', '').split(';').filter(Boolean)) {
+  const i = spec.indexOf('=');
+  shots.push({ name: spec.slice(0, i), q: spec.slice(i + 1) });
+}
 
 async function serverUp() {
   try {

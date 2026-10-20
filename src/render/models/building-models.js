@@ -26,7 +26,7 @@
 // Styles (pantheon.style): roof drives the silhouette, wall the materials and
 // ornament the signature details. All values of DESIGN 4.7 are supported.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import { BUILDINGS, GOLD_MINE } from '../../data/buildings.js';
 import { patchWorldMaterial } from '../shading.js';
@@ -257,6 +257,16 @@ export function fromTris(tris) {
   return g;
 }
 
+/**
+ * Smooth normals across faces that meet at less than `deg` degrees, crisp hips,
+ * ridges and eaves beyond it. Roofs lofted from rings read as one curved surface
+ * (and their surface pattern keeps one direction across a split quad) instead of
+ * a patchwork of flat triangles. Returns a new geometry.
+ */
+export function soft(g, deg = 38) {
+  return toCreasedNormals(g, (deg * Math.PI) / 180);
+}
+
 /** Flip triangles whose normal points toward ref(centroid). */
 function orient(tris, ref) {
   for (const t of tris) {
@@ -357,10 +367,37 @@ function hipLoft({ cx = 0, cz = 0, y, hw, hd, tw = 0, td = 0, h, steps = 3, pi =
     const u = s / steps;
     const f = Math.pow(u, pi);
     const yy = y + h * Math.pow(u, py);
-    const l = s === 0 ? lift : s === 1 ? lift * 0.2 : 0;
+    // the upturned eave corners fade out up the slope
+    const l = lift * Math.pow(1 - u, 1.6);
     rings.push(rectRing(hw + (tw - hw) * f, hd + (td - hd) * f, yy, cx, cz, per, l));
   }
-  return loft(rings, cap);
+  // Each of the four slopes is its own smooth surface: a roof with curved
+  // slopes and swept corners keeps a clean hip line where two slopes meet, and
+  // the surface pattern (tile courses) runs one way across a whole slope.
+  const n = rings[0].length;
+  const parts = [];
+  for (let side = 0; side < 4; side++) {
+    const tris = [];
+    for (let i = 0; i < rings.length - 1; i++) {
+      const A = rings[i];
+      const B = rings[i + 1];
+      for (let q = 0; q < per; q++) {
+        const j = side * per + q;
+        const j1 = (j + 1) % n;
+        tris.push([A[j], A[j1], B[j1]], [A[j], B[j1], B[j]]);
+      }
+    }
+    const g = fromTris(tris);
+    if (g.attributes.position.count) parts.push(soft(g, 55));
+  }
+  if (cap) {
+    const R = rings[rings.length - 1];
+    const tris = [];
+    for (let j = 1; j < n - 1; j++) tris.push([R[0], R[j], R[j + 1]]);
+    const g = fromTris(tris);
+    if (g.attributes.position.count) parts.push(soft(g));
+  }
+  return mergeGeometries(parts, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -754,8 +791,17 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   bool roofy = cls >= 10.0 && cls <= 12.0;
   bool level = abs( N.y ) > ( roofy ? 0.985 : 0.72 );
   vec2 tH = sinS > 1e-4 ? vec2( -N.z, N.x ) / sinS : vec2( 1.0, 0.0 );
+  // Roofs are all rectangular: courses run along the nearest axis, so a slope
+  // with swept corners or smoothed normals keeps straight, parallel rows.
   float u = dot( P.xz, tH );
   vec2 uv = level ? P.xz : vec2( u, P.y / max( sinS, 0.3 ) );
+  if ( cls == 10.0 || cls == 11.0 ) {
+    // Roofs are rectangular: rows run along the nearest axis and are measured
+    // in plan, from the slope's own direction, so a slope with swept corners or
+    // a curved profile keeps straight parallel courses (no contour swirls).
+    bool xs = abs( N.x ) > abs( N.z );
+    uv = vec2( xs ? P.z : P.x, ( xs ? P.x * sign( N.x ) : P.z * sign( N.z ) ) / 0.86 );
+  }
   bool mason = cls >= 1.0 && cls <= 6.0 && cls != 4.0;
   bool beam = cls >= 19.0 && cls <= 21.0;
   bool wood = ( cls >= 7.0 && cls <= 9.0 ) || beam;
@@ -773,12 +819,12 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     ts = vec2( 2.4, 0.8 );
     swap = ( ax == 7.0 && !level ) || ( ax == 9.0 && level );
   } else if ( cls == 10.0 ) ts = vec2( 0.56, 0.88 );
-  else if ( cls == 11.0 ) ts = vec2( 1.0, 1.0 );
+  else if ( cls == 11.0 ) ts = vec2( 1.2, 0.9 );
   else if ( cls == 12.0 ) { ts = vec2( 0.96, 0.6 ); swap = !level; }
   else if ( cls == 15.0 ) ts = vec2( 0.25, 0.25 );
   else if ( cls == 16.0 ) { ts = vec2( 3.0, 1.0 ); swap = !level; }
   else if ( cls == 17.0 ) ts = vec2( 1.4, 1.4 );
-  else if ( cls == 18.0 ) ts = vec2( 1.2, 1.2 );
+  else if ( cls == 18.0 ) ts = vec2( 0.9, 0.9 );
   if ( mason && level ) ts.y *= 2.0; // paving: squarer slabs
   if ( swap ) uv = uv.yx;
   vec2 uvT = uv / ts + seed * vec2( 0.3711, 0.6133 );
@@ -843,10 +889,13 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     h = ( rowP * ( 1.0 - smoothstep( 0.72, 1.0, rowP ) ) * 0.008 * fr + rib * 0.006 * fc );
     ao = 1.0 - 0.24 * lip * fr;
   } else if ( cls == 11.0 ) {
-    // turf: clumps and blades
-    alb *= ( 1.0 + 0.3 * mot + 0.14 * stk + 0.12 * nz ) * vec3( 1.0 + 0.1 * stk, 1.0, 1.0 - 0.12 * stk );
-    h = d.b * 0.012;
-    ao = 0.85 + 0.15 * d.b;
+    // turf: sod strips laid in a running bond, each with its own tint, dark
+    // seams between them, and tufted, mottled tops
+    float fb = 1.0 - smoothstep( 0.2, 0.5, max( fw.x * 4.0, fw.y * 8.0 ) );
+    alb *= ( 1.0 + 0.15 * blk0 * fb ) * ( 1.0 + 0.2 * bid * fb ) * ( 1.0 + 0.34 * mot + 0.2 * nz ) * vec3( 1.0 + 0.16 * stk, 1.0, 1.0 - 0.18 * stk );
+    rough += 0.05 * nz;
+    h = mix( 0.0, blk * 0.01, fb ) + d.b * 0.012;
+    ao = mix( 0.88, 1.0, mix( 1.0, blk, fb ) ) * ( 0.84 + 0.16 * d.b );
   } else if ( cls == 12.0 ) {
     // thatch: straw streaks down the slope, layered courses with a shadowed lip
     float rowP = fract( uvT.x * 8.0 );
@@ -872,9 +921,13 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     h = d.b * 0.02;
     ao = 0.8 + 0.2 * d.b;
   } else if ( cls == 18.0 ) {
-    // packed earth
-    alb *= 1.0 + 0.2 * mot + 0.12 * nz;
-    h = d.b * 0.008;
+    // packed earth set with cobbles: a tint per stone, dark dirt joints
+    float cob = smoothstep( 0.08, 0.55, blk );
+    float fb = 1.0 - smoothstep( 0.2, 0.5, max( fw.x * 4.0, fw.y * 8.0 ) );
+    alb *= mix( 1.0, mix( 0.74, 1.0 + 0.34 * bid, cob ), fb ) * ( 1.0 + 0.2 * mot + 0.12 * nz );
+    rough += 0.1 * ( 1.0 - cob ) * fb;
+    h = cob * 0.01 * fb + d.b * 0.006;
+    ao = mix( 1.0, mix( 0.78, 1.0, cob ), fb );
   } else {
     alb *= 1.0 + 0.05 * nz + 0.04 * mot;
   }
@@ -1292,11 +1345,46 @@ function goldPile(k, P, x, y, z, s) {
   k.b(box(s * 0.36, s * 0.12, s * 0.2, x + s * 0.4, y, z + s * 0.25, 0.4), P.gold, 0.05);
 }
 
-/** Flames (glowing, flickering) rising from y with height fh. */
+/**
+ * Flames (glowing, flickering) rising from y: a ring of curled tongues of
+ * different heights around a hot core, white-yellow at the root, orange in the
+ * body and red at the tips, on a bed of glowing coals. Each tongue flickers on
+ * its own phase (the flicker shader keys on position).
+ */
+const TONGUES = [
+  // x, z offset, height, lean toward x, lean toward z
+  [0, 0, 1, 0.05, 0.03],
+  [-0.07, 0.04, 0.72, -0.28, 0.1],
+  [0.07, 0.03, 0.62, 0.3, 0.08],
+  [0.02, -0.07, 0.56, 0.06, -0.3],
+  [-0.03, 0.08, 0.42, -0.1, 0.34],
+];
 function flames(k, P, x, y, z, s) {
-  const fh = 0.34 * s;
-  k.g(cone(0.13 * s, fh, 5, x, y, z, true), P.fire, (vx, vy) => [clamp01((vy - y) / fh), 0], GLOW.flame);
-  k.g(cone(0.08 * s, fh * 0.72, 4, x + 0.02 * s, y, z + 0.02 * s, true), P.fireHot, (vx, vy) => [clamp01((vy - y) / fh), 0], GLOW.core);
+  const fh = 0.36 * s;
+  const root = P.fireHot;
+  const body = P.fire;
+  const tip = mix(P.fire, '#b81400', 0.75);
+  const n = s < 0.7 ? 3 : 4;
+  for (let i = 0; i < n; i++) {
+    const [ox, oz, hs, lx, lz] = TONGUES[i];
+    const h = fh * hs;
+    const g = cone(0.09 * s * (0.65 + 0.35 * hs), h, 4, 0, 0, 0, true);
+    g.rotateZ(-lx);
+    g.rotateX(lz);
+    g.translate(x + ox * s, y, z + oz * s);
+    const fg = k.g(g, body, (vx, vy) => [clamp01((vy - y) / fh), 0], GLOW.flame);
+    // root to tip gradient (the vertex colors are linear HDR)
+    const col = fg.attributes.color;
+    const pos = fg.attributes.position;
+    for (let v = 0; v < pos.count; v++) {
+      const t = clamp01((pos.getY(v) - y) / h);
+      const c = t < 0.4 ? mix(root, body, t / 0.4) : mix(body, tip, (t - 0.4) / 0.6);
+      const gain = (t < 0.4 ? GLOW.core + (GLOW.flame - GLOW.core) * (t / 0.4) : GLOW.flame * (1 - 0.3 * ((t - 0.4) / 0.6)));
+      col.setXYZ(v, c.r * gain, c.g * gain, c.b * gain);
+    }
+  }
+  // the hot core
+  k.g(cone(0.05 * s, fh * 0.6, 3, x, y, z, true), P.fireHot, (vx, vy) => [clamp01((vy - y) / fh), 0], GLOW.core);
 }
 
 /** Brazier on a short stand with a sacred flame. */
@@ -1576,16 +1664,24 @@ function ornamentPair(k, P, st, x, y, z, s) {
 
 const isRound = (st) => st.roof === 'thatch_cone' || st.roof === 'dome';
 
-function door(k, P, st, x, y, fz, w, h) {
+function door(k, P, st, x, y, fz, w, h, rich = true) {
   const frame = st.wall === 'timber' ? P.woodD : st.wall === 'lacquer' ? P.beam : P.trim;
   k.b(box(w + 0.1, h + 0.06, 0.05, x, y, fz + 0.005), frame, 0.03);
   k.hole(box(w, h, 0.06, x, y, fz + 0.012), y, h);
   if (st.wall === 'mudbrick' || st.wall === 'sandstone') k.b(box(w + 0.14, 0.05, 0.07, x, y + h + 0.06, fz + 0.01), P.wallD, 0.03);
+  if (!rich) return;
+  // a worn stone threshold, and a stone lintel over doors set in timber or plaster
+  k.b(box(w + 0.12, 0.022, 0.07, x, y, fz + 0.035), P.stoneL, 0.04);
+  if (st.wall === 'timber' || st.wall === 'marble' || st.wall === 'stone') k.b(box(w + 0.15, 0.04, 0.065, x, y + h + 0.05, fz + 0.015), P.stone, 0.04);
 }
 
-function windowHole(k, P, x, y, fz, w = 0.12, h = 0.16) {
+function windowHole(k, P, x, y, fz, w = 0.12, h = 0.16, rich = true) {
   k.b(box(w + 0.05, h + 0.05, 0.03, x, y - 0.025, fz + 0.004), P.wallD, 0);
   k.hole(box(w, h, 0.04, x, y, fz + 0.008), y, h);
+  if (!rich) return;
+  // projecting sill and lintel give the opening a recess
+  k.b(box(w + 0.1, 0.028, 0.06, x, y - 0.052, fz + 0.022), P.stoneL, 0.03);
+  k.b(box(w + 0.09, 0.03, 0.05, x, y + h + 0.012, fz + 0.016), P.wallD, 0.02);
 }
 
 /** Wooden spikes (toron) protruding from a south and side walls. */
@@ -1631,6 +1727,18 @@ function rectWalls(k, P, st, o) {
       k.b(box(w + 0.07, 0.07, d + 0.07, x, y + h - 0.07, z), P.woodD, 0.03);
       const n = Math.max(1, Math.round(w / 0.3));
       for (let i = 1; i < n; i++) k.b(box(0.022, h - 0.16, 0.02, x - w / 2 + (w * i) / n, y + 0.08, fz), P.woodD, 0);
+      // a tie rail and diagonal braces make the front read as a framed wall
+      if (!o.simple) k.b(box(w, 0.035, 0.03, x, y + h * 0.5, fz + 0.004), P.woodD, 0.02);
+      if (w > 0.9 && !o.simple) {
+        const bays = Math.max(2, Math.round(w / 0.6));
+        for (let i = 0; i < bays; i++) {
+          const x0 = x - w / 2 + (w * i) / bays;
+          const x1 = x - w / 2 + (w * (i + 1)) / bays;
+          const lo = y + 0.09;
+          const hi = y + h * 0.5;
+          k.b(strut(i % 2 ? [x1 - 0.05, lo, fz + 0.012] : [x0 + 0.05, lo, fz + 0.012], i % 2 ? [x0 + 0.05, hi, fz + 0.012] : [x1 - 0.05, hi, fz + 0.012], 0.03, 0.018), P.woodD, 0.02);
+        }
+      }
       break;
     }
     case 'marble':
@@ -1687,12 +1795,12 @@ function rectWalls(k, P, st, o) {
   if (o.door !== false) {
     const dw = o.doorW ?? Math.min(0.32, w * 0.24);
     const dh = o.doorH ?? Math.min(h * 0.62, 0.5);
-    door(k, P, st, x, y, face, dw, dh);
+    door(k, P, st, x, y, face, dw, dh, !o.simple);
   }
   const nw = o.windows ?? 0;
   if (nw > 0) {
     const wy = y + h * 0.55;
-    for (const sx of [-1, 1]) windowHole(k, P, x + sx * w * 0.3, wy, face);
+    for (const sx of [-1, 1]) windowHole(k, P, x + sx * w * 0.3, wy, face, 0.12, 0.16, !o.simple);
     if (nw > 1 && d > 0.7) {
       for (const sx of [-1, 1]) {
         const g = box(0.04, 0.16, 0.12, x + sx * (w / 2 + 0.005), wy, z);
@@ -1885,7 +1993,7 @@ function roofLonghouse(k, P, st, o) {
         tris.push([a0, b0, b1], [a0, b1, a1]);
       }
     }
-    put('body', fromTris(orient(tris, (mx, my) => [mx, my - 1, 0])), shade(P.roof, sh), 0.07);
+    put('body', soft(fromTris(orient(tris, (mx, my) => [mx, my - 1, 0]))), shade(P.roof, sh), 0.03);
   }
   // dark eave boards give the turf a visible edge
   if (!o.simple) {
@@ -1968,7 +2076,7 @@ function roofPagoda(k, P, st, o) {
     const ridge = last ? Math.max(0, (cw - cd) / 2) + cw * 0.06 : 0;
     k.b(hipLoft({
       cx: x, cz: z, y: yy - 0.04, hw, hd, tw: last ? ridge : cw * 0.3, td: last ? 0.001 : cd * 0.3, h: th, steps: 3, pi: 1, py: 1.7, lift: 0.1, per: 3, cap: !last,
-    }), P.roof, 0.05);
+    }), P.roof, 0.025);
     // eave fascia in trim
     if (!o.simple) for (const sz of [-1, 1]) k.b(box(2 * hw * 0.8, 0.035, 0.035, x, yy - 0.06, z + sz * hd * 0.99), P.roofD, 0);
     if (last) {
@@ -2008,7 +2116,7 @@ function roofCurved(k, P, st, o) {
     // lower skirt roof (double eave) around the walls
     const sh = Math.min(0.32, h * 0.45);
     const so = Math.min(0.22, 0.08 + 0.07 * w);
-    k.b(hipLoft({ cx: x, cz: z, y: y - 0.04, hw: w / 2 + so, hd: d / 2 + so, tw: w / 2 * 0.86, td: d / 2 * 0.8, h: sh * 0.55, steps: 2, py: 1.6, lift: 0.1, per: 3 }), P.roof, 0.05);
+    k.b(hipLoft({ cx: x, cz: z, y: y - 0.04, hw: w / 2 + so, hd: d / 2 + so, tw: w / 2 * 0.86, td: d / 2 * 0.8, h: sh * 0.55, steps: 2, py: 1.6, lift: 0.1, per: 3 }), P.roof, 0.025);
     const by = y - 0.04 + sh * 0.5;
     k.b(box(w * 0.84, sh * 0.75, d * 0.78, x, by, z), P.wall, 0.03);
     k.b(box(w * 0.84 + 0.05, 0.05, d * 0.78 + 0.05, x, by + sh * 0.75 - 0.05, z), P.beam, 0.02);
@@ -2021,7 +2129,7 @@ function roofCurved(k, P, st, o) {
   const hw = cw / 2 + ov;
   const hd = cd / 2 + ov;
   const rh = grade === 'small' ? h : h * 0.8;
-  k.b(hipLoft({ cx: x, cz: z, y: yy - 0.04, hw, hd, tw: ridge, td: 0.001, h: rh, steps: o.simple ? 3 : 4, pi: 1, py: 1.9, lift: 0.15, per: o.simple ? 2 : 3 }), P.roof, 0.05);
+  k.b(hipLoft({ cx: x, cz: z, y: yy - 0.04, hw, hd, tw: ridge, td: 0.001, h: rh, steps: o.simple ? 3 : 4, pi: 1, py: 1.9, lift: 0.15, per: o.simple ? 2 : 3 }), P.roof, 0.025);
   const top = yy - 0.04 + rh;
   const cap = box(ridge * 2 + 0.08, 0.07, 0.09, x, top - 0.03, z);
   if (team) k.t(cap, 1);
@@ -2101,7 +2209,7 @@ function roofStepped(k, P, st, o) {
     const bd = d * 0.5;
     k.b(frustum(bw, 0.32, bd, 0.92, x, top, z - d * 0.08), P.wall, 0.04);
     k.b(box(bw * 0.92 + 0.05, 0.06, bd * 0.92 + 0.05, x, top + 0.3, z - d * 0.08), P.trim, 0.02);
-    door(k, P, st, x, top, z - d * 0.08 + bd * 0.46, 0.16, 0.2);
+    door(k, P, st, x, top, z - d * 0.08 + bd * 0.46, 0.16, 0.2, !o.simple);
     top += 0.36;
   }
   if (team) {
@@ -2229,7 +2337,7 @@ function hall(k, P, st, o) {
   if (st.ornament === 'columns' && o.porch !== false) porch = Math.max(0.24, Math.min(0.42, d * 0.26));
   const wd = d - porch;
   const wz = z - porch / 2;
-  rectWalls(k, P, st, { x, z: wz, w, d: wd, y, h, door: o.door, doorW: o.doorW, doorH: o.doorH, windows: o.windows });
+  rectWalls(k, P, st, { x, z: wz, w, d: wd, y, h, door: o.door, doorW: o.doorW, doorH: o.doorH, windows: o.windows, simple: o.simple });
   if (porch) {
     const n = w > 1.7 ? 4 : 2;
     const cz = z + d / 2 - 0.07;
@@ -3228,7 +3336,7 @@ function buildTownCenter(k, P, st, tier) {
     } else {
       const ux = 1.55;
       const ud = 1.1;
-      rectWalls(k, P, st, { x: 0, z: -0.62, w: ux, d: ud, y: uy, h: 0.62, door: false, windows: 1 });
+      rectWalls(k, P, st, { x: 0, z: -0.62, w: ux, d: ud, y: uy, h: 0.62, door: false, windows: 1, simple: true });
       top = rectRoof(k, P, st, { x: 0, z: -0.62, w: ux, d: ud, y: uy + 0.62, h: roofH(st, st.roof === 'gable' ? ux : ud, 'grand'), grade: st.roof === 'pagoda' ? 'mid' : 'grand', team: true, ridge: st.roof === 'gable' ? 'z' : undefined });
     }
     if (ornamentFront) ornamentPair(k, P, st, 0.62, y, 1.0, 0.75);
@@ -3247,13 +3355,15 @@ function buildTownCenter(k, P, st, tier) {
 // scaffold, foundation, gold mine
 // ---------------------------------------------------------------------------
 
-function buildFoundation(k, P, st, size) {
+function buildFoundation(k, P, st, size, corners = true) {
   const s = size - 2 * MARGIN;
   k.f(box(s, DEPTH + PLINTH - 0.03, s, 0, -DEPTH, 0), P.stoneD, 0.06);
   k.f(box(s - 0.06, 0.03, s - 0.06, 0, PLINTH - 0.03, 0), P.yard, 0.05);
-  // slab edges read as cut stones
-  for (const sz of [-1, 1]) k.f(box(s + 0.002, 0.035, 0.06, 0, PLINTH - 0.035, sz * (s / 2 - 0.03)), P.stone, 0.05);
-  for (const sx of [-1, 1]) k.f(box(0.06, 0.035, s - 0.12, sx * (s / 2 - 0.03), PLINTH - 0.035, 0), P.stone, 0.05);
+  // a raised curb of cut stones frames the slab, with a heavier block at each
+  // corner, so the building stands on a built plinth rather than a flat pad
+  for (const sz of [-1, 1]) k.f(box(s + 0.002, 0.07, 0.07, 0, PLINTH - 0.035, sz * (s / 2 - 0.035)), P.stone, 0.05);
+  for (const sx of [-1, 1]) k.f(box(0.07, 0.07, s - 0.14, sx * (s / 2 - 0.035), PLINTH - 0.035, 0), P.stone, 0.05);
+  if (corners) for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.f(box(0.12, 0.09, 0.12, sx * (s / 2 - 0.06), PLINTH - 0.035, sz * (s / 2 - 0.06)), P.stoneL, 0.05);
 }
 
 function scaffoldKit(size, H) {
@@ -3294,15 +3404,28 @@ function buildGoldMineGeometry() {
   const P = { wood: made('#7b5536', SURF.wood), woodD: made('#4d3421', SURF.wood), gold: made('#f3c63c', SURF.gold), metal: made('#6c7278', SURF.metal) };
   const rr = new RNG(hashSeed('gold-mine-rocks'));
   const rockAt = (r, x, y, z, sy, color) => {
-    const g = prep(new THREE.DodecahedronGeometry(r, 0));
+    // an icosphere pushed into a crag by smooth low-frequency waves (the same
+    // for every vertex at one spot, so the surface stays closed), then shaded
+    // smooth except at the sharper breaks
+    const g = prep(new THREE.IcosahedronGeometry(r, 1));
     const p = g.attributes.position;
+    const a = rr.next() * PI * 2;
+    const b = rr.next() * PI * 2;
+    const c = rr.next() * PI * 2;
     for (let i = 0; i < p.count; i++) {
-      const s = 0.85 + rr.next() * 0.3;
-      p.setXYZ(i, p.getX(i) * s, p.getY(i) * s * sy, p.getZ(i) * s);
+      const px = p.getX(i);
+      const py = p.getY(i);
+      const pz = p.getZ(i);
+      const len = Math.hypot(px, py, pz) || 1;
+      const dx = px / len;
+      const dy = py / len;
+      const dz = pz / len;
+      const s = 0.93 + 0.07 * Math.sin(dx * 4.1 + a) * Math.cos(dz * 3.7 + b) + 0.05 * Math.sin(dy * 5.9 + c + dx * 2.3) - 0.03 * Math.cos(dz * 7.3 + a * 2);
+      p.setXYZ(i, px * s, py * s * sy, pz * s);
     }
     g.rotateY(rr.next() * PI);
     g.translate(x, y, z);
-    k.b(g, color, 0.12);
+    k.b(soft(g, 30), color, 0.05);
     return g;
   };
   // the mound: a big central crag with smaller boulders around (partly below ground)
@@ -3411,7 +3534,8 @@ function getBuildingGeometry(type, pantheon, tier) {
   if (entry) return entry;
   const P = makePalette(colors, st);
   const k = new Kit(hashSeed(key));
-  buildFoundation(k, P, st, size);
+  // the city's walls and towers carry the corners; its triangle budget goes there
+  buildFoundation(k, P, st, size, !(type === 'town_center' && t === 3));
   let top;
   switch (type) {
     case 'town_center': top = buildTownCenter(k, P, st, t); break;
