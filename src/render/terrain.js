@@ -68,7 +68,7 @@ const QUALITY_DEFINES = {
   high: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '' },
   ultra: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '' },
 };
-const ANISOTROPY = { low: 1, medium: 4, high: 8, ultra: 8 };
+const ANISOTROPY = { low: 2, medium: 4, high: 8, ultra: 16 };
 
 /** Tile dryness above which grass counts as a dry meadow. */
 const DRY_AT = 0.64;
@@ -317,13 +317,14 @@ uniform float uWaterLevel;
 varying vec3 vTerrainW;
 varying vec3 vTerrainN;
 
-// tile texel: r = ground layer (lush and dry grass are both GRASS), g = dryness
-vec2 tileAt( ivec2 c ) {
+// tile texel: r = ground layer (lush and dry grass are both GRASS), g = dryness,
+// b = share of dirt around the tile (trodden routes), a = building yard contact
+vec4 tileAt( ivec2 c ) {
   c = clamp( c, ivec2( 0 ), ivec2( uTileSize.xy ) - 1 );
-  return texelFetch( uTiles, c, 0 ).rg;
+  return texelFetch( uTiles, c, 0 );
 }
 
-int layerOf( vec2 k ) {
+int layerOf( vec4 k ) {
   return int( k.x * 255.0 + 0.5 );
 }
 
@@ -349,7 +350,7 @@ vec4 groundTex( int layer, vec2 p, vec2 dx, vec2 dy, float sel ) {
     vec2 ob = sin( vec2( 3.0, 7.0 ) * ( ia + 1.0 ) + fl );
     vec4 a = textureGrad( uGround, vec3( uv + oa, fl ), dx * s, dy * s );
     vec4 b = textureGrad( uGround, vec3( uv + ob, fl ), dx * s, dy * s );
-    return mix( a, b, smoothstep( 0.3, 0.7, f + ( b.a - a.a ) * 0.35 ) );
+    return mix( a, b, smoothstep( 0.3, 0.7, f + ( b.a - a.a ) * 0.12 ) );
   #else
     return textureGrad( uGround, vec3( uv, fl ), dx * s, dy * s );
   #endif
@@ -363,7 +364,7 @@ vec4 layerTex( int layer, vec2 p, vec2 dx, vec2 dy, float sel, float dry ) {
   vec4 b = vec4( 0.0 );
   if ( dry < 0.997 ) a = groundTex( ${LAYER.GRASS}, p, dx, dy, sel );
   if ( dry > 0.003 ) b = groundTex( ${LAYER.DRY}, p, dx, dy, sel );
-  return mix( a, b, saturate( dry + ( b.a - a.a ) * 1.6 * dry * ( 1.0 - dry ) ) );
+  return mix( a, b, saturate( dry + ( b.a - a.a ) * 0.45 * dry * ( 1.0 - dry ) ) );
 }
 
 vec4 layerParams( int layer, float dry ) {
@@ -377,17 +378,20 @@ vec2 tdx = dFdx( tp );
 vec2 tdy = dFdy( tp );
 vec4 tnA = texture2D( uTNoise, tp * 0.029 ); // ~34-tile features
 vec4 tnB = texture2D( uTNoise, tp * 0.13 + 0.37 ); // ~8-tile features
+vec4 tnC = texture2D( uTNoise, tp * 0.41 + 0.71 ); // ~2-tile features: ragged, hand-drawn edges
 // The tile map is looked up through a warped grid, so type borders meander
 // across tiles instead of tracing the grid; the four tiles around the warped
 // point give bilinear weights, merged where they share a type.
-vec2 tg = tp + ( tnB.xy - 0.5 ) * 1.1 + ( tnA.zw - 0.5 ) * 0.8 - 0.5;
+vec2 tg = tp + ( tnB.xy - 0.5 ) * 1.1 + ( tnA.zw - 0.5 ) * 0.8 + ( tnC.xy - 0.5 ) * 0.5 - 0.5;
 vec2 ti = floor( tg );
 vec2 tf = tg - ti;
+// smoothed weights: rounded borders instead of the diamonds plain bilinear draws
+tf = tf * tf * ( 3.0 - 2.0 * tf );
 ivec2 t0 = ivec2( ti );
-vec2 k0 = tileAt( t0 );
-vec2 k1 = tileAt( t0 + ivec2( 1, 0 ) );
-vec2 k2 = tileAt( t0 + ivec2( 0, 1 ) );
-vec2 k3 = tileAt( t0 + ivec2( 1, 1 ) );
+vec4 k0 = tileAt( t0 );
+vec4 k1 = tileAt( t0 + ivec2( 1, 0 ) );
+vec4 k2 = tileAt( t0 + ivec2( 0, 1 ) );
+vec4 k3 = tileAt( t0 + ivec2( 1, 1 ) );
 int c0 = layerOf( k0 );
 int c1 = layerOf( k1 );
 int c2 = layerOf( k2 );
@@ -395,6 +399,7 @@ int c3 = layerOf( k3 );
 vec4 tw = vec4( ( 1.0 - tf.x ) * ( 1.0 - tf.y ), tf.x * ( 1.0 - tf.y ), ( 1.0 - tf.x ) * tf.y, tf.x * tf.y );
 // meadow dryness: the tiles' field interpolated like the weights (continuous,
 // so lush and dry grass meet along soft curves, not tile edges), noise-broken
+vec4 tw0 = tw;
 float tDry = smoothstep( ${(DRY_AT - 0.05).toFixed(3)}, ${(DRY_AT + 0.05).toFixed(3)}, dot( tw, vec4( k0.y, k1.y, k2.y, k3.y ) ) + ( tnB.z - 0.5 ) * 0.14 );
 if ( c1 == c0 ) { tw.x += tw.y; tw.y = 0.0; }
 if ( c2 == c0 ) { tw.x += tw.z; tw.z = 0.0; } else if ( c2 == c1 ) { tw.y += tw.z; tw.z = 0.0; }
@@ -432,13 +437,14 @@ vec4 L1 = layerParams( c1, tDry );
 vec4 L2 = layerParams( c2, tDry );
 vec4 L3 = layerParams( c3, tDry );
 vec4 LR = uLayer[ ${LAYER.ROCK} ];
-// Height blend: each type scores its weight plus its texel height, and only
-// the types within a small band of the best score show. Borders become
-// natural, broken edges instead of a smooth cross-fade.
-vec4 tsc = tw + ( vec4( s0.a, s1.a, s2.a, s3.a ) + vec4( L0.y, L1.y, L2.y, L3.y ) ) * 0.6;
+// Height blend: each type scores its weight plus a little of its texel height,
+// and the types within a wide band of the best score show, weighted by how close
+// they are. Borders stay irregular (tufts poke over soil) without the hard
+// threshold that turned the texel noise into pixel speckle.
+vec4 tsc = tw + ( vec4( s0.a, s1.a, s2.a, s3.a ) + vec4( L0.y, L1.y, L2.y, L3.y ) ) * 0.4;
 tsc = mix( vec4( -9.0 ), tsc, step( 0.003, tw ) );
-float tscR = tSlopeRock > 0.003 ? tSlopeRock + ( sR.a + LR.y ) * 0.6 : -9.0;
-float tm = max( max( max( tsc.x, tsc.y ), max( tsc.z, tsc.w ) ), tscR ) - 0.14;
+float tscR = tSlopeRock > 0.003 ? tSlopeRock + ( sR.a + LR.y ) * 0.4 : -9.0;
+float tm = max( max( max( tsc.x, tsc.y ), max( tsc.z, tsc.w ) ), tscR ) - 0.24;
 vec4 tb = max( tsc - tm, 0.0 );
 float tbR = max( tscR - tm, 0.0 );
 float tbs = 1.0 / max( tb.x + tb.y + tb.z + tb.w + tbR, 1e-4 );
@@ -447,6 +453,28 @@ tbR *= tbs;
 vec3 tAlbedo = s0.rgb * tb.x + s1.rgb * tb.y + s2.rgb * tb.z + s3.rgb * tb.w + sR.rgb * tbR;
 float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z;
 float tRough = dot( tb, vec4( L0.w, L1.w, L2.w, L3.w ) ) + tbR * LR.w;
+// share of the pixel that is soil / meadow (by layer), and of the border band
+// between them (from the plain weights, before the texel heights roughen it)
+float tDirtShow = ( c0 == ${LAYER.DIRT} ? tb.x : 0.0 ) + ( c1 == ${LAYER.DIRT} ? tb.y : 0.0 ) + ( c2 == ${LAYER.DIRT} ? tb.z : 0.0 ) + ( c3 == ${LAYER.DIRT} ? tb.w : 0.0 );
+float tGrassW = ( c0 == ${LAYER.GRASS} ? tw.x : 0.0 ) + ( c1 == ${LAYER.GRASS} ? tw.y : 0.0 ) + ( c2 == ${LAYER.GRASS} ? tw.z : 0.0 ) + ( c3 == ${LAYER.GRASS} ? tw.w : 0.0 );
+// moist soil: a short darker, smoother band on the dirt side of a meadow border
+float tMoist = smoothstep( 0.0, 0.18, tGrassW ) * ( 1.0 - smoothstep( 0.3, 0.62, tGrassW ) );
+tMoist *= tDirtShow * ( 0.75 + 0.25 * tnC.z );
+tAlbedo *= 1.0 - 0.22 * tMoist;
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.95, 0.9, 0.84 ), tMoist * 0.5 );
+tRough = mix( tRough, 0.74, tMoist );
+tBump *= 1.0 - 0.45 * tMoist;
+// trodden earth: packed darker and smoother along routes (dirt density around
+// the tile) and right around buildings (yard contact), nothing raised
+float tWear = saturate( dot( tw0, vec4( k0.z, k1.z, k2.z, k3.z ) ) * 1.25 - 0.45 ) * 0.55 + saturate( dot( tw0, vec4( k0.w, k1.w, k2.w, k3.w ) ) ) * 0.85;
+tWear = saturate( tWear ) * tDirtShow * ( 0.8 + 0.2 * tnC.w );
+tAlbedo *= 1.0 - 0.2 * tWear;
+tRough = mix( tRough, 0.8, tWear * 0.6 );
+tBump *= 1.0 - 0.35 * tWear;
+// the finest relief only reads while a pixel covers about a texel or less: fade
+// it out beyond that so panning and zooming do not shimmer
+float tFoot = max( length( tdx ), length( tdy ) ) * 90.0;
+tBump *= 1.0 - smoothstep( 0.7, 2.6, tFoot );
 // macro variation: broad brightness and hue drift hides what repetition is left
 // (the layers carry little low-frequency content of their own for that reason)
 float tMacro = tnA.x * 0.6 + tnB.x * 0.25 + tnB.w * 0.15;
@@ -477,6 +505,10 @@ const TERRAIN_BUMP = /* glsl */ `
   vec3 sx = dFdx( - vViewPosition );
   vec3 sy = dFdy( - vViewPosition );
   vec2 dh = vec2( dFdx( tBump ), dFdy( tBump ) );
+  // keep the tilt gentle: the height field is 8 bit and one pixel-quad wide, so
+  // unbounded slopes would show as black and white speckle
+  float dhMax = 0.5 * max( length( tdx ), length( tdy ) );
+  dh *= min( 1.0, dhMax / max( length( dh ), 1e-6 ) );
   vec3 r1 = cross( sy, normal );
   vec3 r2 = cross( normal, sx );
   float det = dot( sx, r1 ) * faceDirection;
@@ -530,7 +562,7 @@ function terrainMaterial(textures, tiles, map, time, quality) {
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${TERRAIN_BUMP}`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${TERRAIN_CAUSTICS}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-terrain-v2';
+  mat.customProgramCacheKey = () => 'mythicwar-terrain-v3';
   setTerrainQuality(mat, quality);
   // order matters: the fog-of-war patch keeps the hooks installed before it
   patchWorldMaterial(mat, { cloud: true });
@@ -544,19 +576,48 @@ function setTerrainQuality(mat, quality) {
 }
 
 /**
+ * Share of dirt among the tile and its 8 neighbors (0 off dirt): high in the
+ * middle of roads and yards, low on their margins. The ground shader reads it
+ * as "trodden" and packs the earth a little darker there. Writes the B channel
+ * of the tile texture for the tiles in the rectangle (inclusive-exclusive).
+ */
+function writeDirtDensity(data, W, H, x0, y0, x1, y1) {
+  for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) {
+    for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) {
+      const i = y * W + x;
+      if (data[i * 4] !== LAYER.DIRT) {
+        data[i * 4 + 2] = 0;
+        continue;
+      }
+      let n = 0;
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          const nx = Math.min(W - 1, Math.max(0, x + ox));
+          const ny = Math.min(H - 1, Math.max(0, y + oy));
+          if (data[(ny * W + nx) * 4] === LAYER.DIRT) n++;
+        }
+      }
+      data[i * 4 + 2] = Math.round((n / 9) * 255);
+    }
+  }
+}
+
+/**
  * Ground per tile as a texture (texelFetch'ed by the ground shader): R the
  * layer, with lush and dry grass both stored as GRASS (one family, split per
- * pixel), G the meadow dryness (0..1).
+ * pixel), G the meadow dryness (0..1), B the dirt density around the tile
+ * (trodden routes), A contact with a building yard (paintYard).
  */
 function tileTexture(map) {
   const dryness = tileDryness(map);
   const layers = tileLayers(map, dryness);
-  const data = new Uint8Array(layers.length * 2);
+  const data = new Uint8Array(layers.length * 4);
   for (let i = 0; i < layers.length; i++) {
-    data[i * 2] = layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i];
-    data[i * 2 + 1] = Math.round(Math.min(1, Math.max(0, dryness[i])) * 255);
+    data[i * 4] = layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i];
+    data[i * 4 + 1] = Math.round(Math.min(1, Math.max(0, dryness[i])) * 255);
   }
-  const tex = new THREE.DataTexture(data, map.width, map.height, THREE.RGFormat, THREE.UnsignedByteType);
+  writeDirtDensity(data, map.width, map.height, 0, 0, map.width, map.height);
+  const tex = new THREE.DataTexture(data, map.width, map.height, THREE.RGBAFormat, THREE.UnsignedByteType);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.generateMipmaps = false;
@@ -679,18 +740,27 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
       const H = map.height;
       const data = tiles.image.data;
       let changed = false;
+      let touched = false;
       for (let y = ty - ring; y < ty + size + ring; y++) {
         for (let x = tx - ring; x < tx + size + ring; x++) {
           if (x < 0 || y < 0 || x >= W || y >= H) continue;
           const corner = (x < tx || x >= tx + size) && (y < ty || y >= ty + size);
-          if (corner && ((x * 7 + y * 13) & 3) !== 0) continue;
           const i = y * W + x;
-          if (data[i * 2] !== LAYER.GRASS) continue;
-          data[i * 2] = LAYER.DIRT;
+          // contact: the packed earth right at the walls (footprint and the ring
+          // beside it), a little less at the ragged corners; shader-only
+          const contact = corner ? 150 : x < tx || x >= tx + size || y < ty || y >= ty + size ? 215 : 255;
+          if (data[i * 4 + 3] < contact) {
+            data[i * 4 + 3] = contact;
+            touched = true;
+          }
+          if (corner && ((x * 7 + y * 13) & 3) !== 0) continue;
+          if (data[i * 4] !== LAYER.GRASS) continue;
+          data[i * 4] = LAYER.DIRT;
           changed = true;
         }
       }
-      if (changed) tiles.needsUpdate = true;
+      if (changed) writeDirtDensity(data, W, H, tx - ring - 1, ty - ring - 1, tx + size + ring + 1, ty + size + ring + 1);
+      if (changed || touched) tiles.needsUpdate = true;
       return changed;
     },
     /** Shader detail and texture filtering for a quality tier. */

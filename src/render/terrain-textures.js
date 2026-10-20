@@ -190,6 +190,35 @@ class Canvas {
     this.b[i] += (c[2] * k - this.b[i]) * t;
   }
 
+  /** Soften the colors (not the height) with a wrap-around [1 2 1] kernel, `passes` times each way. */
+  blur(passes = 1) {
+    const S = this.S;
+    const tmp = new Float32Array(S * S);
+    for (const ch of [this.r, this.g, this.b]) {
+      for (let p = 0; p < passes; p++) {
+        for (let y = 0; y < S; y++) {
+          for (let x = 0; x < S; x++) {
+            tmp[y * S + x] = (ch[y * S + ((x + S - 1) % S)] + 2 * ch[y * S + x] + ch[y * S + ((x + 1) % S)]) * 0.25;
+          }
+        }
+        for (let y = 0; y < S; y++) {
+          for (let x = 0; x < S; x++) {
+            ch[y * S + x] = (tmp[((y + S - 1) % S) * S + x] + 2 * tmp[y * S + x] + tmp[((y + 1) % S) * S + x]) * 0.25;
+          }
+        }
+      }
+    }
+  }
+
+  /** The same [1 2 1] softening for the height field. */
+  blurHeight() {
+    const S = this.S;
+    const tmp = new Float32Array(S * S);
+    const h = this.h;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) tmp[y * S + x] = (h[y * S + ((x + S - 1) % S)] + 2 * h[y * S + x] + h[y * S + ((x + 1) % S)]) * 0.25;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) h[y * S + x] = (tmp[((y + S - 1) % S) * S + x] + 2 * tmp[y * S + x] + tmp[((y + 1) % S) * S + x]) * 0.25;
+  }
+
   scale(i, k) {
     this.r[i] *= k;
     this.g[i] *= k;
@@ -230,31 +259,36 @@ class Canvas {
   }
 
   /** A thin tapered stroke (grass blade, pine needle), wrap-around; tip color toward `tip`. */
-  stroke(x0, y0, ang, len, col, tip, alpha, lift) {
+  stroke(x0, y0, ang, len, col, tip, alpha, lift, width = 1) {
     const S = this.S;
     const dx = Math.cos(ang);
     const dy = Math.sin(ang);
     const n = Math.max(2, Math.ceil(len * 2));
     for (let s = 0; s <= n; s++) {
       const t = s / n;
-      const x = (((Math.floor(x0 + dx * len * t) % S) + S) % S);
-      const y = (((Math.floor(y0 + dy * len * t) % S) + S) % S);
-      const i = y * S + x;
       const c0 = col[0] + (tip[0] - col[0]) * t;
       const c1 = col[1] + (tip[1] - col[1]) * t;
       const c2 = col[2] + (tip[2] - col[2]) * t;
       const a = alpha * (1 - 0.35 * t);
-      this.r[i] += (c0 - this.r[i]) * a;
-      this.g[i] += (c1 - this.g[i]) * a;
-      this.b[i] += (c2 - this.b[i]) * a;
       const hh = lift * (0.55 + 0.45 * t);
-      if (hh > this.h[i]) this.h[i] = hh;
+      // blades are wider at the root and taper to a point: `width` pixels across at the base
+      const w = Math.max(1, Math.round(width * (1 - 0.7 * t)));
+      for (let k = 0; k < w; k++) {
+        const off = k - (w - 1) / 2;
+        const x = ((Math.floor(x0 + dx * len * t - dy * off) % S) + S) % S;
+        const y = ((Math.floor(y0 + dy * len * t + dx * off) % S) + S) % S;
+        const i = y * S + x;
+        this.r[i] += (c0 - this.r[i]) * a;
+        this.g[i] += (c1 - this.g[i]) * a;
+        this.b[i] += (c2 - this.b[i]) * a;
+        if (hh > this.h[i]) this.h[i] = hh;
+      }
     }
   }
 }
 
 /** Scatter grass blades in tufts: clusters of strokes fanning out from a root. */
-function grassBlades(cv, rand, count, palette, tips, lift, spread = 1) {
+function grassBlades(cv, rand, count, palette, tips, lift, spread = 1, width = 1, lenScale = 1) {
   const S = cv.S;
   for (let k = 0; k < count; k++) {
     const x = rand() * S;
@@ -265,8 +299,8 @@ function grassBlades(cv, rand, count, palette, tips, lift, spread = 1) {
     const tip = tips[Math.floor(rand() * tips.length)];
     for (let b = 0; b < blades; b++) {
       const ang = base + (rand() - 0.5) * 2.2 * spread;
-      const len = 3 + rand() * 5;
-      cv.stroke(x + (rand() - 0.5) * 2, y + (rand() - 0.5) * 2, ang, len, col, tip, 0.75, lift * (0.75 + rand() * 0.25));
+      const len = (3 + rand() * 5) * lenScale;
+      cv.stroke(x + (rand() - 0.5) * 2, y + (rand() - 0.5) * 2, ang, len, col, tip, 0.75, lift * (0.75 + rand() * 0.25), width);
     }
   }
 }
@@ -289,8 +323,8 @@ function paintGrass(cv, seed, dry) {
     const c = 1 - clamp01(cells.f1[i] / (cells.cs * 0.8));
     const ct = hash(cells.id[i], 3, seed);
     cv.mix(i, tone, c * c * (0.25 + 0.3 * ct));
-    const gap = 1 - clamp01((cells.f2[i] - cells.f1[i]) / 3.5);
-    cv.mix(i, soil, gap * (dry ? 0.5 : 0.35));
+    const gap = 1 - clamp01((cells.f2[i] - cells.f1[i]) / 6);
+    cv.mix(i, soil, gap * gap * (dry ? 0.5 : 0.35));
     cv.h[i] = 0.25 + 0.35 * c + 0.1 * n2[i] - 0.15 * gap;
   }
   if (dry) {
@@ -306,7 +340,11 @@ function paintGrass(cv, seed, dry) {
   }
   const palette = dry ? [C(0x898e54), C(0x969a5e), C(0x7d824c)] : [C(0x4a7036), C(0x5a7e3e), C(0x426632)];
   const tips = dry ? [C(0xaeb074), C(0xa4a86c), C(0x9ca266)] : [C(0x8aa05a), C(0x96a862), C(0x7e9652)];
-  grassBlades(cv, rand, dry ? 1600 : 2600, palette, tips, 0.9);
+  // the base is a soft carpet; blades on top are a few pixels wide so they read
+  // as grass (not 1 px salt and pepper) once the texture is minified on screen
+  cv.blur(1);
+  grassBlades(cv, rand, dry ? 900 : 1500, palette, tips, 0.9, 1, 2, 1.3);
+  cv.blurHeight();
   // a few flowers / seed heads in lush grass, pale stalks in dry
   const dots = dry ? [C(0xd6c98a)] : [C(0xe8e4c8), C(0xe6cf56), C(0xb9a6d8)];
   for (let k = 0; k < (dry ? 90 : 60); k++) {
@@ -338,12 +376,12 @@ function paintDirt(cv, seed) {
   }
   // pebbles and small stones
   const stones = [C(0x8f8574), C(0x7d7262), C(0x9c907c), C(0x6c6152)];
-  for (let k = 0; k < 340; k++) {
-    const r = 1.2 + rand() * rand() * 3.2;
-    cv.splat(rand() * S, rand() * S, r, r * (0.6 + rand() * 0.4), rand() * Math.PI, stones[Math.floor(rand() * stones.length)], 0.9, 0.75 + r * 0.06);
+  for (let k = 0; k < 230; k++) {
+    const r = 1.5 + rand() * rand() * 3.4;
+    cv.splat(rand() * S, rand() * S, r, r * (0.6 + rand() * 0.4), rand() * Math.PI, stones[Math.floor(rand() * stones.length)], 0.78, 0.75 + r * 0.06);
   }
   // trampled grass bits
-  grassBlades(cv, rand, 70, [C(0x5a6a2c)], [C(0x7d8a40)], 0.6, 0.7);
+  grassBlades(cv, rand, 60, [C(0x5a6a2c)], [C(0x7d8a40)], 0.6, 0.7, 2);
 }
 
 function paintSand(cv, seed) {

@@ -326,12 +326,12 @@ test('terrain: ground layers per tile, procedural textures, quality tiers', () =
   const mat = t.terrain.material;
   assert.ok(mat.isMeshStandardMaterial && mat.userData.__fow && mat.userData.__world);
   // the shader's tile map: lush and dry grass share one layer (R), split per
-  // pixel by the dryness field (G)
+  // pixel by the dryness field (G); B = dirt density, A = building yard contact
   const tiles = mat.userData.terrainUniforms.uTiles.value.image.data;
-  assert.equal(tiles.length, map.width * map.height * 2);
+  assert.equal(tiles.length, map.width * map.height * 4);
   for (let i = 0; i < layers.length; i++) {
-    assert.equal(tiles[i * 2], layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i]);
-    if (layers[i] === LAYER.DRY) assert.ok(tiles[i * 2 + 1] >= 0.64 * 255 - 1);
+    assert.equal(tiles[i * 4], layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i]);
+    if (layers[i] === LAYER.DRY) assert.ok(tiles[i * 4 + 1] >= 0.64 * 255 - 1);
   }
   assert.ok(!('TERRAIN_BUMP' in mat.defines));
   assert.ok(!('WATER_HQ' in t.water.material.defines));
