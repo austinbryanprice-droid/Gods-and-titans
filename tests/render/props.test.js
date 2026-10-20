@@ -204,6 +204,30 @@ test('a generated map builds its forest quickly within the instance budget', () 
   d.dispose();
 });
 
+test('spruces come in a deterministic family of shapes chosen per tile', () => {
+  const map = generateMap({ seed: 7, mapSize: 'small', playerCount: 2 });
+  const shapesOf = (f) => {
+    const out = [];
+    for (const m of instancedOf(f.object3d)) {
+      if (m.name !== 'forest-pine') continue;
+      const a = m.geometry.attributes.aShape;
+      assert.equal(a.count, m.count, 'one shape per spruce instance');
+      assert.ok(m.customDepthMaterial.name.includes('pine'), 'spruce shadows are reshaped too');
+      for (let i = 0; i < a.count; i++) out.push([a.getX(i), a.getY(i), a.getZ(i), a.getW(i)].join());
+    }
+    return out;
+  };
+  const f1 = createForest(map);
+  const f2 = createForest(map);
+  const s1 = shapesOf(f1);
+  assert.deepEqual(s1, shapesOf(f2), 'same map, same spruces');
+  const presets = new Set(s1.map((s) => s.split(',')[0]));
+  assert.ok(presets.size >= 4 && presets.size <= 6, `${presets.size} spruce presets in use`);
+  for (const s of s1) for (const v of s.split(',').slice(1)) assert.ok(Math.abs(Number(v)) <= 1);
+  f1.dispose();
+  f2.dispose();
+});
+
 test('prop geometries stay low-poly', () => {
   const info = getPropInfo();
   for (const [v, tris] of Object.entries(info.trees)) assert.ok(tris > 10 && tris <= 160, `${v}: ${tris} triangles`);

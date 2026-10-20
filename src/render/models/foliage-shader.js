@@ -86,8 +86,8 @@ export const PINE_UNIFORMS = {
 };
 
 /**
- * Layout of tier i of a spruce (same maths as the vertex shader's pineMorph, at zero
- * jitter): base height, skirt radius and skirt height, geometry units.
+ * Layout of tier i of a spruce (same maths as the vertex shader's pineMorph, minus the
+ * per-tree jitter): base height, skirt radius and skirt height, geometry units.
  */
 export function pineLayout(i, preset = PINE_PRESETS[0]) {
   const [n, , profile, wide, spacing, lift, tierH] = preset;

@@ -8,7 +8,10 @@
 //   decor.hideInRect(x0, y0, x1, y1); // e.g. under a newly placed building footprint
 //   forest.dispose(); decor.dispose();  // shared geometry and material stay cached
 //
-// Trees: 4 variants (layered pine, clumpy broadleaf, birch, palm near sand/water)
+// Trees: 4 variants (layered spruce, clumpy broadleaf, birch, palm near sand/water);
+// the spruce comes in a family of six shapes (tier count, width, droop, spacing)
+// reshaped per instance in the vertex shader from its tile hash, so it is still
+// one geometry and one draw per chunk,
 // picked by a tile hash and low-frequency noise, 1–2 per forest tile with
 // random rotation, scale and leaf tint (some yellow-green and autumn
 // broadleaves) so forests read as solid but varied walls. One InstancedMesh per
