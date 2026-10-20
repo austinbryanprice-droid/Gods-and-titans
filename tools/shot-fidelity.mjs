@@ -102,6 +102,17 @@ try {
     await page.screenshot({ path: f, timeout: 240000 });
     console.log(f);
   }
+  if (args.includes('--motion')) {
+    // unpaused: crops of the hall's yard (fire pit, flags, well) a moment apart, for a motion strip
+    await aim(setups.hall, 800);
+    await page.evaluate(() => window.__game.setPaused(false));
+    const n = Number(opt('motion', '8'));
+    for (let i = 0; i < n; i++) {
+      await page.waitForTimeout(250);
+      await page.screenshot({ path: join(out, `${prefix}-motion-${i}.png`), clip: { x: 560, y: 150, width: 480, height: 340 }, timeout: 240000 });
+    }
+    console.log(`${prefix}-motion-0..${n - 1}`);
+  }
   if (args.includes('--perf')) console.log(JSON.stringify(await page.evaluate(() => window.__game.stats)));
 } finally {
   await browser.close();
