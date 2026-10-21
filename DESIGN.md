@@ -422,6 +422,46 @@ Worshippers, gods (they have levels), titans, creatures and summoned minions do 
 - **Net:** `rk` (rank, once above Recruit) and `xp` (whole xp, once at least 1) ride in the EntityView,
   so full snapshots, deltas and resyncs carry them with no codec change; `rankUp` is a packed event.
 
+### 5.10 Decade of Peace (game mode)
+An optional game mode the host picks in the lobby: `GameSetup.peaceMinutes` is 30, 45 or 60
+(`PEACE_LENGTHS`; minutes of game time, so pausing a solo game does not use them up). A setup
+without it is a normal game and nothing below applies. Until `world.peaceEnd` (`peaceMinutes ×
+60` s) players cannot harm each other at all, so everyone has time to build up and mass armies
+for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the HUD) and
+`World.canHarm` / `peaceBlocks`:
+- `world.canHarm(a, b)` is `areEnemies(a, b)` except that two players are safe from each other
+  while `world.peace` holds; `world.peaceBlocks(a, b)` is true when the peace is the only
+  reason. `areEnemies` itself is unchanged (collision, placement, kill credit, AI intel and the
+  UI read it), so everything that means "may I hurt this" uses `canHarm`: auto-acquire and
+  attack orders (`canTarget`), tower targeting, splash and cleave, every harmful ability effect
+  (damage, stun, slow, dot, debuff, field, chain, line, dash, knockback, pull), `target: 'enemy'`
+  and harmful `target: 'unit'` casts, autocast and the AI's cast scoring, and debuff auras. An
+  effect with `affects: 'all'` still hits the caster's own and allied units but skips rivals.
+  Heals, shields and buffs on allies, summons and reveal are unaffected, so are friendly fire and
+  hits between teammates (never enemies).
+- Last line of defence: `dealDamage` returns 0 for a hit from one player on an enemy player
+  while the peace holds, so a damage over time or a field cannot get through either.
+- An `attack` or `smart` order aimed at another player's unit or building becomes a `move`
+  to it, with one error per order ("The Decade of Peace holds for another m:ss: no attacking
+  yet."); a cast aimed at a protected player is refused with the same error and costs nothing.
+  Attack-move walks through rivals without stopping.
+- Neutral creatures (owner −1) are never protected or held back: camps still wake, fight and
+  pay bounty, and units fight them as usual.
+- The peace ends at the start of the first tick with `time >= peaceEnd`: `world.peace` turns
+  false and one `{ type: 'peaceEnd' }` event is emitted. There is no new snapshot field: clients
+  derive the countdown from `setup.peaceMinutes` and the snapshot `time`
+  (`ViewState.peaceLeft()`, rounded up to whole seconds on screen).
+- AI: `scan` copies `world.peace` to `s.peace`. While it holds no wave leaves home (armies keep
+  growing and mass at the rally point), threat and defence logic ignores other players, and
+  focus fire only picks creatures. The first wave leaves as soon as the peace is over.
+  Measured (seed 1, Normal vs Normal, small map, 30 minute peace): both sides reach 198–200 pop
+  around minute 13 with 66–69 army units, no player-vs-player hit before 30:00, both waves leave
+  at 30:01 and the first hit lands at about 30:25.
+- Economy is unchanged. In that run the mines are mined out around minute 26–28 and each side
+  still holds about 23 500 gold when the war starts, several times what the build-up cost, so
+  mine sizes are not scaled for the mode. With no mines left the war is fought off that bank
+  (one side was down to about 60 gold ten minutes in).
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -436,6 +476,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 ```js
 {
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
+  peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -568,6 +609,7 @@ EntityView = {
 { type: 'underAttack', player, x, y, id }                            // throttled 10 s per player
 { type: 'titanSummoning', player, t }                                // broadcast drama
 { type: 'playerDefeated', player }
+{ type: 'peaceEnd' }                                                 // the Decade of Peace is over (once)
 { type: 'gameOver', winningTeam }
 ```
 
@@ -686,15 +728,18 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   ```js
   const host = await LobbyHost.create({ transport: 'peer'|'local'|'none', name });
   host.roomCode; host.state; host.onChange(cb); host.setSlot(i, patch); host.applyPreset('coop'|'1v1'|'2v2'|'ffa');
-  host.setMapSize('small'|'medium'); host.canStart(); host.onChat(cb); host.sendChat(text);
+  host.setMapSize('small'|'medium'); host.setPeace(0|30|45|60); host.canStart(); host.onChat(cb); host.sendChat(text);
   const { setup, myIndex, conns } = host.start(); // conns: Map<playerIndex, conn>; resolves 'random' pantheons with the seed
   const client = await LobbyClient.join({ transport, roomCode, name });
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
+  A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
+  turns it into `setup.peaceMinutes` (only a length `PEACE_LENGTHS` offers; `sanitizeLobbyState`
+  and `validateSetup` drop anything else on the clients).
   Can start when ≥ 2 teams have players and every human slot is connected. `state.preset`
   stays lit through pantheon / color / name edits and players joining or leaving, and clears
   when a slot's kind, team or AI difficulty changes. In the GameSetup, repeated names get a
@@ -727,6 +772,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   vs.lastSeen  // Map<id, EntityView> of enemy buildings seen before (shown under fog)
   vs.on(type | '*', cb) → unsubscribe  // fired for every event in each pushed snapshot; also 'snapshot'
   vs.getEntity(id)
+  vs.peaceLeft(); vs.peaceActive(); vs.canHarm(owner) // Decade of Peace (5.10): setup.peaceMinutes vs the snapshot time; may my units hurt this owner now
   ```
   Host local view uses a 50 ms delay; clients use `INTERP_DELAY_MS`.
 
@@ -804,7 +850,8 @@ per-frame budget, so a revealed army appears over a few frames.
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
-  Random, team, AI difficulty; presets; map size; room code with Copy and Copy Invite Link
+  Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
+  30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun.
@@ -818,6 +865,11 @@ per-frame budget, so a revealed army appears over a few frames.
   amount with +50 / +100 / +250 / +500, Max and Clear, a line saying what arrives after the
   market's cut, and Send (disabled with the reason while the trade would be refused). Received
   and sent shipments show as messages.
+  Decade of Peace (5.10): a 🕊️ countdown chip sits next to the game clock (tooltip explains it,
+  it turns amber and pulses for the last minute and is gone when the peace ends); one line as the
+  game opens, a reminder at 5:00, 1:00 and 0:10 (not for marks already passed when the HUD
+  opens), and a "war begins" banner with the horn on `peaceEnd`. Right-clicking or attack-ordering a
+  protected player marks a walk, and the sword cursor does not show over it.
   God portraits top-left (click selects, double-click centers). Messages (errors, alerts,
   "Kronos is being summoned!"), chat (Enter), game-over overlay with stats, menu (surrender, quit).
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
@@ -883,7 +935,8 @@ smaller on easy); target the nearest enemy base (prefer the weakest enemy in mul
 games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, ultimates in
 big fights); retreat badly hurt gods to base. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
-population cap and easy stays well below it.
+population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
+home until the peace ends: the army keeps growing and masses at the rally point.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 

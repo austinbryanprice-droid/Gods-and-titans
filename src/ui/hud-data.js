@@ -2,8 +2,9 @@
 // entity definitions, names, icons, subgroup ordering and small helpers that
 // read a ViewState. Pure (no DOM), so Node tests can use it.
 import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES } from '../data/index.js';
-import { MINE_TIME, CARRY_AMOUNT } from '../config.js';
+import { MINE_TIME, CARRY_AMOUNT, PEACE_NAME } from '../config.js';
 import { NO_MODS, computeMods, workSpeed } from '../data/upgrades.js';
+import { peaceClock } from '../sim/peace.js';
 
 /** Subgroup order (WC3 sorts heroes first): lower comes first. */
 const CLASS_ORDER = { god: 0, titan: 1, creature: 2, infantry: 3, ranged: 4, siege: 5, support: 6, minion: 7, worker: 8 };
@@ -122,6 +123,20 @@ export function leadText(vs) {
   const mine = players && vs.myIndex >= 0 ? players[vs.myIndex] : null;
   const pantheon = mine && PANTHEONS[mine.pantheon];
   return pantheon ? `You lead the ${pantheon.name} pantheon.` : '';
+}
+
+/** Seconds left on the Decade of Peace clock at which the HUD speaks up once (the second is when the clock starts to pulse). */
+export const PEACE_WARNINGS = [300, 60, 10];
+
+/** The line the HUD shows once, as a game with a Decade of Peace opens. */
+export function peaceStartText(sec) {
+  return `The ${PEACE_NAME} is on: no fighting between players for another ${peaceClock(sec)}. Build, train and mass your armies.`;
+}
+
+/** The reminder at a PEACE_WARNINGS mark: "The Decade of Peace ends in 5 minutes." */
+export function peaceWarning(sec) {
+  const when = sec >= 60 ? `${Math.round(sec / 60)} minute${sec === 60 ? '' : 's'}` : `${sec} seconds`;
+  return `The ${PEACE_NAME} ends in ${when}. Get your armies ready.`;
 }
 
 /**

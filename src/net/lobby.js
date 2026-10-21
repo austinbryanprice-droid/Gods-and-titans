@@ -4,7 +4,7 @@
 // Both sides distrust each other's messages: the host validates and rate-limits
 // every client patch / chat / ping; a client cleans the lobby state and checks
 // the GameSetup before it uses them.
-import { MAX_PLAYERS, PLAYER_COLORS } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, PEACE_LENGTHS } from '../config.js';
 import { PANTHEONS, PANTHEON_LIST } from '../data/index.js';
 import { RNG, hashSeed } from '../sim/rng.js';
 import * as mapgen from '../sim/mapgen.js';
@@ -112,6 +112,7 @@ export function sanitizeLobbyState(state) {
     version: typeof state.version === 'string' ? state.version.slice(0, 32) : '',
     mapSize: MAP_SIZE_NAMES.includes(state.mapSize) ? state.mapSize : 'small',
     preset: PRESETS.includes(state.preset) ? state.preset : null,
+    peace: PEACE_LENGTHS.includes(state.peace) ? state.peace : 0,
     started: state.started === true,
     slots,
   };
@@ -160,6 +161,7 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
     };
   });
   const setup = { version, seed, mapSize: state.mapSize, players };
+  if (PEACE_LENGTHS.includes(state.peace)) setup.peaceMinutes = state.peace; // Decade of Peace
   if (typeof mapgen.mapHash === 'function') {
     setup.mapHash = mapgen.mapHash(mapgen.generateMap(mapgen.mapOptions(setup)));
   }
@@ -200,6 +202,7 @@ export class LobbyHost {
       version,
       mapSize: 'small',
       preset: null,
+      peace: 0,
       started: false,
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
@@ -431,6 +434,14 @@ export class LobbyHost {
   setMapSize(size) {
     if (this.started || !MAP_SIZE_NAMES.includes(size) || this.state.mapSize === size) return false;
     this.state.mapSize = size;
+    this.changed();
+    return true;
+  }
+
+  /** Decade of Peace: minutes of game time without combat between players (30 | 45 | 60), or 0 for a normal game. */
+  setPeace(minutes) {
+    if (this.started || (minutes !== 0 && !PEACE_LENGTHS.includes(minutes)) || this.state.peace === minutes) return false;
+    this.state.peace = minutes;
     this.changed();
     return true;
   }

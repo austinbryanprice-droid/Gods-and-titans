@@ -23,6 +23,7 @@ import { spawnCreeps } from './creeps.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
+import { peaceSeconds } from './peace.js';
 import { hyp, distPointRect } from './common.js';
 
 const ERRORS_GOLD = 'Not enough gold.';
@@ -66,6 +67,9 @@ export class World {
     this._tmpSurround = [];
     this.gameOver = null;
     this.winningTeam = null;
+    // Decade of Peace: until peaceEnd (game seconds) players cannot harm each other (see canHarm).
+    this.peaceEnd = peaceSeconds(setup);
+    this.peace = this.peaceEnd > 0;
     this.perf = { lastTickMs: 0, commandErrors: 0, lastCommandError: '' };
 
     const pickRng = this.rng.fork('pantheons');
@@ -342,6 +346,24 @@ export class World {
     const pb = this.players[b];
     if (!pa || !pb) return false;
     return pa.team !== pb.team;
+  }
+
+  /**
+   * May owner a hurt owner b? Enemies may (neutral creatures always), except that
+   * players are safe from each other while the Decade of Peace lasts.
+   */
+  canHarm(a, b) {
+    return this.areEnemies(a, b) && !(this.peace && a >= 0 && b >= 0);
+  }
+
+  /** Is the peace what keeps enemy players a and b from hurting each other right now? */
+  peaceBlocks(a, b) {
+    return this.peace && a >= 0 && b >= 0 && this.areEnemies(a, b);
+  }
+
+  /** Seconds of the Decade of Peace left (0 once it is over, and in a normal game). */
+  peaceLeft() {
+    return this.peace ? Math.max(0, this.peaceEnd - this.time) : 0;
   }
 
   /**
@@ -636,6 +658,10 @@ export class World {
 
   /** Advance the simulation by one tick (DT seconds). */
   tick() {
+    if (this.peace && this.time >= this.peaceEnd - 1e-9) {
+      this.peace = false;
+      this.emit({ type: 'peaceEnd' });
+    }
     const cmds = this.cmdQueue;
     this.cmdQueue = [];
     this.cmdCounts.fill(0);

@@ -94,7 +94,8 @@ export function gatherNear(world, caster, r) {
     const d = Math.hypot(u.x - caster.x, u.y - caster.y);
     if (d > r) continue;
     if (world.areEnemies(caster.owner, u.owner)) {
-      if (u.invuln) continue;
+      // (Decade of Peace: the players it protects are neither targets nor allies.)
+      if (u.invuln || !world.canHarm(caster.owner, u.owner)) continue;
       enemies.push(u);
     } else allies.push(u);
     D.set(u, d);
