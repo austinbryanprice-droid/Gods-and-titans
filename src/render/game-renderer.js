@@ -2020,7 +2020,7 @@ export class GameRenderer {
     const o = ray.origin;
     const d = ray.dir;
     if (d.y > -1e-4) return null;
-    const top = 0.9;
+    const top = Math.max(0.9, this.terrain.field.hMax + 0.05); // above the highest outcrop
     const bottom = -0.65;
     let t = Math.max(0, (top - o.y) / d.y);
     const tEnd = (bottom - o.y) / d.y;

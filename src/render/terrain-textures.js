@@ -1,7 +1,8 @@
 // Procedural ground textures for the terrain (DESIGN 8), painted once per page
 // with typed arrays (no canvas or DOM, so they also build in Node tests):
 //
-//   ground  DataArrayTexture, one GROUND_SIZE² layer per ground type (LAYER):
+//   ground  DataArrayTexture, one GROUND_SIZE² layer per ground type (LAYER; ROCK is
+//           the sandstone of an outcrop's top, FACE its strata, mapped on walls):
 //           sRGB albedo in RGB, a height field in A (per-pixel bump lighting
 //           and height-based blending between types). Every layer tiles.
 //   noise   NOISE_SIZE² RGBA, four independent tileable fbm fields (domain
@@ -14,8 +15,8 @@
 import * as THREE from 'three';
 
 /** Texture-array layer of each ground type. */
-export const LAYER = Object.freeze({ GRASS: 0, DRY: 1, DIRT: 2, SAND: 3, ROCK: 4, FOREST: 5, BED: 6 });
-export const LAYER_COUNT = 7;
+export const LAYER = Object.freeze({ GRASS: 0, DRY: 1, DIRT: 2, SAND: 3, ROCK: 4, FOREST: 5, BED: 6, FACE: 7 });
+export const LAYER_COUNT = 8;
 export const GROUND_SIZE = 256;
 export const NOISE_SIZE = 128;
 export const FX_SIZE = 256;
@@ -391,8 +392,9 @@ function paintSand(cv, seed) {
   const warp = fbm(S, 4, 3, seed + 2);
   const n3 = fbm(S, 32, 1, seed + 3);
   const patches = fbm(S, 3, 3, seed + 4);
-  const lo = C(0xb59d70);
-  const hi = C(0xd5c08f);
+  // sun-bleached cream over a warmer, damper tone: the pale rim of a lake
+  const lo = C(0xbfa77a);
+  const hi = C(0xe2d2a8);
   const TAU = Math.PI * 2;
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
@@ -404,54 +406,102 @@ function paintSand(cv, seed) {
       const ph2 = (TAU * (-7 * x + 5 * y)) / S + warp[i] * 6;
       const p = patches[i];
       const rip = Math.sin(ph + 0.6 * Math.sin(ph)) * (0.1 + 0.9 * smooth(0.42, 0.75, p)) + Math.sin(ph2 + 0.5 * Math.sin(ph2)) * 0.35 * (1 - smooth(0.2, 0.42, p));
-      const t = clamp01((n1[i] - 0.5) * 1.5 + 0.5);
+      const t = clamp01((n1[i] - 0.5) * 1.5 + 0.55);
       cv.set(i, lo);
       cv.mix(i, hi, t);
-      cv.scale(i, 1 + 0.025 * rip + 0.07 * (hash(x, y, seed) - 0.5) + 0.04 * (n3[i] - 0.5));
+      cv.scale(i, 1 + 0.03 * rip + 0.06 * (hash(x, y, seed) - 0.5) + 0.04 * (n3[i] - 0.5));
       cv.h[i] = 0.45 + 0.1 * rip + 0.2 * (t - 0.5) + 0.05 * n3[i];
     }
   }
-  const bits = [C(0x8f8068), C(0xe8dcc0), C(0x9c8a6a)];
-  for (let k = 0; k < 160; k++) {
-    const r = 0.8 + rand() * 1.4;
-    cv.splat(rand() * S, rand() * S, r, r * 0.8, rand() * 3, bits[Math.floor(rand() * bits.length)], 0.7, 0.75);
+  // shore gravel and shell bits
+  const bits = [C(0x9b8b72), C(0xf4ead2), C(0xb59f7e), C(0x7e7566), C(0xd9c6a0)];
+  for (let k = 0; k < 190; k++) {
+    const r = 0.8 + rand() * rand() * 2.1;
+    cv.splat(rand() * S, rand() * S, r, r * 0.8, rand() * 3, bits[Math.floor(rand() * bits.length)], 0.78, 0.75 + r * 0.05);
   }
 }
 
+/** Sandstone seen from above: weathered, mottled rock with shallow pits, hairline fractures and a little lichen. */
 function paintRock(cv, seed) {
   const S = cv.S;
-  const rand = rng(seed);
-  const n1 = fbm(S, 4, 5, seed + 1);
-  const n2 = fbm(S, 8, 4, seed + 2);
-  const slabs = worley(S, 6, seed + 3);
-  const small = worley(S, 15, seed + 4);
-  const cool = C(0x7c7c78);
-  const warm = C(0x948b7c);
-  const dark = C(0x3e3b37);
-  const lichen = C(0x8f8f4c);
-  const ochre = C(0xa08350);
+  const n1 = fbm(S, 3, 5, seed + 1);
+  const n2 = fbm(S, 9, 4, seed + 2);
+  const n3 = fbm(S, 24, 2, seed + 5);
+  const slabs = worley(S, 3, seed + 3);
+  const pits = worley(S, 18, seed + 4);
+  const cream = C(0xdcc08e);
+  const tan = C(0xc9a068);
+  const ochre = C(0xb88556);
+  const rose = C(0xa98068);
+  const crackC = C(0x6e4f3b);
+  const lichen = C(0x9aa05a);
   for (let i = 0; i < S * S; i++) {
-    const tone = hash(slabs.id[i], 5, seed);
-    cv.set(i, cool);
-    cv.mix(i, warm, clamp01(tone * 0.8 + (n1[i] - 0.5)));
-    cv.scale(i, 0.86 + 0.24 * n2[i] + 0.06 * (hash(i, 9, seed) - 0.5));
-    // slab edges: bevel then a dark crack
+    const t = clamp01((n1[i] - 0.5) * 1.7 + 0.5);
+    cv.set(i, cream);
+    cv.mix(i, tan, t);
+    cv.mix(i, ochre, smooth(0.55, 0.85, n2[i]) * 0.55);
+    cv.mix(i, rose, smooth(0.62, 0.9, n1[i] * 0.5 + n2[i] * 0.5) * 0.4);
+    cv.scale(i, 0.93 + 0.12 * n3[i] + 0.04 * (hash(i, 9, seed) - 0.5));
+    // shallow weathering pits: darker and lower
+    const pit = (1 - smooth(0.1, 0.5, pits.f1[i] / pits.cs)) * smooth(0.45, 0.7, n2[i]);
+    cv.scale(i, 1 - 0.2 * pit);
+    // hairline fractures where the slabs meet (a bevel for the bump only)
     const e = slabs.f2[i] - slabs.f1[i];
-    const bevel = smooth(0, 7, e);
-    const crack = 1 - smooth(0.4, 2.2, e);
-    const e2 = small.f2[i] - small.f1[i];
-    const fine = (1 - smooth(0.2, 1.2, e2)) * smooth(0.5, 0.65, n1[i]);
-    cv.scale(i, 0.82 + 0.18 * bevel);
-    cv.mix(i, dark, crack * 0.85 + fine * 0.4);
-    const l = smooth(0.66, 0.78, n2[i] * 0.7 + n1[i] * 0.3) * bevel;
-    if (l > 0) cv.mix(i, tone > 0.5 ? lichen : ochre, l * 0.55);
-    cv.h[i] = 0.25 + 0.55 * bevel + 0.15 * n2[i] - 0.3 * crack - 0.12 * fine;
+    const crack = 1 - smooth(0.3, 1.6, e);
+    cv.mix(i, crackC, crack * 0.26);
+    const l = smooth(0.7, 0.84, n2[i] * 0.6 + n1[i] * 0.4);
+    if (l > 0) cv.mix(i, lichen, l * 0.35);
+    cv.h[i] = 0.5 + 0.3 * n1[i] + 0.15 * n2[i] + 0.1 * smooth(0, 6, e) - 0.3 * pit - 0.25 * crack;
   }
-  const chips = [C(0x8d8a82), C(0x6f6c66)];
-  for (let k = 0; k < 90; k++) {
-    const r = 1 + rand() * 2;
-    cv.splat(rand() * S, rand() * S, r, r * 0.7, rand() * 3, chips[k & 1], 0.8, 0.7);
+}
+
+/**
+ * Sandstone seen from the side (v runs up the wall): level, wind-scoured beds in cream, tan and
+ * ochre (a little rose and umber in the deepest ones), a pitted groove between some of them,
+ * rain-washed streaks running down, a few hairline cracks. The beds only wander a little: they
+ * should read as layers of rock, not as grain.
+ */
+function paintFace(cv, seed) {
+  const S = cv.S;
+  const warp = fbm(S, 4, 3, seed + 1);
+  const n2 = fbm(S, 12, 3, seed + 2);
+  const cells = worley(S, 7, seed + 3);
+  const pits = worley(S, 22, seed + 4);
+  const TAU = Math.PI * 2;
+  const cream = C(0xdcbf8c);
+  const tan = C(0xc79b62);
+  const ochre = C(0xb27c4c);
+  const rose = C(0x9f7561);
+  const umber = C(0x7a523d);
+  const crackC = C(0x4f3629);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const i = y * S + x;
+      const v = y / S;
+      // beds: integer frequencies along v tile; a small warp keeps them from running dead straight
+      const b1 = Math.sin(TAU * 4 * v + (warp[i] - 0.5) * 2.2);
+      const b2 = Math.sin(TAU * 11 * v + (n2[i] - 0.5) * 2.6);
+      const b3 = Math.sin(TAU * 29 * v + (warp[i] - 0.5) * 1.4 + n2[i] * 0.8);
+      const t = clamp01(0.5 + 0.2 * b1 + 0.12 * b2 + 0.04 * b3 + (n2[i] - 0.5) * 0.2);
+      cv.set(i, tan);
+      cv.mix(i, cream, smooth(0.5, 0.85, t) * 0.8);
+      cv.mix(i, ochre, smooth(0.5, 0.2, t) * 0.7);
+      cv.mix(i, rose, smooth(0.3, 0.1, t) * 0.4);
+      cv.mix(i, umber, smooth(0.2, 0.04, t) * 0.22);
+      // grooves where the soft beds are scoured out, with a few pits in them
+      const groove = smooth(-0.5, -0.9, b2);
+      const pit = (1 - smooth(0.1, 0.5, pits.f1[i] / pits.cs)) * (0.3 + 0.7 * groove);
+      // rain-washed streaks running down the face
+      const st = Math.sin(TAU * 9 * (x / S) + 2.2 * Math.sin(TAU * 3 * (x / S) + warp[i] * 4)) * 0.5 + 0.5;
+      cv.scale(i, 0.95 + 0.08 * t - 0.1 * groove - 0.14 * pit + 0.07 * (st - 0.5) + 0.04 * (hash(i, 11, seed) - 0.5));
+      // a few hairline vertical cracks: the borders of tall, narrow cells
+      const e = (cells.f2[i] - cells.f1[i]) / cells.cs;
+      const crack = (1 - smooth(0.015, 0.06, e)) * smooth(0.55, 0.7, n2[i]);
+      cv.mix(i, crackC, crack * 0.3);
+      cv.h[i] = 0.55 + 0.22 * (t - 0.5) - 0.3 * groove - 0.2 * pit - 0.25 * crack;
+    }
   }
+  cv.blur(1);
 }
 
 function paintForest(cv, seed) {
@@ -515,6 +565,7 @@ const PAINTERS = [
   (cv) => paintRock(cv, 503),
   (cv) => paintForest(cv, 601),
   (cv) => paintBed(cv, 701),
+  (cv) => paintFace(cv, 811),
 ];
 
 /** RGBA8 pixels of every ground layer, layer after layer (sRGB albedo, height in A). */
