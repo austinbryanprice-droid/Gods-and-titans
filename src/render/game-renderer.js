@@ -648,16 +648,20 @@ export class GameRenderer {
     this.groundCover.setQuality(q);
     patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
     this.vfx.setQuality(Q.vfx);
+    this.refreshBuildingDetail(Q.detail);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
-    if (setBuildingDetail(Q.detail)) {
-      for (const b of this.buildings.values()) {
-        b.model.refresh();
-        b.height = b.model.height;
-        patchFowObject(b.model.root);
-      }
-      pruneBuildingCaches();
+  }
+
+  /** Rebuild the standing buildings' models when the quality changes their detail level (building-core.js Kit). */
+  refreshBuildingDetail(detail) {
+    if (!setBuildingDetail(detail)) return;
+    for (const b of this.buildings.values()) {
+      b.model.refresh();
+      b.height = b.model.height;
+      patchFowObject(b.model.root);
     }
+    pruneBuildingCaches();
   }
 
   /** Unit meshes cast real shadows on high and ultra; blob shadows ground them everywhere. */
