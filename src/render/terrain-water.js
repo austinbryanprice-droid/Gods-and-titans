@@ -132,7 +132,7 @@ void main() {
   body = mix( body, uDeep, smoothstep( 0.4, 0.95, dd ) );
   // lit by the sky and, a little, by the sun that gets in under the surface
   body *= lightK * ( 0.62 + 0.38 * shade );
-  float alpha = mix( 0.1, 0.93, smoothstep( 0.0, 0.8, dd ) );
+  float alpha = mix( 0.3, 0.95, smoothstep( 0.0, 0.7, dd ) );
   // refraction-like wobble: the ripples tilt how much of the bed shows through
   alpha = saturate( alpha + ( slope.x - slope.y ) * 0.6 * dd );
 
@@ -147,18 +147,22 @@ void main() {
     sky = mix( sky, uSkyHorizon * 1.25, smoothstep( 0.48, 0.72, cl ) * 0.55 );
   #endif
   float F = 0.03 + 0.97 * pow( 1.0 - NdV, 5.0 );
-  F = min( 1.0, F * 2.2 + 0.06 );
+  F = min( 1.0, F * 1.9 + 0.04 );
   vec3 refl = sky * F;
 
-  // ---- key light: a soft sheen on the swells, sparkles from a fine, fast ripple normal
-  vec3 H = normalize( L + V );
-  float sheen = pow( saturate( dot( N, H ) ), 28.0 ) * 0.08;
+  // ---- key light: a soft sheen on the swells, sparkles from a fine, fast ripple normal. The
+  // glints are laid out as if the light stood across the lake from the camera (its height and
+  // its east-west drift are the key light's, so they travel with the sun) so they show from
+  // this high, one-sided view at any time of day, as the sun's own reflection would not
+  vec3 Lg = normalize( vec3( L.x, L.y, - abs( L.z ) * 0.8 ) );
+  vec3 H = normalize( Lg + V );
+  float sheen = pow( saturate( dot( N, H ) ), 20.0 ) * 0.1;
   vec2 fine = ( texture2D( uFx, p * vec2( 0.83, 0.79 ) + vec2( t * 0.07, - t * 0.05 ) ).gr - 0.5 ) * 0.95;
   #ifdef WATER_HQ
     fine += ( texture2D( uFx, p * vec2( 1.37, 1.31 ) + vec2( - t * 0.06, - t * 0.09 ) + 0.27 ).rg - 0.5 ) * 0.7;
   #endif
   vec3 Nf = normalize( vec3( - ( slope.x * 4.0 + fine.x ), 1.0, - ( slope.y * 4.0 + fine.y ) ) );
-  float spark = pow( saturate( dot( Nf, H ) ), 420.0 );
+  float spark = pow( saturate( dot( Nf, H ) ), 260.0 );
   // twinkle: sparkles come and go with a fast-moving noise
   spark *= smoothstep( 0.35, 0.75, texture2D( uFx, p * 0.61 + vec2( t * 0.13, - t * 0.09 ) ).a );
   vec3 sunTint = uSunColor / max( max( uSunColor.r, uSunColor.g ), max( uSunColor.b, 1e-3 ) );
@@ -173,7 +177,7 @@ void main() {
   float phase = depth * 18.0 + t * 0.5 + fn * 1.4;
   float band = smoothstep( 0.7, 0.86, fract( phase ) ) * ( 1.0 - smoothstep( 0.86, 1.0, fract( phase ) ) );
   band *= ( 1.0 - smoothstep( 0.04, 0.17, depth ) ) * smoothstep( 0.32, 0.6, fn );
-  float foam = saturate( edge * lace + band * 0.7 );
+  float foam = saturate( edge * lace + band * 0.45 );
   // a faint shadow just behind each band reads as a wave lip
   alpha = saturate( alpha + band * 0.1 );
 
@@ -185,7 +189,7 @@ void main() {
   col = mix( col, foamLit, foam );
   alpha = mix( alpha, 1.0, foam );
   // thin out over the noisy margin (premultiplied: color and alpha together)
-  float fade = smoothstep( -0.018, 0.006, depth );
+  float fade = smoothstep( -0.01, 0.004, depth );
   col *= fade;
   alpha *= fade;
   if ( alpha < 0.004 ) discard; // nothing to show
@@ -254,9 +258,9 @@ export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true, fie
   geo.setIndex(idx);
   geo.computeBoundingSphere();
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-    uShallow: { value: lin('#4ccbb6') },
-    uMid: { value: lin('#1f9aa3') },
-    uDeep: { value: lin('#0c4f74') },
+    uShallow: { value: lin('#38cdb9') },
+    uMid: { value: lin('#119097') },
+    uDeep: { value: lin('#07506c') },
     uFoam: { value: lin('#f1f9f6') },
     uGlow: { value: lin('#1ec8e0') },
   }]);

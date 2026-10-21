@@ -5,14 +5,16 @@
 //
 //   node tools/shot-terrain.mjs [--port 8321] [--out DIR] [--prefix before] [--quality medium]
 //        [--scenes lake,shore,...] [--width 1600] [--height 900] [--seed 4242]
-//        [--time noon] [--list]
+//        [--dist 8] [--tod golden] [--eval 'h.renderer.terrain.water.visible = false'] [--list]
 //
-// Scenes: lake (default zoom on the largest lake), shore (near shore, close), far (zoomed
-// out over the lake and its sand ring), rocks (an impassable rock cluster), hills (the
+// Scenes: lake (default zoom on the lake nearest the base), shore (near shore, close), far (zoomed
+// out over the lake and its sand ring), rocks and rockup (an impassable rock cluster out in the
+// open, mid zoom and close), hills (the
 // highest meadow), base (home base on its ground), dock (lake edge by the base, mid zoom).
-// --time picks a time of day once the renderer has one (dawn, noon, dusk, night or hours
-// such as 18.5). High and ultra can take a minute a frame under software GL: use a smaller
-// --width / --height for those, or --timeout 600000 for more patience.
+// --tod picks the time of day the lighting has (golden, day, dusk, night, dawn or an hour such
+// as 18.5; it needs the lighting branch, plain main ignores it). High and ultra can take a
+// minute a frame under software GL: use a smaller --width / --height for those, or
+// --timeout 600000 for more patience.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -29,9 +31,11 @@ const quality = opt('quality', 'medium');
 const seed = Number(opt('seed', '4242'));
 const width = Number(opt('width', '1600'));
 const height = Number(opt('height', '900'));
-const timeOfDay = opt('time', '');
+const timeOfDay = opt('tod', '');
 const timeout = Number(opt('timeout', '300000'));
-const ALL = ['lake', 'shore', 'far', 'rocks', 'hills', 'base', 'dock'];
+const distance = Number(opt('dist', '0')); // camera distance for every scene (0: each scene's own)
+const evalCode = opt('eval', ''); // JavaScript run in the page before the shots, with the harness as `h`
+const ALL = ['lake', 'shore', 'far', 'rocks', 'rockup', 'hills', 'base', 'dock'];
 const scenes = opt('scenes', '') ? opt('scenes', '').split(',') : ALL;
 if (args.includes('--list')) { console.log(ALL.join('\n')); process.exit(0); }
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,7 +50,7 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text()); });
 
 try {
-  await page.goto(`http://localhost:${port}/tools/render-harness.html?manual=1&scenario=base&reveal=1&seed=${seed}&quality=${quality}${timeOfDay ? `&time=${encodeURIComponent(timeOfDay)}` : ''}`);
+  await page.goto(`http://localhost:${port}/tools/render-harness.html?manual=1&scenario=base&reveal=1&seed=${seed}&quality=${quality}${timeOfDay ? `&tod=${encodeURIComponent(timeOfDay)}` : ''}`);
   await page.waitForFunction(() => window.harness && window.harness.ready === true, null, { timeout });
   // where things are, from the map itself
   const spots = await page.evaluate(() => {
@@ -105,10 +109,17 @@ try {
       for (let x = 1; x < W - 1; x++) {
         if (T[y * W + x] !== ROCK) continue;
         let n = 0;
-        for (let oy = -2; oy <= 2; oy++) for (let ox = -2; ox <= 2; ox++) if (T[(y + oy) * W + x + ox] === ROCK) n++;
-        // prefer clusters away from the map edge, nearest the base
+        let trees = 0;
+        for (let oy = -2; oy <= 2; oy++) {
+          for (let ox = -2; ox <= 2; ox++) {
+            const c = T[Math.min(H - 1, Math.max(0, y + oy)) * W + Math.min(W - 1, Math.max(0, x + ox))];
+            if (c === ROCK) n++;
+            else if (c === 3) trees++;
+          }
+        }
+        // prefer clusters in the open (trees hide them), nearest the base
         const d = Math.hypot(x - base.x, y - base.y);
-        const score = n * 10 - d * 0.1;
+        const score = n * 10 - trees * 6 - d * 0.1;
         if (score > rockN) { rockN = score; rock = { x: x + 0.5, y: y + 1.5 }; }
       }
     }
@@ -126,18 +137,21 @@ try {
     return { lake: { x: lake.cx, y: lake.cy }, south, rock, hill, base: { x: base.x, y: base.y }, lakeCount: lakes.length, big: { x: big.cx, y: big.cy } };
   });
   console.log('spots', JSON.stringify(spots));
+  if (evalCode) await page.evaluate((code) => new Function('h', code)(window.harness), evalCode);
   const setups = {
     lake: [spots.lake.x, spots.lake.y + 3, 26],
     shore: [spots.south.x, spots.south.y, 13],
     far: [spots.lake.x, spots.lake.y + 4, 44],
     rocks: [spots.rock.x, spots.rock.y, 15],
+    rockup: [spots.rock.x, spots.rock.y, 9],
     hills: [spots.hill.x, spots.hill.y, 20],
     base: [spots.base.x + 0.5, spots.base.y + 3.5, 25],
     dock: [(spots.base.x + spots.lake.x) / 2, (spots.base.y + spots.lake.y) / 2 + 3, 22],
   };
   for (const s of scenes) {
     if (!setups[s]) { console.log('unknown scene', s); continue; }
-    const [x, y, d] = setups[s];
+    const [x, y, d0] = setups[s];
+    const d = distance || d0;
     await page.evaluate(({ x, y, d }) => { window.harness.camera(x, y, d); window.harness.advance(0.05); window.harness.render(); }, { x, y, d });
     const f = join(out, `${prefix}-${s}.png`);
     const t0 = Date.now();

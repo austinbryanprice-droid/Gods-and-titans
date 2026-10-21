@@ -27,7 +27,9 @@ export const WATER_LEVEL = -0.2;
 /** Field samples per tile, each way. */
 export const FIELD_RES = 4;
 /** Height of one sandstone ledge on an outcrop. */
-export const STRATA_STEP = 0.2;
+export const STRATA_STEP = 0.25;
+/** How much of the staircase the outcrop keeps (0 smooth, 1 full ledges). */
+export const STRATA_AMOUNT = 0.3;
 /** Outcrop rise that the data texture maps to 1. */
 export const RISE_MAX = 1.2;
 /** Range of the shore distance the data texture can hold (tiles). */
@@ -257,7 +259,7 @@ export class GroundField {
 
     // ---- outcrops: rise above the ground over the rock tiles
     const sdRock = signedDistance(rock, cw, ch);
-    blur(sdRock, cw, ch, 2);
+    blur(sdRock, cw, ch, 1, 2); // light: a heavier blur would level a tile-wide strip of rock
     const riseCells = new Float32Array(cw * ch);
     for (let cy = 0; cy < ch; cy++) {
       for (let cx = 0; cx < cw; cx++) {
@@ -266,14 +268,17 @@ export class GroundField {
         const x = (cx + 0.5) / R;
         const y = (cy + 0.5) / R;
         const sd = sdRock[i] / R + (wobble(x, y, seed + 23, 0.45) - 0.5) * 0.36;
-        const face = smooth01(-0.1, 0.35, sd);
+        // a steep wall around a nearly level, craggy top; rock patches are small (a tile wide
+        // strip is common), so even a thin one stands well clear of the meadow
+        const face = smooth01(-0.06, 0.15, sd);
         if (face <= 0) continue;
-        const v = Math.min(1, Math.max(0, sd / 1.1));
-        const crag = 0.75 + 0.5 * wobble(x, y, seed + 29, 0.3);
-        const r0 = (0.3 + 0.62 * v) * face * crag;
+        const v = Math.min(1, Math.max(0, sd / 0.8));
+        const crag = 0.82 + 0.36 * wobble(x, y, seed + 29, 0.3);
+        const r0 = Math.min(RISE_MAX - 0.02, (0.66 + 0.12 * v) * face * crag);
+        // only a hint of ledges: a full staircase over a small mound reads as tree rings
         const tt = r0 / STRATA_STEP;
         const k = Math.floor(tt);
-        riseCells[i] = (k + smooth01(0.38, 0.62, tt - k)) * STRATA_STEP;
+        riseCells[i] = r0 + STRATA_AMOUNT * ((k + smooth01(0.3, 0.7, tt - k)) * STRATA_STEP - r0);
       }
     }
     const rise = cellsToSamples(riseCells, cw, ch);

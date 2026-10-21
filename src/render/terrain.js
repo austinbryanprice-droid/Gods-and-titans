@@ -61,13 +61,17 @@ LAYER_PARAMS[LAYER.SAND] = [1 / 4, -0.02, 0.03, 0.86];
 LAYER_PARAMS[LAYER.ROCK] = [1 / 4.5, 0.1, 0.07, 0.78];
 LAYER_PARAMS[LAYER.FOREST] = [1 / 3, 0.03, 0.04, 0.96];
 LAYER_PARAMS[LAYER.BED] = [1 / 3.5, 0, 0.04, 0.7];
+// sandstone strata on the outcrop walls: x repeats per tile along the wall (the rest as above)
+LAYER_PARAMS[LAYER.FACE] = [1 / 3, 0.1, 0.1, 0.8];
+/** Wall texture repeats per world unit of height (a texture tile of strata is 1.5 units tall). */
+const FACE_V = 1 / 1.5;
 
 /** Shader detail per quality tier (GLSL defines). */
 const QUALITY_DEFINES = {
   low: {},
-  medium: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '' },
-  high: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '' },
-  ultra: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '' },
+  medium: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_FACE: '' },
+  high: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '', TERRAIN_FACE: '' },
+  ultra: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '', TERRAIN_FACE: '' },
 };
 const ANISOTROPY = { low: 2, medium: 4, high: 8, ultra: 16 };
 
@@ -306,6 +310,27 @@ vec4 layerTex( int layer, vec2 p, vec2 dx, vec2 dy, float sel, float dry ) {
 
 vec4 layerParams( int layer, float dry ) {
   return layer == ${LAYER.GRASS} ? mix( uLayer[ ${LAYER.GRASS} ], uLayer[ ${LAYER.DRY} ], dry ) : uLayer[ layer ];
+}
+
+// Sandstone: slabs seen from above; on the walls the strata, mapped from the side
+// (triplanar over the two vertical planes, its beds running level along the wall).
+vec4 rockTex( vec2 p, vec2 dx, vec2 dy, float sel, vec3 w, vec3 wdx, vec3 wdy, vec3 n, float wall, float warp ) {
+  vec4 top = groundTex( ${LAYER.ROCK}, p, dx, dy, sel );
+  #ifdef TERRAIN_FACE
+    if ( wall < 0.003 ) return top;
+    vec2 fs = vec2( uLayer[ ${LAYER.FACE} ].x, ${FACE_V.toFixed(4)} );
+    // the beds wander up and down along the wall (a slow noise on the height), so they do not
+    // trace perfect contour lines around the rock
+    float wy = w.y + warp;
+    vec4 fx = textureGrad( uGround, vec3( vec2( w.z, wy ) * fs + 0.37, ${LAYER.FACE}.0 ), vec2( wdx.z, wdx.y ) * fs, vec2( wdy.z, wdy.y ) * fs );
+    vec4 fz = textureGrad( uGround, vec3( vec2( w.x, wy ) * fs, ${LAYER.FACE}.0 ), vec2( wdx.x, wdx.y ) * fs, vec2( wdy.x, wdy.y ) * fs );
+    float bx = n.x * n.x;
+    float bz = n.z * n.z;
+    vec4 face = ( fx * bx + fz * bz ) / max( bx + bz, 1e-4 );
+    return mix( top, face, wall );
+  #else
+    return top;
+  #endif
 }`;
 
 // replaces <map_fragment>: picks and blends the ground layers into the albedo
@@ -340,6 +365,18 @@ int c0 = layerOf( k0 );
 int c1 = layerOf( k1 );
 int c2 = layerOf( k2 );
 int c3 = layerOf( k3 );
+// the field's shoreline (rounder than the tile grid) decides where the lake is: lake bed only out
+// in the water, sand in its shallows and on dry ground that the warped tile map still calls lake
+if ( gShore < - 0.6 ) {
+  c0 = c1 = c2 = c3 = ${LAYER.BED};
+} else if ( gShore < 0.0 ) {
+  c0 = c1 = c2 = c3 = ${LAYER.SAND};
+} else {
+  if ( c0 == ${LAYER.BED} ) c0 = ${LAYER.SAND};
+  if ( c1 == ${LAYER.BED} ) c1 = ${LAYER.SAND};
+  if ( c2 == ${LAYER.BED} ) c2 = ${LAYER.SAND};
+  if ( c3 == ${LAYER.BED} ) c3 = ${LAYER.SAND};
+}
 vec4 tw = vec4( ( 1.0 - tf.x ) * ( 1.0 - tf.y ), tf.x * ( 1.0 - tf.y ), ( 1.0 - tf.x ) * tf.y, tf.x * tf.y );
 // meadow dryness: the tiles' field interpolated like the weights (continuous,
 // so lush and dry grass meet along soft curves, not tile edges), noise-broken
@@ -362,8 +399,13 @@ if ( c0 == c3 && c1 == c2 && c0 != c1 ) {
     tw = vec4( w, 1.0 - w, 0.0, 0.0 );
   }
 }
-// bare rock on steep slopes
-float tSlopeRock = smoothstep( 0.9, 0.78, normalize( vTerrainN ).y );
+// sandstone: the raised outcrops (their rise from the field, whatever the warped tile map
+// says) and any steep slope; the steeper, the more the side texture takes over
+vec3 wn = normalize( vTerrainN );
+vec3 wdx = dFdx( vTerrainW );
+vec3 wdy = dFdy( vTerrainW );
+float tWall = smoothstep( 0.88, 0.62, wn.y );
+float tSlopeRock = max( smoothstep( 0.9, 0.78, wn.y ), smoothstep( 0.03, 0.16, gRise ) );
 tw *= 1.0 - tSlopeRock;
 float tSel = tnB.z;
 vec4 s0 = vec4( 0.0 );
@@ -375,12 +417,12 @@ if ( tw.x > 0.003 ) s0 = layerTex( c0, tp, tdx, tdy, tSel, tDry );
 if ( tw.y > 0.003 ) s1 = layerTex( c1, tp, tdx, tdy, tSel, tDry );
 if ( tw.z > 0.003 ) s2 = layerTex( c2, tp, tdx, tdy, tSel, tDry );
 if ( tw.w > 0.003 ) s3 = layerTex( c3, tp, tdx, tdy, tSel, tDry );
-if ( tSlopeRock > 0.003 ) sR = groundTex( ${LAYER.ROCK}, tp, tdx, tdy, tSel );
+if ( tSlopeRock > 0.003 ) sR = rockTex( tp, tdx, tdy, tSel, vTerrainW, wdx, wdy, wn, tWall, ( tnB.x - 0.5 ) * 0.5 + ( tnC.w - 0.5 ) * 0.3 );
 vec4 L0 = layerParams( c0, tDry );
 vec4 L1 = layerParams( c1, tDry );
 vec4 L2 = layerParams( c2, tDry );
 vec4 L3 = layerParams( c3, tDry );
-vec4 LR = uLayer[ ${LAYER.ROCK} ];
+vec4 LR = mix( uLayer[ ${LAYER.ROCK} ], uLayer[ ${LAYER.FACE} ], tWall );
 // Height blend: each type scores its weight plus a little of its texel height,
 // and the types within a wide band of the best score show, weighted by how close
 // they are. Borders stay irregular (tufts poke over soil) without the hard
@@ -401,6 +443,7 @@ float tRough = dot( tb, vec4( L0.w, L1.w, L2.w, L3.w ) ) + tbR * LR.w;
 // between them (from the plain weights, before the texel heights roughen it)
 float tDirtShow = ( c0 == ${LAYER.DIRT} ? tb.x : 0.0 ) + ( c1 == ${LAYER.DIRT} ? tb.y : 0.0 ) + ( c2 == ${LAYER.DIRT} ? tb.z : 0.0 ) + ( c3 == ${LAYER.DIRT} ? tb.w : 0.0 );
 float tGrassW = ( c0 == ${LAYER.GRASS} ? tw.x : 0.0 ) + ( c1 == ${LAYER.GRASS} ? tw.y : 0.0 ) + ( c2 == ${LAYER.GRASS} ? tw.z : 0.0 ) + ( c3 == ${LAYER.GRASS} ? tw.w : 0.0 );
+float tSandShow = ( c0 == ${LAYER.SAND} ? tb.x : 0.0 ) + ( c1 == ${LAYER.SAND} ? tb.y : 0.0 ) + ( c2 == ${LAYER.SAND} ? tb.z : 0.0 ) + ( c3 == ${LAYER.SAND} ? tb.w : 0.0 );
 // moist soil: a short darker, smoother band on the dirt side of a meadow border
 float tMoist = smoothstep( 0.0, 0.18, tGrassW ) * ( 1.0 - smoothstep( 0.3, 0.62, tGrassW ) );
 tMoist *= tDirtShow * ( 0.75 + 0.25 * tnC.z );
@@ -415,6 +458,17 @@ tWear = saturate( tWear ) * tDirtShow * ( 0.8 + 0.2 * tnC.w );
 tAlbedo *= 1.0 - 0.2 * tWear;
 tRough = mix( tRough, 0.8, tWear * 0.6 );
 tBump *= 1.0 - 0.35 * tWear;
+// sandstone beds on the walls: layers about a hand high, each one a shade of its own, lighter
+// at its top lip and darker where the soft rock has weathered back under the bed above
+float tBedY = ( vTerrainW.y + ( tnB.x - 0.5 ) * 0.5 + ( tnC.w - 0.5 ) * 0.3 ) * 7.0 + tnC.y * 1.5;
+float tBedH = fract( sin( floor( tBedY ) * 12.9898 + 4.1 ) * 43758.5453 );
+vec3 tBed = mix( vec3( 1.0 ), vec3( 1.09, 0.96, 0.82 ), tBedH ) * ( 0.88 + 0.22 * fract( tBedY ) );
+tAlbedo *= mix( vec3( 1.0 ), tBed, tbR * tWall );
+// the foot of a cliff sits in its own shade
+tAlbedo *= 1.0 - 0.4 * tbR * smoothstep( 0.0, 0.05, gRise ) * ( 1.0 - smoothstep( 0.06, 0.34, gRise ) );
+// moss and a little meadow soil on the level tops, mostly low down where the grass creeps up
+float tMossTop = smoothstep( 0.5, 0.78, tnB.w * 0.6 + tnC.x * 0.4 ) * smoothstep( 0.88, 0.97, wn.y ) * ( 1.0 - 0.5 * smoothstep( 0.2, 0.7, gRise ) );
+tAlbedo = mix( tAlbedo, vec3( 0.2, 0.3, 0.1 ) * ( 0.8 + 0.4 * tnA.x ), tbR * tMossTop * 0.7 );
 // the finest relief only reads while a pixel covers about a texel or less: fade
 // it out beyond that so panning and zooming do not shimmer
 float tFoot = max( length( tdx ), length( tdy ) ) * 90.0;
@@ -431,14 +485,24 @@ float tAut = smoothstep( 0.38, 0.74, tnA.w * 0.7 + tnB.y * 0.3 );
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.42, 0.98, 0.62 ), tAut * tGreen * 0.75 );
 float tMoss = smoothstep( 0.5, 0.82, tnA.z * 0.75 + tnB.w * 0.25 );
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.74, 0.9, 0.86 ), tMoss * tGreen * 0.6 );
-// shore: wet (darker, glossier) just above the water line, which laps a little
+// shore: damp sand along the waterline (a little darker, glossier, a deeper gold) that the
+// water laps up and down and that dries out to pale, sun-bleached sand a tile further up,
+// dustier and warmer up the beach
 float tAbove = vTerrainW.y - uWaterLevel;
-float tLap = 0.012 * sin( uTTime * 1.3 + tp.x * 0.7 + tp.y * 0.5 );
-float tWet = 1.0 - smoothstep( 0.02, 0.13, tAbove - tLap );
+float tLap = 0.12 * sin( uTTime * 1.3 + tp.x * 0.7 + tp.y * 0.5 ) + 0.07 * sin( uTTime * 0.8 - tp.x * 1.7 + tp.y * 1.1 );
 float tUnder = 1.0 - smoothstep( -0.02, 0.0, tAbove );
-tAlbedo *= 1.0 - 0.4 * tWet;
+float tWet = ( 1.0 - smoothstep( 0.0, 0.8, gShore + tLap ) ) * ( 1.0 - tUnder );
+tAlbedo *= 1.0 - 0.14 * tWet;
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.04, 0.95, 0.84 ), tWet * 0.55 );
 tRough = mix( mix( tRough, 0.42, tWet ), 0.9, tUnder );
 tBump *= 1.0 - 0.5 * tWet;
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.06, 1.05, 1.02 ), tSandShow * smoothstep( 0.6, 1.2, gShore ) * ( 1.0 - smoothstep( 1.4, 2.8, gShore ) ) );
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.97, 0.9, 0.78 ), tSandShow * smoothstep( 1.8, 3.6, gShore ) * 0.7 );
+// under the water the lake bed is sand in the shallows (a shade darker the deeper), dark silt and
+// pebbles out in the deep; the bump gives way at the seam between the two
+float tShelf = smoothstep( - 1.8, - 0.65, gShore );
+if ( tShelf > 0.003 && gShore < 0.0 ) tAlbedo = mix( tAlbedo, groundTex( ${LAYER.SAND}, tp, tdx, tdy, tSel ).rgb * mix( vec3( 1.0 ), vec3( 0.78, 0.74, 0.66 ), smoothstep( 0.0, 0.5, - gShore ) ), tShelf );
+tBump *= smoothstep( 0.0, 0.06, abs( gShore + 0.6 ) );
 // under the canopy the ground is darker and a touch cooler; hollows and cliff feet are
 // shaded, crests catch more light (from the smooth field, so no tile-sized blotches)
 tAlbedo *= 1.0 - 0.22 * gForest;
@@ -477,7 +541,7 @@ if ( tUnder > 0.0 ) {
   float cb = textureGrad( uTFx, cq * 1.37 + vec2( uTTime * 0.007, uTTime * 0.01 ) + 0.5, tdx * 0.26, tdy * 0.26 ).b;
   float caust = ( ca + cb ) * 0.5 + ca * cb * 1.6;
   float cfade = smoothstep( 0.0, 0.08, - tAbove ) * ( 1.0 - smoothstep( 0.2, 0.6, - tAbove ) );
-  reflectedLight.directDiffuse *= 1.0 + caust * 1.6 * cfade;
+  reflectedLight.directDiffuse *= 1.0 + caust * 1.0 * cfade;
 }
 #endif`;
 
@@ -514,7 +578,7 @@ function terrainMaterial(textures, tiles, gdata, field, map, time, quality) {
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${TERRAIN_BUMP}`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${TERRAIN_CAUSTICS}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-terrain-v4';
+  mat.customProgramCacheKey = () => 'mythicwar-terrain-v5';
   setTerrainQuality(mat, quality);
   // order matters: the fog-of-war patch keeps the hooks installed before it
   patchWorldMaterial(mat, { cloud: true });
