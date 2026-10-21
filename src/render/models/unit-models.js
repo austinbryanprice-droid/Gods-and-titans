@@ -13,14 +13,22 @@
 // recolored in the vertex shader, and every vertex carries its own roughness,
 // metalness, self-glow and occlusion (unit-geo.js), so metal reflects the sky
 // while cloth stays matte under the same material.
+//
+// On high and ultra (detail 'rich') humanoids the rich builder can dress are one
+// smooth skinned mesh on a bone rig instead of rigid parts (rich-humanoid.js,
+// rich-anim.js); everything else, and every unit on low and medium, keeps the
+// low-poly model.
 import * as THREE from 'three';
 import { buildTemplate, normalizeVisual } from './unit-bodies.js';
 import { animateModel, driveWave } from './unit-anim.js';
+import { buildRichTemplate, richSupported } from './rich-humanoid.js';
+import { instantiate, mountOn, bindInstance, B } from './rich-kit.js';
 import { PartBuilder, TEAM, C, withMat, box, cyl, dodeca, seg, T, bakeAO } from './unit-geo.js';
 import { patchWorldMaterial } from '../shading.js';
 
 const HOVER = 2.2; // air units fly this high above the ground
 const TEMPLATES = new Map();
+const RICH_TEMPLATES = new Map(); // rich templates outlive clearUnitModelCache (only their GPU buffers are freed): the build and bake are the slow part
 const AO_CACHE = new Map(); // template key → baked aAo arrays (outlives clearUnitModelCache, see templateAO)
 const MATERIALS = new Map();
 const AURA_MATS = new Map();
@@ -61,8 +69,13 @@ const UNIT_VERTEX = `
   if ( aFx.x > 0.0 ) vColor.rgb = uTeamColor * aFx.x;
 #endif
   vUnitFx = vec4( aFx.yzw, aAo );`;
+// (skinned meshes keep the noise on the surface: their rest position, not the posed one)
 const UNIT_POS_VERTEX = `
-vUnitP = transformed;
+#ifdef USE_SKINNING
+  vUnitP = position;
+#else
+  vUnitP = transformed;
+#endif
 #include <project_vertex>`;
 const UNIT_PARS_FRAGMENT = `
 uniform vec4 uUnitLook;
@@ -219,9 +232,10 @@ function patchUnitShader(mat) {
  * Shared unit material for a team color. Materials are split by morph target
  * count (three.js recompiles when that changes between draws) and ghostliness.
  */
-export function getUnitMaterial(teamColor, morphCount = 0, ghost = false) {
+export function getUnitMaterial(teamColor, morphCount = 0, ghost = false, skinned = false) {
   const col = C(teamColor);
-  const key = `${col.getHexString()}|${morphCount}|${ghost ? 1 : 0}`;
+  // skinned and plain meshes keep apart: a material used by both flips programs on every draw
+  const key = `${col.getHexString()}|${morphCount}|${ghost ? 1 : 0}${skinned ? '|skin' : ''}`;
   let m = MATERIALS.get(key);
   if (m) return m;
   m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1 });
@@ -375,6 +389,22 @@ function templateKey(unitType) {
   return `${unitType.id}|${unitType.class}|${unitType.air ? 1 : 0}|${JSON.stringify(unitType.visual || {})}`;
 }
 
+/** Whether a unit type is drawn with the rich skinned builder at this detail ('rich' | 'base'). */
+function useRich(unitType, detail) {
+  return detail === 'rich' && !!unitType.visual && richSupported(unitType);
+}
+
+function getRichTemplate(unitType) {
+  const key = templateKey(unitType);
+  let tpl = RICH_TEMPLATES.get(key);
+  if (!tpl) {
+    tpl = buildRichTemplate(unitType);
+    tpl.visual = normalizeVisual(unitType.visual);
+    RICH_TEMPLATES.set(key, tpl);
+  }
+  return tpl;
+}
+
 /**
  * Bake ambient occlusion over the whole model, so parts occlude each other
  * (arms on the torso, legs under the body). Arms are posed as they idle
@@ -466,7 +496,8 @@ function templateAO(tpl, unitType, key) {
   AO_CACHE.set(key, geos.map((g) => g.attributes.aAo.array));
 }
 
-function getTemplate(unitType) {
+function getTemplate(unitType, detail = 'base') {
+  if (useRich(unitType, detail)) return getRichTemplate(unitType);
   const key = templateKey(unitType);
   let tpl = TEMPLATES.get(key);
   if (!tpl) {
@@ -514,8 +545,8 @@ function baseBox(geo) {
 const RANGED_THROW = new Set(['spear', 'rock', 'bolt', 'ice', 'leaf']);
 
 class UnitModel {
-  constructor(unitType, teamColor) {
-    const tpl = getTemplate(unitType);
+  constructor(unitType, teamColor, detail = 'base') {
+    const tpl = getTemplate(unitType, detail);
     const v = tpl.visual;
     const assets = sharedAssets();
     this.unitType = unitType;
@@ -531,6 +562,8 @@ class UnitModel {
     this.root.add(this.rigGroup);
     this.parts = {};
     this.teamColor = C(teamColor ?? '#8a8a8a');
+    this.rich = null;
+    if (tpl.rich) this.buildRichParts(tpl);
     for (const p of tpl.parts) {
       let obj;
       if (p.geo) {
@@ -605,8 +638,48 @@ class UnitModel {
     this.hoverY = this.air ? HOVER : 0;
     this.rigGroup.position.y = this.hoverY;
     this.root.updateMatrixWorld(true);
+    if (this.rich) bindInstance(this.rich);
     this.height = this.computeHeight();
     this.disposed = false;
+  }
+
+  /** The rich body: one skinned mesh on its own bones, plus rigid pieces (weapon, shield, tools, flames) riding bones. */
+  buildRichParts(tpl) {
+    const R = tpl.rich;
+    const inst = instantiate(R.geo, R.spec, getUnitMaterial(this.teamColor, 0, false, true));
+    inst.mesh.name = 'body';
+    inst.mesh.castShadow = true;
+    inst.mesh.receiveShadow = true;
+    this.rigGroup.add(inst.mesh);
+    inst.tools = {};
+    inst.flames = [];
+    inst.restUpper = [inst.bones[B.upperR].position.x, inst.bones[B.upperL].position.x];
+    // the bones live outside the scene graph (see rich-kit.js instantiate): pieces ride a mount per bone
+    const mounts = {};
+    const mount = (bone) => mounts[bone] || (mounts[bone] = mountOn(inst, this.rigGroup, bone, `mount:${bone}`));
+    for (const a of R.attach) {
+      const count = a.geo.morphAttributes.position ? a.geo.morphAttributes.position.length : 0;
+      const mesh = new THREE.Mesh(a.geo, getUnitMaterial(this.teamColor, count, false));
+      mesh.name = a.name;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mount(a.bone).add(mesh);
+      if (a.tool) {
+        mesh.visible = false;
+        inst.tools[a.tool] = mesh;
+      }
+      if (a.flicker) inst.flames.push(mesh);
+    }
+    this.rich = inst;
+    if (this.rig.tools) {
+      // cargo rides on the left shoulder
+      const carry = new THREE.Group();
+      carry.name = 'carry';
+      const chest = R.carryAt;
+      carry.position.set(-0.04, R.dims.shoulderY + 0.08 - chest[1], -R.dims.shoulderZ * 1.02);
+      mount(B.chest).add(carry);
+      this.parts.carry = carry;
+    }
   }
 
   computeHeight() {
@@ -614,7 +687,7 @@ class UnitModel {
     this.rigGroup.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
     this.rigGroup.traverse((o) => {
-      if (!o.isMesh || o === this.aura || o === this.carryMesh) return;
+      if (!o.isMesh || !o.visible || o === this.aura || o === this.carryMesh) return;
       _box.copy(baseBox(o.geometry)).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
       top = Math.max(top, _box.max.y);
     });
@@ -628,6 +701,11 @@ class UnitModel {
 
   setTool(kind) {
     if (!this.rig.tools || this.toolKind === kind) return;
+    if (this.rich) {
+      for (const k in this.rich.tools) this.rich.tools[k].visible = k === kind;
+      this.toolKind = kind;
+      return;
+    }
     const g = this.rig.tools[kind] || this.rig.tools.none;
     this.parts.armR.geometry = g;
     this.toolKind = kind;
@@ -727,6 +805,7 @@ class UnitModel {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.rich) this.rich.mesh.skeleton.dispose();
     this.root.removeFromParent();
     this.root.clear();
     this.parts = {};
@@ -739,26 +818,27 @@ class UnitModel {
  * @param {string|number|THREE.Color} teamColor owner color
  * @returns {{root: THREE.Group, height: number, animate: Function, dispose: Function}}
  */
-export function buildUnitModel(unitType, teamColor) {
-  const m = new UnitModel(unitType, teamColor);
+export function buildUnitModel(unitType, teamColor, opts = {}) {
+  const m = new UnitModel(unitType, teamColor, opts.detail);
   return m;
 }
 
 /** Build (and cache) templates up front to avoid hitches on first spawn. */
-export function preloadUnitModels(unitTypes) {
-  for (const u of unitTypes) if (u && u.visual) getTemplate(u);
+export function preloadUnitModels(unitTypes, detail = 'base') {
+  for (const u of unitTypes) if (u && u.visual) getTemplate(u, detail);
 }
 
 /** Triangle / mesh counts and base height (at visual scale) for a unit type. */
-export function getUnitModelInfo(unitType) {
-  const tpl = getTemplate(unitType);
-  const m = new UnitModel(unitType, '#ffffff');
+export function getUnitModelInfo(unitType, detail = 'base') {
+  const tpl = getTemplate(unitType, detail);
+  const m = new UnitModel(unitType, '#ffffff', detail);
   let meshes = 0;
   m.root.traverse((o) => {
     if (o.isMesh) meshes++;
   });
   const info = { triangles: tpl.triangles, meshes, height: m.height, kind: tpl.kind, morphs: {} };
   for (const p of tpl.parts) if (p.geo) info.morphs[p.name] = p.geo.userData.morphNames.slice();
+  info.rich = !!tpl.rich;
   m.dispose();
   return info;
 }
@@ -770,6 +850,10 @@ export function clearUnitModelCache() {
     if (tpl.rig.tools) for (const g of Object.values(tpl.rig.tools)) g.dispose();
   }
   TEMPLATES.clear();
+  for (const tpl of RICH_TEMPLATES.values()) {
+    tpl.rich.geo.dispose();
+    for (const a of tpl.rich.attach) a.geo.dispose();
+  }
   for (const m of MATERIALS.values()) m.dispose();
   MATERIALS.clear();
   for (const m of AURA_MATS.values()) m.dispose();

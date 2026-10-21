@@ -329,11 +329,11 @@ function headAssembly(b, ctx, headKind, opts = {}) {
 // ---------------------------------------------------------------------------
 
 /** Headless riders hold their glowing offhand (a lantern / orb "head") aloft. */
-function holdsAloft(v) {
+export function holdsAloft(v) {
   return v.head === 'none' && (v.offhand === 'lantern' || v.offhand === 'orb' || v.offhand === 'torch');
 }
 
-const PROFILES = {
+export const PROFILES = {
   humanoid: {
     hipY: 0.5, hipZ: 0.085, thigh: 0.245, legR: 0.056, footL: 0.15, footH: 0.06,
     waistW: 0.25, chestW: 0.36, depth: 0.17, chestD: 0.21, shoulderY: 0.86, shoulderZ: 0.2,
@@ -985,7 +985,7 @@ function buildTorso(ctx, P, opts = {}) {
   return { geo: opts.into ? null : b.build(), anchor };
 }
 
-function humanoidItems(v) {
+export function humanoidItems(v) {
   const w = v.weapon;
   if (w === 'bow') return { right: { kind: 'none' }, left: { kind: 'bow', id: 'bow' } };
   const right = w === 'none' ? { kind: 'none' } : { kind: 'weapon', id: w };
@@ -2036,8 +2036,8 @@ function ramTemplate(ctx) {
 
 // ---------------------------------------------------------------------------
 
-/** Build the template for a unit type (not cached; see unit-models.js). */
-export function buildTemplate(unitType) {
+/** The dressing context of a unit type: normalized visual, palette and the mortal / worker / god flags the body builders read. */
+export function unitContext(unitType) {
   const v = normalizeVisual(unitType.visual);
   const unit = { ...unitType, visual: v };
   const pal = makePalette(unit);
@@ -2064,6 +2064,13 @@ export function buildTemplate(unitType) {
       ctx.sleeveTrim = cls === 'support' ? pal.secondary : pal.leather;
     }
   }
+  return ctx;
+}
+
+/** Build the template for a unit type (not cached; see unit-models.js). */
+export function buildTemplate(unitType) {
+  const ctx = unitContext(unitType);
+  const v = ctx.v;
   switch (v.body) {
     case 'giant': return humanoidTemplate(ctx, 'giant');
     case 'beast_biped': return humanoidTemplate(ctx, 'beast_biped');
