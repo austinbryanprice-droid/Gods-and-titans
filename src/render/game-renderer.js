@@ -229,7 +229,7 @@ export class GameRenderer {
     scene.add(this.terrain.group);
     this.heightFn = (x, y) => heightAt(this.map, x, y);
     this.buildForest();
-    this.decor = createDecor(this.map, this.heightFn);
+    this.decor = createDecor(this.map, this.heightFn, { quality: this.quality });
     this.decor.object3d.traverse((o) => {
       if (o.isMesh) o.receiveShadow = true;
     });
@@ -353,7 +353,7 @@ export class GameRenderer {
     // Build from the original forest (felled trees restored) so felled tiles get stumps.
     const terrain = Uint8Array.from(this.map.terrain);
     for (const [tx, ty] of this.vs.felledAll || []) terrain[ty * this.width + tx] = TERRAIN.FOREST;
-    this.forest = createForest({ ...this.map, terrain }, this.heightFn);
+    this.forest = createForest({ ...this.map, terrain }, this.heightFn, { quality: this.quality });
     this.scene.add(this.forest.object3d);
     patchFowObject(this.forest.object3d);
     // Undergrowth and shore stones (render only): bushes, ferns and boulders
@@ -433,7 +433,7 @@ export class GameRenderer {
       }
     }
     if (!decor.length) return null;
-    const d = createDecor({ ...this.map, decor }, this.heightFn);
+    const d = createDecor({ ...this.map, decor }, this.heightFn, { quality: this.quality });
     d.object3d.name = 'undergrowth';
     return d;
   }
@@ -626,6 +626,9 @@ export class GameRenderer {
     });
     setCloudShadows(Q.clouds);
     this.terrain.setQuality(q);
+    this.forest.setQuality(q);
+    this.decor.setQuality(q);
+    if (this.undergrowth) this.undergrowth.setQuality(q);
     this.groundCover.setQuality(q);
     patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
     this.vfx.setQuality(Q.vfx);

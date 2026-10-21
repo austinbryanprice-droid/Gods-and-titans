@@ -7,10 +7,11 @@
 //   node tools/shot-foliage.mjs [--port 8321] [--out DIR] [--prefix shot]
 //        [--scenes stand,lineup,single,far] [--quality high] [--tods day,golden,dusk,night]
 //        [--width 1280] [--height 720] [--zoom N] [--variants pine,broadleaf] [--stand 14x6]
-//        [--px 0 --py 0] [--perf] [--list]
+//        [--px 0 --py 0] [--perf] [--bench N] [--list]
 //
 // Each shot renders one frame at a frozen render clock (identical wind between runs).
-// --perf prints the renderer's draw calls and triangles for every shot.
+// --perf prints the renderer's draw calls and triangles for every shot; --bench N also times N frames
+// (median, ms; a software rasterizer, so only comparable between runs on the same machine).
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -55,6 +56,12 @@ try {
       if (args.includes('--perf')) {
         const s = await page.evaluate(() => { window.gallery.render(); return window.gallery.renderer.getStats(); });
         note = `  calls ${s.drawCalls} tris ${s.triangles}`;
+      }
+      if (opt('bench', '')) {
+        const n = Number(opt('bench', '5'));
+        const ms = await page.evaluate((k) => window.gallery.bench(k), n);
+        ms.sort((a, b) => a - b);
+        note += `  median ${ms[Math.floor(ms.length / 2)].toFixed(0)} ms (min ${ms[0].toFixed(0)})`;
       }
       console.log(`${file}  (${((Date.now() - t0) / 1000).toFixed(1)} s)${note}`);
       await page.close();

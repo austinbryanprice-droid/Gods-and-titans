@@ -724,10 +724,15 @@ function shared() {
   patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, rim: 0.4, shade: [0.8, 1.0, 1.12], detail: [0, 0.45, 0.9, 0], pine: true }), { cloud: true, rim: 0.12 });
   // Round crowns and bushes (leaf puffs: camera-facing quads shaded as spheres). The quads
   // cast from the back of the crown (see PUFF_EXPAND), so both faces take part in the shadow pass.
-  const plantPuff = new THREE.MeshLambertMaterial({ vertexColors: true });
-  plantPuff.name = 'props-plant-puff';
-  plantPuff.shadowSide = THREE.DoubleSide;
-  patchWorldMaterial(patchFoliageMaterial(plantPuff, { wrap: 0.35, rim: 0.45, shade: [0.84, 1.0, 1.12], detail: [0.85, 0.5, 0.9, 0], puff: true, sphereDepth: true }), { cloud: true, rim: 0.12 });
+  // Low draws the quads flat: no depth written by the fragment shader keeps the early depth test.
+  const puffMat = (name, sphereDepth) => {
+    const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+    m.name = name;
+    m.shadowSide = THREE.DoubleSide;
+    return patchWorldMaterial(patchFoliageMaterial(m, { wrap: 0.35, rim: 0.45, shade: [0.84, 1.0, 1.12], detail: [0.85, 0.5, 0.9, 0], puff: true, sphereDepth }), { cloud: true, rim: 0.12 });
+  };
+  const plantPuff = puffMat('props-plant-puff', true);
+  const plantPuffFlat = puffMat('props-plant-puff-flat', false);
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
   patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45, rim: 0.2, shade: [0.88, 1.0, 1.08] }), { cloud: true, rim: 0.12 });
@@ -736,7 +741,7 @@ function shared() {
   stone.name = 'props-stone';
   patchWorldMaterial(patchStoneMaterial(stone), { cloud: true });
   SHARED = {
-    mat: { plantOpen, plantPuff, plant2, stone },
+    mat: { plantOpen, plantPuff, plantPuffFlat, plant2, stone },
     depth: foliageDepthMaterial(),
     depthPine: foliageDepthMaterial({ pine: true }),
     depthPuff: foliageDepthMaterial({ puff: true }),
@@ -758,8 +763,10 @@ function shared() {
 /** Material of a tree variant / decor kind, and whether it sways (needs the swaying shadow material). */
 const TREE_MAT = { pine: 'plantOpen', broadleaf: 'plantPuff', birch: 'plantPuff', palm: 'plant2' };
 const DECOR_MAT = { rock: 'stone', bush: 'plantPuff', flowers: 'plant2', ruin: 'stone', stump: 'stone', grass: 'plant2' };
+/** The material of a key at a quality: leaf puffs are drawn flat (no sphere depth) on low. */
+const matAt = (S, key, quality) => S.mat[key === 'plantPuff' && quality === 'low' ? 'plantPuffFlat' : key];
 /** Shadow-map material of a color material (it must move the geometry the way the color pass does). */
-const DEPTH_OF = { plantOpen: 'depthPine', plantPuff: 'depthPuff' };
+const DEPTH_OF = { plantOpen: 'depthPine', plantPuff: 'depthPuff', plantPuffFlat: 'depthPuff' };
 
 /** Triangle counts of the shared prop geometries (for tests and budgets). */
 export function getPropInfo() {
@@ -842,11 +849,12 @@ function treeTint(variant, r1, r2, n, out) {
  * Instanced forest for every FOREST tile of mapData.
  * @param {{width:number, height:number, terrain:Uint8Array, heights?:Float32Array, seed?:number|string}} mapData
  * @param {(x:number, y:number)=>number} [heightFn] terrain height at sim (x, y); defaults to heightAt(mapData, x, y)
- * @param {{ variants?: string[] }} [o] variants: grow only these tree variants (galleries and tests)
+ * @param {{ variants?: string[], quality?: string }} [o] variants: grow only these tree variants (galleries and tests);
+ *   quality: low / medium / high / ultra (leaf puffs lose their sphere depth on low)
  * @returns {{object3d: THREE.Group, fell: (tx:number, ty:number)=>boolean, isStanding: (tx:number, ty:number)=>boolean,
- *   count: number, dispose: ()=>void}}
+ *   setQuality: (q:string)=>void, count: number, dispose: ()=>void}}
  */
-export function createForest(mapData, heightFn, { variants = null } = {}) {
+export function createForest(mapData, heightFn, { variants = null, quality = 'medium' } = {}) {
   const S = shared();
   const only = variants && variants.length ? variants : null;
   const hf = resolveHeightFn(mapData, heightFn);
@@ -951,7 +959,7 @@ export function createForest(mapData, heightFn, { variants = null } = {}) {
       b.list.forEach((t, idx) => sh.set(t.shape, idx * 4));
       geo.setAttribute('aShape', new THREE.InstancedBufferAttribute(sh, 4));
     }
-    const mesh = new THREE.InstancedMesh(geo, S.mat[TREE_MAT[b.variant]], b.list.length);
+    const mesh = new THREE.InstancedMesh(geo, matAt(S, TREE_MAT[b.variant], quality), b.list.length);
     mesh.name = `forest-${b.variant}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -1021,6 +1029,9 @@ export function createForest(mapData, heightFn, { variants = null } = {}) {
       const i = ty * W + tx;
       return byTile.has(i) && !felled[i];
     },
+    setQuality(q) {
+      for (const b of buckets.values()) b.mesh.material = matAt(S, TREE_MAT[b.variant], q);
+    },
     dispose() {
       if (group.parent) group.parent.remove(group);
       for (const m of meshes) {
@@ -1044,9 +1055,11 @@ const DECOR_SINK = { rock: 0.04, bush: 0.02, flowers: 0.01, ruin: 0.03, stump: 0
  * Instanced decor props from mapData.decor (rocks, bushes, flowers, ruins, stumps, grass tufts).
  * @param {{decor: {x:number, y:number, kind:string, rot:number, scale:number}[]}} mapData
  * @param {(x:number, y:number)=>number} [heightFn]
- * @returns {{object3d: THREE.Group, hideInRect: (x0:number, y0:number, x1:number, y1:number)=>number, dispose: ()=>void}}
+ * @param {{ quality?: string }} [o]
+ * @returns {{object3d: THREE.Group, hideInRect: (x0:number, y0:number, x1:number, y1:number)=>number,
+ *   setQuality: (q:string)=>void, dispose: ()=>void}}
  */
-export function createDecor(mapData, heightFn) {
+export function createDecor(mapData, heightFn, { quality = 'medium' } = {}) {
   const S = shared();
   const hf = resolveHeightFn(mapData, heightFn);
   const group = new THREE.Group();
@@ -1064,7 +1077,7 @@ export function createDecor(mapData, heightFn) {
   const meshes = [];
   for (const l of lists.values()) {
     const matKey = DECOR_MAT[l.kind] || 'stone';
-    const mesh = new THREE.InstancedMesh(l.geo, S.mat[matKey], l.items.length);
+    const mesh = new THREE.InstancedMesh(l.geo, matAt(S, matKey, quality), l.items.length);
     mesh.name = `decor-${l.kind}`;
     mesh.castShadow = l.kind === 'rock' || l.kind === 'ruin' || l.kind === 'bush';
     mesh.receiveShadow = true;
@@ -1109,6 +1122,9 @@ export function createDecor(mapData, heightFn) {
         });
       }
       return n;
+    },
+    setQuality(q) {
+      for (const l of lists.values()) l.mesh.material = matAt(S, DECOR_MAT[l.kind] || 'stone', q);
     },
     dispose() {
       if (group.parent) group.parent.remove(group);
