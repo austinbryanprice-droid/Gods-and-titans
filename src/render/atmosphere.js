@@ -83,7 +83,7 @@ const FIELDS = [
   ['zenith', 'c'], // the sky: overhead, at the horizon, and the ground it meets
   ['horizon', 'c'],
   ['ground', 'c'],
-  ['haze', 'c'], // distance haze color and where it starts / is complete (world units)
+  ['haze', 'c'], // distance haze color, and where it starts / is complete: world units beyond the point the camera looks at
   ['hazeNear', 'n'],
   ['hazeFar', 'n'],
   ['exposure', 'n'],
@@ -114,154 +114,165 @@ for (const [name, kind] of FIELDS) {
 /** One keyframe: hour (unwrapped: 8 .. 32), then the look. Written for readability, parsed once. */
 const LOOKS = [
   {
-    // the first morning: a low golden sun, hot orange light, violet shadows
-    hour: 8,
-    key: '#ffa24f', keyI: 4.3,
-    hemiSky: '#7d94e6', hemiGround: '#b06a2c', hemiI: 0.82,
+    // the first morning: a low golden sun, warm haze, cool blue shadows, a glow over everything lit
+    name: 'golden', hour: 8,
+    key: '#ffe0b4', keyI: 6.5,
+    hemiSky: '#7f9cff', hemiGround: '#c08a48', hemiI: 1.3,
     envI: 0.5,
-    zenith: '#3f5fc0', horizon: '#ffae66', ground: '#5a3a22',
-    haze: '#f2a566', hazeNear: 16, hazeFar: 150,
-    exposure: 1.08,
-    bloom: 0.85, bloomThr: 0.7, bloomKnee: 0.5, bloomRad: 0.9,
-    contrast: 1.15, saturation: 1.14,
-    shadowTint: [0.85, 0.92, 1.16], highlightTint: [1.12, 1.0, 0.84],
-    vignette: 0.4, glow: 0.35, cloud: 1.15, rim: '#ffc98f', shaft: 0.8, lamp: 0.1, night: 0,
+    zenith: '#4a62c0', horizon: '#ffc080', ground: '#5a3a22',
+    haze: '#ffcc88', hazeNear: -11, hazeFar: 85,
+    exposure: 1.0,
+    bloom: 0.7, bloomThr: 0.3, bloomKnee: 0.5, bloomRad: 1.0,
+    contrast: 1.2, saturation: 1.14,
+    shadowTint: [0.8, 0.95, 1.25], highlightTint: [1.06, 1.0, 0.92],
+    vignette: 0.36, glow: 0.22, cloud: 1.1, rim: '#ffc98f', shaft: 0.8, lamp: 0, night: 0,
   },
   {
-    // bright day: warm white sun, clear blue sky fill, crisp
-    hour: 12.5,
-    key: '#fff0d8', keyI: 3.3,
-    hemiSky: '#a5c8ff', hemiGround: '#6a6440', hemiI: 0.78,
-    envI: 0.55,
-    zenith: '#4f88d8', horizon: '#cfe0f0', ground: '#5a5a3a',
-    haze: '#b7cde6', hazeNear: 34, hazeFar: 170,
+    // bright day: the studio look the game started with (a soft white sun, clear sky fill), a touch more vivid
+    name: 'day', hour: 12.5,
+    key: '#fff4e0', keyI: 3.4,
+    hemiSky: '#a8c8ff', hemiGround: '#4c4230', hemiI: 0.9,
+    envI: 0.5,
+    zenith: '#5d8fd0', horizon: '#cfdbe6', ground: '#4a4a32',
+    haze: '#b8cce0', hazeNear: 3, hazeFar: 125,
     exposure: 1.0,
-    bloom: 0.5, bloomThr: 0.95, bloomKnee: 0.45, bloomRad: 0.8,
-    contrast: 1.1, saturation: 1.1,
-    shadowTint: [0.92, 0.97, 1.08], highlightTint: [1.04, 1.0, 0.94],
-    vignette: 0.3, glow: 0.12, cloud: 1.0, rim: '#a8c4f0', shaft: 0.25, lamp: 0, night: 0,
+    bloom: 0.55, bloomThr: 0.92, bloomKnee: 0.45, bloomRad: 0.82,
+    contrast: 1.15, saturation: 1.2,
+    shadowTint: [0.88, 0.97, 1.14], highlightTint: [1.02, 1.01, 0.97],
+    vignette: 0.34, glow: 0.1, cloud: 1.0, rim: '#a8c4f0', shaft: 0.25, lamp: 0, night: 0,
   },
   {
     // late afternoon: richer and redder than the morning
-    hour: 17,
-    key: '#ff9a45', keyI: 4.1,
-    hemiSky: '#8aa0e8', hemiGround: '#a8642a', hemiI: 0.8,
+    name: 'afternoon', hour: 17,
+    key: '#ffd29e', keyI: 6.8,
+    hemiSky: '#8aa4ff', hemiGround: '#c08040', hemiI: 1.25,
     envI: 0.5,
     zenith: '#4a62c0', horizon: '#ff9a5e', ground: '#5a3820',
-    haze: '#f0a060', hazeNear: 20, hazeFar: 150,
-    exposure: 1.06,
-    bloom: 0.8, bloomThr: 0.72, bloomKnee: 0.5, bloomRad: 0.9,
-    contrast: 1.14, saturation: 1.14,
-    shadowTint: [0.86, 0.92, 1.15], highlightTint: [1.12, 0.99, 0.84],
-    vignette: 0.38, glow: 0.32, cloud: 1.1, rim: '#ffb87a', shaft: 0.8, lamp: 0.2, night: 0.05,
+    haze: '#ffbe80', hazeNear: -11, hazeFar: 80,
+    exposure: 1.02,
+    bloom: 0.7, bloomThr: 0.3, bloomKnee: 0.5, bloomRad: 1.0,
+    contrast: 1.18, saturation: 1.14,
+    shadowTint: [0.82, 0.94, 1.22], highlightTint: [1.08, 0.99, 0.9],
+    vignette: 0.38, glow: 0.24, cloud: 1.1, rim: '#ffb87a', shaft: 0.8, lamp: 0.06, night: 0.05,
   },
   {
-    // magenta dusk: pink light on violet, the lamps come on
-    hour: 19,
-    key: '#ff6c88', keyI: 2.8,
-    hemiSky: '#8168d8', hemiGround: '#7a3c62', hemiI: 0.85,
-    envI: 0.45,
-    zenith: '#3d2a96', horizon: '#ff6fa0', ground: '#3e2038',
-    haze: '#d4789e', hazeNear: 14, hazeFar: 125,
-    exposure: 1.12,
-    bloom: 0.9, bloomThr: 0.62, bloomKnee: 0.55, bloomRad: 0.95,
-    contrast: 1.14, saturation: 1.16,
-    shadowTint: [0.88, 0.84, 1.2], highlightTint: [1.12, 0.92, 0.98],
-    vignette: 0.45, glow: 0.4, cloud: 0.9, rim: '#ff8cb0', shaft: 0.55, lamp: 0.75, night: 0.4,
+    // dusk: pink light over lilac, long shadows, the lamps come on
+    name: 'dusk', hour: 19,
+    key: '#ffaeb8', keyI: 9.0,
+    hemiSky: '#b8a0ff', hemiGround: '#a0607a', hemiI: 1.8,
+    envI: 0.55,
+    zenith: '#3d2a96', horizon: '#ff8fb0', ground: '#3e2038',
+    haze: '#d8a0d0', hazeNear: -15, hazeFar: 75,
+    exposure: 1.2,
+    bloom: 0.9, bloomThr: 0.4, bloomKnee: 0.55, bloomRad: 1.0,
+    contrast: 1.12, saturation: 1.1,
+    shadowTint: [0.88, 0.9, 1.15], highlightTint: [1.08, 0.98, 1.0],
+    vignette: 0.42, glow: 0.4, cloud: 0.9, rim: '#ff8cb0', shaft: 0.55, lamp: 0.75, night: 0.4,
   },
   {
     // the blue hour: no direct light at all, just the sky; the key light changes hands here
-    hour: EVENING_SWAP,
+    name: 'blue', hour: EVENING_SWAP,
     key: '#7a74e8', keyI: 0,
-    hemiSky: '#5a64cc', hemiGround: '#3a2f66', hemiI: 1.15,
-    envI: 0.4,
+    hemiSky: '#9ca4f8', hemiGround: '#7a6aa8', hemiI: 3.6,
+    envI: 0.6,
     zenith: '#1c1f66', horizon: '#6a58b0', ground: '#1c1636',
-    haze: '#3b3f8e', hazeNear: 12, hazeFar: 110,
-    exposure: 1.22,
-    bloom: 0.95, bloomThr: 0.5, bloomKnee: 0.5, bloomRad: 0.95,
-    contrast: 1.12, saturation: 1.05,
-    shadowTint: [0.85, 0.9, 1.25], highlightTint: [1.0, 0.97, 1.12],
-    vignette: 0.5, glow: 0.2, cloud: 0.6, rim: '#9fa4ff', shaft: 0, lamp: 1, night: 0.85,
+    haze: '#8a70c0', hazeNear: -15, hazeFar: 70,
+    exposure: 1.2,
+    bloom: 0.95, bloomThr: 0.4, bloomKnee: 0.5, bloomRad: 1.0,
+    contrast: 1.12, saturation: 1.1,
+    shadowTint: [0.85, 0.9, 1.22], highlightTint: [1.0, 0.97, 1.1],
+    vignette: 0.55, glow: 0.2, cloud: 0.6, rim: '#9fa4ff', shaft: 0, lamp: 1, night: 0.85,
   },
   {
-    // moonlit night: cool blue, never black; the lamps and fires carry the colour
-    hour: 21,
-    key: '#86b6ff', keyI: 1.2,
-    hemiSky: '#4d78dc', hemiGround: '#1e3c60', hemiI: 1.2,
-    envI: 0.38,
+    // moonlit night: cool blue-green, never black; the lamps and fires carry the colour
+    name: 'night', hour: 21,
+    key: '#98c4ff', keyI: 3.6,
+    hemiSky: '#4a70d8', hemiGround: '#1f3f66', hemiI: 0.8,
+    envI: 0.4,
     zenith: '#0a1442', horizon: '#1c3a78', ground: '#0c1830',
-    haze: '#12234a', hazeNear: 12, hazeFar: 100,
-    exposure: 1.3,
-    bloom: 1.0, bloomThr: 0.45, bloomKnee: 0.5, bloomRad: 0.9,
-    contrast: 1.14, saturation: 0.95,
-    shadowTint: [0.78, 0.94, 1.28], highlightTint: [0.92, 1.04, 1.18],
-    vignette: 0.52, glow: 0.1, cloud: 0.5, rim: '#7fd8ff', shaft: 0, lamp: 1, night: 1,
-  },
-  {
-    hour: 27.5, // 03:30: the same night, held
-    key: '#86b6ff', keyI: 1.2,
-    hemiSky: '#4d78dc', hemiGround: '#1e3c60', hemiI: 1.2,
-    envI: 0.38,
-    zenith: '#0a1442', horizon: '#1c3a78', ground: '#0c1830',
-    haze: '#12234a', hazeNear: 12, hazeFar: 100,
-    exposure: 1.3,
-    bloom: 1.0, bloomThr: 0.45, bloomKnee: 0.5, bloomRad: 0.9,
-    contrast: 1.14, saturation: 0.95,
-    shadowTint: [0.78, 0.94, 1.28], highlightTint: [0.92, 1.04, 1.18],
-    vignette: 0.52, glow: 0.1, cloud: 0.5, rim: '#7fd8ff', shaft: 0, lamp: 1, night: 1,
+    haze: '#1a3a70', hazeNear: -15, hazeFar: 65,
+    exposure: 1.15,
+    bloom: 1.0, bloomThr: 0.4, bloomKnee: 0.5, bloomRad: 1.0,
+    contrast: 1.22, saturation: 1.0,
+    shadowTint: [0.84, 0.95, 1.25], highlightTint: [0.94, 1.04, 1.14],
+    vignette: 0.5, glow: 0.1, cloud: 0.5, rim: '#7fd8ff', shaft: 0, lamp: 1, night: 1,
   },
   {
     // before dawn: the sky again, a first pink at the horizon; the key light passes back to the sun
-    hour: 24 + MORNING_SWAP,
+    name: 'predawn', hour: 24 + MORNING_SWAP,
     key: '#9aa0ff', keyI: 0,
-    hemiSky: '#5a6ccc', hemiGround: '#4a3a6a', hemiI: 1.1,
-    envI: 0.4,
+    hemiSky: '#9ca4f8', hemiGround: '#8a6aa0', hemiI: 3.4,
+    envI: 0.55,
     zenith: '#1c2470', horizon: '#8a68b8', ground: '#241c40',
-    haze: '#4a4a96', hazeNear: 12, hazeFar: 110,
-    exposure: 1.22,
-    bloom: 0.95, bloomThr: 0.5, bloomKnee: 0.5, bloomRad: 0.95,
-    contrast: 1.12, saturation: 1.05,
-    shadowTint: [0.86, 0.88, 1.24], highlightTint: [1.02, 0.96, 1.1],
-    vignette: 0.5, glow: 0.25, cloud: 0.6, rim: '#b0a4ff', shaft: 0, lamp: 0.9, night: 0.8,
+    haze: '#9a78c0', hazeNear: -15, hazeFar: 70,
+    exposure: 1.2,
+    bloom: 0.95, bloomThr: 0.4, bloomKnee: 0.5, bloomRad: 1.0,
+    contrast: 1.12, saturation: 1.1,
+    shadowTint: [0.86, 0.9, 1.2], highlightTint: [1.02, 0.97, 1.08],
+    vignette: 0.52, glow: 0.25, cloud: 0.6, rim: '#b0a4ff', shaft: 0, lamp: 0.9, night: 0.8,
   },
   {
     // dawn: peach and rose over violet, long soft shadows
-    hour: 29.75,
-    key: '#ff9f78', keyI: 3.0,
-    hemiSky: '#9a8ae6', hemiGround: '#a86a58', hemiI: 0.85,
+    name: 'dawn', hour: 29.75,
+    key: '#ffc090', keyI: 8.0,
+    hemiSky: '#a090f0', hemiGround: '#c8806a', hemiI: 1.5,
     envI: 0.45,
     zenith: '#5a58c4', horizon: '#ffbc90', ground: '#583a3a',
-    haze: '#ffb09c', hazeNear: 14, hazeFar: 130,
-    exposure: 1.1,
-    bloom: 0.9, bloomThr: 0.65, bloomKnee: 0.5, bloomRad: 0.95,
-    contrast: 1.12, saturation: 1.12,
-    shadowTint: [0.9, 0.88, 1.18], highlightTint: [1.12, 0.97, 0.92],
-    vignette: 0.42, glow: 0.38, cloud: 0.9, rim: '#ffb0a0', shaft: 0.7, lamp: 0.4, night: 0.25,
+    haze: '#ffc0a8', hazeNear: -13, hazeFar: 75,
+    exposure: 1.15,
+    bloom: 0.7, bloomThr: 0.3, bloomKnee: 0.5, bloomRad: 1.0,
+    contrast: 1.15, saturation: 1.12,
+    shadowTint: [0.86, 0.94, 1.2], highlightTint: [1.08, 0.98, 0.94],
+    vignette: 0.4, glow: 0.28, cloud: 0.9, rim: '#ffb0a0', shaft: 0.7, lamp: 0.4, night: 0.25,
   },
 ];
-// the day starts over: the first look again, a day later
+// the night holds until 03:30 and the day starts over: copies of the looks they repeat
+LOOKS.splice(LOOKS.findIndex((l) => l.name === 'predawn'), 0, { ...LOOKS.find((l) => l.name === 'night'), hour: 27.5 });
 LOOKS.push({ ...LOOKS[0], hour: LOOKS[0].hour + 24 });
 
-const KEYS = LOOKS.map((look) => {
+const _pack = new THREE.Color();
+
+/** A look written for readability, as one packed vector (colors in linear light). */
+function pack(look) {
   const v = new Float64Array(SIZE);
-  const c = new THREE.Color();
   for (const [name, kind] of FIELDS) {
     const val = look[name];
     const o = OFFSETS[name];
     if (kind === 'n') v[o] = val;
     else if (kind === 'c') {
-      c.set(val);
-      v[o] = c.r;
-      v[o + 1] = c.g;
-      v[o + 2] = c.b;
+      _pack.set(val);
+      v[o] = _pack.r;
+      v[o + 1] = _pack.g;
+      v[o + 2] = _pack.b;
     } else {
       v[o] = val[0];
       v[o + 1] = val[1];
       v[o + 2] = val[2];
     }
   }
-  return { hour: look.hour, v };
-});
+  return v;
+}
+
+const KEYS = LOOKS.map((look) => ({ name: look.name, hour: look.hour, v: pack(look) }));
+
+/**
+ * Re-tune a keyframe at run time, by name ('golden', 'day', 'afternoon', 'dusk', 'blue',
+ * 'night', 'predawn', 'dawn'; the repeats of a look follow it). For tools that try looks
+ * live; the game never calls it.
+ * @param {string} name
+ * @param {Record<string, any>} patch fields as written in the table: { key: '#ffbe78', keyI: 3.5, shadowTint: [1, 1, 1] }
+ * @returns {boolean} whether a keyframe of that name exists
+ */
+export function tuneLook(name, patch) {
+  let found = false;
+  LOOKS.forEach((look, i) => {
+    if (look.name !== name) return;
+    found = true;
+    Object.assign(look, patch);
+    KEYS[i].v = pack(look);
+  });
+  return found;
+}
 
 // ---------------------------------------------------------------------------
 // state
@@ -300,8 +311,8 @@ export function createState() {
     ambientSky: new THREE.Color(),
     ambientGround: new THREE.Color(),
     haze: new THREE.Color(),
-    hazeNear: 40,
-    hazeFar: 170,
+    hazeNear: -10,
+    hazeFar: 90,
     /** Clear color: the haze, darkened. */
     background: new THREE.Color(),
     envIntensity: 0.5,

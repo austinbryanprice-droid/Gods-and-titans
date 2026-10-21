@@ -99,7 +99,13 @@ export const CLOUD_TEXTURE = makeCloudTexture();
  *   uSkyAmbient / uGroundAmbient  what the hemisphere light adds (color × intensity)
  *   uRimColor               silhouette light, follows the time of day
  *   uNight                  0 day .. 1 deep night; uLamp 0..1 how brightly lanterns and windows glow
+ *   uShaft                  0..1 light shafts: the cloud (and canopy) shadows stretch into streaks along the light
+ *   uLampSpot[LAMP_SPOTS]   the lit windows and lanterns of nearby buildings as pools of warm light: xyz = the
+ *                           lamp, w = its reach (0 = unused); set by setLampSpots(), scaled by uLamp
  */
+/** How many pools of lamplight the world shaders light at once. */
+export const LAMP_SPOTS = 8;
+
 export const WORLD_UNIFORMS = {
   uTime: { value: 0 },
   uCloudTex: { value: CLOUD_TEXTURE },
@@ -115,10 +121,13 @@ export const WORLD_UNIFORMS = {
   uRimColor: { value: INITIAL.rimColor.clone() },
   uNight: { value: INITIAL.night },
   uLamp: { value: INITIAL.lamp },
+  uShaft: { value: INITIAL.shaft },
+  uLampSpot: { value: Array.from({ length: LAMP_SPOTS }, () => new THREE.Vector4(0, 0, 0, 0)) },
 };
 
+const SHAFT_CLOUD_BOOST = 0.55;
 let cloudBase = 0.34;
-let cloudScale = INITIAL.cloudScale;
+let cloudScale = INITIAL.cloudScale * (1 + SHAFT_CLOUD_BOOST * INITIAL.shaft);
 
 /** Cloud shadows on or off (quality), strength 0..1; the time of day scales it. */
 export function setCloudShadows(strength) {
@@ -144,8 +153,18 @@ export function applyAtmosphere(s) {
   U.uRimColor.value.copy(s.rimColor);
   U.uNight.value = s.night;
   U.uLamp.value = s.lamp;
-  cloudScale = s.cloudScale;
+  U.uShaft.value = s.shaft;
+  cloudScale = s.cloudScale * (1 + SHAFT_CLOUD_BOOST * s.shaft); // streaks need a deeper shade to read
   U.uCloud.value.x = cloudBase * cloudScale;
+}
+
+/** Where the lamps are lit: a spot is a lamp's world position and its reach; at most LAMP_SPOTS of them count. */
+export function setLampSpots(spots, count) {
+  const u = WORLD_UNIFORMS.uLampSpot.value;
+  for (let i = 0; i < LAMP_SPOTS; i++) {
+    if (i < count) u[i].set(spots[i * 4], spots[i * 4 + 1], spots[i * 4 + 2], spots[i * 4 + 3]);
+    else u[i].w = 0;
+  }
 }
 
 const DIR_LIGHT_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
@@ -164,6 +183,8 @@ const VERTEX = `
   vWorldPos = ( modelMatrix * wpP ).xyz;
 }`;
 
+const LAMP_GAIN = 'vec3( 3.3, 1.8, 0.75 )'; // warm lamplight, linear irradiance at the lamp's foot
+
 export const WORLD_PARS_FRAGMENT = `
 varying vec3 vWorldPos;
 uniform float uTime;
@@ -171,10 +192,37 @@ uniform sampler2D uCloudTex;
 uniform vec4 uCloud;
 uniform vec3 uSunDirW;
 uniform vec3 uRimColor;
+uniform float uLamp;
+uniform float uNight;
+uniform float uShaft;
+uniform vec4 uLampSpot[ ${LAMP_SPOTS} ];
+// Warm light from the lit windows and lanterns of the buildings round about (irradiance):
+// a soft pool around each lamp, brighter on what faces it.
+vec3 lampLight( vec3 wp, vec3 n ) {
+  vec3 acc = vec3( 0.0 );
+  for ( int i = 0; i < ${LAMP_SPOTS}; i++ ) {
+    vec4 s = uLampSpot[ i ];
+    vec3 L = s.xyz - wp;
+    float d2 = dot( L, L );
+    float r2 = s.w * s.w;
+    if ( d2 >= r2 ) continue;
+    float f = 1.0 - d2 / r2;
+    float flick = 0.94 + 0.06 * sin( uTime * 7.3 + float( i ) * 2.1 );
+    acc += ( f * f * flick ) * ( 0.3 + 0.7 * max( dot( n, L * inversesqrt( d2 + 1e-4 ) ), 0.0 ) );
+  }
+  return acc * ( uLamp * ${LAMP_GAIN} );
+}
 float cloudShade( vec3 wp ) {
   if ( uCloud.x <= 0.0 ) return 1.0;
   // project along the sun so tall things are shaded where their shadow would fall
   vec2 p = wp.xz - uSunDirW.xz * ( wp.y / max( uSunDirW.y, 0.2 ) );
+  if ( uShaft > 0.0 ) {
+    // light shafts: with a low sun the shade falls in streaks along the light, long
+    // across the ground and thin across it, like sun through a canopy or broken cloud
+    vec2 d = normalize( uSunDirW.xz + vec2( 1e-4 ) );
+    vec2 n = vec2( -d.y, d.x );
+    p = d * ( dot( p, d ) * mix( 1.0, 0.45, uShaft ) ) + n * ( dot( p, n ) * mix( 1.0, 2.4, uShaft ) );
+  }
   p = p * uCloud.y + uCloud.zw * uTime * uCloud.y;
   float n = texture2D( uCloudTex, p ).r * 0.65 + texture2D( uCloudTex, p * 2.3 + 0.37 ).r * 0.35;
   // the noise sits mostly in 0.5..0.7: this threshold leaves about a third of the
@@ -230,13 +278,24 @@ export function patchWorldMaterial(mat, { rim = 0, cloud = true, key = '' } = {}
         {
           float ndv = saturate( dot( normal, normalize( vViewPosition ) ) );
           float rimF = pow( 1.0 - ndv, 3.0 );
-          // stronger on surfaces facing up / toward the sky
+          // stronger on surfaces facing up / toward the sky, and on the side the key
+          // light (the sun, at night the moon) shines on
           vec3 upV = normalize( ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz );
           rimF *= 0.45 + 0.55 * saturate( dot( normal, upV ) * 0.5 + 0.6 );
+          vec3 keyV = normalize( ( viewMatrix * vec4( uSunDirW, 0.0 ) ).xyz );
+          rimF *= 0.4 + 0.9 * saturate( dot( normal, keyV ) * 0.5 + 0.5 );
           totalEmissiveRadiance += uRimColor * rimF * uRimStrength * diffuseColor.rgb * 1.6;
         }`,
       );
     }
+    // lamplight on everything near a lit building, after dusk
+    fs = fs.replace(
+      '#include <lights_fragment_end>',
+      `#include <lights_fragment_end>
+      if ( uLamp > 0.01 ) {
+        reflectedLight.directDiffuse += material.diffuseColor * RECIPROCAL_PI * lampLight( vWorldPos, inverseTransformDirection( normal, viewMatrix ) );
+      }`,
+    );
     // The VFX point lights stay in the scene at intensity 0 while idle (a fixed light
     // count keeps the programs), yet three evaluates the whole BRDF for each of them on
     // every lit pixel. Skip the ones that do not reach this fragment: getPointLightInfo

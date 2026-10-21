@@ -2,9 +2,10 @@
 // multisampled half-float (HDR) target, then a few full-screen passes add
 // screen-space ambient occlusion (depth only, half resolution, bilateral blur),
 // bloom (soft-threshold prefilter + dual-filter down/up chain) and one final
-// composite: AO, bloom, exposure, Khronos PBR Neutral tone mapping, color
-// grading (contrast, saturation, warm highlights / cool shadows), vignette,
-// optional sharpening when the scene is upscaled, sRGB encoding and dithering.
+// composite: AO, bloom, a glow haze over the far part of the picture, exposure,
+// Khronos PBR Neutral tone mapping, color grading (contrast, saturation, warm
+// highlights / cool shadows), vignette, optional sharpening when the scene is
+// upscaled, sRGB encoding and dithering.
 // The composite also copies the scene depth into the canvas' depth buffer
 // (gl_FragDepth), so overlays drawn afterwards straight to the canvas (health
 // bars, selection rings, markers) keep their exact colors yet are still hidden
@@ -50,6 +51,8 @@ export const DEFAULT_LOOK = {
   shadowTint: [0.93, 0.98, 1.08], // multiplied in, weighted to the dark end
   highlightTint: [1.07, 1.01, 0.9], // … and the bright end
   vignette: 0.34,
+  glow: 0, // a luminous haze over the far (upper) part of the picture, in glowColor (linear): the sky's glow
+  glowColor: [1, 1, 1],
   sharpen: 0.35, // only when the scene renders below the canvas resolution
 };
 
@@ -234,6 +237,8 @@ uniform float uSaturation;
 uniform vec3 uShadowTint;
 uniform vec3 uHighlightTint;
 uniform float uVignette;
+uniform float uGlow;
+uniform vec3 uGlowColor;
 uniform float uSharpen;
 uniform vec2 uAspect;
 varying vec2 vUv;
@@ -279,6 +284,9 @@ void main() {
   #ifdef USE_BLOOM
     col += texture2D( tBloom, vUv ).rgb * uBloomStrength;
   #endif
+  // the far part of the picture sits in a luminous haze, tinted by the sky at the horizon;
+  // the black of unexplored land stays black
+  if ( uGlow > 0.0 ) col += uGlowColor * ( uGlow * vUv.y * vUv.y * vUv.y ) * min( 1.0, luma( col ) * 4.0 );
   col *= uExposure;
   col = neutral( col );
   // grade in a perceptual-ish space
@@ -366,7 +374,7 @@ export class PostFX {
    */
   constructor(renderer, quality = 'medium') {
     this.renderer = renderer;
-    this.look = { ...DEFAULT_LOOK };
+    this.look = { ...DEFAULT_LOOK, shadowTint: [...DEFAULT_LOOK.shadowTint], highlightTint: [...DEFAULT_LOOK.highlightTint], glowColor: [...DEFAULT_LOOK.glowColor] };
     this.width = 1; // the canvas size the targets are allocated for
     this.height = 1;
     this.canvasW = 1; // the canvas size asked for last; differs from width while a resize is held back
@@ -469,6 +477,8 @@ export class PostFX {
       uShadowTint: { value: new THREE.Vector3(1, 1, 1) },
       uHighlightTint: { value: new THREE.Vector3(1, 1, 1) },
       uVignette: { value: 0 },
+      uGlow: { value: 0 },
+      uGlowColor: { value: new THREE.Vector3(1, 1, 1) },
       uSharpen: { value: 0 },
       uAspect: { value: new THREE.Vector2(1, 1) },
     }, defines);
@@ -705,6 +715,8 @@ export class PostFX {
     c.uShadowTint.value.fromArray(look.shadowTint);
     c.uHighlightTint.value.fromArray(look.highlightTint);
     c.uVignette.value = look.vignette;
+    c.uGlow.value = look.glow;
+    c.uGlowColor.value.fromArray(look.glowColor);
     c.uSharpen.value = this.renderScale < 0.999 ? look.sharpen : 0;
     const aspect = this.canvasW / Math.max(1, this.canvasH);
     c.uAspect.value.set(aspect > 1 ? aspect : 1, aspect > 1 ? 1 : 1 / aspect);

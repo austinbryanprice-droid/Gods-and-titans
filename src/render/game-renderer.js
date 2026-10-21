@@ -29,7 +29,7 @@ import { FireLayer } from './fires.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
 import { PostFX, RESIZE_SETTLE_MS } from './post.js';
-import { createEnvironment, setCloudShadows, applyAtmosphere, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
+import { createEnvironment, setCloudShadows, applyAtmosphere, setLampSpots, LAMP_SPOTS, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 import { Atmosphere } from './atmosphere.js';
 
 // Low draws straight to the canvas; the others go through the post-processing
@@ -94,6 +94,11 @@ const _vp = new THREE.Matrix4();
 const _box = new THREE.Box3();
 const _hit = new THREE.Vector3();
 const _rayObj = new THREE.Ray();
+const NO_TINT = [1, 1, 1];
+// the lit buildings nearest the view, for the lamp pools (updateLamps)
+const _lampD = new Float64Array(LAMP_SPOTS);
+const _lampB = new Array(LAMP_SPOTS).fill(null);
+const _lampSpots = new Float32Array(LAMP_SPOTS * 4);
 
 /** Key of a tile of one owner's wall in GameRenderer.wallTiles (maps stay under 1024 tiles a side, owners under 15). */
 function wallKey(owner, tx, ty) {
@@ -1147,6 +1152,7 @@ export class GameRenderer {
     this.vfx.update(dt);
     this.updateOverlays(dt);
     this.updateLook();
+    this.updateLamps();
     this.updateShadowCamera();
 
     this.lastUpdateMs = now() - t0;
@@ -1887,15 +1893,21 @@ export class GameRenderer {
     const vs = this.vs;
     const s = this.atmo.update(Number.isFinite(vs.renderTime) ? vs.renderTime : vs.time);
     applyAtmosphere(s);
-    this.sun.color.copy(s.keyHue);
+    // low draws without the post pipeline, so the grade (warm highlights, cool shadows) goes into the lights
+    const graded = !!(this.post && this.post.enabled);
+    const hi = graded ? NO_TINT : s.highlightTint;
+    const lo = graded ? NO_TINT : s.shadowTint;
+    this.sun.color.setRGB(s.keyHue.r * hi[0], s.keyHue.g * hi[1], s.keyHue.b * hi[2]);
     this.sun.intensity = s.keyIntensity;
-    this.hemi.color.copy(s.hemiSky);
-    this.hemi.groundColor.copy(s.hemiGround);
+    this.hemi.color.setRGB(s.hemiSky.r * lo[0], s.hemiSky.g * lo[1], s.hemiSky.b * lo[2]);
+    this.hemi.groundColor.setRGB(s.hemiGround.r * lo[0], s.hemiGround.g * lo[1], s.hemiGround.b * lo[2]);
     this.hemi.intensity = s.hemiIntensity;
+    // the haze is measured from the point the camera looks at, so zooming out does not fog the middle of the view
     const fog = this.scene.fog;
+    const lookDist = this.camera ? this.camera.distance : CAMERA_DEFAULTS.defaultDistance; // the first call comes before the camera exists
     fog.color.copy(s.haze);
-    fog.near = s.hazeNear;
-    fog.far = s.hazeFar;
+    fog.near = Math.max(0.5, lookDist + s.hazeNear);
+    fog.far = Math.max(fog.near + 1, lookDist + s.hazeFar);
     this.scene.background.copy(s.background);
     this.scene.environmentIntensity = s.envIntensity;
     this.renderer.toneMappingExposure = s.exposure; // the low path's Neutral tone mapping
@@ -1911,8 +1923,54 @@ export class GameRenderer {
       look.shadowTint = s.shadowTint;
       look.highlightTint = s.highlightTint;
       look.vignette = s.vignette;
+      look.glow = s.glow;
+      look.glowColor[0] = s.skyHorizon.r;
+      look.glowColor[1] = s.skyHorizon.g;
+      look.glowColor[2] = s.skyHorizon.b;
     }
     if (this.env && this.env.update(s, force)) this.scene.environment = this.env.texture;
+  }
+
+  /**
+   * After dusk the finished buildings pool warm light round their doorways: the LAMP_SPOTS
+   * nearest to the middle of the view light the ground and whatever stands near them (the
+   * world shaders' lampLight, scaled by the time of day's lamp level).
+   */
+  updateLamps() {
+    if (WORLD_UNIFORMS.uLamp.value < 0.02) {
+      if (this.lampCount) {
+        this.lampCount = 0;
+        setLampSpots(_lampSpots, 0);
+      }
+      return;
+    }
+    const cx = this.camera.target.x;
+    const cy = this.camera.target.y;
+    let n = 0;
+    for (const b of this.buildings.values()) {
+      if (b.def.wall || (b.e.bp ?? 1) < 1) continue;
+      const dx = b.x - cx;
+      const dy = b.y - cy;
+      const d2 = dx * dx + dy * dy;
+      if (n === LAMP_SPOTS && d2 >= _lampD[n - 1]) continue;
+      let i = n < LAMP_SPOTS ? n++ : n - 1; // the nearest few, kept sorted
+      while (i > 0 && _lampD[i - 1] > d2) {
+        _lampD[i] = _lampD[i - 1];
+        _lampB[i] = _lampB[i - 1];
+        i--;
+      }
+      _lampD[i] = d2;
+      _lampB[i] = b;
+    }
+    for (let i = 0; i < n; i++) {
+      const b = _lampB[i];
+      _lampSpots[i * 4] = b.tx + b.size / 2;
+      _lampSpots[i * 4 + 1] = b.model.root.position.y + 1.1;
+      _lampSpots[i * 4 + 2] = b.ty + b.size + 0.1; // in front of the door (the south face)
+      _lampSpots[i * 4 + 3] = 2 + b.size * 0.7;
+    }
+    setLampSpots(_lampSpots, n);
+    this.lampCount = n;
   }
 
   // ------------------------------------------------------------------ render

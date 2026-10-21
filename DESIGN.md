@@ -941,6 +941,33 @@ per-frame budget, so a revealed army appears over a few frames.
   Fog of war (`src/render/fog.js`, installed after the other material patches): remembered
   ground dimmed and desaturated toward a cool grey, unexplored land under a drifting dark mist;
   enemy units hidden when not visible; enemy buildings shown as last seen.
+- Time of day (`src/render/atmosphere.js`, render-only: no sim or protocol change). The match clock
+  in every snapshot (`vs.renderTime`, sim seconds) maps to an hour (`DAY_SECONDS` = 900 a day, the
+  match opens at 08:00, the dark of the night passes faster than the day) and the hour to a *look*:
+  key light, hemisphere fill, haze, sky, exposure, bloom, grade, glow, light shafts and lamp level,
+  blended with eased interpolation between eight keyframes (golden morning, bright day, warm
+  afternoon, pink-lilac dusk, blue hour, moonlit teal night, violet predawn, peach dawn). The sun
+  and the moon share one arc; the *key* light is the sun by day and the moon at night, swapped at
+  the blue hour where both are at zero and never lower than 14 degrees, so shadows never jump or
+  graze. Every client agrees because the hour is a pure function of the sim clock. The `timeOfDay`
+  setting (`src/settings.js`, Settings and the in-game menu, default `cycle`) holds one time for the
+  whole match instead: `golden`, `day`, `dusk`, `night`, `dawn` (`TIME_PRESETS`); `?tod=` in the
+  address does the same for one page load (screenshots), and `GameRenderer.setTimeOfDay(mode)`
+  takes a mode or an hour. `GameRenderer.updateLook` runs each frame: it sets the lights, the haze
+  (measured from the point the camera looks at, so zooming out does not fog the middle), the sky
+  environment (rebaked at most every 1.5 s), the post look, and the shared shader uniforms
+  (`shading.js` `WORLD_UNIFORMS`: `uSunDirW`, `uSunColor`, `uMoonDirW`, `uMoonColor`, `uSkyZenith`,
+  `uSkyHorizon`, `uSkyAmbient`, `uGroundAmbient`, `uRimColor`, `uNight` 0..1, `uLamp` 0..1, `uShaft`
+  0..1, `uLampSpot[8]`). At low sun the cloud and canopy shadows stretch into long streaks along
+  the light (`uShaft`); after dusk windows, doorways, lanterns and fires brighten (`uLamp`), and
+  `GameRenderer.updateLamps` pools warm light on the ground round the finished buildings nearest
+  the view (`uLampSpot`: xyz the lamp, w its reach; at most `LAMP_SPOTS` = 8, none by day). On
+  medium and up the composite pass carries the grade, a glow veil from the horizon colour and the
+  bloom; low has no post pass, so the grade is baked into the light colours. Night stays playable:
+  units, team colours, selection rings, bars and the fog of war all stay readable (overlays draw
+  after post). Tests: `tests/render/atmosphere.test.js`, `tests/render/game-renderer-lighting.test.js`;
+  `tools/shot-lighting.mjs` captures any scene at any time of day and quality (`--canvas` for
+  high / ultra under software GL).
 - Vision-edge fade (`src/render/unit-fade.js`): enemy and neutral units that come into sight
   after load fade in over `FADE_SECONDS` (0.25 s) and fade out the same way when they leave
   it (own and allied units, and everything visible at load, never fade). A fading-out unit is
@@ -980,7 +1007,7 @@ per-frame budget, so a revealed army appears over a few frames.
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
-  (name, volume, graphics quality, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier.
