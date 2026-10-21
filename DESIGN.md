@@ -947,6 +947,20 @@ per-frame budget, so a revealed army appears over a few frames.
   markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
   keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
   shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
+  Buildings (`src/render/models/building-*.js`, four layers): `building-core.js` holds the colors,
+  surface classes and geometry primitives and the Kit that merges a building's parts into four
+  vertex-colored buckets (foundation, body, team, glow); `building-materials.js` the shared materials
+  and the surface shader (stone courses, bricks, planks, tile and shingle courses, sod, thatch, a
+  cobbled court, drawn from the object-space position and normal, plus grime and contact shading);
+  `building-pieces.js` the palette and the reusable pieces (walls in each wall material, a roof in
+  each roof style, props, ornaments); `building-models.js` the buildings and the public API. Roofs are
+  laid in real courses (`courseSlope`) and big masses have rounded edges (`bevelBox`), so edges catch
+  the low sun. The detail level follows the quality tier (`QUALITY.detail`: low 0, the essential forms;
+  medium and up 1, which adds rounded edges, shutters, wall lanterns, loose stones and grass, thick
+  eaves); `GameRenderer.setQuality` switches it and rebuilds the models in place. Budgets, checked by
+  the tests: at most 3000 triangles a building, 700 a wall segment (two meshes), 6 meshes; a style
+  whose detailed build does not fit is built at the plain level (`getBuildingModelInfo(...).level`),
+  which no roster pantheon needs.
   Terrain (`terrain.js`, `ground-field.js`, `terrain-textures.js`, `terrain-water.js`): the sim's
   vertex heights stay as they are, and the renderer builds one smooth ground field from them
   (`groundField(mapData)`, 4 samples a tile: a Catmull-Rom surface through the vertices, so the

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>City Gallery — Mythic War</title>
+  <!--
+    Visual check page for the buildings and structures (src/render/models/building-models.js)
+    under the real renderer: the real GameRenderer (sun, moon, sky, haze, lamp pools, post,
+    fog of war, wall joins) on a generated map, with one pantheon's whole city laid out in
+    the open ground near the first start: a Town Center, houses, barracks, storehouse, shrine,
+    temple, tower, Titan Gate, three construction sites, and wall runs with towers.
+    (tools/gallery-buildings.html shows the same models under plain two-light lighting.)
+    URL params:
+      pantheon=greek|norse|...           the player's pantheon (default greek)
+      quality=low|medium|high|ultra      render tier (default medium)
+      tod=golden|day|dusk|night|dawn|13.5   time of day (default golden)
+      view=village|tc|tiers|house|barracks|storehouse|shrine|temple|tower|gate|walls|sites|row|far
+                                         camera framing (default village)
+      zoom=26                            camera distance (tiles), a default per view
+      tier=3                             Town Center tier of the village's hall (default 3)
+      seed=4242   manual=1               no animation loop; window.gallery.render() draws a frame
+      t=1.2                              render clock (seconds) frozen at this value (manual mode)
+      px=0&py=0                          shift the camera target (tiles)
+    window.gallery.view(name, zoom), .setTod(name), .setQuality(q), .setTier(n), .render(),
+    .grab() (PNG data URL of the canvas right after drawing it), .bench(n).
+    Keys (live mode): WASD / arrows pan, wheel zoom.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #050605; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+    #stats { position: absolute; top: 6px; right: 8px; color: #fff; font: 12px/1.35 monospace; text-shadow: 0 1px 2px #000; text-align: right; white-space: pre; z-index: 2; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="stats"></div>
+  <script type="module">
+    import { createWorld } from '../src/sim/world.js';
+    import { ViewState } from '../src/game/view-state.js';
+    import { GameRenderer } from '../src/render/game-renderer.js';
+    import { PLAYER_COLORS, TERRAIN } from '../src/config.js';
+    import { PANTHEONS } from '../src/data/index.js';
+
+    const Q = new URLSearchParams(location.search);
+    const pantheon = Q.get('pantheon') || 'greek';
+    if (!PANTHEONS[pantheon]) throw new Error(`unknown pantheon ${pantheon}`);
+    const quality = Q.get('quality') || 'medium';
+    const tod = Q.get('tod') || 'golden';
+    const seed = Number(Q.get('seed') || 4242);
+    const manual = Q.get('manual') !== '0';
+    const hallTier = Number(Q.get('tier') || 3);
+    const startView = Q.get('view') || 'village';
+
+    // ---------------------------------------------------------------- world
+    const setup = {
+      version: '0.1.0', seed, mapSize: 'small',
+      players: [0, 1].map((i) => ({
+        index: i, name: `P${i + 1}`, team: i + 1, pantheon: i ? (pantheon === 'norse' ? 'greek' : 'norse') : pantheon,
+        color: PLAYER_COLORS[i], kind: i ? 'ai' : 'human', difficulty: 'normal',
+      })),
+    };
+    const world = createWorld(setup);
+    const map = world.mapData;
+    const W = map.width;
+    const H = map.height;
+    const T = map.terrain;
+    const p = 0;
+    const tc = world.buildingsOf(p).find((b) => b.type === 'town_center');
+    tc.tier = hallTier;
+    world.players[p].tier = hallTier;
+
+    /** Top-left tile of the free w × h block of plain grass nearest (x, y): no building, mine, tree or rock within a few tiles. */
+    function openArea(w, h, x, y, maxR = 40) {
+      const blocked = new Uint8Array(W * H);
+      for (let i = 0; i < W * H; i++) if (T[i] !== TERRAIN.GRASS) blocked[i] = 1;
+      const mark = (tx, ty, s, m = 2) => { for (let j = -m; j <= s + m - 1; j++) for (let k = -m; k <= s + m - 1; k++) { const xx = tx + k; const yy = ty + j; if (xx >= 0 && yy >= 0 && xx < W && yy < H) blocked[yy * W + xx] = 1; } };
+      for (const e of world.entities.values()) if (e.kind !== 'unit') mark(e.tx, e.ty, e.size || 1);
+      for (const m of map.mines || []) mark(m.tx, m.ty, 3, 3);
+      let best = null;
+      let bd = Infinity;
+      for (let ty = 2; ty < H - h - 2; ty++) {
+        for (let tx = 2; tx < W - w - 2; tx++) {
+          const d = Math.hypot(tx + w / 2 - x, ty + h / 2 - y);
+          if (d >= bd || d > maxR) continue;
+          let ok = true;
+          for (let j = 0; j < h && ok; j++) for (let k = 0; k < w; k++) if (blocked[(ty + j) * W + tx + k]) { ok = false; break; }
+          if (ok) { bd = d; best = { tx, ty }; }
+        }
+      }
+      return best;
+    }
+
+    const placed = {};
+    const keep = (type, b) => { if (b) (placed[type] = placed[type] || []).push(b); return b; };
+    const put = (type, dx, dy, bp = 1) => {
+      const spot = world.findPlacement(p, type, tc.x + dx, tc.y + dy, 12);
+      if (!spot) return null;
+      const b = world.createBuilding(p, type, spot.tx, spot.ty, bp >= 1, true);
+      if (bp < 1) { b.buildProgress = bp; b.hp = b.maxHp * (0.1 + 0.9 * bp); }
+      return keep(type, b);
+    };
+    put('house', -6, -1);
+    put('house', -6, 2.5);
+    put('barracks', 6.5, -1);
+    put('shrine', -6.5, 6);
+    put('temple', 6.5, 4.5);
+    put('tower', 1, 8);
+    put('storehouse', -2.5, 8);
+    put('titan_gate', 6, 10);
+    put('house', -9, 12, 0.1);
+    put('barracks', -4, 13, 0.45);
+    put('temple', 1.5, 13.5, 0.8);
+    keep('town_center', tc);
+
+    // wall runs: tower — 7 wooden segments — tower, and a stone run beside it, with a short side spur
+    const wallsAt = openArea(16, 12, tc.x - 4, tc.y + 24, 60) || { tx: Math.floor(tc.x - 8), ty: Math.floor(tc.y + 20) };
+    const wb = (type, tx, ty, kind) => keep(kind || type, world.createBuilding(p, type, tx, ty, true, true));
+    const wx = wallsAt.tx + 1;
+    const wy = wallsAt.ty + 1;
+    wb('tower', wx, wy, 'wall_tower');
+    for (let i = 0; i < 7; i++) wb('wooden_wall', wx + 2 + i, wy, 'wooden_wall');
+    wb('tower', wx + 9, wy, 'wall_tower');
+    for (let i = 0; i < 3; i++) wb('wooden_wall', wx, wy + 2 + i, 'wooden_wall');
+    for (let i = 0; i < 7; i++) wb('stone_wall', wx + 2 + i, wy + 7, 'stone_wall');
+    wb('tower', wx, wy + 7, 'wall_tower');
+    wb('tower', wx + 9, wy + 7, 'wall_tower');
+    for (let i = 0; i < 4; i++) wb('stone_wall', wx + 10, wy + 2 + i, 'stone_wall');
+    for (let i = 0; i < 3; i++) wb('wooden_wall', wx + 10, wy + 6 + i, 'wooden_wall');
+
+    // three Town Centers, tier 1 to 3, on their own open ground
+    const tiersAt = openArea(24, 8, tc.x - 20, tc.y + 12, 60) || { tx: Math.floor(tc.x - 20), ty: Math.floor(tc.y + 10) };
+    for (let i = 0; i < 3; i++) {
+      const b = world.createBuilding(p, 'town_center', tiersAt.tx + 2 + i * 7, tiersAt.ty + 2, true, true);
+      b.tier = i + 1;
+      keep('tc_tier', b);
+    }
+
+    // ---------------------------------------------------------------- renderer
+    const vs = new ViewState({ setup, mapData: map, myIndex: -1, interpDelayMs: 50 });
+    let vnow = 1000;
+    vs.pushSnapshot(world.getSnapshot(), vnow);
+    const canvas = document.getElementById('c');
+    const renderer = new GameRenderer(canvas, { viewState: vs, setup, quality, timeOfDay: tod });
+    window.renderer = renderer;
+
+    const mid = (list) => ({ x: list.reduce((a, b) => a + b.x, 0) / list.length, y: list.reduce((a, b) => a + b.y, 0) / list.length });
+    const first = (t) => (placed[t] && placed[t][0]) || tc;
+    const VIEWS = {
+      village: () => ({ x: tc.x + 0.5, y: tc.y + 3.5, d: 26 }),
+      far: () => ({ x: tc.x + 0.5, y: tc.y + 5, d: 44 }),
+      tc: () => ({ x: tc.x + 0.5, y: tc.y + 1.2, d: 12 }),
+      tiers: () => ({ x: tiersAt.tx + 12.5, y: tiersAt.ty + 3.5, d: 22 }),
+      house: () => ({ x: first('house').x, y: first('house').y + 0.8, d: 8 }),
+      barracks: () => ({ x: first('barracks').x, y: first('barracks').y + 1.2, d: 10 }),
+      storehouse: () => ({ x: first('storehouse').x, y: first('storehouse').y + 0.8, d: 8 }),
+      shrine: () => ({ x: first('shrine').x, y: first('shrine').y + 0.8, d: 8 }),
+      temple: () => ({ x: first('temple').x, y: first('temple').y + 1.2, d: 10 }),
+      tower: () => ({ x: first('tower').x, y: first('tower').y + 0.8, d: 8 }),
+      gate: () => ({ x: first('titan_gate').x, y: first('titan_gate').y + 1.4, d: 11 }),
+      row: () => ({ x: (first('house').x + first('barracks').x) / 2 + 0.5, y: tc.y + 2.5, d: 19 }),
+      sites: () => { const s = (placed.house || []).slice(1).concat((placed.barracks || []).slice(1), (placed.temple || []).slice(1)); const m = mid(s); return { x: m.x, y: m.y + 1, d: 15 }; },
+      walls: () => ({ x: wx + 5.5, y: wy + 4.2, d: 17 }),
+    };
+    function view(name, zoom) {
+      const v = (VIEWS[name] || VIEWS.village)();
+      renderer.camera.centerOn(v.x + Number(Q.get('px') || 0), v.y + Number(Q.get('py') || 0), false);
+      renderer.camera.setDistance(zoom || Number(Q.get('zoom')) || v.d, true);
+      renderer.camera.update(0);
+    }
+    view(startView);
+
+    const statsEl = document.getElementById('stats');
+    function showStats() {
+      const s = renderer.getStats();
+      statsEl.textContent = `${pantheon} ${quality}  ${startView}  zoom ${renderer.camera.distance.toFixed(0)}\ndraw calls ${s.drawCalls}  tris ${(s.triangles / 1000).toFixed(0)}k`;
+    }
+    const clock = Q.has('t') ? Number(Q.get('t')) : null;
+    function frame(dtMs) {
+      vnow += dtMs;
+      vs.update(vnow);
+      renderer.update(dtMs / 1000);
+    }
+    const gl = renderer.renderer.getContext();
+    window.gallery = {
+      renderer, vs, world, placed, pantheon,
+      canvas,
+      advance(sec, fps = 30) { const n = Math.max(1, Math.round(sec * fps)); for (let i = 0; i < n; i++) frame(1000 / fps); },
+      render() { renderer.render(); showStats(); },
+      /** The canvas as a PNG, drawn and read in one task (no compositor frame needed); the sky and shadows settle a frame later, so two draws. */
+      grab() {
+        renderer.update(0); renderer.render();
+        renderer.update(0); renderer.render();
+        return canvas.toDataURL('image/png');
+      },
+      view,
+      setTod(name) { renderer.setTimeOfDay(/^[\d.]+$/.test(name) ? Number(name) : name); },
+      setQuality(q) { renderer.setQuality(q); },
+      setTier(n) { tc.tier = n; world.players[p].tier = n; vs.pushSnapshot(world.getSnapshot(), vnow += 100); frame(100); },
+      /** Render n frames, waiting for the GPU after each (a software rasterizer: relative timing only). */
+      bench(n = 5) {
+        const px = new Uint8Array(4);
+        const ms = [];
+        for (let i = 0; i < n; i++) {
+          const t0 = performance.now();
+          renderer.render();
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          ms.push(performance.now() - t0);
+        }
+        return ms;
+      },
+      stats() { return renderer.getStats(); },
+      ready: false,
+    };
+    const keys = new Set();
+    addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+    addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+    canvas.addEventListener('wheel', (e) => { renderer.camera.zoomBy(-Math.sign(e.deltaY)); e.preventDefault(); }, { passive: false });
+    addEventListener('resize', () => renderer.resize(innerWidth, innerHeight));
+
+    if (manual) {
+      // a frozen clock gives frames that are identical between runs (flags, flames, water)
+      window.gallery.advance(0.1);
+      if (clock != null) renderer.time = clock;
+      window.gallery.render();
+      window.gallery.ready = true;
+    } else {
+      let last = performance.now();
+      let fpsT = last;
+      const loop = (now) => {
+        const dt = Math.min(100, now - last);
+        last = now;
+        const s = (28 * dt) / 1000;
+        if (keys.has('arrowleft') || keys.has('a')) renderer.camera.scroll(-s, 0);
+        if (keys.has('arrowright') || keys.has('d')) renderer.camera.scroll(s, 0);
+        if (keys.has('arrowup') || keys.has('w')) renderer.camera.scroll(0, -s);
+        if (keys.has('arrowdown') || keys.has('s')) renderer.camera.scroll(0, s);
+        frame(dt);
+        renderer.render(now);
+        if (now - fpsT > 500) { showStats(); fpsT = now; }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+      window.gallery.ready = true;
+    }
+  </script>
+</body>
+</html>
