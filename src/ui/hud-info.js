@@ -3,13 +3,14 @@
 // (click an item to cancel it), construction progress, prayer counts, god
 // level / xp, status effects, carried resources, the worshippers working at a
 // building, and stats with the owner's researched upgrades.
-import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE, MINE_SLOTS, MINE_TIME, CARRY_AMOUNT } from '../config.js';
+import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE, MINE_SLOTS } from '../config.js';
 import { UNITS, BUILDINGS, GOLD_MINE, UPGRADES } from '../data/index.js';
 import { buildingMods, unitMods, upgradesFor } from '../data/upgrades.js';
 import { sanitizeName } from '../net/protocol.js';
 import { el, setText, setStyle, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import {
   defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName, workersAt, workerTasks, modsOf, upgradesOf, WORKER_TASKS,
+  workText, mineTripText,
 } from './hud-data.js';
 
 const STATUS = {
@@ -97,9 +98,16 @@ export function taskSummaryText(counts) {
   return WORKER_TASKS.filter((t) => counts[t.id] > 0).map((t) => `${t.icon} ${counts[t.id]}`).join(' · ');
 }
 
-/** Researched upgrades of a building type for a player: "🧱 Stone Walls, 👪 Large Families" ('' when none). */
+/**
+ * Researched upgrades of a building type for a player: "🧱 Stone Walls, 👪 Large Families" ('' when none).
+ * Of an upgrade line only the highest level shows; the lower levels are part of it.
+ */
 export function researchedText(up, typeId) {
-  return upgradesFor(typeId).filter((u) => up.includes(u.id)).map((u) => `${u.icon} ${u.name}`).join(', ');
+  const owned = upgradesFor(typeId).filter((u) => up.includes(u.id));
+  return owned
+    .filter((u) => !u.line || !owned.some((o) => o.line === u.line && o.after === u.id))
+    .map((u) => `${u.icon} ${u.name}`)
+    .join(', ');
 }
 
 /** Shape of an entity that needs a panel rebuild when it changes. */
@@ -204,6 +212,7 @@ export class InfoView {
       }
       s.parts.armor = stat('🛡️', 'Armor');
       s.parts.speed = stat('👣', 'Speed');
+      if (def.class === 'worker') s.parts.work = stat('🔨', 'Work');
     } else if (e.k === 'b' && def) {
       s.parts.armor = stat('🛡️', 'Armor');
       if (def.attack) {
@@ -215,7 +224,8 @@ export class InfoView {
       s.parts.gold = stat('💰', 'Gold left', 'is-wide');
       s.parts.miners = stat('⛏️', 'Miners', 'is-wide');
       s.parts.mineNote = el('div', 'hi-note');
-      extra.append(s.parts.mineNote, el('div', 'hi-note is-dim', `Up to ${MINE_SLOTS} Worshippers mine at once, ${MINE_TIME} s per ${CARRY_AMOUNT} gold; the others wait their turn.`));
+      s.parts.mineRule = el('div', 'hi-note is-dim');
+      extra.append(s.parts.mineNote, s.parts.mineRule);
     }
 
     // Extra block by kind.
@@ -338,6 +348,7 @@ export class InfoView {
       const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0) + um.armor;
       setText(p.armor, String(Math.round(armor * 10) / 10));
       setText(p.speed, String(def.speed));
+      if (p.work) setText(p.work, workText(modsOf(vs, e.o)));
       if (p.xpFill) {
         const lo = GOD_XP_LEVELS[lv - 1] || 0;
         const hi = GOD_XP_LEVELS[lv];
@@ -394,6 +405,7 @@ export class InfoView {
       const inSight = vs.mineInSight(e);
       setText(p.gold, fmt(vs.mineGold(e)));
       setText(p.miners, inSight ? minersText(e) : '?');
+      setText(p.mineRule, `Up to ${MINE_SLOTS} Worshippers mine at once, ${mineTripText(modsOf(vs, vs.myIndex))}; the others wait their turn.`);
       const mine = ownMinersAt(vs, e.id);
       setText(p.mineNote, mine ? `${mine} of your Worshippers ${mine === 1 ? 'works' : 'work'} here.` : inSight ? '' : 'Not in sight: gold left as last seen.');
     }

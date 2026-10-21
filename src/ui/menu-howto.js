@@ -40,6 +40,7 @@ const HOTKEYS = [
     [kbd('W'), 'Town Center: Worshipper · Barracks: Warrior'],
     [kbd('Shift', 'W'), 'Shift with any train hotkey or button queues up to 5 at once'],
     [kbd('U'), 'Town Center: grow to Town, then City'],
+    [keys('K', 'H'), 'Town Center: Worshippers work faster (K) · have more health (H), three levels each'],
     [keys('A', 'P', 'R'), 'Barracks: Archer · Priest · Battering Ram'],
     [keys('Q', 'W', 'E'), 'Shrine: creatures · Temple: gods (R for the fourth)'],
     [kbd('Hotkey'), 'Every building has its own upgrades in the middle rows of its command card'],

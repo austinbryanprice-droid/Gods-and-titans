@@ -22,11 +22,11 @@
 // }
 import {
   MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
-  MINE_SLOTS, MINE_TIME, CARRY_AMOUNT, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE,
+  MINE_SLOTS, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE,
 } from '../config.js';
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt } from '../data/index.js';
-import { upgradesFor } from '../data/upgrades.js';
-import { selectionIds, subgroups, isComplete, ownBuildings, tierName, upgradesOf } from './hud-data.js';
+import { offeredUpgrades, lineOf, getUpgrade } from '../data/upgrades.js';
+import { selectionIds, subgroups, isComplete, ownBuildings, tierName, upgradesOf, modsOf, mineTripText } from './hud-data.js';
 
 export const CARD_SLOTS = 12;
 
@@ -215,8 +215,10 @@ export function researchCheck(vs, up, buildings) {
   for (const b of ownBuildings(vs)) for (const q of b.q || []) if (q.u === up.id) queued++;
   const res = (state, reason) => ({ state, reason, cost, queued });
   if (!me) return res('disabled', null);
-  if (upgradesOf(vs, vs.myIndex).includes(up.id)) return res('passive', null);
+  const owned = upgradesOf(vs, vs.myIndex);
+  if (owned.includes(up.id)) return res('passive', null);
   if (queued) return res('disabled', 'Already being researched.');
+  if (up.after && !owned.includes(up.after)) return res('locked', `Requires ${getUpgrade(up.after).name}.`);
   if (up.tier > (me.tier || 1)) return res('locked', tierReason(up.tier));
   const ready = buildings.filter((b) => isComplete(b));
   if (!ready.length) return res('disabled', null);
@@ -277,7 +279,7 @@ export function describePassive(p) {
 const REPAIR_TEXT = `Mend a damaged building. A full repair costs ${Math.round(REPAIR_COST * 100)}% of the building's cost, paid as it heals; more Worshippers repair faster.`;
 const AUTO_REPAIR_TEXT = `Idle Worshippers repair damaged buildings within ${AUTO_REPAIR_RANGE} tiles by themselves. Applies to all your Worshippers.`;
 
-const GATHER_TEXT = `Mine gold from a gold mine or chop wood from a forest. Up to ${MINE_SLOTS} Worshippers mine one gold mine at a time (${MINE_TIME} s per ${CARRY_AMOUNT} gold); the others wait their turn, so about 5–6 per mine is plenty.`;
+const gatherText = (mods) => `Mine gold from a gold mine or chop wood from a forest. Up to ${MINE_SLOTS} Worshippers mine one gold mine at a time (${mineTripText(mods)}); the others wait their turn, so about 5–6 per mine is plenty.`;
 
 /** "Shrine 0.5/s, Temple 0.7/s per worshipper, 5 at a time" from the building data. */
 function prayText() {
@@ -404,7 +406,7 @@ function unitCard(card, vs, group, ownIds, mode) {
 
   if (isWorker) {
     const workers = units.filter((u) => UNITS[u.t] && UNITS[u.t].class === 'worker');
-    card[4] = button(4, { id: 'gather', key: 'G', icon: '⛏️', title: 'Gather', description: GATHER_TEXT, action: { kind: 'target', order: 'gather', target: 'resource' } });
+    card[4] = button(4, { id: 'gather', key: 'G', icon: '⛏️', title: 'Gather', description: gatherText(modsOf(vs, vs.myIndex)), action: { kind: 'target', order: 'gather', target: 'resource' } });
     const carrying = workers.some((u) => u.c);
     card[5] = button(5, {
       id: 'return', key: 'C', icon: '📥', title: 'Return Resources', description: 'Bring the carried gold or wood to the nearest Town Center or Storehouse.',
@@ -563,17 +565,19 @@ function buildingCard(card, vs, group) {
     default:
       break;
   }
-  // Building upgrades fill the free slots of the middle and bottom rows.
+  // Building upgrades fill the free slots of the middle and bottom rows; an upgrade line
+  // (Worshipper work speed, health) takes one slot and shows its next level.
   const free = [4, 5, 6, 7, 8, 9, 10].filter((i) => !card[i]);
-  upgradesFor(group.type).slice(0, free.length).forEach((up, i) => {
+  offeredUpgrades(group.type, upgradesOf(vs, vs.myIndex)).slice(0, free.length).forEach((up, i) => {
     const chk = researchCheck(vs, up, buildings);
     const done = chk.state === 'passive';
+    const levels = lineOf(up);
     card[free[i]] = button(free[i], {
       id: `research:${up.id}`,
       key: done ? null : up.hotkey,
       icon: up.icon,
       title: done ? `${up.name} (researched)` : `Research ${up.name}`,
-      description: up.description,
+      description: levels.length ? `${up.description} Level ${levels.indexOf(up) + 1} of ${levels.length}.` : up.description,
       state: chk.state,
       reason: chk.reason,
       cost: done ? null : chk.cost,

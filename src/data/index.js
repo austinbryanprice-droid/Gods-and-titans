@@ -2,7 +2,7 @@
 import { MORTALS } from './mortals.js';
 import { BUILDINGS, GOLD_MINE, BUILD_MENU } from './buildings.js';
 import { UPGRADES } from './upgrades.js';
-import { validatePantheon, validateUnit, validateUpgrade } from './schema.js';
+import { validatePantheon, validateUnit, validateUpgrade, validateUpgradeLines } from './schema.js';
 import greek from './pantheons/greek.js';
 import norse from './pantheons/norse.js';
 import egyptian from './pantheons/egyptian.js';
@@ -94,6 +94,7 @@ export function validateData() {
       upgradeIds.add(up.id);
       validateUpgrade(up, b.id, errors, unitIds);
     }
+    validateUpgradeLines(b, errors);
   }
   return errors;
 }

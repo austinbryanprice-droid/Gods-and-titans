@@ -6,6 +6,7 @@ import {
 } from '../config.js';
 import { BUILDINGS } from '../data/index.js';
 import { moveToRect, stopMove } from './movement.js';
+import { workSpeedOf } from './economy.js';
 import { hyp, distPointRect } from './common.js';
 
 const BUILD_REACH = 0.6;
@@ -274,7 +275,7 @@ export function updateConstruction(world, b) {
   const n = b.builders;
   b.builders = 0;
   if (n <= 0) return;
-  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) / b.def.buildTime;
+  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) * workSpeedOf(world, b.owner) / b.def.buildTime;
   const dp = Math.min(rate * DT, 1 - b.buildProgress);
   b.buildProgress += dp;
   b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.9 * dp);
@@ -353,7 +354,7 @@ export function updateBuildingRepair(world, b) {
     b.repairBlocked = false;
     return;
   }
-  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) / (b.def.buildTime * REPAIR_TIME);
+  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) * workSpeedOf(world, b.owner) / (b.def.buildTime * REPAIR_TIME);
   const hp = Math.min(b.maxHp * rate * DT, b.maxHp - b.hp);
   const cost = repairCost(b, hp);
   const msg = world.affordError(b.owner, cost);
