@@ -945,12 +945,14 @@ per-frame budget, so a revealed army appears over a few frames.
   each roof style, props, ornaments); `building-models.js` the buildings and the public API. Roofs are
   laid in real courses (`courseSlope` for a gable, `courseLoft` for hipped, swept and stepped roofs,
   `courseCone` for cones and domes with smooth normals) and big masses have rounded edges (`bevelBox`,
-  and `bevelFrustum` for battered walls), so edges catch the low sun. The detail level follows the quality tier (`QUALITY.detail`: low 0, the essential forms;
-  medium and up 1, which adds rounded edges, shutters, wall lanterns, loose stones and grass, thick
-  eaves); `GameRenderer.setQuality` switches it and rebuilds the models in place. Budgets, checked by
-  the tests: at most 3000 triangles a building, 700 a wall segment (two meshes), 6 meshes; a style
-  whose detailed build does not fit is built at the plain level (`getBuildingModelInfo(...).level`),
-  which no roster pantheon needs.
+  and `bevelFrustum` for battered walls), so edges catch the low sun; walls, towers, gates, temples
+  and shrines are built the same way. The detail level follows the quality tier (`QUALITY.detail`:
+  low 0, the essential forms; medium and up 1, which adds rounded edges, shutters, wall and lookout
+  lamps that light after dusk, loose stones and grass, thick eaves); `GameRenderer.setQuality`
+  switches it and rebuilds the models in place. Budgets, checked by the tests: at most 3000 triangles
+  a building, 700 a wall segment (two meshes), 6 meshes; a style whose detailed build does not fit
+  is built at the plain level (`getBuildingModelInfo(...).level`), which no roster pantheon needs.
+  A test casts rays from the game camera to check that team color stays visible on every building.
   Terrain (`terrain.js`, `ground-field.js`, `terrain-textures.js`, `terrain-water.js`): the sim's
   vertex heights stay as they are, and the renderer builds one smooth ground field from them
   (`groundField(mapData)`, 4 samples a tile: a Catmull-Rom surface through the vertices, so the

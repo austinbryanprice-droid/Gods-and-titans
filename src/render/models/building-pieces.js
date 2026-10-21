@@ -271,7 +271,7 @@ export function steps(k, P, w, d, y, n, stepH, inset, color, x = 0, z = 0) {
   for (let i = 0; i < n; i++) {
     const ww = w - i * inset * 2;
     const dd = d - i * inset * 2;
-    k.b(box(ww, stepH, dd, x, yy, z), i % 2 ? shade(color, 1.06) : color, 0.03);
+    k.b(bx(k, 0.03, ww, stepH, dd, x, yy, z), i % 2 ? shade(color, 1.06) : color, 0.03);
     yy += stepH;
   }
   return yy;
@@ -530,6 +530,15 @@ export function wallLantern(k, P, x, y, fz, s = 1) {
   k.b(box(0.05 * s, 0.01 * s, 0.05 * s, x, y + 0.02 * s, fz + 0.075 * s), P.dark, 0);
 }
 
+/** A lamp on a short iron post: a capped cage round a glowing body, for a lookout platform (lod 1). */
+export function postLamp(k, P, x, y, z, s = 1) {
+  if (!k.lod) return;
+  k.b(box(0.022 * s, 0.17 * s, 0.022 * s, x, y, z), P.dark, 0);
+  k.b(box(0.062 * s, 0.014 * s, 0.062 * s, x, y + 0.17 * s, z), P.dark, 0);
+  k.g(box(0.044 * s, 0.07 * s, 0.044 * s, x, y + 0.184 * s, z), P.lamp, null, GLOW.lamp);
+  k.b(box(0.066 * s, 0.014 * s, 0.066 * s, x, y + 0.254 * s, z), P.dark, 0);
+}
+
 export function door(k, P, st, x, y, fz, w, h, rich = true) {
   const frame = st.wall === 'timber' ? P.woodD : st.wall === 'lacquer' ? P.beam : P.trim;
   k.b(box(w + 0.1, h + 0.06, 0.05, x, y, fz + 0.005), frame, 0.03);
@@ -777,7 +786,7 @@ export function placer(k, x, y, z, ry) {
  * Segments around and courses up a dome: a wide one gets more of both so its outline stays round; the
  * plain level keeps few, and the tight City a course fewer on its small tower domes.
  */
-function domeCuts(k, r) {
+export function domeCuts(k, r) {
   if (!k.lod) return { seg: 8, n: 3 };
   return { seg: Math.max(10, Math.min(16, Math.round(8 + r * 8))), n: k.tight && r < 0.5 ? 4 : 5 };
 }

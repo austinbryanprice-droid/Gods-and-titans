@@ -240,6 +240,7 @@ test('wall segments: every neighbour combination builds in budget, with arms tha
         const label = `${p.id}/${type}/${mask.toString(2)}`;
         const info = getBuildingModelInfo(type, p, 1, mask);
         assert.equal(info.meshes, 2, `${label}: body and team color, two draws a segment`);
+        assert.equal(info.level, 1, `${label}: the rounded detailed build fits the budget, no rebuild at the plain level`);
         assert.ok(info.triangles > 30 && info.triangles <= 700, `${label}: ${info.triangles} triangles`);
         assert.equal(info.fit, 1, `${label}: never shrunk`);
         assert.ok(info.extent <= info.limit, `${label}: reaches ${info.extent.toFixed(3)}`);
@@ -673,5 +674,29 @@ test('team color: every building shows some of it to the game camera, and the Ce
       }
       m.dispose();
     }
+  }
+});
+
+// ---- the light of a lookout ----
+
+test('the watch tower lights a lamp on its lookout at the detailed level, and the plain level draws none', () => {
+  const was = getBuildingDetail();
+  try {
+    for (const p of PANTHEON_LIST) {
+      const glowTriangles = (level) => {
+        setBuildingDetail(level);
+        pruneBuildingCaches();
+        const m = buildBuildingModel('tower', p, '#ff0000');
+        const g = meshesOf(m.root).find((o) => o.name === 'building-glow');
+        const n = g ? g.geometry.attributes.position.count / 3 : 0;
+        m.dispose();
+        return n;
+      };
+      const plain = glowTriangles(0);
+      assert.ok(glowTriangles(1) >= plain + 12, `${p.id}: the lookout has a lit lamp at the detailed level`);
+    }
+  } finally {
+    setBuildingDetail(was);
+    pruneBuildingCaches();
   }
 });
