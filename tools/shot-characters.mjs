@@ -63,6 +63,8 @@ try {
   await page.evaluate(() => { window.harness.renderer.camera.opts.minDistance = 2.5; });
   if (detail) await page.evaluate((d) => window.harness.renderer.setUnitDetail(d), detail);
   if (evalCode) await page.evaluate(`(() => { const h = window.harness; ${evalCode} })()`);
+  // the unit views rebuild when the detail changes and fade in over a few frames (see-through dither): let them finish
+  await page.evaluate(() => window.harness.advance(1));
 
   // where the rows of the formation stand (unit positions of player 0 by class)
   const rows = await page.evaluate(() => {

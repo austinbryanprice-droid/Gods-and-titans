@@ -737,5 +737,3 @@ export function syncRich(inst) {
     m.obj.matrixWorldNeedsUpdate = true;
   }
 }
-
-export { _v as _scratch };
