@@ -161,6 +161,16 @@ test('delta from nothing and to an empty world', () => {
   assert.deepStrictEqual(apply(s, d), again);
 });
 
+test('the peaceEnd event travels packed and comes back whole', () => {
+  const r = new RNG(11);
+  const a = initialSnapshot(r, 3, { v: 1 });
+  const b = { ...a, tick: 1, events: [{ type: 'peaceEnd' }, { type: 'playerDefeated', player: 1 }] };
+  const d = encode(a, b);
+  assert.deepEqual(d.e[0].length, 1, 'a shape with no keys is just its code');
+  assert.deepStrictEqual(apply(a, json(d)).events, b.events);
+  assert.deepStrictEqual(apply(a, d), b);
+});
+
 test('delta carries events, felled and gameOver; unchanged entities stay shared', () => {
   const r = new RNG(9);
   const nextId = { v: 1 };

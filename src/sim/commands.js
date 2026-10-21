@@ -7,6 +7,7 @@ import { issueBuild, cancelBuild, issueRepair, needsRepair } from './constructio
 import { issueTrain, cancelTrain, issueTierUp, issueResearch, setRally } from './production.js';
 import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility, setAutocast } from './abilities.js';
 import { issueTrade } from './trade.js';
+import { peaceNotice } from './peace.js';
 import { hyp } from './common.js';
 
 // ---- Input normalization (commands are untrusted: network, AI, HUD) ----
@@ -165,6 +166,13 @@ function treeAt(world, cmd, target) {
   return null;
 }
 
+/** Tell a player once per order that the Decade of Peace turned their attack into a walk. */
+function peaceReport(world, player, state) {
+  if (state.peaceReported) return;
+  state.peaceReported = true;
+  world.error(player, peaceNotice(world.peaceLeft()));
+}
+
 function smart(world, player, units, cmd) {
   const tRaw = cmd.target ? world.entities.get(cmd.target) : null;
   const t = tRaw && !tRaw.dead ? tRaw : null;
@@ -175,7 +183,11 @@ function smart(world, player, units, cmd) {
   for (const u of units) {
     const worker = u.def.class === 'worker';
     if (t && t.kind !== 'mine' && world.areEnemies(player, t.owner)) {
-      if (canAttackTarget(u, t)) world.setOrder(u, { type: 'attack', target: t.id }, queue);
+      if (world.peaceBlocks(player, t.owner)) {
+        // Decade of Peace: walk up to another player's unit or building instead of attacking it.
+        peaceReport(world, player, state);
+        movers.push(u);
+      } else if (canAttackTarget(u, t)) world.setOrder(u, { type: 'attack', target: t.id }, queue);
       else movers.push(u);
       continue;
     }
@@ -235,7 +247,11 @@ function castCommand(world, player, cmd) {
   if (!isUnlocked(u, ab)) return world.error(player, `That ability unlocks at level ${ab.unlockLevel || 1}.`);
   if (cooldownLeft(u, ab) > 0 && !cmd.queue) return world.error(player, 'That ability is not ready.');
   const tgt = resolveCastTarget(world, u, ab, cmd.x, cmd.y, cmd.target);
-  if (!tgt) return;
+  if (!tgt) {
+    const t = cmd.target ? world.entities.get(cmd.target) : null;
+    if (t && !t.dead && world.peaceBlocks(player, t.owner)) world.error(player, peaceNotice(world.peaceLeft()));
+    return;
+  }
   const queue = !!cmd.queue && !!(u.order || u.orders.length);
   // Instant self abilities fire without interrupting the current order.
   if (!queue && ab.target === 'none' && !(ab.castTime > 0) && !u.stunned && !u.forced) {
@@ -274,8 +290,12 @@ export function applyCommand(world, player, cmd) {
       if (!t || t.dead) break;
       const units = ownUnits(world, player, cmd.units);
       const movers = [];
+      const state = {};
       for (const u of units) {
-        if (canAttackTarget(u, t) && world.areEnemies(player, t.owner)) world.setOrder(u, { type: 'attack', target: t.id }, queue);
+        if (world.peaceBlocks(player, t.owner)) {
+          peaceReport(world, player, state);
+          movers.push(u);
+        } else if (canAttackTarget(u, t) && world.areEnemies(player, t.owner)) world.setOrder(u, { type: 'attack', target: t.id }, queue);
         else movers.push(u);
       }
       if (movers.length) groupOrder(world, movers, t.x, t.y, 'move', queue);

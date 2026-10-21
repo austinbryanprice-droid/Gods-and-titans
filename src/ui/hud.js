@@ -1,5 +1,5 @@
 // In-game HUD (DESIGN 9): a Warcraft III–style HTML overlay in #hud-root.
-//   top bar      gold, wood, faith (+rate), population, tier, clock, ping, menu, market
+//   top bar      gold, wood, faith (+rate), population, tier, clock, peace countdown, ping, menu, market
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
@@ -12,7 +12,8 @@ import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning } from './hud-data.js';
+import { peaceClock } from '../sim/peace.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
@@ -20,7 +21,7 @@ import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
-import { POP_MAX } from '../config.js';
+import { POP_MAX, PEACE_NAME } from '../config.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -75,6 +76,12 @@ export class Hud {
     this.marketBtn.hidden = true;
     this.marketBtn.addEventListener('click', () => this.toggleMarket());
     this.clock = el('span', 'hud-clock');
+    // Decade of Peace: counts down to the first moment players may attack each other; gone once it is over.
+    this.peaceClock = el('span', 'hud-clock');
+    this.peaceChip = el('div', 'hud-time hud-peace', el('i', 'hud-res-i', '🕊️'), this.peaceClock);
+    this.peaceChip.title = `${PEACE_NAME}: no player can harm another until this clock runs out. Neutral creatures still fight.`;
+    this.peaceChip.hidden = true;
+    this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
     this.ping = el('span', 'hud-ping');
     const res = (cls, icon, title) => {
       const v = el('b', 'hud-res-v');
@@ -93,7 +100,7 @@ export class Hud {
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.ping, this.rPantheon.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.ping, this.rPantheon.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -251,6 +258,7 @@ export class Hud {
       setText(this.rTier.v, tierName(me.tier));
     }
     setText(this.clock, formatClock(vs.time));
+    this.updatePeace();
     const s = game.session;
     const stall = stallText(s);
     if (s && !s.isHost) {
@@ -266,6 +274,7 @@ export class Hud {
       this.leadShown = true;
       const lead = leadText(vs);
       if (lead) this.message(lead, 'good');
+      if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good');
     }
 
     if (now - this.lastGods >= GODS_REFRESH_MS) {
@@ -305,6 +314,19 @@ export class Hud {
     if (idn) lines.push(idn.playstyle, '', ...idn.blessings.map((b) => `${b.icon} ${b.name}: ${b.description}`));
     if (p.elite) lines.push('', `${p.elite.icon} ${p.elite.name}, a Barracks soldier from Town: ${p.elite.description.replace(/ Requires Town\.$/, '')}`);
     this.rPantheon.n.title = lines.join('\n');
+  }
+
+  /** The Decade of Peace chip: the countdown, one reminder at each PEACE_WARNINGS mark, gone when the peace is over. */
+  updatePeace() {
+    const left = this.vs.peaceLeft();
+    setHidden(this.peaceChip, !(left > 0));
+    if (!(left > 0)) return;
+    setText(this.peaceClock, peaceClock(left));
+    setClass(this.peaceChip, 'is-ending', left <= PEACE_WARNINGS[1]);
+    // A game seen first part-way through stays quiet about the marks already passed.
+    const passed = PEACE_WARNINGS.filter((s) => left <= s).length;
+    if (this.peaceMarks !== null && passed > this.peaceMarks) this.message(peaceWarning(PEACE_WARNINGS[passed - 1]), 'alert');
+    this.peaceMarks = passed;
   }
 
   /** Current command card (input.js reads it for hotkeys). */

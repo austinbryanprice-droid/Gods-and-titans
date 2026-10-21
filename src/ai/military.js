@@ -22,9 +22,9 @@ function distToBuilding(x, y, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-/** Group threats near a set of buildings. */
+/** Group threats near a set of buildings (none while the Decade of Peace holds: nobody can attack). */
 function threatsNear(s, buildings, range) {
-  if (!buildings.length) return null;
+  if (!buildings.length || s.peace) return null;
   const force = newForce();
   const units = [];
   let x = 0;
@@ -93,12 +93,12 @@ export function localForces(ai, x, y, r, opts = {}) {
     if (u.def.class === 'worker' && !opts.workers) continue;
     if (u.owner === me || (u.owner >= 0 && !world.areEnemies(me, u.owner))) {
       if (u.owner === me || opts.allies !== false) addToForce(mine, u);
-    } else if (u.owner >= 0 || opts.neutral) {
+    } else if (u.owner >= 0 ? !world.peace : opts.neutral) {
       addToForce(theirs, u);
     }
   }
   for (const e of ai.s.enemies) {
-    if (e.defeated || !e.towers) continue;
+    if (e.defeated || !e.towers || world.peace) continue;
     for (const b of e.buildings) {
       if (b.def.attack && b.constructed && !b.dead && Math.hypot(b.x - x, b.y - y) < r) addBuildingToForce(theirs, b, 0);
     }
@@ -436,7 +436,8 @@ export function runMilitary(ai, s) {
       const sinceLast = t - (mil.lastAttackEnd ?? 0);
       let ready = false;
       let ratio = 0;
-      if (target >= 0 && t >= prof.firstAttack) {
+      // (No wave leaves home during the Decade of Peace: the army keeps growing and masses at the rally point.)
+      if (target >= 0 && t >= prof.firstAttack && !s.peace) {
         ratio = fightRatio(armyForce, enemyStrength(s, target));
         const popReady = s.armyPop >= Math.min(wave, prof.armyCap * 0.85);
         const timerReady = sinceLast >= prof.waveInterval && s.armyPop >= wave * 0.6;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LobbyHost, LobbyClient, buildSetup, resolvePantheons } from '../../src/net/lobby.js';
+import { LobbyHost, LobbyClient, buildSetup, resolvePantheons, sanitizeLobbyState } from '../../src/net/lobby.js';
 import { PROTOCOL_VERSION } from '../../src/net/wire-version.js';
 import { joinRoom, abortError } from '../../src/net/transport.js';
 import { PANTHEONS } from '../../src/data/index.js';
@@ -174,6 +174,61 @@ test('offline lobby: 1v1 vs AI by default, coop adds an AI ally, start without c
   assert.equal(conns.size, 0);
   assert.equal(setup.players.length, 3);
   assert.deepEqual(setup.players.map((p) => p.team), [1, 2, 2]);
+});
+
+test('Decade of Peace: the host picks the length, clients see it, and the start carries it', async () => {
+  const host = await LobbyHost.create({ transport: 'loopback', name: 'Austin' });
+  assert.equal(host.state.peace, 0, 'a normal game by default');
+  const bob = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Bob' });
+  assert.equal(bob.state.peace, 0);
+  for (const bad of [10, 31, 90, -30, '30', null, NaN, undefined, true, [30]]) assert.equal(host.setPeace(bad), false, String(bad));
+  assert.equal(host.setPeace(0), false, 'already a normal game');
+  assert.equal(host.state.peace, 0);
+  let changes = 0;
+  host.onChange(() => changes++);
+  assert.ok(host.setPeace(45));
+  assert.equal(changes, 1);
+  assert.equal(host.setPeace(45), false, 'unchanged');
+  assert.equal(changes, 1);
+  await waitFor(() => bob.state.peace === 45);
+  assert.ok(host.applyPreset('2v2'));
+  assert.equal(host.state.peace, 45, 'a preset lays out slots, not the game mode');
+  assert.ok(host.setPeace(60));
+  await waitFor(() => bob.state.peace === 60);
+  assert.ok(host.setPeace(0), 'back to a normal game');
+  await waitFor(() => bob.state.peace === 0);
+  assert.ok(host.setPeace(60));
+  await waitFor(() => bob.state.peace === 60);
+
+  const starts = [];
+  bob.onStart((s) => starts.push(s));
+  const res = host.start();
+  assert.equal(res.setup.peaceMinutes, 60);
+  await waitFor(() => starts.length === 1);
+  assert.deepEqual(starts[0].setup, res.setup);
+  assert.equal(host.setPeace(30), false, 'too late once the game started');
+  assert.equal(host.state.peace, 60);
+  for (const c of res.conns.values()) c.close();
+});
+
+test('only a length the lobby offers reaches the GameSetup, and a normal game keeps its old shape', () => {
+  const state = {
+    mapSize: 'small',
+    slots: [
+      { kind: 'host', name: 'A', pantheon: 'greek', team: 1, color: 0, difficulty: 'normal' },
+      { kind: 'ai', name: '', pantheon: 'norse', team: 2, color: 1, difficulty: 'normal' },
+      { kind: 'closed', name: '', pantheon: 'random', team: 3, color: 2, difficulty: 'normal' },
+      { kind: 'closed', name: '', pantheon: 'random', team: 4, color: 3, difficulty: 'normal' },
+    ],
+  };
+  assert.equal('peaceMinutes' in buildSetup(state, 7).setup, false, 'a state without a peace');
+  assert.equal('peaceMinutes' in buildSetup({ ...state, peace: 0 }, 7).setup, false, 'peace 0');
+  for (const m of [30, 45, 60]) assert.equal(buildSetup({ ...state, peace: m }, 7).setup.peaceMinutes, m);
+  for (const bad of [10, 31, '30', null, NaN, -30]) assert.equal('peaceMinutes' in buildSetup({ ...state, peace: bad }, 7).setup, false, String(bad));
+  // The lobby state a client gets is cleaned the same way.
+  const wire = { slots: state.slots, mapSize: 'small', peace: 45 };
+  assert.equal(sanitizeLobbyState(wire).peace, 45);
+  for (const bad of [10, '45', null, NaN, undefined, {}, -45]) assert.equal(sanitizeLobbyState({ ...wire, peace: bad }).peace, 0, String(bad));
 });
 
 test('leaving frees the slot; kicking and closing the lobby notify clients', async () => {

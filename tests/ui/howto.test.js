@@ -24,6 +24,13 @@ test('the Town Center is introduced with its Village Hall / Town Hall / City Pal
   assert.equal(text.split(village).length - 1, 1, 'said once, not at every mention');
 });
 
+test('the Decade of Peace game mode is explained with its lengths', () => {
+  assert.match(text, /Decade of Peace game mode/);
+  assert.match(text, /for 30, 45 or 60 minutes no player can harm another/);
+  assert.match(text, /countdown beside the game clock/);
+  assert.match(text, /creatures still fight/);
+});
+
 test('controls that were undocumented are listed', () => {
   for (const part of [
     'The same, with a single click', // Ctrl+click

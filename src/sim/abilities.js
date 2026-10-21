@@ -8,7 +8,7 @@ import { dealDamage, heal, acquisitionRange } from './combat.js';
 import { addStatus } from './status.js';
 import { moveToPoint, moveToEntity, stopMove } from './movement.js';
 import { hyp, distToEntity, round2 } from './common.js';
-import { chooseCast } from './cast-choice.js';
+import { chooseCast, abilityProfile } from './cast-choice.js';
 
 const HARMFUL = new Set(['damage', 'stun', 'slow', 'dot', 'chain', 'line', 'knockback', 'pull', 'dash']);
 const FIELD_TICK = 0.5;
@@ -109,9 +109,13 @@ export function resolveCastTarget(world, u, ab, x, y, targetId) {
     return null;
   }
   if (!t || t.dead || t.kind === 'mine') return null;
-  if (ab.target === 'unit') return t.kind === 'unit' ? { x: t.x, y: t.y, target: t } : null;
+  if (ab.target === 'unit') {
+    // (Decade of Peace: a harmful spell cannot be aimed at another player.)
+    if (t.kind !== 'unit' || (world.peaceBlocks(u.owner, t.owner) && abilityProfile(ab).harmful)) return null;
+    return { x: t.x, y: t.y, target: t };
+  }
   if (ab.target === 'ally') return t.kind === 'unit' && !world.areEnemies(u.owner, t.owner) ? { x: t.x, y: t.y, target: t } : null;
-  if (ab.target === 'enemy') return world.areEnemies(u.owner, t.owner) ? { x: t.x, y: t.y, target: t } : null;
+  if (ab.target === 'enemy') return world.canHarm(u.owner, t.owner) ? { x: t.x, y: t.y, target: t } : null;
   return null;
 }
 
@@ -280,9 +284,9 @@ function collect(world, ctx, eff, c, harmful, withBuildings) {
   const ok = (e) => {
     if (e.dead || e.kind === 'mine') return false;
     if (e.kind === 'building' && !withBuildings) return false;
-    if (affects === 'all') return true;
-    const enemy = world.areEnemies(owner, e.owner);
-    return affects === 'enemies' ? enemy : !enemy;
+    // Harmful effects skip the players the Decade of Peace protects, whoever they are aimed at.
+    if (affects === 'all') return !(harmful && world.peaceBlocks(owner, e.owner));
+    return affects === 'enemies' ? world.canHarm(owner, e.owner) : !world.areEnemies(owner, e.owner);
   };
   const r = eff.radius || 0;
   let list;
@@ -389,9 +393,9 @@ export function applyEffect(world, ctx, eff, index) {
       break;
     }
     case 'chain': {
-      let cur = c.unit && !c.unit.dead && c.unit.kind === 'unit' && world.areEnemies(ctx.owner, c.unit.owner) ? c.unit : null;
+      let cur = c.unit && !c.unit.dead && c.unit.kind === 'unit' && world.canHarm(ctx.owner, c.unit.owner) ? c.unit : null;
       if (!cur) {
-        const near = world.queryRadius(c.x, c.y, 1.5, (e) => e.kind === 'unit' && world.areEnemies(ctx.owner, e.owner));
+        const near = world.queryRadius(c.x, c.y, 1.5, (e) => e.kind === 'unit' && world.canHarm(ctx.owner, e.owner));
         near.sort((a, b) => hyp(a.x - c.x, a.y - c.y) - hyp(b.x - c.x, b.y - c.y) || a.id - b.id);
         cur = near[0] || null;
       }
@@ -409,7 +413,7 @@ export function applyEffect(world, ctx, eff, index) {
         amount *= falloff;
         let best = null;
         let bestD = Infinity;
-        for (const e of world.queryRadius(from.x, from.y, range, (o) => o.kind === 'unit' && !hit.has(o.id) && world.areEnemies(ctx.owner, o.owner))) {
+        for (const e of world.queryRadius(from.x, from.y, range, (o) => o.kind === 'unit' && !hit.has(o.id) && world.canHarm(ctx.owner, o.owner))) {
           const d = hyp(e.x - from.x, e.y - from.y);
           if (d < bestD || (d === bestD && e.id < best.id)) {
             bestD = d;
@@ -430,7 +434,7 @@ export function applyEffect(world, ctx, eff, index) {
       const mx = ox + (g.dirx * g.len) / 2;
       const my = oy + (g.diry * g.len) / 2;
       const owner = ctx.owner;
-      for (const e of world.queryRadius(mx, my, g.len / 2 + width, (o) => world.areEnemies(owner, o.owner) && o.kind !== 'mine')) {
+      for (const e of world.queryRadius(mx, my, g.len / 2 + width, (o) => world.canHarm(owner, o.owner) && o.kind !== 'mine')) {
         const rx = e.x - ox;
         const ry = e.y - oy;
         const along = rx * g.dirx + ry * g.diry;
@@ -498,7 +502,7 @@ export function applyEffect(world, ctx, eff, index) {
       const amount = (eff.amount || 0) * scale;
       const owner = ctx.owner;
       const strike = (w, u) => {
-        for (const e of w.queryRadius(u.x, u.y, width / 2 + u.radius, (o) => o.kind === 'unit' && !hit.has(o.id) && w.areEnemies(owner, o.owner))) {
+        for (const e of w.queryRadius(u.x, u.y, width / 2 + u.radius, (o) => o.kind === 'unit' && !hit.has(o.id) && w.canHarm(owner, o.owner))) {
           hit.add(e.id);
           dealDamage(w, e, amount, u, { spell: true });
         }
@@ -594,7 +598,7 @@ export function updateFields(world) {
         f.acc -= FIELD_TICK;
         const owner = f.owner;
         if (f.dps > 0 || f.slowPct > 0) {
-          for (const e of world.queryRadius(f.x, f.y, f.r, (o) => o.kind !== 'mine' && world.areEnemies(owner, o.owner))) {
+          for (const e of world.queryRadius(f.x, f.y, f.r, (o) => o.kind !== 'mine' && world.canHarm(owner, o.owner))) {
             if (f.dps > 0) dealDamage(world, e, f.dps * FIELD_TICK, f.src, { spell: true });
             if (f.slowPct > 0 && e.kind === 'unit' && !e.dead) addStatus(e, { type: 'slow', key: `field${f.id}`, pct: f.slowPct, rem: FIELD_TICK + 0.15 });
           }
@@ -634,7 +638,7 @@ function useOf(ab) {
 function nearestEnemyUnit(world, u, range) {
   let best = null;
   let bestD = Infinity;
-  for (const e of world.queryRadius(u.x, u.y, range, (o) => o.kind === 'unit' && world.areEnemies(u.owner, o.owner))) {
+  for (const e of world.queryRadius(u.x, u.y, range, (o) => o.kind === 'unit' && world.canHarm(u.owner, o.owner))) {
     const d = hyp(e.x - u.x, e.y - u.y);
     if (d < bestD) {
       bestD = d;
@@ -687,7 +691,7 @@ export function pickAutocastTarget(world, u, ab) {
   }
   // damage / cc
   let t = u.target ? world.entities.get(u.target) : null;
-  if (t && (t.dead || t.kind !== 'unit' || !world.areEnemies(u.owner, t.owner))) t = null;
+  if (t && (t.dead || t.kind !== 'unit' || !world.canHarm(u.owner, t.owner))) t = null;
   if (ab.target === 'none') {
     const e = nearestEnemyUnit(world, u, range);
     return e ? { x: u.x, y: u.y, target: null } : null;

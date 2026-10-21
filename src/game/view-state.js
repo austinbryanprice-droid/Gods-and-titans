@@ -6,6 +6,7 @@
 // events. Runs in Node too.
 import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
+import { peaceSeconds } from '../sim/peace.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
 const HISTORY = 8; // position samples kept per unit
@@ -139,6 +140,26 @@ export class ViewState {
 
   isEnemy(owner) {
     return this.relation(owner) === 'enemy';
+  }
+
+  // ---------------------------------------------------------------- Decade of Peace
+
+  /** Seconds of the Decade of Peace left at the latest snapshot (0 once it is over, and in a normal game). */
+  peaceLeft() {
+    const total = peaceSeconds(this.setup);
+    return total > 0 ? Math.max(0, total - this.time) : 0;
+  }
+
+  /** Is the Decade of Peace on? */
+  peaceActive() {
+    return this.peaceLeft() > 0;
+  }
+
+  /** May my units hurt this owner's units and buildings now? Creatures always; rival players only once the peace is over. */
+  canHarm(owner) {
+    if (owner === undefined || owner === null) return false;
+    if (owner < 0) return true;
+    return this.isEnemy(owner) && !this.peaceActive();
   }
 
   // ---------------------------------------------------------------- fog of war

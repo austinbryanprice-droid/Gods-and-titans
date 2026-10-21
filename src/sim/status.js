@@ -181,6 +181,7 @@ export function updateAuras(world) {
         if (t.dead) continue;
         const enemy = world.areEnemies(h.owner, t.owner);
         if (enemy !== wantEnemies) continue;
+        if (enemy && !world.canHarm(h.owner, t.owner)) continue; // Decade of Peace: no debuff auras on other players
         if (hyp(t.x - h.x, t.y - h.y) - t.radius > r) continue;
         if (!t.aura) t.aura = { damage: 0, armor: 0, speed: 0, attackSpeed: 0, regen: 0, pos: {}, neg: {} };
         const amt = p.amount;

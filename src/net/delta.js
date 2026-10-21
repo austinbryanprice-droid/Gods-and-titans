@@ -91,6 +91,7 @@ export const EVENT_SHAPES = [
   ['researched', 'player', 'up'],
   ['trade', 'from', 'to', 'res', 'amt', 'got'],
   ['rankUp', 'id', 'rank'],
+  ['peaceEnd'],
   ['bounty', 'player', 'amount', 'x', 'y', 'res'],
 ].map(([type, ...keys]) => ({ type, keys }));
 const SHAPES_BY_TYPE = new Map();

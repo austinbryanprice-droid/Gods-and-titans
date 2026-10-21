@@ -669,6 +669,10 @@ kbd {
 .mw-segmented .mw-seg:last-child { border-radius: 0 4px 4px 0; }
 .mw-seg small { font: 400 0.85em/1 var(--mw-font-ui); letter-spacing: 0; text-transform: none; opacity: 0.75; }
 .mw-map-static { color: var(--mw-ink-dim); }
+.mw-mode-group { flex-basis: 24em; }
+.mw-peace-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em 0.9em; margin-top: 0.7em; }
+.mw-peace-label { color: var(--mw-ink-dim); font-size: 0.9em; }
+.mw-peace-hint { flex-basis: 100%; margin: 0; }
 
 /* room code + chat */
 .mw-room { text-align: center; }

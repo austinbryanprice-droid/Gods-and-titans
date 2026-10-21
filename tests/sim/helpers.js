@@ -52,7 +52,7 @@ export const PLAIN_PANTHEONS = ['norse', 'hindu'];
 /** GameSetup with n players on teams [1, 2, ...] unless teams given. */
 export function makeSetup(n = 2, opts = {}) {
   const teams = opts.teams ?? Array.from({ length: n }, (_, i) => i + 1);
-  return {
+  const setup = {
     version: '0.1.0',
     seed: opts.seed ?? 12345,
     mapSize: 'small',
@@ -66,9 +66,11 @@ export function makeSetup(n = 2, opts = {}) {
       difficulty: i === 0 ? null : 'normal',
     })),
   };
+  if (opts.peaceMinutes) setup.peaceMinutes = opts.peaceMinutes; // Decade of Peace
+  return setup;
 }
 
-/** A World on a synthetic map. opts: { players, teams, map: makeMap opts, seed } */
+/** A World on a synthetic map. opts: { players, teams, map: makeMap opts, seed, peaceMinutes } */
 export function makeWorld(opts = {}) {
   const n = opts.players ?? 2;
   const mapOpts = { ...(opts.map || {}) };

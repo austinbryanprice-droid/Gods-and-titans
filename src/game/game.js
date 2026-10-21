@@ -11,6 +11,7 @@ import { HostSession, ClientSession } from '../net/session.js';
 import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
+import { PEACE_NAME } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
@@ -701,6 +702,10 @@ export class Game {
       }
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system');
+        break;
+      case 'peaceEnd':
+        hud.showBanner(`The ${PEACE_NAME} is over: war begins!`, 'danger');
+        sfx.play('horn');
         break;
       case 'bounty':
         // The renderer shows the floating "+N" gold (or faith).

@@ -1,5 +1,5 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
-import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
@@ -362,6 +362,18 @@ export function pantheonSummary(p) {
     blessings: ((p.identity && p.identity.blessings) || []).map((b) => ({ id: b.id, icon: b.icon, name: b.name, description: b.description })),
     elite: p.elite ? unit(p.elite) : null,
   };
+}
+
+/** Minutes of Decade of Peace the lobby is set to (0 = a standard game). */
+export function peaceMinutes(state) {
+  const m = state && state.peace;
+  return PEACE_LENGTHS.includes(m) ? m : 0;
+}
+
+/** The lobby's game mode in words: what a client sees where the host has buttons. */
+export function gameModeLabel(state) {
+  const m = peaceMinutes(state);
+  return m ? `${PEACE_NAME}: no combat for ${m} minutes` : 'Standard: fight from the first minute';
 }
 
 /** Label for the lobby header. */
