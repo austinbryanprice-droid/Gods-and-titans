@@ -332,6 +332,17 @@ if ( vLeaf > 0.5 && vNeedle.z > 0.5 ) {
 }
 ${FOLIAGE_COVERAGE}`;
 
+// At night leaves lose their saturation and lean blue-green (moonlight).
+const FOLIAGE_GRADE = /* glsl */ `
+if ( vLeaf > 0.5 && uFolNight > 0.0 ) {
+  float folLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
+  diffuseColor.rgb = mix( diffuseColor.rgb, folLuma * vec3( 0.8, 1.0, 1.18 ), 0.4 * uFolNight );
+}`;
+
+// The light that fills the shade (sky and ground ambient) is tinted: cool, blue-green shadows.
+const FOLIAGE_SHADE = /* glsl */ `
+reflectedLight.indirectDiffuse *= mix( vec3( 1.0 ), uFolShade, vLeaf );`;
+
 // A puff's normal: the sphere's, bent a little toward the crown's outward direction (vNormal)
 const PUFF_NORMAL_FRAGMENT = /* glsl */ `
 if ( vBb.w > 0.5 ) {
@@ -395,7 +406,10 @@ const FOLIAGE_LIGHTS = THREE.ShaderChunk.lights_lambert_pars_fragment.replace(
   // back-lit crowns: looking toward the sun, the thin outer leaves glow a little (view dependent)
   float backLit = saturate( - dot( geometryViewDir, directLight.direction ) );
   float thinLeaf = 1.0 - saturate( dot( geometryNormal, geometryViewDir ) );
-  irradiance += lightColor * vec3( 1.0, 0.92, 0.5 ) * ( uFoliage.y * vLeaf * 0.8 * backLit * backLit * ( 0.3 + 0.7 * thinLeaf ) );`,
+  irradiance += lightColor * vec3( 1.0, 0.92, 0.5 ) * ( uFoliage.y * vLeaf * 0.8 * backLit * backLit * ( 0.3 + 0.7 * thinLeaf ) );
+  // rim light: the edge of a crown on the sun's side glows with the light's own color
+  float rimEdge = pow( thinLeaf, 2.2 ) * saturate( rawNL * 0.6 + 0.55 );
+  irradiance += lightColor * vec3( 1.0, 0.9, 0.55 ) * ( uFoliage.w * vLeaf * rimEdge );`,
 );
 
 // The light loop, remembering each light's color before its shadow is applied.
@@ -409,7 +423,8 @@ const FOLIAGE_LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(
  * used by instanced plants (geometry with an `aFol` attribute). Call before
  * patchWorldMaterial / patchFowMaterial (they keep this hook). Idempotent.
  * @param {THREE.MeshLambertMaterial} mat
- * @param {{ wrap?: number, translucency?: number, filter?: number, detail?: number[], pine?: boolean, puff?: boolean, sphereDepth?: boolean }} [o]
+ * @param {{ wrap?: number, translucency?: number, filter?: number, rim?: number, shade?: number[], detail?: number[], pine?: boolean, puff?: boolean, sphereDepth?: boolean }} [o]
+ *   rim: strength of the sun-side edge light of crowns; shade: tint of the light that fills the shade (cool: blue-green shadows);
  *   detail: [texture repeats (puffs: across one radius), albedo contrast, how much of the outline is cut
  *   into leaves / sprays, unused] for puffs and spruce tiers; leaf and needle textures (leaf-texture.js);
  *   filter: share of the light that still reaches leaves in shadow (0 = hard shadows);
@@ -418,13 +433,13 @@ const FOLIAGE_LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(
  *   sphereDepth: puffs also write the depth of the sphere (round intersections; the fragment shader
  *   loses early depth testing, so only where the crowns are worth it)
  */
-export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, detail = null, pine = false, puff = false, sphereDepth = false } = {}) {
+export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, rim = 0.3, shade = [1, 1, 1], detail = null, pine = false, puff = false, sphereDepth = false } = {}) {
   if (!mat || mat.userData.__foliage) return mat;
   if (!FOLIAGE_LIGHTS.includes('uFoliage') || !FOLIAGE_LIGHTS_BEGIN.includes('folLightColor = directLight.color')) {
     throw new Error('foliage lighting patch did not apply');
   }
   mat.userData.__foliage = true;
-  const uFoliage = { value: new THREE.Vector3(wrap, translucency, filter) };
+  const uFoliage = { value: new THREE.Vector4(wrap, translucency, filter, rim) };
   mat.userData.uFoliage = uFoliage;
   // texture detail of puffs and spruce tiers: [texture repeats, contrast, outline cut, unused]; null = flat
   const textured = !!detail && (puff || pine);
@@ -434,6 +449,8 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
   // Cut leaf edges ride on alpha to coverage where the target is multisampled (post.js
   // MSAA); on the plain canvas (low) the shader falls back to a hard cut.
   const uFolMS = { value: 0 };
+  const uFolShade = { value: new THREE.Vector3(shade[0], shade[1], shade[2]) };
+  mat.userData.uFolShade = uFolShade;
   if (textured) {
     mat.alphaToCoverage = true;
     const prevBefore = mat.onBeforeRender;
@@ -453,6 +470,9 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
     shader.uniforms.uFoliage = uFoliage;
     shader.uniforms.uFolDetail = uFolDetail;
     shader.uniforms.uFolMS = uFolMS;
+    shader.uniforms.uFolShade = uFolShade;
+    // the time of day (the Lighting thread's shared uniforms); day where it is not there yet
+    shader.uniforms.uFolNight = WORLD_UNIFORMS.uNight || NIGHT_DAY;
     if (puff) shader.uniforms.uLeafTex = { value: leafTexture() };
     if (pine) {
       shader.uniforms.uPine = PINE_UNIFORMS.uPine;
@@ -464,7 +484,7 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_MORPH : ''}${puff ? PUFF_JITTER : ''}${INSTANCED_WIND}${puff ? PUFF_EXPAND : ''}`)
       .replace('#include <shadowmap_vertex>', FOLIAGE_SHADOW_VERTEX);
     const fragmentPars = [
-      'varying float vLeaf;', 'uniform vec3 uFoliage;', 'uniform float uFolMS;', 'vec3 folLightColor = vec3( 0.0 );',
+      'varying float vLeaf;', 'uniform vec4 uFoliage;', 'uniform float uFolMS;', 'uniform vec3 uFolShade;', 'uniform float uFolNight;', 'vec3 folLightColor = vec3( 0.0 );',
       puff && 'varying vec4 vBb;\nvarying vec4 vBbSeed;\nvarying float vPuffK;\nuniform sampler2D uLeafTex;',
       puff && sphereDepth && 'uniform mat4 projectionMatrix;',
       pine && 'varying vec3 vNeedle;\nuniform sampler2D uNeedleTex;',
@@ -472,7 +492,8 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
     ].filter(Boolean).join('\n');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${fragmentPars}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${!textured ? '' : puff ? puffDetailFragment(sphereDepth) : PINE_DETAIL_FRAGMENT}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${!textured ? '' : puff ? puffDetailFragment(sphereDepth) : PINE_DETAIL_FRAGMENT}${FOLIAGE_GRADE}`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${FOLIAGE_SHADE}`)
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>\n${puff ? PUFF_NORMAL_FRAGMENT : ''}`)
       .replace('#include <lights_lambert_pars_fragment>', FOLIAGE_LIGHTS)
       .replace('#include <lights_fragment_begin>', FOLIAGE_LIGHTS_BEGIN);
@@ -481,6 +502,8 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
   mat.needsUpdate = true;
   return mat;
 }
+
+const NIGHT_DAY = { value: 0 };
 
 const DEPTH = {};
 /**

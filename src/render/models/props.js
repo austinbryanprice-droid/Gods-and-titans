@@ -721,16 +721,16 @@ function shared() {
   plantOpen.name = 'props-plant-open';
   plantOpen.shadowSide = THREE.DoubleSide;
   // less wrap than the round crowns: needles keep a crisp lit and shaded side
-  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, detail: [0, 0.45, 0.9, 0], pine: true }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, rim: 0.4, shade: [0.8, 1.0, 1.12], detail: [0, 0.45, 0.9, 0], pine: true }), { cloud: true, rim: 0.12 });
   // Round crowns and bushes (leaf puffs: camera-facing quads shaded as spheres). The quads
   // cast from the back of the crown (see PUFF_EXPAND), so both faces take part in the shadow pass.
   const plantPuff = new THREE.MeshLambertMaterial({ vertexColors: true });
   plantPuff.name = 'props-plant-puff';
   plantPuff.shadowSide = THREE.DoubleSide;
-  patchWorldMaterial(patchFoliageMaterial(plantPuff, { detail: [0.85, 0.5, 0.9, 0], puff: true, sphereDepth: true }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plantPuff, { wrap: 0.35, rim: 0.45, shade: [0.84, 1.0, 1.12], detail: [0.85, 0.5, 0.9, 0], puff: true, sphereDepth: true }), { cloud: true, rim: 0.12 });
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
-  patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45 }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45, rim: 0.2, shade: [0.88, 1.0, 1.08] }), { cloud: true, rim: 0.12 });
   // Still props: physically based stone / wood, flat shaded, roughness per face.
   const stone = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, metalness: 0 });
   stone.name = 'props-stone';
