@@ -352,6 +352,14 @@ export class VFXSystem {
     e.h.start(this, e);
   }
 
+  /** A promoted soldier: a small golden ring and a few sparks (the god level-up column is far too big for a Warrior). */
+  spawnRankUp({ x, y } = {}) {
+    if (this.disposed || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const gz = this.ground(x, y);
+    this.decalFx(STYLE.ring, x, y, 0.2, 1.2, 0.6, COLORS.gold, COLORS.goldCore, 1, 0.03, 0.4);
+    this.burst(this.add, x, gz + 0.4, y, 10, 1.2, 2.5, 0.8, 2.2, 0.35, 0.7, 0.2, 0.04, COLORS.goldCore, COLORS.gold, 1, CELL.STAR, 2, 2.2);
+  }
+
   /** Summon pillar for a trained / revived god, titan or creature (scale = visual scale). */
   spawnSummon({ x, y, scale, el } = {}) {
     if (this.disposed || !Number.isFinite(x) || !Number.isFinite(y)) return;

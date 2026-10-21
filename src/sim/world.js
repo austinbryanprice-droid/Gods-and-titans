@@ -6,6 +6,7 @@ import {
 } from '../config.js';
 import { BUILDINGS, GOLD_MINE, PANTHEONS, PANTHEON_LIST, getUnitType, xpValue } from '../data/index.js';
 import { NO_MODS, computeMods, buildingMods, unitMods } from '../data/upgrades.js';
+import { canRank, rankForXp, rankBonus, killXp } from '../data/ranks.js';
 import { RNG, hashSeed } from './rng.js';
 import { generateMap, mapOptions } from './mapgen.js';
 import { MapState } from './map-state.js';
@@ -218,6 +219,7 @@ export class World {
       radius: def.radius, terrainR: Math.min(def.radius, 0.45), mass: Math.max(0.3, (def.radius / 0.35) ** 2),
       big: def.radius >= 0.75 && !def.air, air: !!def.air,
       level: def.class === 'god' ? Math.max(1, opts.level || 1) : 1, xp: def.class === 'god' ? opts.xp || 0 : 0,
+      rank: 0, // soldiers: 0..RANK_MAX from xp (data/ranks.js)
       hp: def.hp, maxHp: def.hp, baseArmor: def.armor, baseDamage: def.attack ? def.attack.damage : 0,
       baseSpeed: def.speed, baseRegen: regen, regen0: regen, passiveLifesteal: lifesteal, evasion, thorns,
       state: 'idle', order: null, orders: [], target: 0, carry: 0, carryAmount: 0,
@@ -255,13 +257,14 @@ export class World {
     const p = u.owner >= 0 ? this.players[u.owner] : null;
     const m = unitMods(p ? p.mods : NO_MODS, def);
     const lv = def.class === 'god' ? u.level - 1 : 0;
-    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp);
+    const rk = rankBonus(u.rank);
+    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp) * (1 + rk.hp);
     const newMax = hpMult === 1 ? def.hp : Math.round(def.hp * hpMult);
     if (full) u.hp = newMax;
     else u.hp = Math.max(1, Math.min(newMax, u.hp + (newMax - u.maxHp)));
     u.maxHp = newMax;
-    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) : 0;
-    u.baseArmor = def.armor + GOD_LEVEL_ARMOR * lv + m.armor;
+    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) * (1 + rk.damage) : 0;
+    u.baseArmor = def.armor + GOD_LEVEL_ARMOR * lv + m.armor + rk.armor;
     u.baseRegen = u.regen0 + m.regen;
   }
 
@@ -298,6 +301,17 @@ export class World {
       this.applyUnitStats(u);
       this.emit({ type: 'levelUp', id: u.id, level: u.level });
     }
+  }
+
+  /** Experience for a mortal soldier (data/ranks.js canRank); crossing a threshold raises its rank and stats. */
+  gainRankXp(u, amount) {
+    if (u.dead || !(amount > 0) || !canRank(u.def)) return;
+    u.xp += amount;
+    const rank = rankForXp(u.xp);
+    if (rank <= u.rank) return;
+    u.rank = rank;
+    this.applyUnitStats(u);
+    this.emit({ type: 'rankUp', id: u.id, rank });
   }
 
   // -------------------------------------------------------------- read API
@@ -472,6 +486,7 @@ export class World {
         const kp = this.players[killer];
         if (kp) kp.stats.kills++;
         this.grantXp(e, killer);
+        if (src.kind === 'unit') this.gainRankXp(src, killXp(e));
         if (e.owner === NEUTRAL && kp) {
           const amount = 10 + 10 * (e.def.tier || 1);
           kp.gold += amount;
@@ -481,6 +496,7 @@ export class World {
     } else if (e.kind === 'building') {
       this.emit({ type: 'death', id: e.id, t: e.type, o: e.owner, x: r2(e.x), y: r2(e.y), k: 'b' });
       this.releaseBuilding(e);
+      if (killer !== undefined && killer >= 0 && src.kind === 'unit' && this.areEnemies(killer, e.owner)) this.gainRankXp(src, killXp(e));
     }
   }
 

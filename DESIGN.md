@@ -382,6 +382,28 @@ A player is **defeated** when they own no buildings (finished or not). Their rem
 die. A team wins when every player not on that team is defeated (neutral excluded).
 `surrender` defeats the issuing player. Then `gameOver: { winningTeam }`.
 
+### 5.9 Soldier ranks
+Mortal soldiers (every unit the Barracks trains: Warrior, Archer, Priest, Battering Ram; `canRank` in
+`src/data/ranks.js`) earn experience and rise through four ranks: Recruit, Veteran, Elite, Champion.
+Worshippers, gods (they have levels), titans, creatures and summoned minions do not rank.
+- **Experience:** the unit that lands the killing blow on an enemy unit earns what the kill is worth to
+  gods (`xpValue`: `10 × pop + hp / 40`, so a Warrior is worth 31; gods `100 × level`, titans 400; neutral
+  creeps count). The killing blow on a completed enemy building earns `hp / BUILDING_XP_HP` (50; a House
+  is worth 10, a Barracks 24), which is how Battering Rams rank. A Priest earns `HEAL_XP` (0.1) for each hit
+  point it actually restores. Nothing else counts (not damage dealt, not assists), so there is nothing to
+  farm: a victim can only be killed once.
+- **Ranks:** cumulative xp `RANK_XP` = 0 / 60 / 150 / 300, so about 2, 5 and 10 Warrior kills. Each rank
+  adds `RANK_HP` (+10%) max hp, `RANK_DAMAGE` (+5%) attack damage and `RANK_ARMOR` (+0.5) armor, on top of
+  building upgrades (`applyUnitStats`). A promotion adds the extra max hp to the current hp too (a full unit
+  stays full) and emits `rankUp`. Experience is lost with the unit; a new soldier is a Recruit.
+- **Shown:** one to three bronze / silver / gold diamonds over the unit (`StatusLayer.addRank`, always, not
+  only when selected; not chevrons, because a buff icon already is a pair of gold ones), a rank numeral
+  badge on the portrait and the multi-selection cells, and in the selection panel the rank, an xp bar and
+  the stats with the rank bonus included. A promotion plays a small golden ring, the rank name floating
+  over the unit and, for the player's own soldiers, a soft chime.
+- **Net:** `rk` (rank, once above Recruit) and `xp` (whole xp, once at least 1) ride in the EntityView,
+  so full snapshots, deltas and resyncs carry them with no codec change; `rankUp` is a packed event.
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -483,7 +505,7 @@ EntityView = {
   tg,             // current target entity id or 0
   // units:
   c,              // carrying: 0 | 'g' | 'w'
-  lv, xp,         // gods only (else omitted)
+  lv, xp,         // gods: level and xp. Soldiers (5.9): xp once they have earned 1, and rk (rank 1..3) once promoted. Else omitted
   cd,             // { abilityId: secondsRemaining } (only abilities on cooldown)
   fx,             // status codes: subset of ['stun','slow','shield','invuln','buff','debuff','dot']
   ex,             // seconds until a summoned minion expires (omitted if permanent)
@@ -520,6 +542,7 @@ EntityView = {
 { type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
 { type: 'levelUp', id, level }
+{ type: 'rankUp',  id, rank }                                        // a soldier reached a new rank (5.9)
 { type: 'treeFelled', tx, ty }
 { type: 'resourceDepleted', id }
 { type: 'error',   player, message }

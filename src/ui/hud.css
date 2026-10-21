@@ -686,6 +686,8 @@
   border: 1px solid #3a2608;
   box-shadow: 0 0.1em 0.3em rgba(0, 0, 0, 0.6);
 }
+/* a soldier's rank: bronze, silver or gold (--rank, set per rank by hud-info.js) instead of the god's level gold */
+.hi-level.is-rank { background: linear-gradient(180deg, color-mix(in srgb, var(--rank) 55%, #fff), var(--rank)); letter-spacing: 0.04em; }
 .hi-bar {
   position: relative;
   height: 0.62em;
@@ -707,6 +709,7 @@
 .hi-hp-text { font: 700 0.86em/1 var(--mw-font-ui); font-variant-numeric: tabular-nums; text-align: center; color: #e8f6e0; text-shadow: 0 1px 0 #000; }
 .hi-bar.is-xp { height: 0.5em; }
 .hi-bar.is-xp .hi-bar-fill { background: linear-gradient(180deg, #c8a0ff, #8a5ad8); }
+.hi-bar.is-xp.is-rank .hi-bar-fill { background: linear-gradient(180deg, #ffe7a0, #c99636); }
 .hi-bar.is-build .hi-bar-fill, .hi-bar.is-train .hi-bar-fill { background: linear-gradient(180deg, #ffe7a0, #c99636); }
 
 .hi-right { display: flex; flex-direction: column; gap: 0.3em; min-width: 0; max-width: 38em; }
@@ -803,6 +806,7 @@
 .hi-cell-bar { position: absolute; left: 0.15em; right: 0.15em; bottom: 0.15em; height: 0.3em; background: #120c0a; }
 .hi-cell-bar .hi-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; }
 .hi-cell-lv { position: absolute; top: 0.05em; right: 0.15em; font: 800 0.62em/1 var(--mw-font-ui); color: var(--mw-gold-hi); text-shadow: 0 1px 0 #000; }
+.hi-cell-lv.is-rank { color: var(--rank); letter-spacing: 0.04em; }
 
 /* ------------------------------------------------------------ overlays */
 

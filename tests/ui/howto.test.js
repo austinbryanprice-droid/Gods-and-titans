@@ -35,3 +35,8 @@ test('controls that were undocumented are listed', () => {
     'Zoom in and out (smoothly on a trackpad)',
   ]) assert.ok(text.includes(part), part);
 });
+
+test('soldier ranks are explained with the numbers from the config', () => {
+  assert.match(text, /rise from Recruit to Veteran, Elite and Champion/);
+  assert.match(text, /Each rank adds 5% damage, 10% health and 0\.5 armor/);
+});

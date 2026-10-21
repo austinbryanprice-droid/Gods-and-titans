@@ -17,7 +17,7 @@ The host's browser runs the game for everyone, so the host should have the stead
 
 ## How to win
 
-Destroy every enemy building. Worshippers mine gold (two at a time per mine), chop wood and pray. Houses raise your population limit, the Barracks trains mortal soldiers, a Shrine summons creatures, a Temple summons your gods (up to three, and they level up), and a City can raise a Titan Gate for your titan. The in-game **How to Play** screen and the first-game checklist cover the rest.
+Destroy every enemy building. Worshippers mine gold (two at a time per mine), chop wood and pray. Houses raise your population limit, the Barracks trains mortal soldiers (who earn ranks as they fight), a Shrine summons creatures, a Temple summons your gods (up to three, and they level up), and a City can raise a Titan Gate for your titan. The in-game **How to Play** screen and the first-game checklist cover the rest.
 
 ## Controls
 
