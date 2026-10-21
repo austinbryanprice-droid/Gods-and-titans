@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, tipsDismissed: false });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -96,4 +96,17 @@ test('tipsDismissed: false by default, only booleans accepted, remembered across
   _resetSettingsForTests();
   assert.equal(getSettings().tipsDismissed, true);
   assert.equal(saveSettings({ tipsDismissed: false }).tipsDismissed, false);
+});
+
+test('timeOfDay: the day and night cycle by default, only the known times accepted, remembered across reloads', () => {
+  assert.equal(getSettings().timeOfDay, 'cycle');
+  assert.equal(saveSettings({ timeOfDay: 'midnight' }).timeOfDay, 'cycle');
+  assert.equal(saveSettings({ timeOfDay: 7 }).timeOfDay, 'cycle');
+  const seen = [];
+  onSettingsChange((s, changed) => seen.push(changed));
+  for (const t of ['golden', 'day', 'dusk', 'night', 'dawn', 'cycle']) assert.equal(saveSettings({ timeOfDay: t }).timeOfDay, t, t);
+  assert.deepEqual(seen.length, 6);
+  saveSettings({ timeOfDay: 'night' });
+  _resetSettingsForTests();
+  assert.equal(getSettings().timeOfDay, 'night');
 });

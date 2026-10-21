@@ -1362,3 +1362,10 @@
 .hud-market-send:disabled { opacity: 0.45; cursor: default; }
 .hud-market-send[hidden] { display: none; }
 .hud-market-note { font-size: 0.72em; color: var(--mw-ink-mute); }
+
+/* Time of day (the in-game menu's sky choice: the settings screen's segmented control, in the overlay) */
+.hud-choice { display: flex; flex-direction: column; gap: 0.45em; padding: 0.5em 0 0.7em; }
+.hud-choice-label { font: 700 0.95em/1.2 var(--mw-font-ui); color: var(--mw-ink); }
+.hud-choice .mw-segmented { max-width: 100%; }
+.hud-choice .mw-seg { padding: 0.45em 0.8em; }
+.hud-choice-note { color: var(--mw-ink-mute); font-size: 0.8em; line-height: 1.35; max-width: 34em; }

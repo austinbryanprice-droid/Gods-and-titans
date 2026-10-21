@@ -19,7 +19,8 @@ export async function resolve(spec, ctx, next) {
 const THREE = await import('three');
 const { CameraController, CAMERA_DEFAULTS } = await import('../../src/render/camera.js');
 const { FogOfWar, FOW_UNIFORMS, FOW_VISIBLE, FOW_EXPLORED, FOW_UNEXPLORED, FOW_FADE_SECONDS, patchFowMaterial, patchFowObject } = await import('../../src/render/fog.js');
-const { buildTerrainGeometry, terrainColors, tileLayers, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
+const { buildTerrainGeometry, tileLayers, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
+const { groundField, FIELD_RES } = await import('../../src/render/ground-field.js');
 const { LAYER, LAYER_COUNT, GROUND_SIZE, terrainTextureData } = await import('../../src/render/terrain-textures.js');
 const { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } = await import('../../src/render/overlays.js');
 const { PlacementLayer } = await import('../../src/render/placement.js');
@@ -209,18 +210,24 @@ test('fog: patchFowMaterial chains onBeforeCompile, keys the program and is idem
 
 // ------------------------------------------------------------------ terrain
 
-test('terrain: every vertex lies on heightAt, tiles are 8 upward-facing triangles', () => {
+test('terrain: one vertex per field sample on heightAt, faces point up, chunks tile the index', () => {
   const map = hillyMap();
-  const geo = buildTerrainGeometry(map);
+  const field = groundField(map);
+  const geo = buildTerrainGeometry(map, field);
   const pos = geo.attributes.position;
+  const nor = geo.attributes.normal;
   const W = map.width;
   const H = map.height;
-  assert.equal(pos.count, (W + 1) * (H + 1) + W * H + W * (H + 1) + (W + 1) * H);
-  assert.equal(geo.index.count, W * H * 8 * 3);
+  const R = FIELD_RES;
+  assert.equal(pos.count, (W * R + 1) * (H * R + 1));
+  assert.equal(geo.index.count, W * H * R * R * 6);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
     assert.ok(close(pos.getY(i), heightAt(map, x, z), 1e-5), `vertex ${i} at ${x},${z}`);
+    // smooth shading: unit normals, tilted from the field's slope, never pointing down
+    const len = Math.hypot(nor.getX(i), nor.getY(i), nor.getZ(i));
+    assert.ok(close(len, 1, 1e-4) && nor.getY(i) > 0, `normal ${i}`);
   }
   // counter-clockwise from above: every face normal points up
   const a = new THREE.Vector3();
@@ -234,21 +241,29 @@ test('terrain: every vertex lies on heightAt, tiles are 8 upward-facing triangle
     const n = b.sub(a).cross(c.sub(a));
     assert.ok(n.y > 0, `triangle ${t / 3} faces down`);
   }
-  // colors are finite, positive, and a lone tile blends into its neighbors
-  const col = geo.attributes.color.array;
-  for (const v of col) assert.ok(Number.isFinite(v) && v >= 0);
-  const { corner, center, hEdge, vEdge } = terrainColors(map);
-  assert.equal(corner.length, (W + 1) * (H + 1) * 3);
-  assert.equal(center.length, W * H * 3);
-  assert.equal(hEdge.length, W * (H + 1) * 3);
-  assert.equal(vEdge.length, (W + 1) * H * 3);
+  // chunks: consecutive slices of the index that cover the map once, each with a box around its ground
+  const chunks = geo.userData.chunks;
+  let next = 0;
+  let tiles = 0;
+  for (const ch of chunks) {
+    assert.equal(ch.start, next, 'chunks follow each other');
+    next += ch.count;
+    tiles += ch.count / (R * R * 6);
+    for (let t = ch.start; t < ch.start + ch.count; t++) {
+      const v = idx[t];
+      assert.ok(ch.box.containsPoint(a.set(pos.getX(v), pos.getY(v), pos.getZ(v))), 'chunk box holds its vertices');
+    }
+  }
+  assert.equal(next, idx.length);
+  assert.equal(tiles, W * H);
   geo.dispose();
 });
 
-test('terrain: water only over low tiles at the water level, a dark border, and a clean dispose', () => {
+test('terrain: water only over low ground at the water level, a dark border, and a clean dispose', () => {
   const map = hillyMap();
   const t = createTerrain(map);
-  assert.ok(t.terrain.isMesh && t.water && t.border);
+  assert.ok(t.chunks.length > 0 && t.chunks.every((m) => m.isMesh && m.receiveShadow) && t.water && t.border);
+  assert.equal(t.terrain.children.length, t.chunks.length);
   const wp = t.water.geometry.attributes.position;
   assert.ok(wp.count > 0);
   for (let i = 0; i < wp.count; i++) assert.ok(close(wp.getY(i), WATER_LEVEL, 1e-6));
@@ -287,8 +302,8 @@ test('terrain: the water depth at every vertex is the depth of the ground below 
   for (let i = 0; i < pos.count; i++) {
     assert.ok(close(depth.getX(i), WATER_LEVEL - heightAt(map, pos.getX(i), pos.getZ(i)), 1e-5), `water vertex ${i}`);
   }
-  // the terrain's own 8-triangle fans, so depth interpolates like the ground does
-  assert.equal(geo.index.count % 24, 0);
+  // two triangles per field cell, so depth interpolates like the ground does
+  assert.equal(geo.index.count % 6, 0);
   // no depth writes: rings, blob shadows and ground effects at the shore stay whole
   assert.equal(t.water.material.depthWrite, false);
   t.update(2.5);
@@ -323,8 +338,9 @@ test('terrain: ground layers per tile, procedural textures, quality tiers', () =
     assert.ok(lo === 0 && hi === 255, `layer ${l} height spans the byte range`);
   }
   const t = createTerrain(map, { quality: 'low' });
-  const mat = t.terrain.material;
+  const mat = t.material;
   assert.ok(mat.isMeshStandardMaterial && mat.userData.__fow && mat.userData.__world);
+  assert.ok(t.chunks.every((m) => m.material === mat), 'one material for every chunk');
   // the shader's tile map: lush and dry grass share one layer (R), split per
   // pixel by the dryness field (G); B = dirt density, A = building yard contact
   const tiles = mat.userData.terrainUniforms.uTiles.value.image.data;
@@ -333,10 +349,10 @@ test('terrain: ground layers per tile, procedural textures, quality tiers', () =
     assert.equal(tiles[i * 4], layers[i] === LAYER.DRY ? LAYER.GRASS : layers[i]);
     if (layers[i] === LAYER.DRY) assert.ok(tiles[i * 4 + 1] >= 0.64 * 255 - 1);
   }
-  assert.ok(!('TERRAIN_BUMP' in mat.defines));
+  assert.ok(!('TERRAIN_BUMP' in mat.defines) && !('TERRAIN_FACE' in mat.defines));
   assert.ok(!('WATER_HQ' in t.water.material.defines));
   t.setQuality('ultra');
-  assert.ok('TERRAIN_BUMP' in mat.defines && 'TERRAIN_ANTITILE' in mat.defines);
+  assert.ok('TERRAIN_BUMP' in mat.defines && 'TERRAIN_ANTITILE' in mat.defines && 'TERRAIN_FACE' in mat.defines);
   assert.ok('WATER_HQ' in t.water.material.defines);
   // the water keeps its program when its detail does not change
   const wv = t.water.material.version;
@@ -344,6 +360,32 @@ test('terrain: ground layers per tile, procedural textures, quality tiers', () =
   assert.equal(t.water.material.version, wv);
   t.setQuality('nonsense');
   assert.ok('TERRAIN_BUMP' in mat.defines);
+  t.dispose();
+});
+
+test('terrain: the ground shader reads the field data texture, the sandstone layers and the lake level', () => {
+  const map = hillyMap();
+  const field = groundField(map);
+  const t = createTerrain(map, { quality: 'high' });
+  const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader };
+  t.material.onBeforeCompile(shader, null);
+  const u = t.material.userData.terrainUniforms;
+  assert.equal(shader.uniforms.uGData, u.uGData);
+  assert.equal(u.uLayer.value.length, LAYER_COUNT);
+  // one texel per field sample, texel centers on the samples: world x of tile edge 0 and of the far edge
+  const img = u.uGData.value.image;
+  assert.ok(img.width === field.nx && img.height === field.ny && img.data.length === field.nx * field.ny * 4);
+  const m = u.uGMap.value;
+  assert.ok(close(m.z, 0.5 / field.nx, 1e-9));
+  assert.ok(close(m.x * map.width + m.z, (field.nx - 0.5) / field.nx, 1e-9));
+  assert.ok(close(m.y * map.height + m.w, (field.ny - 0.5) / field.ny, 1e-9));
+  const fs = shader.fragmentShader;
+  assert.match(fs, /uniform sampler2D uGData;/);
+  assert.match(fs, /vec4 rockTex\(/);
+  assert.match(fs, /float gShore = /);
+  assert.match(fs, new RegExp(`, ${LAYER.FACE}\\.0 \\)`), 'the wall strata layer is sampled');
+  // medium and up map the walls from the side, low keeps the top texture only
+  assert.match(fs, /#ifdef TERRAIN_FACE/);
   t.dispose();
 });
 

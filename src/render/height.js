@@ -1,37 +1,24 @@
 // Terrain height lookups shared by the renderer, unit placement and props.
 // mapData.heights is a (width + 1) × (height + 1) vertex grid; vertex (vx, vy)
 // sits at world (vx, vy), so tile (tx, ty) spans vertices tx..tx+1, ty..ty+1.
+// The ground the player sees is a smooth surface through those heights
+// (ground-field.js): shorelines are rounded off and rock tiles rise into
+// outcrops, so heightAt answers with the rendered ground, not with the raw grid.
+import { groundField } from './ground-field.js';
 
 /**
- * Bilinear terrain height at world point (x, y) (sim coordinates, tiles).
- * Points outside the map are clamped to the border.
+ * Terrain height at world point (x, y) (sim coordinates, tiles): the smooth ground
+ * surface, which passes through the sim's vertex heights away from shores and
+ * rock. Points outside the map are clamped to the border; a map without heights
+ * is flat at 0.
  * @param {{width:number, height:number, heights:Float32Array}} mapData
  * @param {number} x
  * @param {number} y
  * @returns {number}
  */
 export function heightAt(mapData, x, y) {
-  const hs = mapData && mapData.heights;
-  if (!hs) return 0;
-  const w = mapData.width;
-  const h = mapData.height ?? mapData.width;
-  const W = w + 1;
-  const cx = x > 0 ? (x < w ? x : w) : 0;
-  const cy = y > 0 ? (y < h ? y : h) : 0;
-  let x0 = Math.floor(cx);
-  let y0 = Math.floor(cy);
-  if (x0 > w - 1) x0 = w - 1;
-  if (y0 > h - 1) y0 = h - 1;
-  const fx = cx - x0;
-  const fy = cy - y0;
-  const i = y0 * W + x0;
-  const h00 = hs[i];
-  const h10 = hs[i + 1];
-  const h01 = hs[i + W];
-  const h11 = hs[i + W + 1];
-  const top = h00 + (h10 - h00) * fx;
-  const bot = h01 + (h11 - h01) * fx;
-  return top + (bot - top) * fy;
+  const f = groundField(mapData);
+  return f ? f.heightAt(x, y) : 0;
 }
 
 /**

@@ -4,6 +4,9 @@
 
 const STORAGE_KEY = 'mythicwar-settings';
 const QUALITIES = ['low', 'medium', 'high', 'ultra'];
+// The sky: the day and night cycle that follows the match clock, or one time of day held
+// for the whole match (the render side is src/render/atmosphere.js; a test keeps both lists equal).
+const TIMES_OF_DAY = ['cycle', 'golden', 'day', 'dusk', 'night', 'dawn'];
 const MAX_NAME_LENGTH = 20;
 
 const listeners = new Set();
@@ -21,9 +24,11 @@ function cleanName(name) {
 /**
  * Defaults; the name gets 3 random digits once and is then saved. `tipsDismissed`
  * becomes true once the player closes (or finishes) the in-game "getting started" tips.
+ * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
+ * or one fixed time of day.
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', edgeScroll: true, showAllBars: false, tipsDismissed: false };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -33,6 +38,7 @@ function sanitize(raw, base) {
   if (typeof raw.name === 'string' && cleanName(raw.name)) out.name = cleanName(raw.name);
   if (typeof raw.volume === 'number' && Number.isFinite(raw.volume)) out.volume = Math.min(1, Math.max(0, raw.volume));
   if (QUALITIES.includes(raw.quality)) out.quality = raw.quality;
+  if (TIMES_OF_DAY.includes(raw.timeOfDay)) out.timeOfDay = raw.timeOfDay;
   if (typeof raw.edgeScroll === 'boolean') out.edgeScroll = raw.edgeScroll;
   if (typeof raw.showAllBars === 'boolean') out.showAllBars = raw.showAllBars;
   if (typeof raw.tipsDismissed === 'boolean') out.tipsDismissed = raw.tipsDismissed;
@@ -77,7 +83,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean }}
  */
 export function getSettings() {
   return load();
@@ -131,3 +137,4 @@ export function _resetSettingsForTests({ clearStorage = false } = {}) {
 
 export const SETTINGS_KEY = STORAGE_KEY;
 export const QUALITY_LEVELS = QUALITIES;
+export const TIME_OF_DAY_MODES = TIMES_OF_DAY;

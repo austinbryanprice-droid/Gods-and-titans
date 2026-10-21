@@ -1,18 +1,27 @@
-// Terrain for the game renderer (DESIGN 8): one smooth-shaded mesh built from
-// mapData.heights (8 triangles per tile) and textured per pixel from a
-// procedural texture array (terrain-textures.js: lush and dry grass, dirt,
-// sand, rock, forest floor, lake bed). A one-texel-per-tile map of ground
-// types is looked up through a noise-warped grid, so borders meander instead
-// of following tile edges, and neighboring types blend by their texture
-// heights (grass tufts poke through dirt, sand fills between pebbles); roads
-// stay connected across diagonal steps, and lush and dry grass cross-fade
-// along a smooth per-pixel dryness field. On
-// top: macro color variation and a repetition breaker against visible tiling,
-// rock on steep slopes, a darker, glossier wet band along the shore, per-pixel
-// bump lighting from the texture heights (screen-space derivatives, no
-// tangents), animated caustics on the lake bed; the water (terrain-water.js)
-// and a misty dark border beyond the map edge. Every material samples the fog
-// of war; the lit ones get the drifting cloud shadows (shading.js).
+// Terrain for the game renderer (DESIGN 8): one smooth-shaded surface over the
+// ground field (ground-field.js: the sim's cosmetic vertex heights as a smooth
+// Catmull-Rom surface, rounded organic shorelines, rock tiles raised into
+// sandstone outcrops), built as 16x16 tile chunks over shared vertices (FIELD_RES
+// samples a tile, so a tile edge is never a facet and the light flows over it) so
+// only the chunks in view are drawn. It is textured per pixel from a procedural
+// texture array (terrain-textures.js: lush and dry grass, dirt, sand, rock,
+// forest floor, lake bed, cliff face). A one-texel-per-tile map of ground types
+// is looked up through a noise-warped grid, so borders meander instead of
+// following tile edges, and neighboring types blend by their texture heights
+// (grass tufts poke through dirt, sand fills between pebbles); roads stay
+// connected across diagonal steps, and lush and dry grass cross-fade along a
+// smooth per-pixel dryness field. A small data texture carries what the field
+// knows per sample (distance to the shore, outcrop rise, forest share, cavity)
+// so the shader can put the shore where the field put it: the lake bed only
+// under the water, a pale sand band that darkens to damp sand at the waterline
+// and a sand shelf in the shallows, whatever the tile map says. On top: macro
+// color variation and a repetition breaker against visible tiling, sandstone on
+// steep slopes (the top texture on the flat, strata and grooves on the faces,
+// shaded dark at the foot and light on the crest), per-pixel bump lighting from
+// the texture heights (screen-space derivatives, no tangents), animated
+// caustics on the lake bed; the water (terrain-water.js) and a misty dark border
+// beyond the map edge. Every material samples the fog of war; the lit ones get
+// the drifting cloud shadows (shading.js).
 //
 //   const t = createTerrain(mapData, { quality: 'medium' });
 //   scene.add(t.group); t.update(timeSec); t.setQuality('high'); t.dispose();
@@ -23,6 +32,7 @@ import { patchFowMaterial, FOW_UNIFORMS } from './fog.js';
 import { patchWorldMaterial } from './shading.js';
 import { LAYER, LAYER_COUNT, createTerrainTextures } from './terrain-textures.js';
 import { WATER_LEVEL, buildWater, setWaterQuality } from './terrain-water.js';
+import { FIELD_RES, SHORE_MIN, SHORE_MAX, RISE_MAX, groundField } from './ground-field.js';
 
 export { WATER_LEVEL, buildWater };
 
@@ -60,13 +70,17 @@ LAYER_PARAMS[LAYER.SAND] = [1 / 4, -0.02, 0.03, 0.86];
 LAYER_PARAMS[LAYER.ROCK] = [1 / 4.5, 0.1, 0.07, 0.78];
 LAYER_PARAMS[LAYER.FOREST] = [1 / 3, 0.03, 0.04, 0.96];
 LAYER_PARAMS[LAYER.BED] = [1 / 3.5, 0, 0.04, 0.7];
+// sandstone strata on the outcrop walls: x repeats per tile along the wall (the rest as above)
+LAYER_PARAMS[LAYER.FACE] = [1 / 3, 0.1, 0.035, 0.8];
+/** Wall texture repeats per world unit of height (a texture tile of strata is 1.5 units tall). */
+const FACE_V = 1 / 1.5;
 
 /** Shader detail per quality tier (GLSL defines). */
 const QUALITY_DEFINES = {
   low: {},
-  medium: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '' },
-  high: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '' },
-  ultra: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '' },
+  medium: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_FACE: '' },
+  high: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '', TERRAIN_FACE: '' },
+  ultra: { TERRAIN_BUMP: '', TERRAIN_CAUSTICS: '', TERRAIN_ANTITILE: '', TERRAIN_FACE: '' },
 };
 const ANISOTROPY = { low: 2, medium: 4, high: 8, ultra: 16 };
 
@@ -130,167 +144,101 @@ export function tileLayers(map, dryness = tileDryness(map)) {
   return out;
 }
 
+/** Tiles per terrain chunk (a chunk is one draw call, culled on its own). */
+const CHUNK = 16;
+
 /**
- * Per-vertex shade (linear RGB multipliers on the textured ground) for the
- * corner grid, tile centers and the midpoints of horizontal (top/bottom) and
- * vertical (left/right) tile edges: darker under the forest canopy and on deep
- * lake beds, a touch brighter on hilltops, a little per-vertex variation.
- * Corners average their four tiles, edge midpoints their two, centers lean
- * 25% toward their neighbors.
- * @returns {{corner: Float32Array, center: Float32Array, hEdge: Float32Array, vEdge: Float32Array}}
+ * Terrain geometry from the ground field (ground-field.js): one vertex per field
+ * sample (FIELD_RES per tile), normals from the field's slope so the shading is
+ * continuous over tile and chunk edges, two triangles per cell with the diagonal
+ * alternating, counter-clockwise seen from above. The index runs chunk after chunk
+ * (CHUNK × CHUNK tiles): geometry.userData.chunks lists { start, count, box } of
+ * each, so the renderer can draw and cull them separately over shared vertices.
+ * @param {object} map mapData
+ * @param {import('./ground-field.js').GroundField} [field]
  */
-export function terrainColors(map) {
+export function buildTerrainGeometry(map, field = groundField(map)) {
   const W = map.width;
-  const H = map.height;
-  const T = map.terrain;
-  const seed = (Number(map.seed) | 0) || 7;
-  const hs = map.heights;
-  const VW = W + 1;
-  const hAt = (vx, vy) => (hs ? hs[vy * VW + vx] : 0);
-  // shade from height and forest share; a faint cool tint in the forest shadow
-  const write = (out, o, h, forestShare, hash) => {
-    let k = 0.96 + 0.08 * hash;
-    k *= 1 - 0.22 * forestShare;
-    if (h > 0.25) k *= 1 + (h - 0.25) * 0.12;
-    if (h < -0.3) k *= 0.8 + 0.33 * Math.max(0, h + 0.6);
-    out[o] = k * (1 - 0.04 * forestShare);
-    out[o + 1] = k;
-    out[o + 2] = k * (1 + 0.03 * forestShare);
-  };
+  const H = map.height ?? map.width;
+  const R = FIELD_RES;
+  const nx = field.nx;
+  const ny = field.ny;
+  const pos = new Float32Array(nx * ny * 3);
+  const nor = new Float32Array(nx * ny * 3);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = (j * nx + i) * 3;
+      pos[k] = i / R;
+      pos[k + 1] = field.hgt[j * nx + i];
+      pos[k + 2] = j / R;
+      field.normalAt(i, j, nor, k);
+    }
+  }
+  const idx = new Uint32Array(W * H * R * R * 6);
+  const chunks = [];
   let n = 0;
-  let f = 0;
-  const addTile = (tx, ty) => {
-    if (tx < 0 || ty < 0 || tx >= W || ty >= H) return;
-    n++;
-    if (T[ty * W + tx] === TERRAIN.FOREST) f++;
-  };
-  const share = () => {
-    const s = n ? f / n : 0;
-    n = f = 0;
-    return s;
-  };
-  const corner = new Float32Array(VW * (H + 1) * 3);
-  for (let vy = 0; vy <= H; vy++) {
-    for (let vx = 0; vx <= W; vx++) {
-      addTile(vx - 1, vy - 1);
-      addTile(vx, vy - 1);
-      addTile(vx - 1, vy);
-      addTile(vx, vy);
-      write(corner, (vy * VW + vx) * 3, hAt(vx, vy), share(), hash2(vx, vy, seed + 3));
-    }
-  }
-  const hEdge = new Float32Array(W * (H + 1) * 3);
-  for (let vy = 0; vy <= H; vy++) {
-    for (let tx = 0; tx < W; tx++) {
-      addTile(tx, vy - 1);
-      addTile(tx, vy);
-      write(hEdge, (vy * W + tx) * 3, (hAt(tx, vy) + hAt(tx + 1, vy)) / 2, share(), hash2(tx * 2 + 1, vy * 2, seed + 5));
-    }
-  }
-  const vEdge = new Float32Array(VW * H * 3);
-  for (let ty = 0; ty < H; ty++) {
-    for (let vx = 0; vx <= W; vx++) {
-      addTile(vx - 1, ty);
-      addTile(vx, ty);
-      write(vEdge, (ty * VW + vx) * 3, (hAt(vx, ty) + hAt(vx, ty + 1)) / 2, share(), hash2(vx * 2, ty * 2 + 1, seed + 5));
-    }
-  }
-  const center = new Float32Array(W * H * 3);
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const i = ty * W + tx;
-      addTile(tx - 1, ty);
-      addTile(tx + 1, ty);
-      addTile(tx, ty - 1);
-      addTile(tx, ty + 1);
-      const own = T[i] === TERRAIN.FOREST ? 1 : 0;
-      const h = (hAt(tx, ty) + hAt(tx + 1, ty) + hAt(tx, ty + 1) + hAt(tx + 1, ty + 1)) / 4;
-      write(center, i * 3, h, 0.75 * own + 0.25 * share(), hash2(i, 77, seed + 4));
-    }
-  }
-  return { corner, center, hEdge, vEdge };
-}
-
-/**
- * Terrain geometry: every tile is an 8-triangle fan around a center vertex,
- * through its four corners and four edge midpoints. Corner heights come from
- * map.heights, edge midpoints and centers from the bilinear surface, so the mesh
- * matches heightAt() at every vertex. Smooth vertex normals.
- */
-export function buildTerrainGeometry(map) {
-  const W = map.width;
-  const H = map.height;
-  const VW = W + 1;
-  const nCorner = VW * (H + 1);
-  const cBase = nCorner; // tile centers
-  const hBase = cBase + W * H; // horizontal edge midpoints
-  const vBase = hBase + W * (H + 1); // vertical edge midpoints
-  const nVert = vBase + VW * H;
-  const pos = new Float32Array(nVert * 3);
-  const col = new Float32Array(nVert * 3);
-  const hs = map.heights;
-  const hAt = (vx, vy) => (hs ? hs[vy * VW + vx] : 0);
-  const { corner, center, hEdge, vEdge } = terrainColors(map);
-  const put = (i, x, y, z) => {
-    pos[i * 3] = x;
-    pos[i * 3 + 1] = y;
-    pos[i * 3 + 2] = z;
-  };
-  for (let vy = 0; vy <= H; vy++) for (let vx = 0; vx <= W; vx++) put(vy * VW + vx, vx, hAt(vx, vy), vy);
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const h = (hAt(tx, ty) + hAt(tx + 1, ty) + hAt(tx, ty + 1) + hAt(tx + 1, ty + 1)) / 4;
-      put(cBase + ty * W + tx, tx + 0.5, h, ty + 0.5);
-    }
-  }
-  for (let vy = 0; vy <= H; vy++) {
-    for (let tx = 0; tx < W; tx++) put(hBase + vy * W + tx, tx + 0.5, (hAt(tx, vy) + hAt(tx + 1, vy)) / 2, vy);
-  }
-  for (let ty = 0; ty < H; ty++) {
-    for (let vx = 0; vx <= W; vx++) put(vBase + ty * VW + vx, vx, (hAt(vx, ty) + hAt(vx, ty + 1)) / 2, ty + 0.5);
-  }
-  col.set(corner, 0);
-  col.set(center, cBase * 3);
-  col.set(hEdge, hBase * 3);
-  col.set(vEdge, vBase * 3);
-
-  const idx = new Uint32Array(W * H * 24);
-  let k = 0;
-  const tri = (a, b, c) => {
-    idx[k++] = a;
-    idx[k++] = b;
-    idx[k++] = c;
-  };
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const c = cBase + ty * W + tx;
-      const tl = ty * VW + tx;
-      const tr = tl + 1;
-      const bl = tl + VW;
-      const br = bl + 1;
-      const top = hBase + ty * W + tx;
-      const bottom = top + W;
-      const left = vBase + ty * VW + tx;
-      const right = left + 1;
-      // counter-clockwise seen from above (+Y): x east, z south
-      tri(c, tr, top);
-      tri(c, top, tl);
-      tri(c, br, right);
-      tri(c, right, tr);
-      tri(c, bl, bottom);
-      tri(c, bottom, br);
-      tri(c, tl, left);
-      tri(c, left, bl);
+  for (let cy = 0; cy < H; cy += CHUNK) {
+    for (let cx = 0; cx < W; cx += CHUNK) {
+      const i0 = cx * R;
+      const i1 = Math.min(W, cx + CHUNK) * R;
+      const j0 = cy * R;
+      const j1 = Math.min(H, cy + CHUNK) * R;
+      const start = n;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let j = j0; j < j1; j++) {
+        for (let i = i0; i < i1; i++) {
+          const tl = j * nx + i;
+          const tr = tl + 1;
+          const bl = tl + nx;
+          const br = bl + 1;
+          // counter-clockwise from above (+Y): x east, z south
+          if ((i + j) & 1) {
+            idx[n++] = tl; idx[n++] = bl; idx[n++] = br;
+            idx[n++] = tl; idx[n++] = br; idx[n++] = tr;
+          } else {
+            idx[n++] = tl; idx[n++] = bl; idx[n++] = tr;
+            idx[n++] = tr; idx[n++] = bl; idx[n++] = br;
+          }
+        }
+      }
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const h = field.hgt[j * nx + i];
+          if (h < lo) lo = h;
+          if (h > hi) hi = h;
+        }
+      }
+      const box = new THREE.Box3(new THREE.Vector3(i0 / R, lo, j0 / R), new THREE.Vector3(i1 / R, hi, j1 / R));
+      chunks.push({ cx, cy, start, count: n - start, box });
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
+  geo.userData.chunks = chunks;
   geo.computeBoundingSphere();
   geo.computeBoundingBox();
   return geo;
+}
+
+/**
+ * The ground data texture the shader reads per pixel (one texel per field sample,
+ * bilinear): R shore distance (SHORE_MIN..SHORE_MAX tiles, + on land), G outcrop
+ * rise (0..RISE_MAX), B forest share, A cavity (0.5 flat, below it a crest).
+ */
+function groundDataTexture(field) {
+  const tex = new THREE.DataTexture(field.dataBytes(), field.nx, field.ny, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.name = 'terrain-ground-data';
+  tex.needsUpdate = true;
+  return tex;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +258,8 @@ uniform sampler2DArray uGround;
 uniform sampler2D uTNoise;
 uniform sampler2D uTFx;
 uniform sampler2D uTiles;
+uniform sampler2D uGData;
+uniform vec4 uGMap;
 uniform vec4 uTileSize; // width, height (tiles)
 uniform vec4 uLayer[ ${LAYER_COUNT} ];
 uniform float uTTime;
@@ -369,6 +319,27 @@ vec4 layerTex( int layer, vec2 p, vec2 dx, vec2 dy, float sel, float dry ) {
 
 vec4 layerParams( int layer, float dry ) {
   return layer == ${LAYER.GRASS} ? mix( uLayer[ ${LAYER.GRASS} ], uLayer[ ${LAYER.DRY} ], dry ) : uLayer[ layer ];
+}
+
+// Sandstone: slabs seen from above; on the walls the strata, mapped from the side
+// (triplanar over the two vertical planes, its beds running level along the wall).
+vec4 rockTex( vec2 p, vec2 dx, vec2 dy, float sel, vec3 w, vec3 wdx, vec3 wdy, vec3 n, float wall, float warp ) {
+  vec4 top = groundTex( ${LAYER.ROCK}, p, dx, dy, sel );
+  #ifdef TERRAIN_FACE
+    if ( wall < 0.003 ) return top;
+    vec2 fs = vec2( uLayer[ ${LAYER.FACE} ].x, ${FACE_V.toFixed(4)} );
+    // the beds wander up and down a little along the wall (a slow noise on the height), so they
+    // do not trace perfect contour lines around the rock
+    float wy = w.y + warp;
+    vec4 fx = textureGrad( uGround, vec3( vec2( w.z, wy ) * fs + 0.37, ${LAYER.FACE}.0 ), vec2( wdx.z, wdx.y ) * fs, vec2( wdy.z, wdy.y ) * fs );
+    vec4 fz = textureGrad( uGround, vec3( vec2( w.x, wy ) * fs, ${LAYER.FACE}.0 ), vec2( wdx.x, wdx.y ) * fs, vec2( wdy.x, wdy.y ) * fs );
+    float bx = n.x * n.x;
+    float bz = n.z * n.z;
+    vec4 face = ( fx * bx + fz * bz ) / max( bx + bz, 1e-4 );
+    return mix( top, face, wall );
+  #else
+    return top;
+  #endif
 }`;
 
 // replaces <map_fragment>: picks and blends the ground layers into the albedo
@@ -379,6 +350,13 @@ vec2 tdy = dFdy( tp );
 vec4 tnA = texture2D( uTNoise, tp * 0.029 ); // ~34-tile features
 vec4 tnB = texture2D( uTNoise, tp * 0.13 + 0.37 ); // ~8-tile features
 vec4 tnC = texture2D( uTNoise, tp * 0.41 + 0.71 ); // ~2-tile features: ragged, hand-drawn edges
+// the ground field's smooth per-pixel data (ground-field.js): shore distance (tiles, + on
+// land), outcrop rise, forest share, cavity (+ hollows, - crests)
+vec4 gd = texture2D( uGData, tp * uGMap.xy + uGMap.zw );
+float gShore = gd.r * ${(SHORE_MAX - SHORE_MIN).toFixed(1)} + ${SHORE_MIN.toFixed(1)};
+float gRise = gd.g * ${RISE_MAX.toFixed(2)};
+float gForest = gd.b;
+float gCav = gd.a * 2.0 - 1.0;
 // The tile map is looked up through a warped grid, so type borders meander
 // across tiles instead of tracing the grid; the four tiles around the warped
 // point give bilinear weights, merged where they share a type.
@@ -396,6 +374,18 @@ int c0 = layerOf( k0 );
 int c1 = layerOf( k1 );
 int c2 = layerOf( k2 );
 int c3 = layerOf( k3 );
+// the field's shoreline (rounder than the tile grid) decides where the lake is: lake bed only out
+// in the water, sand in its shallows and on dry ground that the warped tile map still calls lake
+if ( gShore < - 0.6 ) {
+  c0 = c1 = c2 = c3 = ${LAYER.BED};
+} else if ( gShore < 0.0 ) {
+  c0 = c1 = c2 = c3 = ${LAYER.SAND};
+} else {
+  if ( c0 == ${LAYER.BED} ) c0 = ${LAYER.SAND};
+  if ( c1 == ${LAYER.BED} ) c1 = ${LAYER.SAND};
+  if ( c2 == ${LAYER.BED} ) c2 = ${LAYER.SAND};
+  if ( c3 == ${LAYER.BED} ) c3 = ${LAYER.SAND};
+}
 vec4 tw = vec4( ( 1.0 - tf.x ) * ( 1.0 - tf.y ), tf.x * ( 1.0 - tf.y ), ( 1.0 - tf.x ) * tf.y, tf.x * tf.y );
 // meadow dryness: the tiles' field interpolated like the weights (continuous,
 // so lush and dry grass meet along soft curves, not tile edges), noise-broken
@@ -418,8 +408,13 @@ if ( c0 == c3 && c1 == c2 && c0 != c1 ) {
     tw = vec4( w, 1.0 - w, 0.0, 0.0 );
   }
 }
-// bare rock on steep slopes
-float tSlopeRock = smoothstep( 0.9, 0.78, normalize( vTerrainN ).y );
+// sandstone: the raised outcrops (their rise from the field, whatever the warped tile map
+// says) and any steep slope; the steeper, the more the side texture takes over
+vec3 wn = normalize( vTerrainN );
+vec3 wdx = dFdx( vTerrainW );
+vec3 wdy = dFdy( vTerrainW );
+float tWall = smoothstep( 0.72, 0.45, wn.y );
+float tSlopeRock = max( smoothstep( 0.9, 0.78, wn.y ), smoothstep( 0.06, 0.3, gRise ) );
 tw *= 1.0 - tSlopeRock;
 float tSel = tnB.z;
 vec4 s0 = vec4( 0.0 );
@@ -431,12 +426,12 @@ if ( tw.x > 0.003 ) s0 = layerTex( c0, tp, tdx, tdy, tSel, tDry );
 if ( tw.y > 0.003 ) s1 = layerTex( c1, tp, tdx, tdy, tSel, tDry );
 if ( tw.z > 0.003 ) s2 = layerTex( c2, tp, tdx, tdy, tSel, tDry );
 if ( tw.w > 0.003 ) s3 = layerTex( c3, tp, tdx, tdy, tSel, tDry );
-if ( tSlopeRock > 0.003 ) sR = groundTex( ${LAYER.ROCK}, tp, tdx, tdy, tSel );
+if ( tSlopeRock > 0.003 ) sR = rockTex( tp, tdx, tdy, tSel, vTerrainW, wdx, wdy, wn, tWall, ( tnB.x - 0.5 ) * 0.14 + ( tnC.w - 0.5 ) * 0.08 );
 vec4 L0 = layerParams( c0, tDry );
 vec4 L1 = layerParams( c1, tDry );
 vec4 L2 = layerParams( c2, tDry );
 vec4 L3 = layerParams( c3, tDry );
-vec4 LR = uLayer[ ${LAYER.ROCK} ];
+vec4 LR = mix( uLayer[ ${LAYER.ROCK} ], uLayer[ ${LAYER.FACE} ], tWall );
 // Height blend: each type scores its weight plus a little of its texel height,
 // and the types within a wide band of the best score show, weighted by how close
 // they are. Borders stay irregular (tufts poke over soil) without the hard
@@ -451,12 +446,13 @@ float tbs = 1.0 / max( tb.x + tb.y + tb.z + tb.w + tbR, 1e-4 );
 tb *= tbs;
 tbR *= tbs;
 vec3 tAlbedo = s0.rgb * tb.x + s1.rgb * tb.y + s2.rgb * tb.z + s3.rgb * tb.w + sR.rgb * tbR;
-float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z;
+float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z * ( 1.0 - 0.96 * tWall );
 float tRough = dot( tb, vec4( L0.w, L1.w, L2.w, L3.w ) ) + tbR * LR.w;
 // share of the pixel that is soil / meadow (by layer), and of the border band
 // between them (from the plain weights, before the texel heights roughen it)
 float tDirtShow = ( c0 == ${LAYER.DIRT} ? tb.x : 0.0 ) + ( c1 == ${LAYER.DIRT} ? tb.y : 0.0 ) + ( c2 == ${LAYER.DIRT} ? tb.z : 0.0 ) + ( c3 == ${LAYER.DIRT} ? tb.w : 0.0 );
 float tGrassW = ( c0 == ${LAYER.GRASS} ? tw.x : 0.0 ) + ( c1 == ${LAYER.GRASS} ? tw.y : 0.0 ) + ( c2 == ${LAYER.GRASS} ? tw.z : 0.0 ) + ( c3 == ${LAYER.GRASS} ? tw.w : 0.0 );
+float tSandShow = ( c0 == ${LAYER.SAND} ? tb.x : 0.0 ) + ( c1 == ${LAYER.SAND} ? tb.y : 0.0 ) + ( c2 == ${LAYER.SAND} ? tb.z : 0.0 ) + ( c3 == ${LAYER.SAND} ? tb.w : 0.0 );
 // moist soil: a short darker, smoother band on the dirt side of a meadow border
 float tMoist = smoothstep( 0.0, 0.18, tGrassW ) * ( 1.0 - smoothstep( 0.3, 0.62, tGrassW ) );
 tMoist *= tDirtShow * ( 0.75 + 0.25 * tnC.z );
@@ -471,6 +467,17 @@ tWear = saturate( tWear ) * tDirtShow * ( 0.8 + 0.2 * tnC.w );
 tAlbedo *= 1.0 - 0.2 * tWear;
 tRough = mix( tRough, 0.8, tWear * 0.6 );
 tBump *= 1.0 - 0.35 * tWear;
+// sandstone beds on the walls: layers about a hand high, each one a shade of its own, lighter
+// at its top lip and darker where the soft rock has weathered back under the bed above
+float tBedY = ( vTerrainW.y + ( tnB.x - 0.5 ) * 0.14 + ( tnC.w - 0.5 ) * 0.08 ) * 7.0 + tnC.y * 0.6;
+float tBedH = fract( sin( floor( tBedY ) * 12.9898 + 4.1 ) * 43758.5453 );
+vec3 tBed = mix( vec3( 1.0 ), vec3( 1.06, 0.97, 0.87 ), tBedH ) * ( 0.92 + 0.14 * fract( tBedY ) );
+tAlbedo *= mix( vec3( 1.0 ), tBed, tbR * tWall );
+// the foot of a cliff sits in its own shade
+tAlbedo *= 1.0 - 0.4 * tbR * smoothstep( 0.0, 0.05, gRise ) * ( 1.0 - smoothstep( 0.06, 0.34, gRise ) );
+// moss and a little meadow soil on the level tops, mostly low down where the grass creeps up
+float tMossTop = smoothstep( 0.5, 0.78, tnB.w * 0.6 + tnC.x * 0.4 ) * smoothstep( 0.88, 0.97, wn.y ) * ( 1.0 - 0.5 * smoothstep( 0.2, 0.7, gRise ) );
+tAlbedo = mix( tAlbedo, vec3( 0.2, 0.3, 0.1 ) * ( 0.8 + 0.4 * tnA.x ), tbR * tMossTop * 0.7 );
 // the finest relief only reads while a pixel covers about a texel or less: fade
 // it out beyond that so panning and zooming do not shimmer
 float tFoot = max( length( tdx ), length( tdy ) ) * 90.0;
@@ -487,14 +494,29 @@ float tAut = smoothstep( 0.38, 0.74, tnA.w * 0.7 + tnB.y * 0.3 );
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.42, 0.98, 0.62 ), tAut * tGreen * 0.75 );
 float tMoss = smoothstep( 0.5, 0.82, tnA.z * 0.75 + tnB.w * 0.25 );
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.74, 0.9, 0.86 ), tMoss * tGreen * 0.6 );
-// shore: wet (darker, glossier) just above the water line, which laps a little
+// shore: damp sand along the waterline (a little darker, glossier, a deeper gold) that the
+// water laps up and down and that dries out to pale, sun-bleached sand a tile further up,
+// dustier and warmer up the beach
 float tAbove = vTerrainW.y - uWaterLevel;
-float tLap = 0.012 * sin( uTTime * 1.3 + tp.x * 0.7 + tp.y * 0.5 );
-float tWet = 1.0 - smoothstep( 0.02, 0.13, tAbove - tLap );
+float tLap = 0.12 * sin( uTTime * 1.3 + tp.x * 0.7 + tp.y * 0.5 ) + 0.07 * sin( uTTime * 0.8 - tp.x * 1.7 + tp.y * 1.1 );
 float tUnder = 1.0 - smoothstep( -0.02, 0.0, tAbove );
-tAlbedo *= 1.0 - 0.4 * tWet;
+float tWet = ( 1.0 - smoothstep( 0.0, 0.8, gShore + tLap ) ) * ( 1.0 - tUnder );
+tAlbedo *= 1.0 - 0.14 * tWet;
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.04, 0.95, 0.84 ), tWet * 0.55 );
 tRough = mix( mix( tRough, 0.42, tWet ), 0.9, tUnder );
 tBump *= 1.0 - 0.5 * tWet;
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.03, 1.03, 1.01 ), tSandShow * smoothstep( 0.6, 1.2, gShore ) * ( 1.0 - smoothstep( 1.4, 2.8, gShore ) ) );
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.97, 0.9, 0.78 ), tSandShow * smoothstep( 1.8, 3.6, gShore ) * 0.7 );
+// under the water the lake bed is sand in the shallows (a shade darker the deeper), dark silt and
+// pebbles out in the deep; the bump gives way at the seam between the two
+float tShelf = smoothstep( - 1.8, - 0.65, gShore );
+if ( tShelf > 0.003 && gShore < 0.0 ) tAlbedo = mix( tAlbedo, groundTex( ${LAYER.SAND}, tp, tdx, tdy, tSel ).rgb * mix( vec3( 1.0 ), vec3( 0.78, 0.74, 0.66 ), smoothstep( 0.0, 0.5, - gShore ) ), tShelf );
+tBump *= smoothstep( 0.0, 0.06, abs( gShore + 0.6 ) );
+// under the canopy the ground is darker and a touch cooler; hollows and cliff feet are
+// shaded, crests catch more light (from the smooth field, so no tile-sized blotches)
+tAlbedo *= 1.0 - 0.22 * gForest;
+tAlbedo *= vec3( 1.0 - 0.04 * gForest, 1.0, 1.0 + 0.03 * gForest );
+tAlbedo *= 1.0 - 0.3 * max( gCav, 0.0 ) + 0.12 * max( - gCav, 0.0 );
 diffuseColor.rgb *= tAlbedo;`;
 
 const TERRAIN_BUMP = /* glsl */ `
@@ -528,7 +550,7 @@ if ( tUnder > 0.0 ) {
   float cb = textureGrad( uTFx, cq * 1.37 + vec2( uTTime * 0.007, uTTime * 0.01 ) + 0.5, tdx * 0.26, tdy * 0.26 ).b;
   float caust = ( ca + cb ) * 0.5 + ca * cb * 1.6;
   float cfade = smoothstep( 0.0, 0.08, - tAbove ) * ( 1.0 - smoothstep( 0.2, 0.6, - tAbove ) );
-  reflectedLight.directDiffuse *= 1.0 + caust * 1.6 * cfade;
+  reflectedLight.directDiffuse *= 1.0 + caust * 1.0 * cfade;
 }
 #endif`;
 
@@ -536,8 +558,8 @@ if ( tUnder > 0.0 ) {
  * The ground material: a MeshStandardMaterial (rough, so it takes the sky's
  * image-based light like the models) with the layer blending patched in.
  */
-function terrainMaterial(textures, tiles, map, time, quality) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 });
+function terrainMaterial(textures, tiles, gdata, field, map, time, quality) {
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0 });
   mat.name = 'terrain';
   const uniforms = {
     uGround: { value: textures.ground },
@@ -545,6 +567,9 @@ function terrainMaterial(textures, tiles, map, time, quality) {
     uTFx: { value: textures.fx },
     uTiles: { value: tiles },
     uTileSize: { value: new THREE.Vector4(map.width, map.height, 1 / map.width, 1 / map.height) },
+    uGData: { value: gdata },
+    // world (tiles) → ground data uv: one texel per field sample, texel centers on the samples
+    uGMap: { value: new THREE.Vector4(FIELD_RES / field.nx, FIELD_RES / field.ny, 0.5 / field.nx, 0.5 / field.ny) },
     uLayer: { value: LAYER_PARAMS.map((p) => new THREE.Vector4(...p)) },
     uTTime: time,
     uWaterLevel: { value: WATER_LEVEL },
@@ -562,7 +587,7 @@ function terrainMaterial(textures, tiles, map, time, quality) {
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${TERRAIN_BUMP}`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${TERRAIN_CAUSTICS}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-terrain-v3';
+  mat.customProgramCacheKey = () => 'mythicwar-terrain-v5';
   setTerrainQuality(mat, quality);
   // order matters: the fog-of-war patch keeps the hooks installed before it
   patchWorldMaterial(mat, { cloud: true });
@@ -695,7 +720,7 @@ function borderMesh(map) {
  * Build terrain, water and the border beyond the map edge for a map.
  * @param {object} map mapData (width, height, terrain, heights, seed)
  * @param {{ quality?: 'low'|'medium'|'high'|'ultra' }} [o]
- * @returns {{group: THREE.Group, terrain: THREE.Mesh, water: THREE.Mesh|null, border: THREE.Mesh,
+ * @returns {{group: THREE.Group, terrain: THREE.Group, chunks: THREE.Mesh[], material: THREE.Material, field: object, water: THREE.Mesh|null, border: THREE.Mesh,
  *   height: (x:number,y:number)=>number, update: (timeSec:number)=>void, setQuality: (q:string)=>void, dispose: ()=>void}}
  */
 export function createTerrain(map, { quality = 'medium' } = {}) {
@@ -705,16 +730,34 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
   const textures = createTerrainTextures(ANISOTROPY[q]);
   const tiles = tileTexture(map);
   const time = { value: 0 };
-  const geo = buildTerrainGeometry(map);
-  const mat = terrainMaterial(textures, tiles, map, time, q);
-  const terrain = new THREE.Mesh(geo, mat);
+  const field = groundField(map);
+  const gdata = groundDataTexture(field);
+  const geo = buildTerrainGeometry(map, field);
+  const mat = terrainMaterial(textures, tiles, gdata, field, map, time, q);
+  // one mesh per chunk over the shared vertices, so only the chunks in view are drawn
+  const terrain = new THREE.Group();
   terrain.name = 'terrain';
-  terrain.receiveShadow = true;
-  terrain.matrixAutoUpdate = false;
-  terrain.updateMatrix();
+  const chunks = [];
+  const chunkGeos = [];
+  for (const c of geo.userData.chunks) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', geo.attributes.position);
+    g.setAttribute('normal', geo.attributes.normal);
+    g.setIndex(new THREE.BufferAttribute(geo.index.array.subarray(c.start, c.start + c.count), 1));
+    g.boundingBox = c.box.clone();
+    g.boundingSphere = c.box.getBoundingSphere(new THREE.Sphere());
+    const m = new THREE.Mesh(g, mat);
+    m.name = `terrain-${c.cx}-${c.cy}`;
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false;
+    m.updateMatrix();
+    terrain.add(m);
+    chunks.push(m);
+    chunkGeos.push(g);
+  }
   group.add(terrain);
 
-  const water = buildWater(map, { fx: textures.fx, noise: textures.noise, time, hq: q !== 'low' });
+  const water = buildWater(map, { fx: textures.fx, noise: textures.noise, time, hq: q !== 'low', field });
   if (water) group.add(water);
 
   const border = borderMesh(map);
@@ -723,6 +766,9 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
   return {
     group,
     terrain,
+    chunks,
+    material: mat,
+    field,
     water,
     border,
     height: (x, y) => heightAt(map, x, y),
@@ -775,8 +821,10 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
     },
     dispose() {
       group.removeFromParent();
+      for (const g of chunkGeos) g.dispose();
       geo.dispose();
       mat.dispose();
+      gdata.dispose();
       tiles.dispose();
       textures.dispose();
       if (water) {

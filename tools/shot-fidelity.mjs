@@ -6,7 +6,7 @@
 //
 //   node tools/shot-fidelity.mjs [--port 8311] [--out DIR] [--prefix before]
 //        [--pantheon greek] [--seed 4242] [--quality high] [--scenes world,hall,...]
-//        [--width 1600] [--height 900] [--list]
+//        [--tod cycle|golden|day|dusk|night|dawn] [--width 1600] [--height 900] [--list]
 //
 // Scenes: world (default zoom on the home base), hall (closest zoom on the town
 // center), yard (mid zoom, base + ground), forest (forest edge), mine (gold mine),
@@ -27,6 +27,7 @@ const prefix = opt('prefix', 'shot');
 const pantheon = opt('pantheon', 'greek');
 const seed = Number(opt('seed', '4242'));
 const quality = opt('quality', 'high');
+const tod = opt('tod', 'cycle'); // the sim is frozen at t = 0, so the cycle shows the 08:00 golden morning
 const width = Number(opt('width', '1600'));
 const height = Number(opt('height', '900'));
 const ALL = ['world', 'hall', 'yard', 'forest', 'mine', 'crowd', 'far'];
@@ -41,12 +42,12 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 const page = await browser.newPage({ viewport: { width, height } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text()); });
-await page.addInitScript((q) => {
+await page.addInitScript(({ q, t }) => {
   try {
     const s = JSON.parse(localStorage.getItem('mythicwar-settings') || '{}');
-    s.quality = q; s.tipsDismissed = true; localStorage.setItem('mythicwar-settings', JSON.stringify(s));
+    s.quality = q; s.timeOfDay = t; s.tipsDismissed = true; localStorage.setItem('mythicwar-settings', JSON.stringify(s));
   } catch {}
-}, quality);
+}, { q: quality, t: tod });
 
 try {
   await page.goto(`http://localhost:${port}/index.html`);

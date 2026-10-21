@@ -75,18 +75,20 @@ function visibleInstances(mesh) {
   return out;
 }
 
-test('heightAt interpolates the vertex grid bilinearly and clamps outside', () => {
-  const map = { width: 2, height: 2, heights: new Float32Array([0, 1, 2, 1, 2, 3, 2, 3, 6]) };
-  assert.equal(heightAt(map, 0, 0), 0);
-  assert.equal(heightAt(map, 1, 0), 1);
-  assert.equal(heightAt(map, 2, 2), 6);
-  assert.equal(heightAt(map, 0.5, 0), 0.5);
-  assert.equal(heightAt(map, 0.5, 0.5), 1);
-  assert.ok(Math.abs(heightAt(map, 1.5, 1.5) - 3.5) < 1e-6);
+test('heightAt is a smooth surface through the vertex grid and clamps outside', () => {
+  const heights = new Float32Array([0, 1, 2, 1, 2, 3, 2, 3, 6]);
+  const map = { width: 2, height: 2, heights };
+  // it passes through every vertex height ...
+  for (let vy = 0; vy <= 2; vy++) for (let vx = 0; vx <= 2; vx++) assert.ok(Math.abs(heightAt(map, vx, vy) - heights[vy * 3 + vx]) < 1e-6, `vertex ${vx},${vy}`);
+  // ... and between them stays close to the straight blend (a Catmull-Rom curve overshoots a little)
+  assert.ok(Math.abs(heightAt(map, 0.5, 0) - 0.5) < 0.1);
+  assert.ok(Math.abs(heightAt(map, 0.5, 0.5) - 1) < 0.25);
+  assert.ok(Math.abs(heightAt(map, 1.5, 1.5) - 3.5) < 0.9);
   assert.equal(heightAt(map, -5, -5), 0, 'clamped to the corner');
   assert.equal(heightAt(map, 9, 9), 6, 'clamped to the far corner');
-  assert.equal(heightAt(map, 2, 0.5), 2.5, 'right border');
+  assert.ok(Math.abs(heightAt(map, 2, 0.5) - 2.5) < 0.25, 'right border');
   assert.equal(heightAt({ width: 4, height: 4 }, 1, 1), 0, 'no heights → flat');
+  assert.equal(heightAt(null, 1, 1), 0, 'no map → flat');
   const m = synthMap();
   for (let i = 0; i < 200; i++) {
     const x = (i * 7.3) % m.width;
