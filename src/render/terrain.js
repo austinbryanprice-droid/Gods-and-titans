@@ -505,7 +505,7 @@ tAlbedo *= 1.0 - 0.14 * tWet;
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.04, 0.95, 0.84 ), tWet * 0.55 );
 tRough = mix( mix( tRough, 0.42, tWet ), 0.9, tUnder );
 tBump *= 1.0 - 0.5 * tWet;
-tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.06, 1.05, 1.02 ), tSandShow * smoothstep( 0.6, 1.2, gShore ) * ( 1.0 - smoothstep( 1.4, 2.8, gShore ) ) );
+tAlbedo = mix( tAlbedo, tAlbedo * vec3( 1.03, 1.03, 1.01 ), tSandShow * smoothstep( 0.6, 1.2, gShore ) * ( 1.0 - smoothstep( 1.4, 2.8, gShore ) ) );
 tAlbedo = mix( tAlbedo, tAlbedo * vec3( 0.97, 0.9, 0.78 ), tSandShow * smoothstep( 1.8, 3.6, gShore ) * 0.7 );
 // under the water the lake bed is sand in the shallows (a shade darker the deeper), dark silt and
 // pebbles out in the deep; the bump gives way at the seam between the two

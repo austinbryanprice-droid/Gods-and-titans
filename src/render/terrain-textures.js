@@ -393,8 +393,8 @@ function paintSand(cv, seed) {
   const n3 = fbm(S, 32, 1, seed + 3);
   const patches = fbm(S, 3, 3, seed + 4);
   // sun-bleached cream over a warmer, damper tone: the pale rim of a lake
-  const lo = C(0xcdb583);
-  const hi = C(0xf1e3ba);
+  const lo = C(0xbfa77a);
+  const hi = C(0xe2d2a8);
   const TAU = Math.PI * 2;
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
