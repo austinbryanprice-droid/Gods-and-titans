@@ -271,7 +271,7 @@ test('plants sway (their shadows too), stone and stumps stay still', () => {
   }
   for (const m of instancedOf(d.object3d)) {
     const kind = m.name.slice('decor-'.length);
-    const sways = kind === 'bush' || kind === 'flowers' || kind === 'grass';
+    const sways = kind === 'bush' || kind === 'flowers' || kind === 'grass' || kind === 'fern';
     assert.equal(!!m.material.userData.__foliage, sways, `${m.name} sways: ${sways}`);
     assert.equal(!!m.customDepthMaterial, sways);
     if (!sways) assert.ok(m.material.isMeshStandardMaterial && m.geometry.attributes.aRough, `${m.name} is physically based stone`);

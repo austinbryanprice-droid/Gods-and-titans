@@ -30,6 +30,7 @@ import { patchWorldMaterial } from '../shading.js';
 import {
   patchFoliageMaterial, patchStoneMaterial, foliageDepthMaterial, PINE_TIERS, PINE_TOP, PINE_PRESETS, pineLayout,
 } from './foliage-shader.js';
+import { NEEDLE_SPRAYS } from './leaf-texture.js';
 
 // Forest chunk size (tiles). Every variant in a chunk is one InstancedMesh,
 // culled as a whole in the main and the shadow pass: at close and default zoom
@@ -486,38 +487,45 @@ function palmGeo() {
     shade(g, '#8a6b45', r, { jit: 0.1, ao });
     g.rotateZ(-lean);
     g.translate(px, py, 0);
-    parts.push(g);
+    parts.push(noUv(g));
     px += Math.sin(lean) * h;
     py += Math.cos(lean) * h * 0.98;
   }
   const top = new THREE.Vector3(px, py, 0);
-  // fronds: arching, folded along the spine (V section), drooping at the tip
+  // fronds: arching ribbons folded along the spine (V section), drooping at the tip; the needle
+  // texture cuts each into a feathery frond
   const n = 8;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * PI * 2 + r.next() * 0.35;
     const ca = Math.cos(a);
     const sa = Math.sin(a);
     const len = 0.74 + r.next() * 0.16;
-    const rise = i % 2 ? 0.1 : 0.15;
-    const at = (t, up) => [top.x + ca * len * t, top.y + up, top.z + sa * len * t];
-    const side = (p, w, down) => [[p[0] - sa * w, p[1] - down, p[2] + ca * w], [p[0] + sa * w, p[1] - down, p[2] - ca * w]];
-    const B = [top.x, top.y + 0.02, top.z];
-    const M1 = at(0.38, rise);
-    const M2 = at(0.72, rise * 0.25);
-    const T = at(1, -0.24);
-    const [L1, R1] = side(M1, 0.15, 0.05);
-    const [L2, R2] = side(M2, 0.11, 0.045);
-    const tris = [[B, L1, M1], [B, M1, R1], [M1, L1, L2], [M1, L2, M2], [M1, M2, R2], [M1, R2, R1], [M2, L2, T], [M2, T, R2]];
-    const g = triGeo(orient(tris, () => _up));
+    const rise = i % 2 ? 0.67 : 1; // some fronds arch higher than others
+    const uc = ((i + 2) % NEEDLE_SPRAYS + 0.5) / NEEDLE_SPRAYS;
+    const rows = [];
+    for (let k = 0; k <= 3; k++) {
+      const t = k / 3;
+      const d = len * t;
+      const y = 0.02 + rise * (0.711 * t - 0.971 * t * t);
+      const w = 0.13 * (0.6 + 0.4 * Math.sin(PI * Math.min(1, t * 0.9 + 0.12)));
+      const fold = 0.045 * (1 - 0.4 * t);
+      const p = [top.x + ca * d, top.y + y, top.z + sa * d];
+      rows.push([
+        [p[0] - sa * w, p[1] - fold, p[2] + ca * w, uc - SPRAY_SPAN, t],
+        [p[0], p[1], p[2], uc, t],
+        [p[0] + sa * w, p[1] - fold, p[2] - ca * w, uc + SPRAY_SPAN, t],
+      ]);
+    }
+    const g = triGeo(orient(ribbonTris(rows), () => _up));
     const out = (p) => Math.hypot(p.x - top.x, p.z - top.z) / len;
     const ao = (p) => 0.6 + 0.45 * smooth01(out(p) * 1.5);
     const grad = { to: '#94a447', t: (p) => 0.75 * smooth01(out(p) * 1.6 - 0.55) };
     parts.push(shade(g, i % 2 ? '#3d7a30' : '#468334', r, { jit: 0.08, leaf: 1, center: _n.set(top.x, top.y - 0.25, top.z).clone(), soft: 0.35, ao, grad }));
   }
-  for (let i = 0; i < 3; i++) {
-    const a = i * 2.1 + 0.4;
+  for (let i = 0; i < 2; i++) {
+    const a = i * 3.1 + 0.4;
     const nut = octa(0.055).translate(top.x + Math.cos(a) * 0.06, top.y - 0.07, top.z + Math.sin(a) * 0.06);
-    parts.push(shade(nut, '#5e4226', r, { jit: 0.1, ao: () => 0.8 }));
+    parts.push(noUv(shade(nut, '#5e4226', r, { jit: 0.1, ao: () => 0.8 })));
   }
   const g = finish(parts, { height: 1.7, bend: 0.09, flutter: 0.022 });
   g.translate(-px * 0.4, 0, 0);
@@ -665,6 +673,67 @@ function grassGeo() {
   return finish([g], { height: 0.3, bend: 0.045, flutter: 0 });
 }
 
+/**
+ * Triangles of a ribbon of vertex rows (2 or 3 across each; the first row at the root, the last at
+ * the tip). Vertices are [x, y, z, u, v]: the needle texture maps u across and v along.
+ */
+function ribbonTris(rows) {
+  const tris = [];
+  for (let k = 0; k < rows.length - 1; k++) {
+    const a = rows[k];
+    const b = rows[k + 1];
+    for (let j = 0; j < a.length - 1; j++) tris.push([a[j], a[j + 1], b[j + 1]], [a[j], b[j + 1], b[j]]);
+  }
+  return tris;
+}
+
+/** Half the width of one spray of the needle texture, in u: a frond keeps to its own spray. */
+const SPRAY_SPAN = 0.5 / NEEDLE_SPRAYS;
+
+/**
+ * Fern: a rosette of arching fronds, each a flat ribbon that rises from the crown, arches over and
+ * droops at its tip. Every frond carries one spray of the needle texture (leaf-texture.js), which
+ * cuts the ribbon into a feathery, pointed frond.
+ */
+function fernGeo(variant) {
+  const r = new RNG(70 + variant);
+  const tris = [];
+  const n = variant === 0 ? 10 : 8;
+  const SEG = 4;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * PI * 2 + r.next() * 0.5;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    const reach = 0.32 + r.next() * 0.14;
+    const arch = 0.09 + r.next() * 0.08;
+    const w = 0.04 + r.next() * 0.012; // half width
+    const uc = ((i + (variant ? 3 : 0)) % NEEDLE_SPRAYS + 0.5) / NEEDLE_SPRAYS;
+    const rows = [];
+    for (let k = 0; k <= SEG; k++) {
+      const t = k / SEG;
+      const d = 0.02 + reach * t;
+      const y = 0.025 + 4 * arch * t * (1 - 0.9 * t);
+      const cup = 0.012 * (1 - t); // the edges curl up a little toward the base
+      rows.push([
+        [ca * d - sa * w, y + cup, sa * d + ca * w, uc - SPRAY_SPAN, t],
+        [ca * d + sa * w, y + cup, sa * d - ca * w, uc + SPRAY_SPAN, t],
+      ]);
+    }
+    tris.push(...ribbonTris(rows));
+  }
+  const g = triGeo(orient(tris, () => _up));
+  shade(g, variant ? '#5a9e3e' : '#4f9238', r, {
+    jit: 0.1,
+    leaf: 1,
+    center: new THREE.Vector3(0, -0.3, 0),
+    soft: 0.8,
+    // dark in the heart of the rosette, fresher and yellower toward the tips
+    ao: (p) => 0.55 + 0.6 * smooth01(Math.hypot(p.x, p.z) / 0.3),
+    grad: { to: '#8dbb48', t: (p) => 0.55 * smooth01(Math.hypot(p.x, p.z) / 0.34 - 0.35) },
+  });
+  return finish([g], { height: 0.3, bend: 0.045, flutter: 0.004 });
+}
+
 function ruinGeo(variant) {
   const r = new RNG(60 + variant);
   const parts = [];
@@ -721,7 +790,7 @@ function shared() {
   plantOpen.name = 'props-plant-open';
   plantOpen.shadowSide = THREE.DoubleSide;
   // less wrap than the round crowns: needles keep a crisp lit and shaded side
-  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, rim: 0.4, shade: [0.8, 1.0, 1.12], detail: [0, 0.45, 0.9, 0], pine: true }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, rim: 0.4, shade: [0.8, 1.0, 1.12], detail: [0, 0.45, 0.9, 0.55], pine: true }), { cloud: true, rim: 0.12 });
   // Round crowns and bushes (leaf puffs: camera-facing quads shaded as spheres). The quads
   // cast from the back of the crown (see PUFF_EXPAND), so both faces take part in the shadow pass.
   // Low draws the quads flat: no depth written by the fragment shader keeps the early depth test.
@@ -736,12 +805,16 @@ function shared() {
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
   patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45, rim: 0.2, shade: [0.88, 1.0, 1.08] }), { cloud: true, rim: 0.12 });
+  // Fern and palm fronds: ribbons cut into feathery fronds by the needle texture, lit from both sides.
+  const plantFern = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  plantFern.name = 'props-plant-fern';
+  patchWorldMaterial(patchFoliageMaterial(plantFern, { wrap: 0.5, translucency: 0.45, rim: 0.25, shade: [0.88, 1.0, 1.08], detail: [0, 0.55, 1.0, -0.3], needles: true }), { cloud: true, rim: 0.12 });
   // Still props: physically based stone / wood, flat shaded, roughness per face.
   const stone = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, metalness: 0 });
   stone.name = 'props-stone';
   patchWorldMaterial(patchStoneMaterial(stone), { cloud: true });
   SHARED = {
-    mat: { plantOpen, plantPuff, plantPuffFlat, plant2, stone },
+    mat: { plantOpen, plantPuff, plantPuffFlat, plant2, plantFern, stone },
     depth: foliageDepthMaterial(),
     depthPine: foliageDepthMaterial({ pine: true }),
     depthPuff: foliageDepthMaterial({ puff: true }),
@@ -754,6 +827,7 @@ function shared() {
       ruin: [ruinGeo(0), ruinGeo(1)],
       stump: null,
       grass: [grassGeo()],
+      fern: [fernGeo(0), fernGeo(1)],
     },
   };
   SHARED.decor.stump = [SHARED.stump];
@@ -761,8 +835,8 @@ function shared() {
 }
 
 /** Material of a tree variant / decor kind, and whether it sways (needs the swaying shadow material). */
-const TREE_MAT = { pine: 'plantOpen', broadleaf: 'plantPuff', birch: 'plantPuff', palm: 'plant2' };
-const DECOR_MAT = { rock: 'stone', bush: 'plantPuff', flowers: 'plant2', ruin: 'stone', stump: 'stone', grass: 'plant2' };
+const TREE_MAT = { pine: 'plantOpen', broadleaf: 'plantPuff', birch: 'plantPuff', palm: 'plantFern' };
+const DECOR_MAT = { rock: 'stone', bush: 'plantPuff', flowers: 'plant2', ruin: 'stone', stump: 'stone', grass: 'plant2', fern: 'plantFern' };
 /** The material of a key at a quality: leaf puffs are drawn flat (no sphere depth) on low. */
 const matAt = (S, key, quality) => S.mat[key === 'plantPuff' && quality === 'low' ? 'plantPuffFlat' : key];
 /** Shadow-map material of a color material (it must move the geometry the way the color pass does). */
@@ -1048,11 +1122,11 @@ export function createForest(mapData, heightFn, { variants = null, quality = 'me
 // decor
 // ---------------------------------------------------------------------------
 
-const DECOR_JITTER = { rock: 0.14, bush: 0.18, flowers: 0.04, ruin: 0.1, stump: 0.12, grass: 0.22 };
-const DECOR_SINK = { rock: 0.04, bush: 0.02, flowers: 0.01, ruin: 0.03, stump: 0.02, grass: 0.01 };
+const DECOR_JITTER = { rock: 0.14, bush: 0.18, flowers: 0.04, ruin: 0.1, stump: 0.12, grass: 0.22, fern: 0.2 };
+const DECOR_SINK = { rock: 0.04, bush: 0.02, flowers: 0.01, ruin: 0.03, stump: 0.02, grass: 0.01, fern: 0.01 };
 
 /**
- * Instanced decor props from mapData.decor (rocks, bushes, flowers, ruins, stumps, grass tufts).
+ * Instanced decor props from mapData.decor (rocks, bushes, flowers, ruins, stumps, grass tufts, ferns).
  * @param {{decor: {x:number, y:number, kind:string, rot:number, scale:number}[]}} mapData
  * @param {(x:number, y:number)=>number} [heightFn]
  * @param {{ quality?: string }} [o]

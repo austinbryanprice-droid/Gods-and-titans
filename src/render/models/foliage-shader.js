@@ -13,7 +13,7 @@
 // units (0 at the roots, growing with height), z = flutter amplitude.
 import * as THREE from 'three';
 import { WORLD_UNIFORMS } from '../shading.js';
-import { leafTexture, needleTexture } from './leaf-texture.js';
+import { leafTexture, needleTexture, NEEDLE_SPRAYS } from './leaf-texture.js';
 
 /** Wind shared by every plant: xy = direction (x east, y south; unit), z = strength, w = unused. */
 export const WIND_UNIFORMS = {
@@ -259,15 +259,18 @@ const FOLIAGE_DETAIL_PARS = /* glsl */ `
 uniform vec4 uFolDetail;
 varying vec3 vFolP;`;
 
-// Spruce needles: the geometry carries aUv = (around the tier, out along it, 1; 0 for trunk and
-// leader). Each tree and each tier starts its texture somewhere else.
-const PINE_NEEDLE_PARS_VERTEX = /* glsl */ `
+// Needle sprays (spruce tiers, fern fronds): the geometry carries aUv = (along the texture's width,
+// out along the spray, 1; 0 for trunk and leader). Each spruce and each of its tiers starts its
+// texture somewhere else; a fern shifts by whole sprays, so every frond keeps one spray's outline.
+const NEEDLE_PARS_VERTEX = /* glsl */ `
 attribute vec3 aUv;
 varying vec3 vNeedle;`;
-const PINE_NEEDLE_VERTEX = /* glsl */ `
+const needleVertex = (pine) => /* glsl */ `
 vNeedle = aUv;
 #ifdef USE_INSTANCING
-  vNeedle.x += fract( instanceMatrix[ 3 ].x * 0.173 + instanceMatrix[ 3 ].z * 0.291 ) * 8.0 + aPine.x * 0.37;
+  ${pine
+    ? 'vNeedle.x += fract( instanceMatrix[ 3 ].x * 0.173 + instanceMatrix[ 3 ].z * 0.291 ) * 8.0 + aPine.x * 0.37;'
+    : `vNeedle.x += floor( fract( instanceMatrix[ 3 ].x * 0.173 + instanceMatrix[ 3 ].z * 0.291 ) * ${NEEDLE_SPRAYS.toFixed(1)} ) * ${(1 / NEEDLE_SPRAYS).toFixed(4)};`}
 #endif`;
 
 // The end of every detail block: coverage becomes alpha to coverage on the multisampled target
@@ -315,15 +318,17 @@ if ( vBb.w > 0.5 ) {
 ${FOLIAGE_COVERAGE}`;
 
 /**
- * Spruce tiers (fragment): the needle texture on the skirt (sprays running out from the trunk,
- * fresher at their tips), the hem cut into drooping tips toward the rim, the skirt closed
- * toward the trunk. uFolDetail: y = albedo contrast, z = how much of the hem is cut (0..1).
+ * Needle sprays (fragment): the needle texture on a spruce skirt (sprays running out from the
+ * trunk, fresher at their tips) or a fern frond, the outline cut into sprays from where the
+ * hem starts, a skirt closed toward the trunk. uFolDetail: y = albedo contrast, z = how much of
+ * the outline is cut (0..1), w = where along the spray the cut starts (a fern's whole frond is
+ * cut: below 0).
  */
-const PINE_DETAIL_FRAGMENT = /* glsl */ `
+const NEEDLE_DETAIL_FRAGMENT = /* glsl */ `
 float folCov = 1.0; // coverage of this fragment: the skirt cut into sprays
 if ( vLeaf > 0.5 && vNeedle.z > 0.5 ) {
   vec4 nt = texture2D( uNeedleTex, vNeedle.xy );
-  float nKeep = mix( 1.0, nt.a, uFolDetail.z * smoothstep( 0.55, 0.8, vNeedle.y ) ) - 0.5;
+  float nKeep = mix( 1.0, nt.a, uFolDetail.z * smoothstep( uFolDetail.w, uFolDetail.w + 0.25, vNeedle.y ) ) - 0.5;
   folCov = clamp( nKeep / max( fwidth( nKeep ) * 1.25, 0.02 ) + 0.5, 0.0, 1.0 );
   diffuseColor.rgb *= mix( 1.0, nt.r * 1.5, uFolDetail.y );
   // fresh growth at the tips leans yellow
@@ -423,17 +428,19 @@ const FOLIAGE_LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(
  * used by instanced plants (geometry with an `aFol` attribute). Call before
  * patchWorldMaterial / patchFowMaterial (they keep this hook). Idempotent.
  * @param {THREE.MeshLambertMaterial} mat
- * @param {{ wrap?: number, translucency?: number, filter?: number, rim?: number, shade?: number[], detail?: number[], pine?: boolean, puff?: boolean, sphereDepth?: boolean }} [o]
+ * @param {{ wrap?: number, translucency?: number, filter?: number, rim?: number, shade?: number[], detail?: number[], pine?: boolean, needles?: boolean, puff?: boolean, sphereDepth?: boolean }} [o]
  *   rim: strength of the sun-side edge light of crowns; shade: tint of the light that fills the shade (cool: blue-green shadows);
  *   detail: [texture repeats (puffs: across one radius), albedo contrast, how much of the outline is cut
- *   into leaves / sprays, unused] for puffs and spruce tiers; leaf and needle textures (leaf-texture.js);
+ *   into leaves / sprays, where along a spray the cut starts (needles)] for puffs and needle sprays;
+ *   leaf and needle textures (leaf-texture.js);
  *   filter: share of the light that still reaches leaves in shadow (0 = hard shadows);
- *   pine: reshape the shared spruce geometry per instance (aPine / aShape attributes, PINE_PRESETS);
+ *   pine: reshape the shared spruce geometry per instance (aPine / aShape attributes, PINE_PRESETS); also needles
+ *   needles: the geometry carries aUv: the needle texture cuts its surfaces into sprays (a spruce, a fern);
  *   puff: the geometry carries leaf puffs (aBb attribute): quads turned toward the camera and shaded as spheres;
  *   sphereDepth: puffs also write the depth of the sphere (round intersections; the fragment shader
  *   loses early depth testing, so only where the crowns are worth it)
  */
-export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, rim = 0.3, shade = [1, 1, 1], detail = null, pine = false, puff = false, sphereDepth = false } = {}) {
+export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, rim = 0.3, shade = [1, 1, 1], detail = null, pine = false, needles = false, puff = false, sphereDepth = false } = {}) {
   if (!mat || mat.userData.__foliage) return mat;
   if (!FOLIAGE_LIGHTS.includes('uFoliage') || !FOLIAGE_LIGHTS_BEGIN.includes('folLightColor = directLight.color')) {
     throw new Error('foliage lighting patch did not apply');
@@ -441,8 +448,9 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
   mat.userData.__foliage = true;
   const uFoliage = { value: new THREE.Vector4(wrap, translucency, filter, rim) };
   mat.userData.uFoliage = uFoliage;
-  // texture detail of puffs and spruce tiers: [texture repeats, contrast, outline cut, unused]; null = flat
-  const textured = !!detail && (puff || pine);
+  // texture detail of puffs and needle sprays: [texture repeats, contrast, outline cut, hem start]; null = flat
+  needles = needles || pine;
+  const textured = !!detail && (puff || needles);
   const d = detail || [1, 0, 0, 0];
   const uFolDetail = { value: new THREE.Vector4(d[0], d[1], d[2], d[3]) };
   mat.userData.uFolDetail = uFolDetail;
@@ -474,31 +482,29 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
     // the time of day (the Lighting thread's shared uniforms); day where it is not there yet
     shader.uniforms.uFolNight = WORLD_UNIFORMS.uNight || NIGHT_DAY;
     if (puff) shader.uniforms.uLeafTex = { value: leafTexture() };
-    if (pine) {
-      shader.uniforms.uPine = PINE_UNIFORMS.uPine;
-      shader.uniforms.uNeedleTex = { value: needleTexture() };
-    }
+    if (pine) shader.uniforms.uPine = PINE_UNIFORMS.uPine;
+    if (needles) shader.uniforms.uNeedleTex = { value: needleTexture() };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}${pine ? PINE_VERTEX_PARS + PINE_NEEDLE_PARS_VERTEX : ''}${puff ? PUFF_VERTEX_PARS : ''}`)
-      .replace('#include <color_vertex>', `${FOLIAGE_COLOR_VERTEX}\n${FOLIAGE_DETAIL_VERTEX}${puff ? `\nvBb = aBb;${PUFF_SEED_VERTEX}` : ''}${pine ? PINE_NEEDLE_VERTEX : ''}`)
+      .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}${pine ? PINE_VERTEX_PARS : ''}${needles ? NEEDLE_PARS_VERTEX : ''}${puff ? PUFF_VERTEX_PARS : ''}`)
+      .replace('#include <color_vertex>', `${FOLIAGE_COLOR_VERTEX}\n${FOLIAGE_DETAIL_VERTEX}${puff ? `\nvBb = aBb;${PUFF_SEED_VERTEX}` : ''}${needles ? needleVertex(pine) : ''}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_MORPH : ''}${puff ? PUFF_JITTER : ''}${INSTANCED_WIND}${puff ? PUFF_EXPAND : ''}`)
       .replace('#include <shadowmap_vertex>', FOLIAGE_SHADOW_VERTEX);
     const fragmentPars = [
       'varying float vLeaf;', 'uniform vec4 uFoliage;', 'uniform float uFolMS;', 'uniform vec3 uFolShade;', 'uniform float uFolNight;', 'vec3 folLightColor = vec3( 0.0 );',
       puff && 'varying vec4 vBb;\nvarying vec4 vBbSeed;\nvarying float vPuffK;\nuniform sampler2D uLeafTex;',
       puff && sphereDepth && 'uniform mat4 projectionMatrix;',
-      pine && 'varying vec3 vNeedle;\nuniform sampler2D uNeedleTex;',
+      needles && 'varying vec3 vNeedle;\nuniform sampler2D uNeedleTex;',
       FOLIAGE_DETAIL_PARS,
     ].filter(Boolean).join('\n');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${fragmentPars}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${!textured ? '' : puff ? puffDetailFragment(sphereDepth) : PINE_DETAIL_FRAGMENT}${FOLIAGE_GRADE}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${!textured ? '' : puff ? puffDetailFragment(sphereDepth) : NEEDLE_DETAIL_FRAGMENT}${FOLIAGE_GRADE}`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${FOLIAGE_SHADE}`)
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>\n${puff ? PUFF_NORMAL_FRAGMENT : ''}`)
       .replace('#include <lights_lambert_pars_fragment>', FOLIAGE_LIGHTS)
       .replace('#include <lights_fragment_begin>', FOLIAGE_LIGHTS_BEGIN);
   };
-  mat.customProgramCacheKey = () => `${prevKey}|foliage7${pine ? 'p' : ''}${puff ? 'b' : ''}${puff && sphereDepth ? 'd' : ''}${textured ? 't' : ''}`;
+  mat.customProgramCacheKey = () => `${prevKey}|foliage8${pine ? 'p' : needles ? 'n' : ''}${puff ? 'b' : ''}${puff && sphereDepth ? 'd' : ''}${textured ? 't' : ''}`;
   mat.needsUpdate = true;
   return mat;
 }

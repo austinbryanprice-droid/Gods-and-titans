@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url';
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
 const ALL = ['stand', 'lineup', 'single', 'far'];
-if (args.includes('--list')) { console.log(ALL.join('\n')); process.exit(0); }
+const KNOWN = [...ALL, 'plants']; // plants: a close-up row of the decor plants (not in the default set)
+if (args.includes('--list')) { console.log(KNOWN.join('\n')); process.exit(0); }
 const port = Number(opt('port', '8321'));
 const out = opt('out', join(tmpdir(), 'mythicwar-foliage'));
 const prefix = opt('prefix', 'shot');
