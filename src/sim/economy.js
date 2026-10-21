@@ -5,7 +5,7 @@
 import { MINE_TIME, CARRY_AMOUNT, CHOP_INTERVAL, DT } from '../config.js';
 import { moveToRect, moveToPoint, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
-import { NO_MODS } from '../data/upgrades.js';
+import { NO_MODS, workSpeed, chopSpeed } from '../data/upgrades.js';
 
 const REACH = 0.5; // edge distance to work at a mine / tree / drop-off
 const SPOT_OFFSET = 0.42; // mining spots stand this far outside the mine's edge
@@ -20,9 +20,15 @@ export function carryCap(world, u, res) {
   return CARRY_AMOUNT + modsOf(world, u).carry[res];
 }
 
-/** Seconds per wood chopped (Sharpened Axes shortens it). */
+/** How much faster a player's Worshippers mine, build and repair (1 = normal; Work Songs and later levels raise it). */
+export function workSpeedOf(world, owner) {
+  const p = world.players[owner];
+  return workSpeed(p ? p.mods : NO_MODS);
+}
+
+/** Seconds per wood chopped (Sharpened Axes and the work upgrades shorten it). */
 function chopInterval(world, u) {
-  return CHOP_INTERVAL / (1 + modsOf(world, u).chop);
+  return CHOP_INTERVAL / chopSpeed(modsOf(world, u));
 }
 
 function reachRect(u, tx, ty, size) {
@@ -248,9 +254,10 @@ export function activeMiners(world, m) {
 
 /**
  * Start a trip in `slot`. The timer runs from the next tick on, so a slot is
- * busy exactly MINE_TIME per trip whether the worker took it during its own
- * update or was handed it during the previous miner's (and it pauses while
- * the worker is stunned, like every other order).
+ * busy exactly MINE_TIME per trip (less with work upgrades, which run it down
+ * faster) whether the worker took it during its own update or was handed it
+ * during the previous miner's (and it pauses while the worker is stunned, like
+ * every other order).
  */
 function beginMining(world, m, u, o, slot) {
   m.miners[slot] = u.id;
@@ -361,7 +368,7 @@ function gatherGold(world, u, o) {
       handOff(world, mine);
       return false;
     }
-    if (world.tickCount > o.startT) o.timer -= DT;
+    if (world.tickCount > o.startT) o.timer -= DT * workSpeedOf(world, u.owner);
     if (o.timer <= 1e-9) {
       const take = Math.min(carryCap(world, u, 'g'), mine.amount);
       mine.amount -= take;

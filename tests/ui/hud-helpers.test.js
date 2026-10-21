@@ -10,6 +10,8 @@ import { abilityScale } from '../../src/sim/abilities.js';
 import { minersText, rangeText, unitStateText } from '../../src/ui/hud-info.js';
 import { getCommandCard, buildingDescription, tierUnlocks, abilityLevelText } from '../../src/ui/command-card.js';
 import { tipSteps, splitKeys } from '../../src/ui/hud-tips.js';
+import { workText, mineTripText, modsOf } from '../../src/ui/hud-data.js';
+import { NO_MODS, computeMods } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
 
 let clock = 0;
@@ -231,4 +233,26 @@ test('worshipper task counts and the workers at a building come from the snapsho
   assert.equal(taskSummaryText(t.counts), '⛏️ 1 · 🙏 1 · 🔧 2 · 💤 1');
   assert.equal(unitStateText(vs.entities.get(ws[0].id), UNITS.worshipper, 0), 'Repairing');
   assert.equal(researchedText(['house_stone_walls', 'tc_iron_picks'], 'house'), '🧱 Stone Walls');
+  // Of an upgrade line only its highest level shows.
+  const tc = ['tc_iron_picks', 'tc_work_songs', 'tc_master_craftsmen', 'tc_hearty_meals'];
+  assert.equal(researchedText(tc, 'town_center'), '⛏️ Iron Picks, ⚒️ Master Craftsmen, 🍲 Hearty Meals');
+  assert.equal(researchedText([...tc, 'tc_tireless_devotion', 'tc_healing_herbs', 'tc_blessed_vigor'], 'town_center'),
+    '⛏️ Iron Picks, ☀️ Tireless Devotion, 💪 Blessed Vigor');
+});
+
+test('work speed and the mining trip are quoted from the same numbers the sim uses', () => {
+  assert.equal(workText(NO_MODS), 'Normal');
+  assert.equal(workText(computeMods(['tc_work_songs'])), '+15%');
+  assert.equal(workText(computeMods(['tc_work_songs', 'tc_master_craftsmen', 'tc_tireless_devotion'])), '+50%');
+  assert.equal(mineTripText(NO_MODS), `${MINE_TIME} s per ${CARRY_AMOUNT} gold`);
+  assert.equal(mineTripText(computeMods(['tc_iron_picks'])), `${MINE_TIME} s per ${CARRY_AMOUNT + 2} gold`);
+  assert.equal(mineTripText(computeMods(['tc_work_songs', 'tc_master_craftsmen', 'tc_tireless_devotion', 'tc_iron_picks'])), '1 s per 12 gold');
+
+  // From a snapshot: the viewer's own researched levels, none for a spectator.
+  const world = makeWorld();
+  assert.equal(workText(modsOf(viewOf(world), 0)), 'Normal');
+  world.completeResearch(0, 'tc_work_songs');
+  assert.equal(workText(modsOf(viewOf(world), 0)), '+15%');
+  assert.equal(workText(modsOf(viewOf(world), 1)), 'Normal', 'the other player is not faster');
+  assert.equal(workText(modsOf(viewOf(world), -1)), 'Normal', 'a spectator has no upgrades');
 });

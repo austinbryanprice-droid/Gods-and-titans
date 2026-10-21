@@ -263,11 +263,12 @@ export function planProduction(ai, s, wants) {
 
 // Building upgrades the AI researches, in order, one at a time and only from a surplus
 // (they share the queues with the army).
-const RESEARCH_ORDER = [
-  'tc_iron_picks', 'storehouse_sharp_axes', 'barracks_bronze_weapons', 'tower_burning_arrows', 'shrine_sacred_chants',
-  'house_stone_walls', 'temple_incense', 'barracks_hoplite_shields', 'storehouse_handcarts', 'shrine_blessed_beasts',
-  'temple_divine_favor', 'tc_palisade', 'house_large_families', 'barracks_drill_yard', 'tower_iron_bracing',
-  'tower_lookout', 'temple_rite_of_ascension', 'titan_gate_primordial_bond', 'titan_gate_widened_rift',
+export const RESEARCH_ORDER = [
+  'tc_iron_picks', 'storehouse_sharp_axes', 'tc_work_songs', 'barracks_bronze_weapons', 'tower_burning_arrows',
+  'shrine_sacred_chants', 'tc_hearty_meals', 'house_stone_walls', 'temple_incense', 'barracks_hoplite_shields',
+  'storehouse_handcarts', 'tc_master_craftsmen', 'shrine_blessed_beasts', 'temple_divine_favor', 'tc_healing_herbs',
+  'tc_palisade', 'house_large_families', 'barracks_drill_yard', 'tower_iron_bracing', 'tower_lookout',
+  'tc_tireless_devotion', 'temple_rite_of_ascension', 'tc_blessed_vigor', 'titan_gate_primordial_bond', 'titan_gate_widened_rift',
 ];
 const RESEARCH_FROM = { t: 300, gold: 500, wood: 300 };
 
@@ -280,7 +281,7 @@ export function planResearch(ai, s, wants) {
   }
   for (const id of RESEARCH_ORDER) {
     const up = UPGRADES[id];
-    if (!up || p.upgrades[id] || up.tier > p.tier) continue;
+    if (!up || p.upgrades[id] || up.tier > p.tier || (up.after && !p.upgrades[up.after])) continue;
     const at = (s.done.get(up.building) || []).find((b) => b.queue.length === 0);
     if (!at) continue;
     wants.push({
