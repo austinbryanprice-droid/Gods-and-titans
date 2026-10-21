@@ -907,6 +907,11 @@ kbd {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.mw-pcard-style { margin: 0 0.9em 0.5em; font: 0.84em/1.4 var(--mw-font-body); color: var(--mw-ink); }
+.mw-pcard-style b { font: 600 1em/1.4 var(--mw-font-display); letter-spacing: 0.06em; color: var(--p-accent, var(--mw-gold)); }
+.mw-preview .mw-pcard-style { margin-left: 0; margin-right: 0; }
+.mw-blessing .mw-unit-line { white-space: normal; }
+.mw-pcard-last { margin-bottom: 1em; }
 .mw-pcard-label {
   margin: 0.45em 0.9em 0.3em;
   font: 600 0.66em/1.2 var(--mw-font-display);

@@ -10,6 +10,36 @@ export default {
   colors: { wall: '#cf9467', roof: '#b85a2e', trim: '#7a1e2a', accent: '#f2b51e' },
   style: { roof: 'shikhara', wall: 'sandstone', ornament: 'carvings' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Wheel of Dharma',
+    playstyle: 'Faith from honest work, and gods that return: your workers earn faith while they labor, and fallen gods are reborn cheaply.',
+    blessings: [
+      {
+        id: 'hindu_karma',
+        name: 'Karma',
+        icon: '☸️',
+        description: 'Every worshipper at work (mining, chopping, building or repairing) earns 0.06 faith per second.',
+        effects: [{ type: 'perk', stat: 'karma', amount: 0.06 }],
+      },
+      {
+        id: 'hindu_samsara',
+        name: 'Samsara',
+        icon: '♻️',
+        description: 'Fallen gods are reborn for 40% less gold, faith and time than the usual revival.',
+        effects: [{ type: 'perk', stat: 'revive', amount: 0.4 }],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'topknot', extras: ['skirt', 'jewelry'], colors: { primary: '#e8c27a', secondary: '#b85a2e', accent: '#f2b51e' } },
+    warrior: { headgear: 'tiara', offhand: 'shield', extras: ['armor', 'jewelry'], colors: { secondary: '#7a1e2a', accent: '#f2b51e' } },
+    archer: { headgear: 'tiara', extras: ['cape', 'jewelry'], colors: { primary: '#2a7a5a', secondary: '#7a1e2a', accent: '#f2b51e' } },
+    priest: { headgear: 'topknot', extras: ['skirt', 'jewelry'], colors: { primary: '#f08a24', secondary: '#7a1e2a', accent: '#ffe9a0' } },
+    battering_ram: { colors: { primary: '#8a5a3a', accent: '#f2b51e' } },
+  },
+
   gods: [
     // ---- Shiva: nuker ----
     {
@@ -594,4 +624,44 @@ export default {
 
   // Hindu gods summon no minions.
   minions: [],
+
+  // The fifth Barracks soldier, available at Town: a sweeping royal champion.
+  elite: {
+    id: 'hindu_kshatriya',
+    name: 'Kshatriya',
+    title: 'Warrior-Prince',
+    pantheon: 'hindu',
+    class: 'infantry',
+    kin: 'warrior',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 185, wood: 40, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 520,
+    armor: 3,
+    speed: 2.7,
+    radius: 0.38,
+    sight: 8,
+    air: false,
+    attack: { damage: 17, range: 0.5, cooldown: 1.4, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [
+      { type: 'cleave', pct: 0.5, radius: 1.5, name: 'Sweeping Mace', description: 'Each attack also strikes enemies within 1.5 tiles of the target for 50% damage.' },
+    ],
+    visual: {
+      body: 'humanoid',
+      scale: 1.1,
+      colors: { skin: '#c8a07a', primary: '#b85a2e', secondary: '#7a1e2a', accent: '#f2b51e' },
+      head: 'human',
+      headgear: 'crown',
+      weapon: 'mace',
+      offhand: 'shield',
+      extras: ['armor', 'cape'],
+      aura: null,
+    },
+    icon: '👑',
+    description: 'Royal champion with a heavy mace. Every swing also hits enemies beside his target for half damage, so he shines against crowds. Requires Town.',
+  },
 };

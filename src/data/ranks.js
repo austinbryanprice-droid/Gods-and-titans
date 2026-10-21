@@ -8,7 +8,7 @@ export const RANK_NUMERALS = ['', 'I', 'II', 'III']; // the HUD badge of each ra
 export const RANK_COLORS = ['#9a8a70', '#cd8c52', '#cfd8e6', '#ffd23a']; // Recruit, then bronze, silver, gold: HUD badges and the pips over units
 export const RANK_MAX = RANK_XP.length - 1;
 
-/** Can units of this type rank up? Everything the Barracks trains: Warrior, Archer, Priest, Battering Ram. */
+/** Can units of this type rank up? Everything the Barracks trains: Warrior, Archer, Priest, Battering Ram and the pantheon's elite soldier. */
 export function canRank(def) {
   return !!def && def.producedAt === 'barracks';
 }

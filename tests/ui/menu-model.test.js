@@ -134,6 +134,24 @@ test('every pantheon has an emblem, a summary with 4 gods, a titan and 3 creatur
   }
 });
 
+test('every pantheon summary carries its identity: tagline, playstyle, two blessings and the elite soldier', () => {
+  const taglines = new Set();
+  for (const p of PANTHEON_LIST) {
+    const s = M.pantheonSummary(p);
+    assert.equal(s.tagline, p.identity.tagline);
+    assert.equal(s.playstyle, p.identity.playstyle);
+    taglines.add(s.tagline);
+    assert.equal(s.blessings.length, 2, p.id);
+    for (const b of s.blessings) assert.ok(b.id.startsWith(`${p.id}_`) && b.icon && b.name && b.description, `${p.id} ${b.id}`);
+    assert.equal(s.elite.id, p.elite.id);
+    assert.ok(s.elite.icon && s.elite.name && s.elite.line, p.id);
+  }
+  assert.equal(taglines.size, PANTHEON_LIST.length, 'every pantheon says something different');
+  // a pantheon without an identity still summarizes (older saves, test fixtures)
+  const bare = M.pantheonSummary({ ...PANTHEON_LIST[0], identity: undefined, elite: undefined });
+  assert.deepEqual([bare.tagline, bare.playstyle, bare.blessings, bare.elite], ['', '', [], null]);
+});
+
 test('friendlyJoinError turns the lobby version-mismatch reason (with build fingerprints) into plain words', () => {
   const reason = versionMismatchReason('0.1.0+1a2b3c4d', '0.1.0+9f8e7d6c');
   const msg = M.friendlyJoinError(new Error(reason), 'ABCDE');

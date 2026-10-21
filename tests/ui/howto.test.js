@@ -40,3 +40,10 @@ test('soldier ranks are explained with the numbers from the config', () => {
   assert.match(text, /rise from Recruit to Veteran, Elite and Champion/);
   assert.match(text, /Each rank adds 5% damage, 10% health and 0\.5 armor/);
 });
+
+test('the pantheon soldier and the pantheon blessings are explained, with the Barracks key for the soldier', () => {
+  assert.ok(text.includes('Know your pantheon'));
+  assert.match(text, /two blessings that work from the first second/);
+  assert.match(text, /one elite soldier that only your pantheon fields/);
+  assert.match(text, /your pantheon's own soldier/);
+});

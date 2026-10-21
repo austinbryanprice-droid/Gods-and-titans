@@ -7,7 +7,8 @@
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
 //   overlays     waiting, in-game menu (F10), game over, host left
 // Only the panels take pointer events; everything else falls through to the canvas.
-import { UNITS } from '../data/index.js';
+import { UNITS, PANTHEONS } from '../data/index.js';
+import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
@@ -88,8 +89,11 @@ export class Hud {
     this.rFaith.n.appendChild(this.rFaithRate);
     this.rPop = res('is-pop', '👥', `Population — build Houses to raise the limit (up to ${POP_MAX})`);
     this.rTier = res('is-tier', '🏛️', 'Settlement tier');
+    // Your pantheon: hover for its blessings and elite soldier (filled in by showPantheon).
+    this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
+    this.rPantheon.n.hidden = true;
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.ping),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.ping, this.rPantheon.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -237,6 +241,7 @@ export class Hud {
     const me = vs.me;
     const game = this.game;
     if (me) {
+      if (me.pantheon !== this.pantheonId) this.showPantheon(me.pantheon);
       setText(this.rGold.v, fmt(me.gold));
       setText(this.rWood.v, fmt(me.wood));
       setText(this.rFaith.v, fmt(me.faith));
@@ -285,6 +290,21 @@ export class Hud {
     }
     this.minimap.update(now);
     if (this.tips) this.tips.update(now);
+  }
+
+  /** The top-bar pantheon chip: emblem and name, with the blessings and elite soldier in its tooltip. */
+  showPantheon(id) {
+    this.pantheonId = id;
+    const p = Object.hasOwn(PANTHEONS, id) ? PANTHEONS[id] : null;
+    setHidden(this.rPantheon.n, !p);
+    if (!p) return;
+    setText(this.rPantheon.n.querySelector('.hud-res-i'), PANTHEON_EMBLEMS[id] || '✦');
+    setText(this.rPantheon.v, p.name);
+    const idn = p.identity;
+    const lines = [idn ? `${p.name}: ${idn.tagline}` : p.name];
+    if (idn) lines.push(idn.playstyle, '', ...idn.blessings.map((b) => `${b.icon} ${b.name}: ${b.description}`));
+    if (p.elite) lines.push('', `${p.elite.icon} ${p.elite.name}, a Barracks soldier from Town: ${p.elite.description.replace(/ Requires Town\.$/, '')}`);
+    this.rPantheon.n.title = lines.join('\n');
   }
 
   /** Current command card (input.js reads it for hotkeys). */

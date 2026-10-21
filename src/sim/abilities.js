@@ -172,9 +172,15 @@ export function updateCastOrder(world, u, o) {
   return true;
 }
 
+/** Àṣẹ: gods and titans of a blessed pantheon recharge their abilities faster. */
+function cooldownScale(world, u) {
+  const p = u.owner >= 0 ? world.players[u.owner] : null;
+  return p && (u.def.class === 'god' || u.def.class === 'titan') ? 1 - p.mods.perks.cooldown : 1;
+}
+
 /** Fire an ability now: cooldown, events, and effects (delayed ones are scheduled). */
 export function executeAbility(world, u, ab, tgt) {
-  u.cooldowns[ab.id] = ab.cooldown;
+  u.cooldowns[ab.id] = ab.cooldown * cooldownScale(world, u);
   const ctx = {
     caster: u,
     owner: u.owner,

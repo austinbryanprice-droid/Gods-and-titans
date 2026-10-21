@@ -357,6 +357,10 @@ export function pantheonSummary(p) {
     gods: (p.gods || []).map(unit),
     titan: unit(p.titan),
     creatures: (p.creatures || []).map(unit),
+    tagline: (p.identity && p.identity.tagline) || '',
+    playstyle: (p.identity && p.identity.playstyle) || '',
+    blessings: ((p.identity && p.identity.blessings) || []).map((b) => ({ id: b.id, icon: b.icon, name: b.name, description: b.description })),
+    elite: p.elite ? unit(p.elite) : null,
   };
 }
 

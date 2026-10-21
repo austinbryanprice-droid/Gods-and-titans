@@ -10,6 +10,39 @@ export default {
   colors: { wall: '#c9a274', roof: '#a87c50', trim: '#2a4fa0', accent: '#d8b040' },
   style: { roof: 'stepped', wall: 'mudbrick', ornament: 'winged_bulls' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Cradle of Cities',
+    playstyle: 'Out-build and out-siege: crowded cities of mudbrick houses, battering rams that hit like gods, and slingers that crack buildings.',
+    blessings: [
+      {
+        id: 'mesopotamian_crowded_cities',
+        name: 'Crowded Cities',
+        icon: '🏘️',
+        description: 'Every House shelters 2 more population.',
+        effects: [{ type: 'building', building: 'house', stat: 'pop', amount: 2 }],
+      },
+      {
+        id: 'mesopotamian_siegecraft',
+        name: 'Siegecraft',
+        icon: '🐏',
+        description: 'Battering Rams deal 40% more damage and have 25% more health.',
+        effects: [
+          { type: 'unit', units: ['battering_ram'], stat: 'damage', amount: 0.4 },
+          { type: 'unit', units: ['battering_ram'], stat: 'hp', amount: 0.25 },
+        ],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'none', extras: ['skirt', 'beard'], colors: { primary: '#d8c4a0', secondary: '#2a4fa0', accent: '#d8b040' } },
+    warrior: { headgear: 'helmet', weapon: 'spear', offhand: 'shield', extras: ['armor', 'beard'], colors: { secondary: '#2a4fa0', accent: '#d8b040' } },
+    archer: { headgear: 'none', extras: ['cape', 'beard'], colors: { primary: '#2a4fa0', secondary: '#a87c50', accent: '#d8b040' } },
+    priest: { headgear: 'horns', extras: ['skirt', 'beard'], colors: { primary: '#ece3cc', secondary: '#2a4fa0', accent: '#d8b040' } },
+    battering_ram: { colors: { primary: '#8a6a44', accent: '#2a4fa0' } },
+  },
+
   gods: [
     // ---- Marduk: nuker ----
     {
@@ -755,4 +788,42 @@ export default {
       description: 'The furious serpent-dragon of the Ishtar Gate, with a snake\'s head, a lion\'s forelegs and an eagle\'s talons, whose bite carries venom.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a slinger who is as good against walls as against men.
+  elite: {
+    id: 'mesopotamian_slinger',
+    name: 'Slinger',
+    title: 'Stone of Assur',
+    pantheon: 'mesopotamian',
+    class: 'ranged',
+    kin: 'archer',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 160, wood: 60, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 310,
+    armor: 0,
+    speed: 2.8,
+    radius: 0.34,
+    sight: 9,
+    air: false,
+    attack: { damage: 21, range: 5.5, cooldown: 1.5, canHitAir: true, projectile: 'rock', element: 'physical', splash: 0, buildingMult: 2 },
+    abilities: [],
+    passives: [],
+    visual: {
+      body: 'humanoid',
+      scale: 1.0,
+      colors: { skin: '#c8a07a', primary: '#2a4fa0', secondary: '#a87c50', accent: '#d8b040' },
+      head: 'human',
+      headgear: 'hood',
+      weapon: 'whip',
+      offhand: 'none',
+      extras: ['cape', 'beard'],
+      aura: null,
+    },
+    icon: '☄️',
+    description: 'Hurls shaped stones from a leather sling, and deals double damage to buildings. A fine escort for rams, and able to hit flyers. Requires Town.',
+  },
 };

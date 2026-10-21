@@ -30,15 +30,31 @@ export function pantheonEmblem(id) {
 
 const tierLabel = (t) => ['', 'Village', 'Town', 'City'][t] || '';
 
-/** One god / titan row: icon, name · title, and (for gods) a one-line description. */
+/** One god / titan / elite row: icon, name · title, and (for gods and elites) a one-line description. */
 export function unitRow(u, kind) {
   return h('li.mw-unit', { title: `${u.name}${u.title ? ` — ${u.title}` : ''}\n${u.description}` },
     h('span.mw-unit-icon', { 'aria-hidden': 'true' }, u.icon),
     h('span.mw-unit-text',
       h('span.mw-unit-name', u.name, u.title ? h('span.mw-unit-title', ` · ${u.title}`) : null),
-      kind === 'god' ? h('span.mw-unit-line', u.line) : null,
+      kind === 'god' || kind === 'elite' ? h('span.mw-unit-line', u.line) : null,
     ),
   );
+}
+
+/** One blessing row: icon, name and what it does (wraps onto two lines). */
+export function blessingRow(b) {
+  return h('li.mw-unit.mw-blessing', { title: `${b.name}\n${b.description}` },
+    h('span.mw-unit-icon', { 'aria-hidden': 'true' }, b.icon),
+    h('span.mw-unit-text',
+      h('span.mw-unit-name', b.name),
+      h('span.mw-unit-line', b.description),
+    ),
+  );
+}
+
+/** How the pantheon plays: its tagline in bold, then one sentence. */
+export function styleLine(s) {
+  return s.tagline ? h('p.mw-pcard-style', h('b', s.tagline), ` — ${s.playstyle}`) : null;
 }
 
 function card(s, selected, onPick) {
@@ -60,6 +76,9 @@ function card(s, selected, onPick) {
     selected ? h('span.mw-pcard-check', '✓ Chosen') : null,
   ),
   h('p.mw-pcard-desc', s.description),
+  styleLine(s),
+  s.blessings.length ? h('div.mw-pcard-label', 'Blessings') : null,
+  s.blessings.length ? h('ul.mw-pcard-gods', s.blessings.map(blessingRow)) : null,
   h('div.mw-pcard-label', 'Gods'),
   h('ul.mw-pcard-gods', s.gods.map((g) => unitRow(g, 'god'))),
   h('div.mw-pcard-label', 'Titan'),
@@ -67,6 +86,8 @@ function card(s, selected, onPick) {
   h('div.mw-pcard-label', 'Creatures'),
   h('ul.mw-pcard-creatures', s.creatures.map((u) => h('li.mw-chip', { title: `${u.name} (tier ${u.tier}, ${tierLabel(u.tier)}${u.air ? ', flying' : ''})\n${u.description}` },
     h('span', { 'aria-hidden': 'true' }, u.icon), ` ${u.name}`, u.air ? h('span.mw-air', { title: 'Flying' }, '✈') : null))),
+  s.elite ? h('div.mw-pcard-label', 'Elite soldier') : null,
+  s.elite ? h('ul.mw-pcard-gods.mw-pcard-last', unitRow(s.elite, 'elite')) : null,
   );
   return el;
 }
@@ -131,7 +152,7 @@ export function openPantheonPicker({ host, current, title = 'Choose your pantheo
   const dialog = h('div.mw-modal.mw-panel', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div.mw-modal-head',
       h('h2.mw-h2', title),
-      h('p.mw-modal-sub', 'Ten mythologies, each with four gods, a titan and three mythical creatures. Hover a god for its full story.'),
+      h('p.mw-modal-sub', 'Ten mythologies, each with four gods, a titan, three mythical creatures, two blessings and an elite soldier. Hover anything for its full story.'),
       h('button.mw-icon-btn.mw-modal-close', { type: 'button', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => {
         sfx.play('click');
         close();

@@ -1,7 +1,7 @@
 // Data-driven knowledge for the AI: unit roles, combat strength and ability
 // profiles, derived once per type from the pantheon data (works for every
 // pantheon without per-pantheon code).
-import { getUnitType, godsFor, creaturesFor, titanFor } from '../data/index.js';
+import { getUnitType, godsFor, creaturesFor, titanFor, eliteFor } from '../data/index.js';
 import { rankBonus } from '../data/ranks.js';
 import { GOD_LEVEL_HP, GOD_LEVEL_DAMAGE } from '../config.js';
 
@@ -212,5 +212,6 @@ export function pantheonRoster(pantheonId) {
     gods: godsFor(pantheonId).map((g) => g.id),
     creatures: creaturesFor(pantheonId).slice().sort((a, b) => a.tier - b.tier).map((c) => c.id),
     titan: titanFor(pantheonId) ? titanFor(pantheonId).id : null,
+    elite: eliteFor(pantheonId) ? eliteFor(pantheonId).id : null,
   };
 }

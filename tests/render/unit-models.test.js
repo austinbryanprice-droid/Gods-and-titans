@@ -20,7 +20,8 @@ const THREE = await import('three');
 const {
   buildUnitModel, getUnitModelInfo, preloadUnitModels, clearUnitModelCache, getUnitMaterial, AIR_HOVER_HEIGHT,
 } = await import('../../src/render/models/unit-models.js');
-const { UNITS, MORTALS } = await import('../../src/data/index.js');
+const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
+const { unitLook } = await import('../../src/render/models/unit-looks.js');
 const { BODIES, HEADS, HEADGEAR, WEAPONS, OFFHANDS, EXTRAS } = await import('../../src/data/schema.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
 
@@ -33,7 +34,7 @@ const { PLAYER_COLORS } = await import('../../src/config.js');
 const BUDGET = { mortal: 1000, god: 1500, titan: 2000, creature: 1200, minion: 1200 };
 const STATES = ['idle', 'move', 'attack', 'gather', 'return', 'build', 'pray', 'cast', 'dead'];
 
-const unitClass = (u) => (MORTALS[u.id] ? 'mortal' : u.class || 'creature');
+const unitClass = (u) => (MORTALS[u.id] || u.mortal ? 'mortal' : u.class || 'creature'); // a pantheon's elite soldier is dressed as a mortal
 
 /** Synthetic unit type exercising one visual setup. */
 function syn(id, visual, opt = {}) {
@@ -403,5 +404,59 @@ test('unit geometry: creased normals round limbs, keep box edges hard, and bend 
   const dN = geo.morphAttributes.normal[0].array;
   for (let i = 0; i < N.length; i += 3) {
     assert.ok(Math.abs(N[i] + dN[i] + N[i]) < 1e-4 && Math.abs(N[i + 1] + dN[i + 1] + N[i + 1]) < 1e-4, 'x / y normals turn with the piece');
+  }
+});
+
+test('pantheon looks: a mortal dressed by its pantheon keeps its stats, builds within the mortal budget and caches apart from the plain one', () => {
+  const plain = UNITS.warrior;
+  assert.equal(unitLook(plain, null), plain);
+  assert.equal(unitLook(plain, 'nowhere'), plain);
+  assert.equal(unitLook(UNITS.greek_zeus, 'greek'), UNITS.greek_zeus, 'pantheon units are never dressed');
+  const greek = unitLook(plain, 'greek');
+  const norse = unitLook(plain, 'norse');
+  assert.notEqual(greek, plain);
+  assert.equal(unitLook(plain, 'greek'), greek, 'dressed once, then shared');
+  assert.equal(greek.id, 'warrior');
+  assert.equal(greek.attack, plain.attack, 'only the visual changes');
+  assert.equal(greek.visual.scale, plain.visual.scale);
+  assert.equal(greek.visual.colors.skin, plain.visual.colors.skin, 'colors merge key by key');
+  assert.notEqual(greek.visual.colors.accent, plain.visual.colors.accent);
+  assert.equal(plain.visual.weapon, 'sword', 'the shared unit is not touched');
+  assert.notEqual(JSON.stringify(greek.visual), JSON.stringify(norse.visual));
+  const a = getUnitModelInfo(greek);
+  const b = getUnitModelInfo(norse);
+  assert.ok(a.triangles > 20 && b.triangles > 20);
+  const geometries = (m) => {
+    const out = [];
+    m.root.traverse((o) => {
+      if (o.isMesh && o.geometry.attributes.aFx) out.push(o.geometry);
+    });
+    return out;
+  };
+  const m1 = buildUnitModel(greek, PLAYER_COLORS[0]);
+  const m2 = buildUnitModel(greek, PLAYER_COLORS[0]);
+  const m3 = buildUnitModel(norse, PLAYER_COLORS[0]);
+  const [g1, g2, g3] = [m1, m2, m3].map(geometries);
+  assert.ok(g1.length > 0);
+  assert.deepEqual(g1, g2, 'two Greek warriors share geometry');
+  assert.ok(g1.every((g, i) => g !== g3[i]), 'a Norse warrior has its own');
+  for (const m of [m1, m2, m3]) m.dispose();
+});
+
+test('every pantheon look and elite soldier builds, stays inside the mortal budget and animates', () => {
+  for (const p of PANTHEON_LIST) {
+    for (const m of [...Object.values(MORTALS), p.elite]) {
+      const def = unitLook(m, p.id);
+      const info = getUnitModelInfo(def);
+      assert.ok(info.triangles <= BUDGET.mortal, `${p.id} ${m.id}: ${info.triangles} triangles`);
+      assert.ok(info.meshes <= 8, `${p.id} ${m.id}: ${info.meshes} meshes`);
+      const model = buildUnitModel(def, PLAYER_COLORS[1]);
+      model.animate('idle', 0, 0, {});
+      for (const st of ['move', 'attack', 'dead']) {
+        for (let i = 0; i < 12; i++) model.animate(st, i / 20, 1 / 20, { moving: st === 'move', attackPhase: st === 'attack' ? i / 12 : undefined, level: 1 });
+        assertFiniteTree(model.root, `${p.id} ${m.id}/${st}`);
+      }
+      model.dispose();
+    }
   }
 });

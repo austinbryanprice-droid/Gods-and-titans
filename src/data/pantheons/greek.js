@@ -9,6 +9,39 @@ export default {
   colors: { wall: '#ece6d6', roof: '#b5523b', trim: '#3a6ea5', accent: '#d4af37' },
   style: { roof: 'gable', wall: 'marble', ornament: 'columns' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Heroes of Olympus',
+    playstyle: 'Hero-led armies: your gods arrive already blooded, and a close-ordered phalanx holds the line while they cast.',
+    blessings: [
+      {
+        id: 'greek_heroic_birth',
+        name: 'Heroic Birth',
+        icon: '🏛️',
+        description: 'Gods arrive at level 2, with their second ability ready.',
+        effects: [{ type: 'godLevel', amount: 1 }],
+      },
+      {
+        id: 'greek_hoplite_drill',
+        name: 'Hoplite Drill',
+        icon: '🛡️',
+        description: 'Infantry fight in close order: +1 armor and 8% more health.',
+        effects: [
+          { type: 'unit', classes: ['infantry'], stat: 'armor', amount: 1 },
+          { type: 'unit', classes: ['infantry'], stat: 'hp', amount: 0.08 },
+        ],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'laurel', colors: { secondary: '#8a5a3a', accent: '#d4af37' } },
+    warrior: { headgear: 'helmet', offhand: 'shield', extras: ['armor', 'cape'], colors: { secondary: '#8f6b2e', accent: '#d1a94a' } },
+    archer: { headgear: 'laurel', colors: { primary: '#3a6ea5', accent: '#d4af37' } },
+    priest: { headgear: 'laurel', colors: { primary: '#f3efe2', secondary: '#3a6ea5', accent: '#d4af37' } },
+    battering_ram: { colors: { primary: '#8a6a4a', accent: '#b08a3a' } },
+  },
+
   gods: [
     // ---- Zeus: nuker ----
     {
@@ -657,4 +690,44 @@ export default {
       description: 'The three-headed hound that guards the gates of the underworld, whose bites cleave through crowds for 40% splash damage.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a phalanx anchor.
+  elite: {
+    id: 'greek_hoplite',
+    name: 'Hoplite',
+    title: 'Phalanx Anchor',
+    pantheon: 'greek',
+    class: 'infantry',
+    kin: 'warrior',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 190, wood: 40, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 640,
+    armor: 5,
+    speed: 2.5,
+    radius: 0.38,
+    sight: 8,
+    air: false,
+    attack: { damage: 15, range: 0.5, cooldown: 1.45, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [
+      { type: 'aura', stat: 'armor', amount: 1, radius: 4, affects: 'allies', name: 'Phalanx', description: 'Shields overlap: allies within 4 tiles gain +1 armor.' },
+    ],
+    visual: {
+      body: 'humanoid',
+      scale: 1.14,
+      colors: { skin: '#c8a07a', primary: '#b5523b', secondary: '#8f6b2e', accent: '#d1a94a' },
+      head: 'human',
+      headgear: 'helmet',
+      weapon: 'spear',
+      offhand: 'shield',
+      extras: ['armor', 'cape'],
+      aura: null,
+    },
+    icon: '🎖️',
+    description: 'Heavy spearman of the phalanx. Slow and hard to kill, and his overlapping shields add +1 armor to allies nearby. Requires Town.',
+  },
 };

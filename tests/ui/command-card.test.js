@@ -6,6 +6,8 @@ import { subgroups } from '../../src/ui/hud-data.js';
 import { POP_MAX } from '../../src/config.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
+import { PANTHEON_LIST, godsFor } from '../../src/data/index.js';
+import { modsOf } from '../../src/ui/hud-data.js';
 
 let clock = 0;
 /** A ViewState for player `me` fed one real snapshot from the world. */
@@ -261,7 +263,7 @@ test('population cap and queue limit make training unavailable', () => {
   assert.equal(card[0].reason, 'Production queue is full.');
 });
 
-test('Barracks: Warrior W, Archer A, Priest P (Town), Ram R (Town); several barracks share the queue', () => {
+test('Barracks: Warrior W, Archer A, Priest P (Town), Ram R (Town), the pantheon soldier E (Town); several barracks share the queue', () => {
   const world = makeWorld();
   const b1 = place(world, 0, 'barracks', 6, 13);
   const b2 = place(world, 0, 'barracks', 11, 13);
@@ -269,13 +271,20 @@ test('Barracks: Warrior W, Archer A, Priest P (Town), Ram R (Town); several barr
   const vs = viewOf(world);
   const card = getCommandCard([b1.id, b2.id], vs);
   assert.deepEqual(slotsOf(card), [
-    '0:train:warrior', '1:train:archer', '2:train:priest', '3:train:battering_ram',
-    '4:research:barracks_bronze_weapons', '5:research:barracks_hoplite_shields', '6:research:barracks_drill_yard', '11:rally',
+    '0:train:warrior', '1:train:archer', '2:train:priest', '3:train:battering_ram', '4:train:greek_hoplite',
+    '5:research:barracks_bronze_weapons', '6:research:barracks_hoplite_shields', '7:research:barracks_drill_yard', '11:rally',
   ]);
-  assert.deepEqual(card.slice(0, 4).map((b) => b.key), ['W', 'A', 'P', 'R']);
+  assert.deepEqual(card.slice(0, 5).map((b) => b.key), ['W', 'A', 'P', 'R', 'E']);
   assert.equal(card[0].state, 'ready');
   assert.equal(card[2].state, 'locked');
   assert.equal(card[2].reason, 'Requires Town.');
+  assert.equal(card[4].title, 'Train Hoplite');
+  assert.equal(card[4].state, 'locked');
+  assert.equal(card[4].reason, 'Requires Town.');
+  // Soldier upgrades say they reach the pantheon's own soldier too; Drill Yard is not a unit upgrade.
+  assert.match(card[5].description, /Your Hoplites count too\.$/);
+  assert.match(card[6].description, /Your Hoplites count too\.$/);
+  assert.doesNotMatch(card[7].description, /count too/);
   assert.deepEqual(card[1].cost, { gold: 120, wood: 30, faith: 0, pop: 2, time: 20 });
   // Train goes to the barracks with the shorter queue.
   world.issueCommand(0, { type: 'train', building: b1.id, unit: 'warrior' });
@@ -283,6 +292,24 @@ test('Barracks: Warrior W, Archer A, Priest P (Town), Ram R (Town); several barr
   const vs2 = viewOf(world);
   const pick = pickTrainBuilding([vs2.getEntity(b1.id), vs2.getEntity(b2.id)]);
   assert.equal(pick.id, b2.id);
+});
+
+test('every pantheon trains its own soldier at the Barracks with E once it is a Town', () => {
+  for (const pantheon of PANTHEON_LIST) {
+    const world = makeWorld({ pantheons: [pantheon.id, 'norse'] });
+    const b = place(world, 0, 'barracks', 6, 13);
+    rich(world);
+    let card = getCommandCard([b.id], viewOf(world));
+    const elite = pantheon.elite;
+    assert.equal(card[4].id, `train:${elite.id}`, pantheon.id);
+    assert.equal(card[4].key, 'E', pantheon.id);
+    assert.equal(card[4].reason, 'Requires Town.', pantheon.id);
+    tcOf(world).tier = 2;
+    world.recomputeTier(0, true);
+    card = getCommandCard([b.id], viewOf(world));
+    assert.equal(card[4].state, 'ready', pantheon.id);
+    assert.deepEqual(card[4].cost, { gold: elite.cost.gold, wood: elite.cost.wood, faith: 0, pop: elite.pop, time: elite.buildTime }, pantheon.id);
+  }
 });
 
 test('Shrine creatures Q W E with tier locks; Titan Gate titan T', () => {
@@ -367,6 +394,34 @@ test('Temple: four gods, god limits by tier, duplicates, and Revive for the fall
   assert.deepEqual(card[0].cost, { gold: 50, wood: 0, faith: 100, pop: 5, time: 17.5 });
   const chk = trainCheck(vs, 'greek_zeus', [vs.getEntity(temple.id)]);
   assert.equal(chk.revive, 3);
+});
+
+test('blessings reach the card: Samsara cheapens a revive, Àṣẹ shortens ability cooldowns, and both reach modsOf', () => {
+  const hindu = makeWorld({ pantheons: ['hindu', 'greek'] });
+  const temple = place(hindu, 0, 'temple', 6, 13);
+  rich(hindu);
+  hindu.players[0].popCap = 150;
+  const [god] = godsFor('hindu');
+  hindu.players[0].fallen[god.id] = { level: 2, xp: 130 };
+  const vs = viewOf(hindu);
+  const card = getCommandCard([temple.id], vs);
+  const share = 0.5 * 0.6;
+  assert.equal(card[0].title, `Revive ${god.name} (level 2)`);
+  assert.deepEqual(card[0].cost, { gold: Math.round(god.cost.gold * share), wood: 0, faith: Math.round(god.cost.faith * share), pop: god.pop, time: god.buildTime * share });
+  assert.match(card[0].description, /Revive for 30% of the cost and time/);
+  assert.equal(modsOf(vs, 0).perks.revive, 0.4);
+  assert.equal(modsOf(vs, 1).perks.revive, 0, 'the opponent has their own blessings');
+  assert.equal(modsOf(vs, 1).godLevel, 1);
+
+  const africa = makeWorld({ pantheons: ['west_african', 'greek'] });
+  const g = godsFor('west_african')[0];
+  const unit = spawn(africa, 0, g.id, 12, 16);
+  const q = getCommandCard([unit.id], viewOf(africa)).find((b) => b && b.key === 'Q');
+  assert.equal(q.cost.cooldown, Math.round(g.abilities[0].cooldown * 0.85 * 10) / 10);
+  const plain = makeWorld({ pantheons: ['greek', 'west_african'] });
+  const z = spawn(plain, 0, 'greek_zeus', 12, 16);
+  const zq = getCommandCard([z.id], viewOf(plain)).find((b) => b && b.key === 'Q');
+  assert.equal(zq.cost.cooldown, godsFor('greek')[0].abilities[0].cooldown);
 });
 
 test('god card: abilities Q W R in the bottom row with level locks and cooldowns', () => {

@@ -372,7 +372,7 @@ export class InfoView {
       }
       const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0) + um.armor + rb.armor;
       setText(p.armor, String(Math.round(armor * 10) / 10));
-      setText(p.speed, String(def.speed));
+      setText(p.speed, String(Math.round(def.speed * (1 + um.speed) * 100) / 100));
       if (p.work) setText(p.work, workText(modsOf(vs, e.o)));
       if (p.xpFill && isGod) {
         const lo = GOD_XP_LEVELS[lv - 1] || 0;

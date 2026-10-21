@@ -2,9 +2,9 @@
 // god/titan summoning rules, reviving fallen gods, tier upgrades, building
 // upgrade research, rally points and spawning at the footprint edge nearest
 // the rally.
-import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, REVIVE_COST_MULT, DT, POP_MAX } from '../config.js';
+import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, DT, POP_MAX } from '../config.js';
 import { getUnitType, producibleAt } from '../data/index.js';
-import { getUpgrade, buildingMods } from '../data/upgrades.js';
+import { getUpgrade, buildingMods, reviveMult } from '../data/upgrades.js';
 import { refund, tierMessage, requiresMessage } from './construction.js';
 import { hyp } from './common.js';
 
@@ -66,7 +66,8 @@ export function issueTrain(world, player, b, unitId) {
   } else if (def.tier > p.tier) {
     return world.error(player, tierMessage(def.tier));
   }
-  const cost = fallen ? scaledCost(def.cost, REVIVE_COST_MULT) : { gold: def.cost.gold || 0, wood: def.cost.wood || 0, faith: def.cost.faith || 0 };
+  const revive = reviveMult(p.mods);
+  const cost = fallen ? scaledCost(def.cost, revive) : { gold: def.cost.gold || 0, wood: def.cost.wood || 0, faith: def.cost.faith || 0 };
   const msg = world.affordError(player, cost);
   if (msg) return world.error(player, msg);
   if (p.popUsed + def.pop > p.popCap) {
@@ -74,7 +75,7 @@ export function issueTrain(world, player, b, unitId) {
     return world.error(player, p.popCap >= POP_MAX ? `Population limit reached (${POP_MAX}).` : 'Not enough population. Build more Houses.');
   }
   world.pay(player, cost);
-  const time = def.buildTime * (fallen ? REVIVE_COST_MULT : 1);
+  const time = def.buildTime * (fallen ? revive : 1);
   b.queue.push({ u: unitId, time, elapsed: 0, cost, pop: def.pop, revive: fallen ? { level: fallen.level, xp: fallen.xp } : null });
   if (fallen) delete p.fallen[unitId];
   p.popUsed += def.pop;
@@ -204,8 +205,8 @@ export function updateProduction(world, b) {
   const item = b.queue[0];
   const p = world.players[b.owner];
   const unit = item.u !== 'tier_up' && !item.research;
-  // Drill Yard / Widened Rift: units of this building train faster.
-  item.elapsed += unit && p ? DT * (1 + buildingMods(p.mods, b.type).train) : DT;
+  // Drill Yard / Widened Rift: units of this building train faster; Imperial Bureaucracy speeds up research and growth.
+  item.elapsed += p ? DT * (unit ? 1 + buildingMods(p.mods, b.type).train : 1 + p.mods.perks.techSpeed) : DT;
   if (item.elapsed < item.time - 1e-9) return;
   b.queue.shift();
   if (item.u === 'tier_up') {

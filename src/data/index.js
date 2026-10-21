@@ -3,26 +3,14 @@ import { MORTALS } from './mortals.js';
 import { BUILDINGS, GOLD_MINE, BUILD_MENU } from './buildings.js';
 import { UPGRADES } from './upgrades.js';
 import { validatePantheon, validateUnit, validateUpgrade, validateUpgradeLines } from './schema.js';
-import greek from './pantheons/greek.js';
-import norse from './pantheons/norse.js';
-import egyptian from './pantheons/egyptian.js';
-import hindu from './pantheons/hindu.js';
-import japanese from './pantheons/japanese.js';
-import chinese from './pantheons/chinese.js';
-import aztec from './pantheons/aztec.js';
-import celtic from './pantheons/celtic.js';
-import mesopotamian from './pantheons/mesopotamian.js';
-import west_african from './pantheons/west_african.js';
+import { PANTHEON_LIST, PANTHEONS } from './pantheon-list.js';
 
-export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS, UPGRADES };
+export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS, UPGRADES, PANTHEON_LIST, PANTHEONS };
 
-export const PANTHEON_LIST = [greek, norse, egyptian, hindu, japanese, chinese, aztec, celtic, mesopotamian, west_african];
-export const PANTHEONS = Object.fromEntries(PANTHEON_LIST.map((p) => [p.id, p]));
-
-/** Every unit type by id: mortals plus each pantheon's gods, titan, creatures and minions. */
+/** Every unit type by id: mortals plus each pantheon's gods, titan, creatures, minions and elite soldier. */
 export const UNITS = { ...MORTALS };
 for (const p of PANTHEON_LIST) {
-  for (const u of [...p.gods, p.titan, ...p.creatures, ...(p.minions || [])]) UNITS[u.id] = u;
+  for (const u of [...p.gods, p.titan, ...p.creatures, ...(p.minions || []), ...(p.elite ? [p.elite] : [])]) UNITS[u.id] = u;
 }
 
 /** Every ability by id (abilities are owned by units). */
@@ -47,15 +35,22 @@ export function creaturesFor(pantheonId) {
 export function titanFor(pantheonId) {
   return PANTHEONS[pantheonId]?.titan || null;
 }
+/** The pantheon's own Barracks soldier (Hoplite, Berserker, Samurai ...), or null. */
+export function eliteFor(pantheonId) {
+  return PANTHEONS[pantheonId]?.elite || null;
+}
 
 /**
  * Unit type ids a building of `buildingId` can produce for a player of `pantheonId`.
- * Resolves the 'creatures' | 'gods' | 'titan' shorthands.
+ * Resolves the 'creatures' | 'gods' | 'titan' shorthands and adds the pantheon's elite soldier.
  */
 export function producibleAt(buildingId, pantheonId) {
   const b = BUILDINGS[buildingId];
   if (!b) return [];
-  if (Array.isArray(b.produces)) return b.produces;
+  if (Array.isArray(b.produces)) {
+    const elite = eliteFor(pantheonId);
+    return elite && elite.producedAt === buildingId ? [...b.produces, elite.id] : b.produces;
+  }
   if (b.produces === 'creatures') return creaturesFor(pantheonId).map((u) => u.id);
   if (b.produces === 'gods') return godsFor(pantheonId).map((u) => u.id);
   if (b.produces === 'titan') return titanFor(pantheonId) ? [titanFor(pantheonId).id] : [];
@@ -77,7 +72,7 @@ export function validateData() {
   const seen = new Set();
   for (const p of PANTHEON_LIST) {
     validatePantheon(p, errors, unitIds);
-    for (const u of [...p.gods, p.titan, ...p.creatures, ...(p.minions || [])]) {
+    for (const u of [...p.gods, p.titan, ...p.creatures, ...(p.minions || []), ...(p.elite ? [p.elite] : [])]) {
       if (seen.has(u.id)) errors.push(`duplicate unit id ${u.id}`);
       seen.add(u.id);
     }

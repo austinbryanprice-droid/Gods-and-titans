@@ -10,6 +10,36 @@ export default {
   colors: { wall: '#c88a5a', roof: '#a0603a', trim: '#1f6e4a', accent: '#e0a828' },
   style: { roof: 'dome', wall: 'mudbrick', ornament: 'spikes' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Power of Àṣẹ',
+    playstyle: 'Gods that cast again and again: drums and stories quicken every god and titan, and the gold road keeps the treasury full.',
+    blessings: [
+      {
+        id: 'west_african_ase',
+        name: 'Àṣẹ',
+        icon: '🗣️',
+        description: 'God and titan abilities recharge 15% faster.',
+        effects: [{ type: 'perk', stat: 'cooldown', amount: 0.15 }],
+      },
+      {
+        id: 'west_african_gold_road',
+        name: 'Gold Road',
+        icon: '💰',
+        description: 'Worshippers bring back 1 more gold from every trip to a mine.',
+        effects: [{ type: 'carry', resource: 'g', amount: 1 }],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'veil', extras: ['skirt', 'jewelry'], colors: { primary: '#e0c070', secondary: '#1f6e4a', accent: '#e0a828' } },
+    warrior: { headgear: 'horns', weapon: 'spear', offhand: 'shield', extras: ['armor', 'jewelry'], colors: { secondary: '#1f6e4a', accent: '#e0a828' } },
+    archer: { headgear: 'feathers', extras: ['cape', 'jewelry'], colors: { primary: '#a0603a', secondary: '#1f6e4a', accent: '#e0a828' } },
+    priest: { headgear: 'headdress', weapon: 'drum', extras: ['skirt'], colors: { primary: '#f0e4c0', secondary: '#1f6e4a', accent: '#e0a828' } },
+    battering_ram: { colors: { primary: '#6a4428', accent: '#e0a828' } },
+  },
+
   gods: [
     // ---- Shango: nuker ----
     {
@@ -673,4 +703,44 @@ export default {
       description: 'Onini the great python, tricked by Anansi into stretching along a palm branch to prove he was longer than it, whose crushing coils slow his prey.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a skirmisher whose darts poison.
+  elite: {
+    id: 'west_african_dart_hunter',
+    name: 'Dart Hunter',
+    title: 'Poison of the Savanna',
+    pantheon: 'west_african',
+    class: 'ranged',
+    kin: 'archer',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 150, wood: 45, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 280,
+    armor: 0,
+    speed: 3,
+    radius: 0.33,
+    sight: 9,
+    air: false,
+    attack: { damage: 11, range: 5.5, cooldown: 1.15, canHitAir: true, projectile: 'arrow', element: 'poison', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [
+      { type: 'onHitDot', dps: 6, duration: 4, name: 'Poison Darts', description: 'Darts poison the target for 6 damage per second for 4 seconds.' },
+    ],
+    visual: {
+      body: 'humanoid',
+      scale: 1.02,
+      colors: { skin: '#c8a07a', primary: '#a0603a', secondary: '#1f6e4a', accent: '#e0a828' },
+      head: 'human',
+      headgear: 'antlers',
+      weapon: 'bow',
+      offhand: 'none',
+      extras: ['cape', 'fur', 'jewelry'],
+      aura: null,
+    },
+    icon: '🌿',
+    description: 'Hunter who tips his darts with savanna poison. Each hit does little damage on its own but leaves the target burning for 6 per second, and he can strike flyers. Requires Town.',
+  },
 };

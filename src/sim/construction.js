@@ -269,13 +269,19 @@ export function updateBuild(world, u, o) {
   return false;
 }
 
+/** Pyramid Builders: how much faster than usual its owner raises and mends buildings. */
+function buildSpeed(world, b) {
+  const p = world.players[b.owner];
+  return p ? 1 + p.mods.perks.buildSpeed : 1;
+}
+
 /** Advance construction of an unfinished building from this tick's builders. */
 export function updateConstruction(world, b) {
   if (b.constructed) return;
   const n = b.builders;
   b.builders = 0;
   if (n <= 0) return;
-  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) * workSpeedOf(world, b.owner) / b.def.buildTime;
+  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) * workSpeedOf(world, b.owner) * buildSpeed(world, b) / b.def.buildTime;
   const dp = Math.min(rate * DT, 1 - b.buildProgress);
   b.buildProgress += dp;
   b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.9 * dp);
@@ -354,7 +360,7 @@ export function updateBuildingRepair(world, b) {
     b.repairBlocked = false;
     return;
   }
-  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) * workSpeedOf(world, b.owner) / (b.def.buildTime * REPAIR_TIME);
+  const rate = (1 + BUILD_HELPER_BONUS * (n - 1)) * workSpeedOf(world, b.owner) * buildSpeed(world, b) / (b.def.buildTime * REPAIR_TIME);
   const hp = Math.min(b.maxHp * rate * DT, b.maxHp - b.hp);
   const cost = repairCost(b, hp);
   const msg = world.affordError(b.owner, cost);

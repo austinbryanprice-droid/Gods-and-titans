@@ -10,6 +10,42 @@ export default {
   colors: { wall: '#e3c98f', roof: '#d9bd7a', trim: '#2f5f9e', accent: '#e8b830' },
   style: { roof: 'pyramid', wall: 'sandstone', ornament: 'obelisks' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Builders of Eternity',
+    playstyle: 'Dig in: your people raise and mend monuments fast, your walls shrug off blows, and a rich priesthood fills the shrines with faith.',
+    blessings: [
+      {
+        id: 'egyptian_pyramid_builders',
+        name: 'Pyramid Builders',
+        icon: '🔺',
+        description: 'Buildings are raised and repaired 35% faster, and every building has +2 armor.',
+        effects: [
+          { type: 'perk', stat: 'buildSpeed', amount: 0.35 },
+          { type: 'building', building: '*', stat: 'armor', amount: 2 },
+        ],
+      },
+      {
+        id: 'egyptian_priesthood_of_amun',
+        name: 'Priesthood of Amun',
+        icon: '🌞',
+        description: 'Worshippers praying at Shrines and Temples earn 30% more faith.',
+        effects: [
+          { type: 'building', building: 'shrine', stat: 'faith', amount: 0.3 },
+          { type: 'building', building: 'temple', stat: 'faith', amount: 0.3 },
+        ],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'nemes', extras: ['skirt', 'jewelry'], colors: { primary: '#efe6c8', secondary: '#2f5f9e', accent: '#e8b830' } },
+    warrior: { headgear: 'nemes', weapon: 'sword', offhand: 'shield', extras: ['armor', 'jewelry'], colors: { secondary: '#2f5f9e', accent: '#e8b830' } },
+    archer: { headgear: 'nemes', extras: ['cape', 'jewelry'], colors: { primary: '#c9a23a', secondary: '#2f5f9e', accent: '#e8b830' } },
+    priest: { headgear: 'none', weapon: 'ankh', extras: ['skirt', 'jewelry'], colors: { primary: '#f4efe0', secondary: '#2f5f9e', accent: '#e8b830' } },
+    battering_ram: { colors: { primary: '#a07a3a', accent: '#e8b830' } },
+  },
+
   gods: [
     // ---- Ra: nuker ----
     {
@@ -659,4 +695,42 @@ export default {
       description: 'An embalmed warrior of the ancient dead whose curse burns any foe it strikes for 3 damage per second.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a fast skirmisher on a war chariot.
+  elite: {
+    id: 'egyptian_chariot_archer',
+    name: 'Chariot Archer',
+    title: 'Lord of the Chariot',
+    pantheon: 'egyptian',
+    class: 'ranged',
+    kin: 'archer',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 170, wood: 55, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 340,
+    armor: 1,
+    speed: 3.8,
+    radius: 0.45,
+    sight: 9,
+    air: false,
+    attack: { damage: 17, range: 5.5, cooldown: 1.2, canHitAir: true, projectile: 'arrow', element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [],
+    visual: {
+      body: 'humanoid',
+      scale: 1.04,
+      colors: { skin: '#c8a07a', primary: '#c9a23a', secondary: '#2f5f9e', accent: '#e8b830' },
+      head: 'human',
+      headgear: 'feathers',
+      weapon: 'bow',
+      offhand: 'none',
+      extras: ['armor', 'cape'],
+      aura: null,
+    },
+    icon: '🏇',
+    description: 'Bowman on a light war chariot. Faster than any other soldier, he shoots on the move and can strike flyers, but dies quickly if caught. Requires Town.',
+  },
 };

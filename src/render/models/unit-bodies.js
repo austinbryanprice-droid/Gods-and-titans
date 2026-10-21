@@ -2045,7 +2045,7 @@ export function buildTemplate(unitType) {
   const ctx = {
     unit, v, pal, cls,
     ex: new Set(v.extras),
-    mortal: !unitType.pantheon,
+    mortal: !unitType.pantheon || !!unitType.mortal, // a pantheon's own soldier dresses like the shared ones
     worker: cls === 'worker',
     grand: cls === 'god' || cls === 'titan',
     lod: cls === 'god' || cls === 'titan' ? 2 : cls === 'minion' && unitType.pantheon ? 0 : 1,

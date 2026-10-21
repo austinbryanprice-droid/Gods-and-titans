@@ -92,7 +92,11 @@ function barracksPick(ai, s, mix, tier) {
   }
   const rangedWant = 0.42 + airShare * 0.5;
   const rangedShare = mix.total > 0 ? mix.ranged / mix.total : 0;
-  return rangedShare < rangedWant ? 'archer' : 'warrior';
+  const needRanged = rangedShare < rangedWant;
+  // The pantheon's own soldier takes up to 45% of the army when it fills the role being asked for.
+  const elite = ai.roster.elite ? unitInfo(ai.roster.elite) : null;
+  if (elite && tier >= elite.tier && elite.melee !== needRanged && countOf(s, elite.id) * elite.pop < mix.total * 0.45) return elite.id;
+  return needRanged ? 'archer' : 'warrior';
 }
 
 /** What the Shrine should summon next (highest tier with a mix of lower ones). */
