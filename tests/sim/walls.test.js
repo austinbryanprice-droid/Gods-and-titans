@@ -356,8 +356,8 @@ test('an explicit attack order on a wall segment breaks it', () => {
 });
 
 // A ring of stone around the first player's Town Center, and soldiers of the second sent in.
-function ringWorld(type = 'stone_wall') {
-  const w = makeWorld();
+function ringWorld(type = 'stone_wall', opts = {}) {
+  const w = makeWorld(opts);
   clearUnits(w, 0);
   clearUnits(w, 1);
   const ring = [];
@@ -379,6 +379,21 @@ test('soldiers shut out by a wall break through it and go on to the buildings be
   assert.ok(walls(w).length >= ring.length - 4, `the army broke in, it did not tear the ring down (${ring.length - walls(w).length} segments lost)`);
   assert.ok(w.paths.stats.expanded - searchesBefore < 400000, `pathfinding stayed cheap while shut out (${w.paths.stats.expanded - searchesBefore} nodes)`);
   assert.equal(w.perf.commandErrors, 0);
+});
+
+test('while the Decade of Peace holds nobody breaks a wall; when it ends the army breaks in', () => {
+  const { w, ring } = ringWorld('stone_wall', { peaceMinutes: 30 });
+  const army = [0, 1, 2].map((i) => spawn(w, 1, 'warrior', 10.5 + i * 0.6, 0.8));
+  w.issueCommand(1, { type: 'attackMove', units: army.map((u) => u.id), x: 8, y: 8 });
+  const searches = w.paths.stats.expanded;
+  run(w, 40);
+  assert.equal(walls(w).length, ring.length);
+  assert.ok(walls(w).every((b) => b.hp === b.maxHp), 'the peace protects the wall');
+  assert.ok(w.paths.stats.expanded - searches < 400000, 'and shut-out soldiers do not search without end');
+  w.peaceEnd = w.time;
+  w.tick();
+  assert.equal(w.peace, false);
+  assert.ok(runUntil(w, () => walls(w).length < ring.length, 120) > 0, 'once the peace is over they break in');
 });
 
 test('a crowd works on one segment of the wall, not on many', () => {

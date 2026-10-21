@@ -132,6 +132,17 @@ Levels of one upgrade line (the Town Center's Worshipper work speed and health) 
 and one hotkey, stand side by side in the list, and each names the level before it in `after`.
 Gold mines are 3×3 resource entities placed by the map.
 
+**Wall segments** (`wall: true`, `size: 1`: `wooden_wall`, `stone_wall`) are ordinary one-tile
+building entities that Worshippers drag out in lines (5.3). The wooden one carries
+`wallUpgrade: { to, cost, time }` (the stone upgrade, researched per segment with no building
+needed); the stone segment's own `cost` is the whole price (wood plus the upgrade), which is what
+repairs and the refund for a tower raised over it go by. `joinsWalls: true` (the Watch Tower) lets a
+building be raised on, or in line with, the owner's wall segments and be joined by them.
+`src/data/walls.js` holds the pure helpers the sim, HUD and renderer share: `isWallType`,
+`wallUpgradeOf`, `wallLine(x0, y0, x1, y1)` (the tiles of a dragged line), `wallMask` and
+`wallConnections` (the neighbours a segment runs on to). Walls do not count as buildings for
+defeat (5.8), for the AI's targets (10), for population, or for the buildings stat.
+
 ### 4.4 Ability
 ```js
 {
@@ -339,6 +350,38 @@ Pop used = pop of living units + pop of everything queued in production.
   says `Unexplored ground.` first for any fogged tile (the sim does not know the fog, and the
   text does not reveal what lies in it). Only the text depends on the reason, never validity.
 - `cancelBuild` on an unfinished building: removes it, refunds `CANCEL_BUILD_REFUND` (75%).
+- **Walls** (`src/sim/construction.js` `issueBuildLine`, `src/sim/production.js` `issueWallUpgrade`):
+  - A `build` command for a wall type with `tx2` / `ty2` is a *line*: the tiles from (tx, ty) towards
+    (tx2, ty2) in the nearest of eight directions (`wallLine`, at most `MAX_WALL_LINE` = 48 tiles;
+    a diagonal is stepped with a corner tile so no unit can squeeze between two segments). The
+    whole line is paid for at once, all or nothing (`Not enough wood.`), and every segment's
+    construction site is created at once without an event or a message, so an unfinished segment
+    already blocks the way and can be attacked (hp 10% of max). Tiles the wall already holds (an own
+    segment, or a tower that joined it) are skipped and tiles that cannot be built on are left out;
+    when nothing at all can be built the first reason is the error (`The wall is already there.` when
+    the line is all built).
+  - Crew: the workers are ordered along the line and each takes a contiguous stretch; extra workers
+    help the nearest one. A worker that finishes a segment, or cannot reach it (it is boxed in), walks
+    on to the next of its stretch and then to the nearest unfinished segment of the player's walls
+    within `WALL_HELP_RANGE` (14) that fewer workers are on. A plain `build` of a wall type without
+    `tx2` is a single segment.
+  - A finished segment emits no `buildingComplete`, adds nothing to the stats, population or defeat
+    checks, and its death is a `death` event like any building's (the HUD folds a run of them into one
+    "breached" message).
+  - `upgradeWall { walls: [ids] }` queues the stone upgrade on each finished segment that is not
+    already upgrading, in the order given, paying per segment for as many as the purse allows
+    (`Not enough gold. Upgraded 7 wall segments.`). The upgrade is a queue item (`upgrade: true`, `u` =
+    the stone type) that runs by itself with no worshipper; the wooden segment keeps working as a wall
+    meanwhile and `world.changeBuildingType` then turns the same entity into stone in place (it keeps
+    the health it is missing; armor and maximum health follow the new type). Imperial Bureaucracy's
+    `techSpeed` quickens it, like any growth.
+  - A building with `joinsWalls` may be placed over the owner's own wall segments (the placement check
+    ignores them); when the builder starts it the segments under its footprint are removed with a full
+    refund and the tower stands in their place, joined to the wall (the renderer reaches the
+    neighbouring segments into it, 8).
+  - `cancelBuild` on a *finished* wall segment takes it down, refunding `WALL_REMOVE_REFUND` (50%) of
+    its cost (an upgrade under way is refunded in full): walls block the owner's own units too, so
+    this is how a gap is opened. Dismantling is not an attack and costs no time.
 - **Repair:** worshippers ordered to `repair` an own completed, damaged building walk to it and
   mend it (state `build`, view task `tk: 'repair'`). One worshipper restores the full health bar
   in `REPAIR_TIME` (75%) of the build time (shorter with work speed); each extra adds `BUILD_HELPER_BONUS`. A full bar
@@ -417,6 +460,18 @@ Pop used = pop of living units + pop of everything queued in production.
   collide with ground units.
 - When a unit is attacked while idle, it fights back (workers too, unless gathering/praying).
 - Towers auto-attack the closest enemy unit in range.
+- **Walls** block every ground unit's movement and have health and armor. Nobody auto-acquires a wall
+  segment: `findTarget` skips them, so idle soldiers and towers leave a wall alone (an explicit
+  `attack` on one works). A ground melee attacker whose way to its target is cut off (no attack spot
+  of the target can be reached: `approachSpot` returns `'unreachable'` after `CUT_SPOTS` = 2 spots in
+  a row) or whose attack-move stops short of its destination breaks through: `findBreach` picks the
+  enemy segment within `BREACH_RANGE` (4) with the least health left (nearest on a tie), so a crowd
+  works on one segment and a wooden stretch in a stone wall is where they break in. The order
+  carries on once the segment falls and finds the way open. An attack-move drops the breach when an
+  enemy unit comes within reach. Ranged attackers shoot over a wall and never break it, and the AI
+  never targets a wall segment (10). Rams hit walls like any building. A wall segment is worth no
+  experience (5.9); it pays spoils like any finished building. Nothing breaks a wall during a
+  Decade of Peace (5.10).
 - Neutral creeps (owner −1) sit at camps, attack anything within `CREEP_AGGRO_RANGE`, chase up
   to `CREEP_LEASH_RANGE` from camp, then walk back and heal to full. They give the killer's
   owner a bounty of `10 + 10 × tier` gold.
@@ -443,8 +498,8 @@ think's purchases) to the poorest teammate who is nearly broke (under 120 gold /
 from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid).
 
 ### 5.8 Victory
-A player is **defeated** when they own no buildings (finished or not). Their remaining units
-die. A team wins when every player not on that team is defeated (neutral excluded).
+A player is **defeated** when they own no buildings (finished or not; wall segments do not count).
+Their remaining units die. A team wins when every player not on that team is defeated (neutral excluded).
 `surrender` defeats the issuing player. Then `gameOver: { winningTeam }`.
 
 ### 5.9 Soldier ranks
@@ -549,11 +604,12 @@ counted in `world.perf.commandErrors`.
 { type: 'gather',     units, target?: mineId, tx?, ty? }          // mine or tree tile
 { type: 'pray',       units, target: buildingId }
 { type: 'returnCargo', units }
-{ type: 'build',      units: [workerIds], building: typeId, tx, ty, queue } // footprint top-left tile
+{ type: 'build',      units: [workerIds], building: typeId, tx, ty, queue, tx2?, ty2? } // footprint top-left tile; a wall type with tx2/ty2 is a line (5.3)
 { type: 'train',      building: id, unit: typeId }                // also creatures, gods, titan, revive
 { type: 'cancelTrain', building: id, index }
 { type: 'upgradeTier', building: id }
-{ type: 'cancelBuild', building: id }
+{ type: 'cancelBuild', building: id }                      // also takes a finished wall segment down (5.3)
+{ type: 'upgradeWall', walls: [buildingIds] }             // wooden → stone on finished wall segments (5.3)
 { type: 'repair',     units, target: buildingId, queue }   // on a construction site: help build
 { type: 'research',   building: id, upgrade: upgradeId }
 { type: 'autoRepair', on: bool }
@@ -575,7 +631,7 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
 `Population limit reached (200).` (the cap is already `POP_MAX`, so more Houses cannot help)
 `Can't build there.` `Trees in the way.` `Another building is in the way.` `A gold mine is in the way.`
-`Something is in the way.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
+`Something is in the way.` `Too close to a gold mine.` `The wall is already there.` `Requires Town.` `Requires City.`
 `Requires a <Building>.` (e.g. `Requires a Shrine.`) `Production queue is full.`
 `Your settlement is already growing.` `You already have that god.` `You can only have 3 gods.`
 `Your next god requires Town.` `Your next god requires City.` `You already have a Titan.`
@@ -623,7 +679,7 @@ EntityView = {
   // buildings:
   tx, ty,         // footprint top-left tile
   bp,             // build progress 0..1 (1 = complete)
-  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }] (first item progressing)
+  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }] (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
   tr,             // town center tier 1..3
   pr,             // praying worshipper count
   rp,             // rally [x, y] or null
@@ -837,7 +893,7 @@ r.pickEntity(sx, sy) → id | null             // visible entity under the curso
 r.entitiesInRect(x0, y0, x1, y1) → [ids]     // units whose projected position is inside the screen rect
 r.worldToScreen(x, y, h = 0) → { sx, sy, onScreen }
 r.setSelection(ids); r.setHover(id | null);
-r.showPlacement(buildingTypeId, tx, ty, valid, tiles?); r.hidePlacement();
+r.showPlacement(buildingTypeId, tx, ty, valid, tiles?); r.showWallLine(wallTypeId, tiles); r.hidePlacement();
 r.showCommandMarker(x, y, 'move' | 'attack' | 'gather');
 r.showFloatingText(x, y, text, color?, h?); r.setShowAllBars(on); r.setQuality(q); r.getStats();
 r.dispose();
@@ -895,6 +951,21 @@ per-frame budget, so a revealed army appears over a few frames.
   building's walls and ceiling.
 - Selection rings colored: own green, ally yellow-green, enemy red, neutral yellow.
   Health bars over damaged/selected/hovered units (all with Alt held).
+- Walls (`building-models.js` `buildWoodenWall` / `buildStoneWall`): a segment is a post with arms
+  towards the neighbours its *connection mask* names (`wallConnections`: the low four bits are N, E,
+  S, W; the same bits shifted up by `WALL_TOWER_SHIFT` mark a neighbour that is a tower, whose arm
+  runs on into the tower's footprint because the tower stands well inside it). Each mask is a cached
+  geometry of its own and `model.setConnections(mask)` swaps it in place. A segment is two meshes
+  (body, team band) so a long wall costs two draws a segment; it has no foundation and no scaffold
+  (a site rises out of the ground) and its look follows the pantheon's wall material.
+  `GameRenderer.syncWallJoins` (once per snapshot, after the building views) computes every
+  segment's mask from the same-owner wall and `joinsWalls` tiles around it (`wallTiles`), so a tower
+  in line with a wall visibly joins it and a segment that fell is no longer reached for; a segment
+  upgraded in place (the view's type changed) gets its stone model in place. Walls draw slim
+  selection rings, no fires, no worn yard under them, a health bar only where hurt, hovered or with
+  Alt held, and a progress bar only when hovered. `PlacementLayer.showLine(typeId, tiles, kindAt)` is
+  the ghost of the dragged line: a segment per tile to build (red where blocked), joined to its
+  neighbours and to the walls that stand, over a per-tile grid.
 
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
@@ -950,13 +1021,26 @@ per-frame budget, so a revealed army appears over a few frames.
   step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan, minimap click/drag,
   Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
+  **Walls**: with a wall type chosen in the build menu (W) the left button goes down on the first
+  tile and the line follows the cursor in the nearest of eight directions (`wallLine`); releasing
+  orders it for all selected workers (`build` with `tx2` / `ty2`; Shift keeps laying walls). A tip by
+  the cursor says what the line would build and cost ("12 × Wooden Wall 🌲 144", red when it is
+  short or nothing can be built); a refused line keeps the mode so a shorter one can be tried.
+  Right-click, Esc or losing the window drops the drag first and leaves placement on the second
+  press. A wall-only selection holds up to `MAX_WALL_SELECTION` (160) segments (any other selection
+  `MAX_SELECTION`); a selection of more than 24 shows a crowd panel (a stack per type with its count,
+  the total health, how many are hurt, being built or upgrading) in place of the icon grid; a drag box prefers other buildings
+  over wall segments, so the walls are not picked by accident. `game.js` folds a run of
+  destroyed segments into one "Your wall was breached!" message per 6 s.
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.
   Hotkeys: units M move, S stop, H hold, A attack; workers + G gather, B build (submenu: House H,
-  Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C), P pray,
+  Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C, Wooden Wall W), P pray,
   C return cargo, R repair (targets an own building), T Auto-Repair on/off (lit while on);
   abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:
   Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R, pantheon elite E; Shrine: creatures Q W E;
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
+  Wall segments: U upgrade to stone (every idle segment of the active subgroup, as many as the purse
+  allows), D dismantle finished segments, C cancel unfinished segments or upgrades.
   Each building's upgrades fill the free middle / bottom slots with their data hotkey (no two
   buttons of a card share a key); researched ones stay as dim "(researched)" buttons. An upgrade
   line takes one slot and shows its next level to research ("Level 2 of 3."), keeping the line's
@@ -964,7 +1048,7 @@ per-frame budget, so a revealed army appears over a few frames.
   The Town Center card therefore reads Worshipper W, Grow U / Iron Picks I, Palisade L, Work
   K, Health H / Rally Y.
 - `minimap.js`: 2D canvas: terrain colors, mines, trees, units/buildings as team-colored dots
-  (visible only), fog, camera quad; click/drag moves camera, right-click issues smart move.
+  (visible only; wall segments as thin squares), fog, camera quad; click/drag moves camera, right-click issues smart move.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with
   distance attenuation from `sfx.setListener(x, y, scale)` (the camera target; `scale` follows the
   zoom, 0.8 close to 1.8 far, and stretches the hearing range so a zoomed-out view still hears its
@@ -985,7 +1069,9 @@ second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/cre
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
 games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, ultimates in
-big fights); retreat badly hurt gods to base. Its Barracks also trains the pantheon elite soldier (4.10)
+big fights); retreat badly hurt gods to base. It builds no walls, and wall segments are invisible to its scans (`worldDigest`,
+`scanWorld`, team targeting): they are neither buildings it counts nor targets it picks, and an army shut out by a
+player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
 population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
