@@ -2,7 +2,7 @@
 // god/titan summoning rules, reviving fallen gods, tier upgrades, building
 // upgrade research, rally points and spawning at the footprint edge nearest
 // the rally.
-import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, REVIVE_COST_MULT, DT } from '../config.js';
+import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, REVIVE_COST_MULT, DT, POP_MAX } from '../config.js';
 import { getUnitType, producibleAt } from '../data/index.js';
 import { getUpgrade, buildingMods } from '../data/upgrades.js';
 import { refund, tierMessage, requiresMessage } from './construction.js';
@@ -69,7 +69,10 @@ export function issueTrain(world, player, b, unitId) {
   const cost = fallen ? scaledCost(def.cost, REVIVE_COST_MULT) : { gold: def.cost.gold || 0, wood: def.cost.wood || 0, faith: def.cost.faith || 0 };
   const msg = world.affordError(player, cost);
   if (msg) return world.error(player, msg);
-  if (p.popUsed + def.pop > p.popCap) return world.error(player, 'Not enough population. Build more Houses.');
+  if (p.popUsed + def.pop > p.popCap) {
+    // At POP_MAX more Houses cannot help.
+    return world.error(player, p.popCap >= POP_MAX ? `Population limit reached (${POP_MAX}).` : 'Not enough population. Build more Houses.');
+  }
   world.pay(player, cost);
   const time = def.buildTime * (fallen ? REVIVE_COST_MULT : 1);
   b.queue.push({ u: unitId, time, elapsed: 0, cost, pop: def.pop, revive: fallen ? { level: fallen.level, xp: fallen.xp } : null });

@@ -19,6 +19,7 @@ import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
+import { POP_MAX } from '../config.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -85,7 +86,7 @@ export class Hud {
     this.rFaith = res('is-faith', '✨', 'Faith — earned by worshippers praying at Shrines and Temples');
     this.rFaithRate = el('small', 'hud-res-rate');
     this.rFaith.n.appendChild(this.rFaithRate);
-    this.rPop = res('is-pop', '👥', 'Population — build Houses to raise the limit');
+    this.rPop = res('is-pop', '👥', `Population — build Houses to raise the limit (up to ${POP_MAX})`);
     this.rTier = res('is-tier', '🏛️', 'Settlement tier');
     this.top = el('div', 'hud-top hud-panel',
       el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.ping),

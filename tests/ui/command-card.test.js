@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
 import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, CARD_SLOTS } from '../../src/ui/command-card.js';
 import { subgroups } from '../../src/ui/hud-data.js';
+import { POP_MAX } from '../../src/config.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
 
 let clock = 0;
@@ -154,6 +155,19 @@ test('Town Center: Worshipper, Grow (with requirement), Rally, queue count, grow
   tc.tier = 3;
   card = getCommandCard([tc.id], viewOf(world));
   assert.equal(card[1], null);
+});
+
+test('at the population limit more Houses cannot help, and the card says so', () => {
+  const world = makeWorld();
+  const tc = tcOf(world);
+  rich(world);
+  Object.assign(world.players[0], { popCap: POP_MAX, popUsed: POP_MAX });
+  world.recomputePopCap = () => {};
+  const card = getCommandCard([tc.id], viewOf(world));
+  assert.equal(card[0].state, 'unaffordable');
+  assert.equal(card[0].reason, `Population limit reached (${POP_MAX}).`);
+  world.players[0].popUsed = POP_MAX - 1;
+  assert.equal(getCommandCard([tc.id], viewOf(world))[0].state, 'ready', 'one free pop fits a worshipper');
 });
 
 test('population cap and queue limit make training unavailable', () => {

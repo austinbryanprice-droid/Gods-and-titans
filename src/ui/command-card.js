@@ -22,7 +22,7 @@
 // }
 import {
   MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
-  MINE_SLOTS, MINE_TIME, CARRY_AMOUNT, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE,
+  MINE_SLOTS, MINE_TIME, CARRY_AMOUNT, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE, POP_MAX,
 } from '../config.js';
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt } from '../data/index.js';
 import { upgradesFor } from '../data/upgrades.js';
@@ -86,8 +86,8 @@ export function affordReason(me, cost) {
 }
 
 function popReason(me, pop) {
-  if (!me || !(pop > 0)) return null;
-  return me.pop + pop > me.popCap ? 'Not enough population. Build more Houses.' : null;
+  if (!me || !(pop > 0) || me.pop + pop <= me.popCap) return null;
+  return me.popCap >= POP_MAX ? `Population limit reached (${POP_MAX}).` : 'Not enough population. Build more Houses.';
 }
 
 function requiresText(typeId) {

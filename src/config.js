@@ -27,7 +27,7 @@ export const NEUTRAL_COLOR = '#8a8a8a';
 // ---- Economy ----
 export const START_RESOURCES = { gold: 400, wood: 200, faith: 50 };
 export const START_WORKERS = 5;
-export const POP_MAX = 150;
+export const POP_MAX = 200; // ceiling on any player's population; Town Centers (12) and Houses (8) raise the cap up to this
 export const CARRY_AMOUNT = 10; // gold or wood per trip
 export const MINE_TIME = 1.5; // seconds a worker mines per 10-gold trip
 export const MINE_SLOTS = 2; // workers mining one gold mine at the same time; others wait their turn

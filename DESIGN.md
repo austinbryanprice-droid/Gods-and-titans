@@ -247,7 +247,9 @@ figures of living monotheistic faiths.
 ### 5.1 Start
 Each player: Town Center (tier 1, Village) at its start position, 5 Worshippers, 400 gold,
 200 wood, 50 faith. A gold mine (12000) 2–4 tiles from the Town Center, a forest edge 6–10
-tiles away. Population cap = sum of `popProvided` of completed buildings, max 150.
+tiles away. Population cap = sum of `popProvided` of completed buildings, max `POP_MAX` (200): a Town
+Center gives 12 and a House 8 (10 with Large Families), so 24 Houses and a Town Center reach it (19 with
+Large Families).
 Pop used = pop of living units + pop of everything queued in production.
 
 ### 5.2 Economy
@@ -445,6 +447,7 @@ Units that cannot do the resolved action just move.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
+`Population limit reached (200).` (the cap is already `POP_MAX`, so more Houses cannot help)
 `Can't build there.` `Trees in the way.` `Another building is in the way.` `A gold mine is in the way.`
 `Something is in the way.` `Too close to a gold mine.` `Requires Town.` `Requires City.`
 `Requires a <Building>.` (e.g. `Requires a Shrine.`) `Production queue is full.`
@@ -832,7 +835,9 @@ second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/cre
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
 games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, ultimates in
-big fights); retreat badly hurt gods to base. Hard is fair (no resource cheats).
+big fights); retreat badly hurt gods to base. Hard is fair (no resource cheats). Army size stops at the
+profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
+population cap and easy stays well below it.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 

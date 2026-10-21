@@ -7,7 +7,8 @@ import { createWorld, World } from '../../src/sim/world.js';
 import { createAI } from '../../src/ai/ai.js';
 import { teamTarget } from '../../src/ai/team.js';
 import { PANTHEON_LIST, godsFor, titanFor, creaturesFor } from '../../src/data/index.js';
-import { TICK_RATE } from '../../src/config.js';
+import { TICK_RATE, POP_MAX } from '../../src/config.js';
+import { PROFILES } from '../../src/ai/profiles.js';
 import { makeMap, makeSetup } from '../sim/helpers.js';
 
 const PANTHEON_IDS = PANTHEON_LIST.map((p) => (typeof p === 'string' ? p : p.id));
@@ -61,7 +62,25 @@ test('AI builds an economy, prays, techs and summons a god against a passive opp
   assert.ok(gods.length >= 1, 'a god');
   assert.ok(army.length >= 12, `army ${army.length}`);
   assert.ok(world.players[0].tier >= 2, `tier ${world.players[0].tier}`);
-  assert.ok(world.players[0].popCap > world.players[0].popUsed || world.players[0].popCap >= 150, 'houses ahead of the cap');
+  assert.ok(world.players[0].popCap > world.players[0].popUsed || world.players[0].popCap >= POP_MAX, 'houses ahead of the cap');
+  assert.equal(ai.ai.errors, 0);
+});
+
+test('AI army caps stay in order and within the population limit', () => {
+  const { easy, normal, hard } = PROFILES;
+  assert.ok(easy.armyCap < normal.armyCap && normal.armyCap < hard.armyCap && hard.armyCap <= POP_MAX, `${easy.armyCap}/${normal.armyCap}/${hard.armyCap}`);
+});
+
+test('a normal AI keeps building Houses and fills the population limit', () => {
+  const g = soloGame(11, 'egyptian', 'normal');
+  // The idle opponent outlives the AI's attack waves, so the game does not end before the limit is reached.
+  for (const b of g.world.buildingsOf(1)) b.hp = b.maxHp = 1e9;
+  g.step(16 * 60);
+  const { world, ai } = g;
+  const p = world.players[0];
+  assert.equal(p.popCap, POP_MAX, `Houses reach the limit (${p.popUsed}/${p.popCap})`);
+  assert.ok(p.popUsed >= POP_MAX - 4, `population ${p.popUsed}/${p.popCap}`);
+  assert.ok(built(world, 0, 'house') >= 20, `houses ${built(world, 0, 'house')}`);
   assert.equal(ai.ai.errors, 0);
 });
 
@@ -216,7 +235,7 @@ test('allied AIs share one deterministic target: the weakest enemy by buildings'
   assert.equal(a.ai.errors + b.ai.errors, 0);
 });
 
-test('performance: AI thinks stay cheap with 400 units fighting on a medium map', () => {
+test('performance: AI thinks stay cheap with 500 units fighting on a medium map', () => {
   const pans = ['greek', 'norse', 'egyptian', 'hindu'];
   const world = createWorld({
     version: '0.1.0',
@@ -238,7 +257,7 @@ test('performance: AI thinks stay cheap with 400 units fighting on a medium map'
     }
     const cre = creaturesFor(p.pantheon).map((c) => c.id);
     const gods = godsFor(p.pantheon).map((g) => g.id);
-    for (let k = 0; k < 96; k++) {
+    for (let k = 0; k < 124; k++) {
       const t = k < 2 ? gods[k] : k % 4 === 0 ? cre[k % 3] : k % 2 ? 'archer' : 'warrior';
       world.spawnUnit(i, t, tc.x + 6 + (k % 9) * 0.9, tc.y + 6 + Math.floor(k / 9) * 0.9, { silent: true, level: 3 });
     }
@@ -246,7 +265,7 @@ test('performance: AI thinks stay cheap with 400 units fighting on a medium map'
   world.recomputePop();
   for (let i = 0; i < 4; i++) world.recomputePopCap(i);
   world.hash.rebuild(world.unitList);
-  assert.ok(world.unitList.length >= 400);
+  assert.ok(world.unitList.length >= 500); // 4 players near the 200 population limit
   const ticks = 50 * TICK_RATE;
   for (let t = 0; t < ticks; t++) {
     if (t === 10 * TICK_RATE) for (const a of ais) Object.assign(a.ai.stats, { thinkMs: 0, thinks: 0 });
