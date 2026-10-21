@@ -64,3 +64,30 @@ test('every building has its own upgrades: at least two each, no effect shared w
     }
   }
 });
+
+test('upgrade lines: levels follow each other, share one hotkey and stand side by side', async () => {
+  const { validateUpgrade, validateUpgradeLines } = await import('../../src/data/schema.js');
+  const lvl = (id, extra = {}) => ({ id, hotkey: 'K', tier: 1, line: 'l', ...extra });
+  const lines = (upgrades) => {
+    const errors = [];
+    validateUpgradeLines({ id: 'b', upgrades }, errors);
+    return errors.join('\n');
+  };
+  assert.equal(lines([lvl('a'), lvl('b', { after: 'a', tier: 2 })]), '');
+  assert.match(lines([lvl('a'), lvl('b')]), /b must follow a/);
+  assert.match(lines([lvl('a'), lvl('b', { after: 'a', hotkey: 'L' })]), /b must share the hotkey of a/);
+  assert.match(lines([lvl('a', { tier: 2 }), lvl('b', { after: 'a', tier: 1 })]), /b asks for a lower tier than a/);
+  assert.match(lines([lvl('a')]), /needs at least two levels/);
+  assert.match(lines([lvl('a', { after: 'z' }), lvl('b', { after: 'a' })]), /first level a must not have an after/);
+  assert.match(lines([lvl('a'), { id: 'x', hotkey: 'Z', tier: 1 }, lvl('b', { after: 'a' })]), /b must stand next to the other levels/);
+  assert.match(lines([lvl('a'), lvl('b', { after: 'a' }), { id: 'x', hotkey: 'K', tier: 1 }]), /hotkey K is used by line:l and x/);
+  assert.match(lines([{ id: 'x', hotkey: 'K', tier: 1 }, { id: 'y', hotkey: 'K', tier: 1 }]), /hotkey K is used by x and y/);
+
+  const errors = [];
+  const base = { id: 'u', name: 'U', icon: '⛏️', description: 'd', hotkey: 'K', cost: { gold: 1, wood: 0, faith: 0 }, time: 1, tier: 1, effects: [{ type: 'work', amount: 0.1 }] };
+  validateUpgrade(base, 'b', errors, new Set());
+  validateUpgrade({ ...base, line: 'l', after: 'p' }, 'b', errors, new Set());
+  assert.deepEqual(errors, [], 'a work effect, and a line with its after, are valid');
+  validateUpgrade({ ...base, after: 'p' }, 'b', errors, new Set());
+  assert.match(errors.join('\n'), /after needs a line and an upgrade id/);
+});

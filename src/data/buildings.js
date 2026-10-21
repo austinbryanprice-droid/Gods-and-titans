@@ -1,6 +1,7 @@
 // Building types shared by every pantheon (each pantheon styles them visually).
 // Schema: DESIGN.md section 4.3. `upgrades` are one-time researches made at a
-// building of that type, each with its own effects (src/data/upgrades.js).
+// building of that type, each with its own effects (src/data/upgrades.js). Levels
+// of one upgrade line share a `line` id, and each names the level before it in `after`.
 
 export const BUILDINGS = {
   town_center: {
@@ -33,6 +34,26 @@ export const BUILDINGS = {
       { id: 'tc_palisade', name: 'Palisade', icon: '🚧', hotkey: 'L', cost: { gold: 150, wood: 200, faith: 0 }, time: 45, tier: 2,
         effects: [{ type: 'building', building: 'town_center', stat: 'hp', amount: 800 }, { type: 'building', building: 'town_center', stat: 'armor', amount: 3 }],
         description: 'A sharpened log wall rings every Town Center: +800 health and +3 armor.' },
+      // Two Worshipper lines of three levels each; the card shows the next level of a line in one slot.
+      // Work speed covers mining, chopping, building and repairing (levels add up); health is a share of base health.
+      { id: 'tc_work_songs', name: 'Work Songs', icon: '🎵', hotkey: 'K', line: 'worshipper_work', cost: { gold: 100, wood: 50, faith: 0 }, time: 35, tier: 1,
+        effects: [{ type: 'work', amount: 0.15 }],
+        description: 'Singing keeps the rhythm: Worshippers mine, chop, build and repair 15% faster.' },
+      { id: 'tc_master_craftsmen', name: 'Master Craftsmen', icon: '⚒️', hotkey: 'K', line: 'worshipper_work', after: 'tc_work_songs', cost: { gold: 175, wood: 125, faith: 0 }, time: 45, tier: 2,
+        effects: [{ type: 'work', amount: 0.15 }],
+        description: 'Guild masters teach their trades: Worshippers work another 15% faster (30% in all).' },
+      { id: 'tc_tireless_devotion', name: 'Tireless Devotion', icon: '☀️', hotkey: 'K', line: 'worshipper_work', after: 'tc_master_craftsmen', cost: { gold: 250, wood: 175, faith: 50 }, time: 60, tier: 3,
+        effects: [{ type: 'work', amount: 0.2 }],
+        description: 'Labor becomes devotion and the gods lighten the load: Worshippers work another 20% faster (50% in all).' },
+      { id: 'tc_hearty_meals', name: 'Hearty Meals', icon: '🍲', hotkey: 'H', line: 'worshipper_health', cost: { gold: 75, wood: 75, faith: 0 }, time: 35, tier: 1,
+        effects: [{ type: 'unit', classes: ['worker'], stat: 'hp', amount: 0.2 }],
+        description: 'Shared meals at the hall keep the faithful strong: Worshippers have 20% more health.' },
+      { id: 'tc_healing_herbs', name: 'Healing Herbs', icon: '🌿', hotkey: 'H', line: 'worshipper_health', after: 'tc_hearty_meals', cost: { gold: 125, wood: 100, faith: 0 }, time: 45, tier: 2,
+        effects: [{ type: 'unit', classes: ['worker'], stat: 'hp', amount: 0.2 }],
+        description: 'Poultices and tonics from the herb garden: Worshippers have another 20% more health (40% in all).' },
+      { id: 'tc_blessed_vigor', name: 'Blessed Vigor', icon: '💪', hotkey: 'H', line: 'worshipper_health', after: 'tc_healing_herbs', cost: { gold: 175, wood: 125, faith: 75 }, time: 60, tier: 3,
+        effects: [{ type: 'unit', classes: ['worker'], stat: 'hp', amount: 0.2 }],
+        description: 'The gods lend their strength to the faithful: Worshippers have another 20% more health (60% in all).' },
     ],
     icon: '🏛️',
     hotkey: 'C',

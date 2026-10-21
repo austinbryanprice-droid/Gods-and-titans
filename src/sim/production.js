@@ -124,6 +124,7 @@ export function issueResearch(world, player, b, upId) {
   const p = world.players[player];
   if (p.upgrades[upId]) return world.error(player, 'Already researched.');
   if (researching(world, player, upId)) return world.error(player, 'Already being researched.');
+  if (up.after && !p.upgrades[up.after]) return world.error(player, `Requires ${getUpgrade(up.after).name}.`);
   if (up.tier > p.tier) return world.error(player, tierMessage(up.tier));
   if (b.queue.some((q) => q.u === 'tier_up')) return world.error(player, 'Your settlement is already growing.');
   if (b.queue.length >= MAX_QUEUE) return world.error(player, 'Production queue is full.');
