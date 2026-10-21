@@ -270,11 +270,12 @@ export class GroundField {
         const sd = sdRock[i] / R + (wobble(x, y, seed + 23, 0.45) - 0.5) * 0.36;
         // a steep wall around a nearly level, craggy top; rock patches are small (a tile wide
         // strip is common), so even a thin one stands well clear of the meadow
-        const face = smooth01(-0.06, 0.15, sd);
+        const face = smooth01(-0.1, 0.05, sd);
         if (face <= 0) continue;
-        const v = Math.min(1, Math.max(0, sd / 0.8));
-        const crag = 0.82 + 0.36 * wobble(x, y, seed + 29, 0.3);
-        const r0 = Math.min(RISE_MAX - 0.02, (0.66 + 0.12 * v) * face * crag);
+        // (no dome: a rise that grows with the distance from the edge folds into a crease where
+        // the two sides of a thin patch meet)
+        const crag = 0.8 + 0.4 * wobble(x, y, seed + 29, 0.3);
+        const r0 = Math.min(RISE_MAX - 0.02, 0.72 * face * crag);
         // only a hint of ledges: a full staircase over a small mound reads as tree rings
         const tt = r0 / STRATA_STEP;
         const k = Math.floor(tt);

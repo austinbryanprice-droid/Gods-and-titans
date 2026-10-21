@@ -62,7 +62,7 @@ LAYER_PARAMS[LAYER.ROCK] = [1 / 4.5, 0.1, 0.07, 0.78];
 LAYER_PARAMS[LAYER.FOREST] = [1 / 3, 0.03, 0.04, 0.96];
 LAYER_PARAMS[LAYER.BED] = [1 / 3.5, 0, 0.04, 0.7];
 // sandstone strata on the outcrop walls: x repeats per tile along the wall (the rest as above)
-LAYER_PARAMS[LAYER.FACE] = [1 / 3, 0.1, 0.1, 0.8];
+LAYER_PARAMS[LAYER.FACE] = [1 / 3, 0.1, 0.035, 0.8];
 /** Wall texture repeats per world unit of height (a texture tile of strata is 1.5 units tall). */
 const FACE_V = 1 / 1.5;
 
@@ -437,7 +437,7 @@ float tbs = 1.0 / max( tb.x + tb.y + tb.z + tb.w + tbR, 1e-4 );
 tb *= tbs;
 tbR *= tbs;
 vec3 tAlbedo = s0.rgb * tb.x + s1.rgb * tb.y + s2.rgb * tb.z + s3.rgb * tb.w + sR.rgb * tbR;
-float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z;
+float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z * ( 1.0 - 0.7 * tWall );
 float tRough = dot( tb, vec4( L0.w, L1.w, L2.w, L3.w ) ) + tbR * LR.w;
 // share of the pixel that is soil / meadow (by layer), and of the border band
 // between them (from the plain weights, before the texel heights roughen it)
