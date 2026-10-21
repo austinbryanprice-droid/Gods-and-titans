@@ -16,7 +16,7 @@ import { wallConnections } from '../data/walls.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { unitLook } from './models/unit-looks.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
-import { createForest, createDecor } from './models/props.js';
+import { createForest, createDecor, decorOffOutcrops } from './models/props.js';
 import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
@@ -233,7 +233,7 @@ export class GameRenderer {
     scene.add(this.terrain.group);
     this.heightFn = (x, y) => heightAt(this.map, x, y);
     this.buildForest();
-    this.decor = createDecor(this.map, this.heightFn, { quality: this.quality });
+    this.decor = createDecor({ ...this.map, decor: decorOffOutcrops(this.map, this.map.decor || []) }, this.heightFn, { quality: this.quality });
     this.decor.object3d.traverse((o) => {
       if (o.isMesh) o.receiveShadow = true;
     });
@@ -440,13 +440,14 @@ export class GameRenderer {
         }
       }
     }
-    if (!decor.length) return null;
-    const d = createDecor({ ...this.map, decor }, this.heightFn, { quality: this.quality });
+    const kept = decorOffOutcrops(this.map, decor);
+    if (!kept.length) return null;
+    const d = createDecor({ ...this.map, decor: kept }, this.heightFn, { quality: this.quality });
     d.object3d.name = 'undergrowth';
     return d;
   }
 
-  /** A few boulders on every impassable rock tile so cliffs read as rock. */
+  /** A few boulders on the impassable rock tiles (only where the sandstone outcrop is low, see decorOffOutcrops). */
   buildRockDecor() {
     const decor = [];
     const W = this.width;
@@ -460,8 +461,9 @@ export class GameRenderer {
         if (r > 0.45) decor.push({ x: tx + 0.75 - r * 0.3, y: ty + 0.7, kind: 'rock', rot: r * 3.1, scale: 0.9 + r * 0.5 });
       }
     }
-    if (!decor.length) return null;
-    const d = createDecor({ ...this.map, decor }, this.heightFn);
+    const kept = decorOffOutcrops(this.map, decor);
+    if (!kept.length) return null;
+    const d = createDecor({ ...this.map, decor: kept }, this.heightFn);
     d.object3d.name = 'rock-decor';
     return d;
   }

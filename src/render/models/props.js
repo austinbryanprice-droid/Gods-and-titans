@@ -26,6 +26,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TERRAIN } from '../../config.js';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import { heightAt } from '../height.js';
+import { groundField } from '../ground-field.js';
 import { patchWorldMaterial } from '../shading.js';
 import {
   patchFoliageMaterial, patchStoneMaterial, foliageDepthMaterial, PINE_TIERS, PINE_TOP, PINE_PRESETS, pineLayout,
@@ -1124,6 +1125,28 @@ export function createForest(mapData, heightFn, { variants = null, quality = 'me
 
 const DECOR_JITTER = { rock: 0.14, bush: 0.18, flowers: 0.04, ruin: 0.1, stump: 0.12, grass: 0.22, fern: 0.2 };
 const DECOR_SINK = { rock: 0.04, bush: 0.02, flowers: 0.01, ruin: 0.03, stump: 0.02, grass: 0.01, fern: 0.01 };
+
+/** How far up a sandstone outcrop (the ground field's rise, in height) decor may stand: plants and ruins not at all, boulders on the lower flank. */
+const OUTCROP_PLANT_MAX = 0.05;
+const OUTCROP_ROCK_MAX = 0.3;
+
+/**
+ * The decor that does not stand on the terrain's sandstone outcrops: tufts, flowers, bushes and
+ * ruins pasted onto a pillar's flank look wrong, so plants keep to the meadow and boulders to the
+ * foot (the outcrops read as rock by themselves). Render-only; a map without rock keeps everything.
+ * @template {{x:number, y:number, kind:string}} D
+ * @param {object} mapData
+ * @param {D[]} list
+ * @returns {D[]}
+ */
+export function decorOffOutcrops(mapData, list) {
+  const field = groundField(mapData);
+  if (!field || !list.length) return list;
+  return list.filter((d) => {
+    const rise = field.sample(field.rise, d.x, d.y);
+    return rise < OUTCROP_PLANT_MAX || (d.kind === 'rock' && rise < OUTCROP_ROCK_MAX);
+  });
+}
 
 /**
  * Instanced decor props from mapData.decor (rocks, bushes, flowers, ruins, stumps, grass tufts, ferns).

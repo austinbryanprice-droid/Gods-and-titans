@@ -1002,7 +1002,9 @@ per-frame budget, so a revealed army appears over a few frames.
   the shade and a night grade that follows `WORLD_UNIFORMS.uNight`. `createForest` / `createDecor`
   take `{ quality }` and return `setQuality` (low draws the puffs as flat discs and keeps the early
   depth test). Triangle budgets: a tree up to 160, decor up to 200 (tests/render/props.test.js,
-  foliage.test.js). Look at them with `tools/gallery-foliage.html` and `tools/shot-foliage.mjs`.
+  foliage.test.js). Decor (map decor, undergrowth, boulders) keeps off the terrain's sandstone
+  outcrops (`decorOffOutcrops`: plants not at all, boulders only at the foot, read from the ground
+  field's rise). Look at them with `tools/gallery-foliage.html` and `tools/shot-foliage.mjs`.
 - Status markers (`src/render/status-markers.js`, `StatusLayer`: instanced, procedural
   glyphs): icons above the health bar in the order buff, debuff, slow, dot; a rimmed bubble
   around shielded units; slow keeps a frosty ground ring, invulnerability a double gold ring,

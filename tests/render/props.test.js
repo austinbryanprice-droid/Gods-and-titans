@@ -21,7 +21,7 @@ export async function resolve(spec, ctx, next) {
 
 const THREE = await import('three');
 const { heightAt, footprintHeight } = await import('../../src/render/height.js');
-const { createForest, createDecor, getPropInfo } = await import('../../src/render/models/props.js');
+const { createForest, createDecor, decorOffOutcrops, getPropInfo } = await import('../../src/render/models/props.js');
 const { createGroundCover, getGroundCoverInfo, GROUND_COVER_UNIFORMS } = await import('../../src/render/models/ground-cover.js');
 const { patchFowObject } = await import('../../src/render/fog.js');
 const { WATER_LEVEL } = await import('../../src/render/terrain.js');
@@ -189,6 +189,25 @@ test('decor: instanced per kind, on the ground, hideInRect clears building sites
   assert.equal(instancedOf(empty.object3d).length, 0);
   assert.equal(empty.hideInRect(0, 0, 4, 4), 0);
   empty.dispose();
+});
+
+test('decorOffOutcrops: plants keep to the meadow and boulders to the foot of a sandstone outcrop', () => {
+  const N = 16;
+  const terrain = new Uint8Array(N * N).fill(TERRAIN.GRASS);
+  for (let y = 6; y < 9; y++) for (let x = 6; x < 9; x++) terrain[y * N + x] = TERRAIN.ROCK;
+  const map = { width: N, height: N, terrain, heights: new Float32Array((N + 1) * (N + 1)), seed: 7 };
+  const at = (kind, x, y) => ({ kind, x, y, rot: 0, scale: 1 });
+  const list = [
+    at('grass', 7.5, 7.5), at('flowers', 7.2, 7.6), at('bush', 7.8, 7.4), at('ruin', 7.5, 7.2), at('rock', 7.5, 7.5), // on top
+    at('rock', 5.8, 7.5), at('grass', 5.5, 7.5), at('bush', 3, 3), at('rock', 12, 12), // at the foot and in the meadow
+  ];
+  const kept = decorOffOutcrops(map, list);
+  assert.deepEqual(kept.map((d) => `${d.kind}@${d.x},${d.y}`), ['rock@5.8,7.5', 'grass@5.5,7.5', 'bush@3,3', 'rock@12,12']);
+  assert.equal(list.length, 9, 'the list itself is not modified');
+  // flat ground without rock keeps everything, and so does an empty list
+  const flat = { width: N, height: N, terrain: new Uint8Array(N * N).fill(TERRAIN.GRASS), heights: new Float32Array((N + 1) * (N + 1)) };
+  assert.equal(decorOffOutcrops(flat, list).length, list.length);
+  assert.deepEqual(decorOffOutcrops(map, []), []);
 });
 
 test('a generated map builds its forest quickly within the instance budget', () => {
