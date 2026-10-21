@@ -233,14 +233,14 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   vec3 P = vObjPos;
   vec3 N = normalize( vObjN );
   float sinS = length( N.xz );
-  bool roofy = cls >= 10.0 && cls <= 12.0;
+  bool roofy = ( cls >= 10.0 && cls <= 12.0 ) || cls == 23.0;
   bool level = abs( N.y ) > ( roofy ? 0.985 : 0.72 );
   vec2 tH = sinS > 1e-4 ? vec2( -N.z, N.x ) / sinS : vec2( 1.0, 0.0 );
   // Roofs are all rectangular: courses run along the nearest axis, so a slope
   // with swept corners or smoothed normals keeps straight, parallel rows.
   float u = dot( P.xz, tH );
   vec2 uv = level ? P.xz : vec2( u, P.y / max( sinS, 0.3 ) );
-  if ( cls == 10.0 || cls == 11.0 ) {
+  if ( cls == 10.0 || cls == 11.0 || cls == 23.0 ) {
     // Roofs are rectangular: rows run along the nearest axis and are measured
     // in plan, from the slope's own direction, so a slope with swept corners or
     // a curved profile keeps straight parallel courses (no contour swirls).
@@ -263,13 +263,14 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     float ax = beam ? cls - 12.0 : cls; // 7 grain along y, 8 along x, 9 along z
     ts = vec2( 2.4, 0.8 );
     swap = ( ax == 7.0 && !level ) || ( ax == 9.0 && level );
-  } else if ( cls == 10.0 ) ts = vec2( 0.56, 0.88 );
+  } else if ( cls == 10.0 || cls == 23.0 ) ts = vec2( 0.56, 0.88 );
   else if ( cls == 11.0 ) ts = vec2( 1.2, 0.9 );
   else if ( cls == 12.0 ) { ts = vec2( 0.96, 0.6 ); swap = !level; }
   else if ( cls == 15.0 ) ts = vec2( 0.25, 0.25 );
   else if ( cls == 16.0 ) { ts = vec2( 3.0, 1.0 ); swap = !level; }
   else if ( cls == 17.0 ) ts = vec2( 1.4, 1.4 );
   else if ( cls == 18.0 ) ts = vec2( 0.9, 0.9 );
+  else if ( cls == 24.0 ) ts = vec2( 1.6, 1.6 );
   if ( mason && level ) ts.y *= 2.0; // paving: squarer slabs
   if ( swap ) uv = uv.yx;
   vec2 uvT = uv / ts + seed * vec2( 0.3711, 0.6133 );
@@ -281,6 +282,8 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
   vec4 c = texture2D( uDetail, ( level ? P.xz * 0.27 : vec2( P.y * 0.22, u * 0.55 ) ) + seed * 0.173 );
   #endif
   vec2 fw = fwidth( uvT );
+  vec2 uvDx = dFdx( uvT ); // for fetches made inside a branch: the derivatives stay in uniform control flow
+  vec2 uvDy = dFdy( uvT );
   // zero-mean terms: patterns move a surface's tone around its vertex color, so
   // seen from afar (mipmapped to the average) it keeps the palette color
   float blk = d.r;
@@ -294,6 +297,8 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     float jd = cls == 3.0 ? 0.16 : cls == 2.0 ? 0.3 : cls == 5.0 ? 0.24 : cls == 6.0 ? 0.28 : 0.42;
     float bv = cls == 3.0 ? 0.05 : cls == 6.0 ? 0.18 : 0.12;
     alb *= ( 1.0 + jd * blk0 ) * ( 1.0 + bv * 2.0 * bid ) * ( 1.0 + 0.1 * nz );
+    // broad patches of warmer and cooler stone across a wall, the way weather and quarries leave it
+    alb *= ( 1.0 + 0.12 * mot ) * vec3( 1.0 + 0.06 * mot, 1.0, 1.0 - 0.08 * mot );
     if ( cls == 2.0 ) alb *= vec3( 1.0 + 0.1 * bid, 1.0, 1.0 - 0.1 * bid );
     rough += 0.14 * ( 1.0 - blk ) + 0.12 * bid;
     h = blk * ( cls == 3.0 ? 0.004 : cls >= 5.0 ? 0.006 : 0.012 );
@@ -317,6 +322,20 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     rough += 0.12 * stk + 0.1 * ( 1.0 - seams );
     h = seams * 0.006 + stk * 0.0015;
     ao = mix( 0.7, 1.0, seams );
+  } else if ( cls == 23.0 ) {
+    // tiles or shingles laid in real courses (the rows are geometry): barrel ribs, a tint per
+    // column of tiles, a worn and mottled surface
+    float colF = uvT.x * 4.0;
+    float fc = 1.0 - smoothstep( 0.16, 0.36, fw.x * 4.0 );
+    float rib = 0.5 + 0.5 * cos( fract( colF ) * 6.2832 );
+    float tid = bldHash( vec2( floor( colF ), seed ) ) - 0.5;
+    // every column of tiles is fired a little differently (toward orange or brown), and the roof has
+    // aged: dark green moss in patches
+    alb *= ( 1.0 + 0.16 * ( rib - 0.5 ) * fc ) * vec3( 1.0 + 0.26 * tid, 1.0 + 0.04 * tid, 1.0 - 0.3 * tid ) * ( 1.0 + 0.14 * nz + 0.12 * mot );
+    float moss = smoothstep( 0.1, 0.26, mot + 0.12 * nz ) * 0.55;
+    alb = mix( alb, alb * vec3( 0.7, 0.98, 0.55 ), moss );
+    rough += 0.12 * nz + 0.08 * ( 1.0 - rib ) + 0.2 * moss;
+    h = rib * 0.006 * fc + d.b * 0.004;
   } else if ( cls == 10.0 ) {
     // roof tiles: rows rising up the slope with a shadow under each overlapping
     // lip, barrel ribs across; both fade out once a row is under ~3 pixels
@@ -334,13 +353,28 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     h = ( rowP * ( 1.0 - smoothstep( 0.72, 1.0, rowP ) ) * 0.008 * fr + rib * 0.006 * fc );
     ao = 1.0 - 0.24 * lip * fr;
   } else if ( cls == 11.0 ) {
-    // turf: sod strips laid in a running bond, each with its own tint, dark
-    // seams between them, and tufted, mottled tops
+    // turf: a living sod blanket, no joints: soft patches from yellow-green to deep green, a dry golden
+    // tint here and there, grass strokes, tufted bumps and a few flower specks you find up close
     float fb = 1.0 - smoothstep( 0.2, 0.5, max( fw.x * 4.0, fw.y * 8.0 ) );
-    alb *= ( 1.0 + 0.15 * blk0 * fb ) * ( 1.0 + 0.2 * bid * fb ) * ( 1.0 + 0.34 * mot + 0.2 * nz ) * vec3( 1.0 + 0.16 * stk, 1.0, 1.0 - 0.18 * stk );
+    float tone = 1.5 * mot + 0.9 * nz;
+    vec3 grass = vec3( 1.0 + 0.5 * tone, 1.0 + 0.26 * tone, 1.0 - 0.3 * tone );
+    float dry = smoothstep( 0.1, 0.34, mot + 0.3 * nz );
+    alb *= mix( grass, vec3( 1.34, 1.08, 0.55 ), dry * 0.45 );
+    alb *= vec3( 1.0 + 0.1 * stk, 1.0 + 0.05 * stk, 1.0 - 0.1 * stk );
+    float fl = step( 0.994, bldHash( floor( uvT * vec2( 16.0, 22.0 ) ) + seed ) ) * fb;
+    alb = mix( alb, vec3( 2.4, 2.2, 1.1 ), fl * 0.7 );
     rough += 0.05 * nz;
-    h = mix( 0.0, blk * 0.01, fb ) + d.b * 0.012;
-    ao = mix( 0.88, 1.0, mix( 1.0, blk, fb ) ) * ( 0.84 + 0.16 * d.b );
+    h = d.b * 0.016 + d.a * 0.006;
+    ao = 0.82 + 0.18 * d.b;
+    #ifndef BLD_LITE
+    // a finer pass of the same map: tufts and blades at a third of the scale
+    vec4 d2 = textureGrad( uDetail, uvT * vec2( 3.3, 3.7 ) + 0.37, uvDx * vec2( 3.3, 3.7 ), uvDy * vec2( 3.3, 3.7 ) );
+    float fine = d2.b - uDetailMean.b;
+    float blade = d2.a - uDetailMean.a;
+    alb *= vec3( 1.0 + 0.24 * fine, 1.0 + 0.18 * fine, 1.0 - 0.12 * fine ) * ( 1.0 + 0.2 * blade * fb );
+    h += d2.b * 0.01;
+    ao *= 0.9 + 0.1 * d2.b;
+    #endif
   } else if ( cls == 12.0 ) {
     // thatch: straw streaks down the slope, layered courses with a shadowed lip
     float rowP = fract( uvT.x * 8.0 );
@@ -365,6 +399,18 @@ void bldSurface( float cls, float seed, float rough0, float metal0, out vec3 alb
     rough += 0.14 * nz;
     h = d.b * 0.02;
     ao = 0.8 + 0.2 * d.b;
+  } else if ( cls == 24.0 ) {
+    // a court of packed earth and gravel with scattered flagstones: stones where the block map's
+    // random value is high, dark dirt joints round them, mottled ground elsewhere
+    float stn = smoothstep( 0.18, 0.27, bid );
+    float jn = smoothstep( 0.08, 0.5, blk );
+    float fb = 1.0 - smoothstep( 0.2, 0.5, max( fw.x * 4.0, fw.y * 8.0 ) );
+    vec3 dirt = vec3( 1.0 + 0.22 * mot + 0.14 * nz );
+    vec3 stoneC = vec3( 1.1, 1.12, 1.14 ) * ( 1.0 + 0.3 * bid ) * mix( 0.78, 1.0, jn );
+    alb *= mix( dirt, stoneC, stn * fb );
+    rough += 0.1 * ( 1.0 - jn ) * stn * fb;
+    h = stn * jn * 0.012 * fb + d.b * 0.01;
+    ao = mix( 1.0, mix( 0.72, 1.0, jn ), stn * fb );
   } else if ( cls == 18.0 ) {
     // packed earth set with cobbles: a tint per stone, dark dirt joints
     float cob = smoothstep( 0.08, 0.55, blk );

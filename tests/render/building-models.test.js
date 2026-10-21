@@ -19,7 +19,9 @@ export async function resolve(spec, ctx, next) {
 const THREE = await import('three');
 const {
   buildBuildingModel, buildGoldMineModel, getBuildingModelInfo, getGoldMineInfo, setBuildingTime, clearBuildingCaches, PLINTH,
+  setBuildingDetail, getBuildingDetail, pruneBuildingCaches,
 } = await import('../../src/render/models/building-models.js');
+const { bevelBox, courseSlope, shadedTris } = await import('../../src/render/models/building-core.js');
 const { BUILDINGS, PANTHEON_LIST, GOLD_MINE } = await import('../../src/data/index.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
 const { WALL_N, WALL_E, WALL_S, WALL_W, WALL_TOWER_SHIFT } = await import('../../src/data/walls.js');
@@ -399,4 +401,114 @@ test('gold mine: 3×3 fit, budget and remaining-gold levels', () => {
   mine.setAmountFraction(NaN);
   mine.animate(3);
   mine.dispose();
+});
+
+// ---- the detail levels (quality tiers) and the toolkit's new geometry ----
+
+test('detail levels: both build every roster building in budget, the plain level is the lighter, the detailed one is never degraded', () => {
+  const was = getBuildingDetail();
+  try {
+    const plain = new Map();
+    for (const level of [0, 1]) {
+      setBuildingDetail(level);
+      pruneBuildingCaches();
+      for (const p of PANTHEON_LIST) {
+        for (const [type, tier] of VARIANTS) {
+          const label = `${p.id}/${type}${tier}@${level}`;
+          const info = getBuildingModelInfo(type, p, tier);
+          const wall = BUILDINGS[type].wall === true;
+          assert.equal(info.level, level, `${label}: built at the level asked for, not the fallback`);
+          assert.ok(info.triangles > (wall ? 30 : 50) && info.triangles <= TRI_BUDGET, `${label}: ${info.triangles} triangles`);
+          assert.ok(info.meshes >= 2 && info.meshes <= MESH_BUDGET, `${label}: ${info.meshes} meshes`);
+          assert.equal(info.fit, 1, `${label}: fits its footprint as built`);
+          if (level === 0) plain.set(label.slice(0, -2), info.triangles);
+          else assert.ok(info.triangles >= plain.get(label.slice(0, -2)), `${label}: the detailed build adds to the plain one`);
+        }
+      }
+    }
+  } finally {
+    setBuildingDetail(was);
+    pruneBuildingCaches();
+  }
+});
+
+test('detail levels: a model refreshes onto the new level and the old level\'s cache is dropped', () => {
+  const was = getBuildingDetail();
+  try {
+    setBuildingDetail(1);
+    const m = buildBuildingModel('house', PANTHEON_LIST[0], '#ff0000');
+    const detailed = trianglesOf(m.root);
+    assert.equal(setBuildingDetail(0), true);
+    assert.equal(setBuildingDetail(0), false, 'no change, no rebuild');
+    assert.equal(trianglesOf(m.root), detailed, 'a model keeps its geometry until it refreshes');
+    m.refresh();
+    assert.ok(trianglesOf(m.root) < detailed, 'the plain level is lighter');
+    pruneBuildingCaches();
+    setBuildingDetail(1);
+    m.refresh();
+    assert.equal(trianglesOf(m.root), detailed, 'and back');
+    m.dispose();
+  } finally {
+    setBuildingDetail(was);
+    pruneBuildingCaches();
+  }
+});
+
+test('bevelBox: a rounded box with a square foot, 30 triangles (44 rounded all round), every face turned outward', () => {
+  for (const bottom of [false, true]) {
+    const g = bevelBox(1, 0.6, 0.8, 0.1, 0, 0, 0, 0, bottom);
+    const p = g.attributes.position;
+    assert.equal(p.count / 3, bottom ? 44 : 30);
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    assert.ok(Math.abs(bb.max.x - 0.5) < 1e-5 && Math.abs(bb.min.x + 0.5) < 1e-5 && Math.abs(bb.max.z - 0.4) < 1e-5);
+    assert.ok(Math.abs(bb.min.y) < 1e-5 && Math.abs(bb.max.y - 0.6) < 1e-5, 'stands on y');
+    for (let i = 0; i < p.count; i += 3) {
+      const a = new THREE.Vector3().fromBufferAttribute(p, i);
+      const b = new THREE.Vector3().fromBufferAttribute(p, i + 1);
+      const c = new THREE.Vector3().fromBufferAttribute(p, i + 2);
+      const n = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+      const mid = a.clone().add(b).add(c).divideScalar(3).sub(new THREE.Vector3(0, 0.3, 0));
+      assert.ok(n.dot(mid) > 0, 'faces point away from the center');
+    }
+    for (let i = 0; i < g.attributes.normal.count; i++) {
+      const n = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, i);
+      assert.ok(Math.abs(n.length() - 1) < 1e-4);
+    }
+  }
+});
+
+test('courseSlope: a roof slope in overlapping courses, four triangles a course with a shade per vertex', () => {
+  const a0 = [-1, 0, 1], a1 = [1, 0, 1], b0 = [-1, 0.5, 0], b1 = [1, 0.5, 0];
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const g = courseSlope(a0, a1, b0, b1, 6, 0.03, { rnd });
+  assert.equal(g.attributes.position.count / 3, 6 * 4);
+  assert.equal(g.attributes.color.count, g.attributes.position.count);
+  let up = 0;
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i += 3) {
+    const a = new THREE.Vector3().fromBufferAttribute(p, i);
+    const b = new THREE.Vector3().fromBufferAttribute(p, i + 1);
+    const c = new THREE.Vector3().fromBufferAttribute(p, i + 2);
+    const n = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize();
+    if (n.y > 0.5) up++;
+    assert.ok(n.z > -1e-6, 'every course faces the eave side (+z) or up');
+  }
+  assert.equal(up, 6 * 2, 'the faces of the courses point up the slope');
+  const col = g.attributes.color;
+  for (let i = 0; i < col.count; i++) assert.ok(col.getX(i) > 0.3 && col.getX(i) < 1.2);
+});
+
+test('shadedTris: per-vertex shades, faces turned away from the reference point', () => {
+  const g = shadedTris([[[0, 0, 0], [1, 0, 0], [0, 0, 1], 0.5, 0.75, 1], [[0, 0, 0], [0, 0, 1], [1, 0, 0], 0.5, 1, 0.75]], () => [0.2, -1, 0.2]);
+  const p = g.attributes.position;
+  assert.equal(p.count, 6);
+  for (let i = 0; i < p.count; i += 3) {
+    const a = new THREE.Vector3().fromBufferAttribute(p, i);
+    const b = new THREE.Vector3().fromBufferAttribute(p, i + 1);
+    const c = new THREE.Vector3().fromBufferAttribute(p, i + 2);
+    assert.ok(new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).y > 0, 'turned up, away from below');
+  }
+  assert.deepEqual([...g.attributes.color.array].slice(0, 9), [0.5, 0.5, 0.5, 1, 1, 1, 0.75, 0.75, 0.75], 'a flipped face swaps its shades with its vertices');
 });

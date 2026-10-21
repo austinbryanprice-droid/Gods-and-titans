@@ -52,7 +52,7 @@ export const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 export const CLS = {
   PLAIN: 0, STONE: 1, SANDSTONE: 2, MARBLE: 3, PLASTER: 4, MUDBRICK: 5, BRICK: 6,
   WOOD_Y: 7, WOOD_X: 8, WOOD_Z: 9, TILE: 10, TURF: 11, THATCH: 12, METAL: 13, GOLD: 14,
-  CLOTH: 15, LACQUER: 16, ROCK: 17, EARTH: 18, BEAM_Y: 19, BEAM_X: 20, BEAM_Z: 21, INTERIOR: 22, WOOD: -1,
+  CLOTH: 15, LACQUER: 16, ROCK: 17, EARTH: 18, BEAM_Y: 19, BEAM_X: 20, BEAM_Z: 21, INTERIOR: 22, TILEG: 23, COURT: 24, WOOD: -1,
 };
 export const surf = (cls, rough, metal = 0) => Object.freeze({ cls, rough, metal });
 /** Surface tags: class + base roughness / metalness. */
@@ -70,6 +70,10 @@ export const SURF = {
   tile: surf(CLS.TILE, 0.6),
   glazedTile: surf(CLS.TILE, 0.42),
   slateTile: surf(CLS.TILE, 0.58),
+  // tiles laid in real courses (courseSlope): the geometry draws the rows, the shader the ribs and wear
+  tileC: surf(CLS.TILEG, 0.6),
+  glazedTileC: surf(CLS.TILEG, 0.42),
+  slateTileC: surf(CLS.TILEG, 0.58),
   turf: surf(CLS.TURF, 0.97),
   thatch: surf(CLS.THATCH, 0.95),
   // trim metals stay partly diffuse: seen from above most facets mirror the
@@ -80,6 +84,7 @@ export const SURF = {
   lacquer: surf(CLS.LACQUER, 0.3),
   rock: surf(CLS.ROCK, 0.86),
   earth: surf(CLS.EARTH, 0.97),
+  court: surf(CLS.COURT, 0.92),
   water: surf(CLS.PLAIN, 0.08),
   interior: surf(CLS.INTERIOR, 1),
 };
@@ -122,6 +127,66 @@ export const SMOOTH_SEGMENTS = 6;
 /** Box w×h×d standing on y (bottom face at y), centered on x/z, turned by ry. */
 export function box(w, h, d, x = 0, y = 0, z = 0, ry = 0) {
   const g = prep(new THREE.BoxGeometry(w, h, d));
+  g.translate(0, h / 2, 0);
+  if (ry) g.rotateY(ry);
+  return g.translate(x, y, z);
+}
+
+/**
+ * Box w×h×d standing on y with its edges rounded off: each face is shrunk by r and a strip per edge
+ * (and a triangle per corner) joins them, shaded by blending the two faces' normals across it, so
+ * edges catch light as a soft highlight while the faces stay perfectly flat. The foot of the box is
+ * left square (it stands on something, and the camera looks down): 30 triangles, 44 with `bottom`
+ * for a box that is rounded all round.
+ */
+export function bevelBox(w, h, d, r, x = 0, y = 0, z = 0, ry = 0, bottom = false) {
+  const e = [w / 2, h / 2, d / 2];
+  r = Math.min(r, e[0] * 0.8, e[1] * 0.8, e[2] * 0.8);
+  const hi = [e[0] - r, e[1] - r, e[2] - r];
+  const lo = [-hi[0], bottom ? -hi[1] : -e[1], -hi[2]];
+  const pos = [];
+  const nor = [];
+  const emit = (a, na, b, nb, c, nc) => {
+    // wind counter-clockwise seen from outside: the face normal follows the blended vertex normals
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const dot = nx * (na[0] + nb[0] + nc[0]) + ny * (na[1] + nb[1] + nc[1]) + nz * (na[2] + nb[2] + nc[2]);
+    if (dot < 0) { [b, c] = [c, b]; [nb, nc] = [nc, nb]; }
+    pos.push(...a, ...b, ...c);
+    nor.push(...na, ...nb, ...nc);
+  };
+  const quad = (a, na, b, nb, c, nc, dd, nd) => { emit(a, na, b, nb, c, nc); emit(a, na, c, nc, dd, nd); };
+  const vec = (i, s, j, t, k, u) => { const p = [0, 0, 0]; p[i] = s; p[j] = t; p[k] = u; return p; };
+  const unit = (i, s) => { const n = [0, 0, 0]; n[i] = s; return n; };
+  for (let i = 0; i < 3; i++) {
+    const j = (i + 1) % 3;
+    const k = (i + 2) % 3;
+    for (const s of [-1, 1]) {
+      if (i === 1 && s < 0 && !bottom) continue; // the foot
+      // the face
+      const n = unit(i, s);
+      quad(vec(i, s * e[i], j, lo[j], k, lo[k]), n, vec(i, s * e[i], j, hi[j], k, lo[k]), n, vec(i, s * e[i], j, hi[j], k, hi[k]), n, vec(i, s * e[i], j, lo[j], k, hi[k]), n);
+      // the strip along its edge to the face of the next axis (so each of the 12 edges is made once)
+      for (const t of [-1, 1]) {
+        if (j === 1 && t < 0 && !bottom) continue;
+        const nj = unit(j, t);
+        const at = t > 0 ? hi[j] : lo[j];
+        quad(
+          vec(i, s * e[i], j, at, k, lo[k]), n, vec(i, s * e[i], j, at, k, hi[k]), n,
+          vec(i, s * (e[i] - r), j, t * e[j], k, hi[k]), nj, vec(i, s * (e[i] - r), j, t * e[j], k, lo[k]), nj,
+        );
+      }
+    }
+  }
+  // a triangle at each corner, between the three faces' corner points
+  for (const s of [-1, 1]) for (const t of [-1, 1]) for (const u of [-1, 1]) {
+    if (t < 0 && !bottom) continue;
+    emit([s * e[0], t * hi[1], u * hi[2]], unit(0, s), [s * hi[0], t * e[1], u * hi[2]], unit(1, t), [s * hi[0], t * hi[1], u * e[2]], unit(2, u));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nor), 3));
   g.translate(0, h / 2, 0);
   if (ry) g.rotateY(ry);
   return g.translate(x, y, z);
@@ -231,6 +296,35 @@ export function fromTris(tris) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  return g;
+}
+
+/**
+ * Geometry from triangles with a shade per vertex: faces = [[a, b, c, shadeA, shadeB, shadeC], ...],
+ * each turned to face away from ref(centroid). The shades multiply the part's color (see Kit.add),
+ * so a surface can darken smoothly toward its eave or its foot without extra triangles.
+ */
+export function shadedTris(faces, ref) {
+  const pos = new Float32Array(faces.length * 9);
+  const col = new Float32Array(faces.length * 9);
+  let o = 0;
+  for (const f of faces) {
+    let [a, b, c, sa, sb, sc] = f;
+    const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const mx = (a[0] + b[0] + c[0]) / 3, my = (a[1] + b[1] + c[1]) / 3, mz = (a[2] + b[2] + c[2]) / 3;
+    const r = ref(mx, my, mz);
+    if (nx * (mx - r[0]) + ny * (my - r[1]) + nz * (mz - r[2]) < 0) { [b, c] = [c, b]; [sb, sc] = [sc, sb]; }
+    for (const [v, sh] of [[a, sa], [b, sb], [c, sc]]) {
+      pos[o] = v[0]; pos[o + 1] = v[1]; pos[o + 2] = v[2];
+      col[o] = col[o + 1] = col[o + 2] = sh;
+      o += 3;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 }
 
@@ -377,6 +471,53 @@ export function hipLoft({ cx = 0, cz = 0, y, hw, hd, tw = 0, td = 0, h, steps = 
   return mergeGeometries(parts, false);
 }
 
+/**
+ * A roof slope laid in overlapping courses (shingles, tiles, boards): the plane from the eave edge
+ * (a0 → a1) to the ridge edge (b0 → b1) cut into `n` strips, each starting `lip` higher than where
+ * the one below ends, so every row reads as lying over the next: a dark butt edge, then a face that
+ * is shadowed toward the row above it. `tint` varies the rows (a fraction of brightness). One flat-
+ * shaded geometry with per-vertex shade multipliers (see Kit.add); 4 triangles a course.
+ */
+export function courseSlope(a0, a1, b0, b1, n, lip, { shadow = 0.2, butt = 0.55, tint = 0.06, rnd = Math.random } = {}) {
+  const pos = [];
+  const col = [];
+  const lerp = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+  const push = (pts, shades, flipUp) => {
+    // two triangles of a quad, wound so the normal points up (faces) or toward the eave (butts)
+    const [A, B, C2, D] = pts;
+    const nx = (B[1] - A[1]) * (C2[2] - A[2]) - (B[2] - A[2]) * (C2[1] - A[1]);
+    const ny = (B[2] - A[2]) * (C2[0] - A[0]) - (B[0] - A[0]) * (C2[2] - A[2]);
+    const nz = (B[0] - A[0]) * (C2[1] - A[1]) - (B[1] - A[1]) * (C2[0] - A[0]);
+    const ex = a0[0] - b0[0];
+    const ez = a0[2] - b0[2];
+    const dot = flipUp ? ny : nx * ex + nz * ez;
+    const order = dot >= 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];
+    for (const i of order) {
+      pos.push(...pts[i]);
+      col.push(shades[i], shades[i], shades[i]);
+    }
+  };
+  for (let s = 0; s < n; s++) {
+    const t0 = s / n;
+    const t1 = (s + 1) / n;
+    const k = 1 + (rnd() * 2 - 1) * tint;
+    const p0 = lerp(a0, b0, t0);
+    const p1 = lerp(a1, b1, t0);
+    const q0 = [p0[0], p0[1] + lip, p0[2]];
+    const q1 = [p1[0], p1[1] + lip, p1[2]];
+    const r0 = lerp(a0, b0, t1);
+    const r1 = lerp(a1, b1, t1);
+    // the face, shadowed toward the butt of the row above
+    push([q0, q1, r1, r0], [k, k, k * (1 - shadow), k * (1 - shadow)], true);
+    // the butt edge
+    push([p0, p1, q1, q0], [k * butt, k * butt, k * butt, k * butt], false);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  return g;
+}
+
 // ---------------------------------------------------------------------------
 // Kit: collects colored parts into buckets and merges them
 // ---------------------------------------------------------------------------
@@ -395,8 +536,15 @@ export const INTERIOR_DARK = new THREE.Color(0.0025, 0.0018, 0.0015);
 export const OPENING = made('#21180f', SURF.interior);
 
 export class Kit {
-  constructor(seed) {
+  /**
+   * `lod` is the detail level the building is built at: 0 keeps to the essential forms (low
+   * quality), 1 adds the finer pieces (rafter ends, shutters, props, rounded edges). Pieces read it.
+   */
+  constructor(seed, lod = 1) {
     this.rng = new RNG(seed);
+    this.lod = lod;
+    /** A building that is tight on its triangle budget (the City) leaves out the optional extras. */
+    this.tight = false;
     this.parts = { base: [], body: [], team: [], glow: [] };
     this.count = 0;
   }
@@ -412,13 +560,15 @@ export class Kit {
     const n = pos.count;
     const c = bucket === 'team' && typeof color === 'number' ? gray(color) : C(color);
     if (gain !== 1) c.multiplyScalar(gain);
+    // a geometry may bring per-vertex multipliers of its own (shade gradients, a tint per row)
+    const pre = g.attributes.color || null;
     const col = new Float32Array(n * 3);
     for (let i = 0; i < n; i += 3) {
       const k = jit ? 1 + (this.rng.next() * 2 - 1) * jit : 1;
       for (let v = i; v < i + 3 && v < n; v++) {
-        col[v * 3] = c.r * k;
-        col[v * 3 + 1] = c.g * k;
-        col[v * 3 + 2] = c.b * k;
+        col[v * 3] = c.r * k * (pre ? pre.getX(v) : 1);
+        col[v * 3 + 1] = c.g * k * (pre ? pre.getY(v) : 1);
+        col[v * 3 + 2] = c.b * k * (pre ? pre.getZ(v) : 1);
       }
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));

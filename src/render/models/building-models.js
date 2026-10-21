@@ -6,6 +6,7 @@
 //   m.setTier(2);        // town centers: 1 Village, 2 Town, 3 City
 //   m.setConnections(m); // wall segments: which neighbours the wall runs on to (data/walls.js wallConnections)
 //   m.animate(timeSec);  // flames, waving flags, the titan gate vortex
+//   m.refresh();         // after setBuildingDetail(level): rebuild at the new detail level
 //   m.height             // top of the model (health bar placement)
 //   m.dispose();         // detaches; cached geometry and shared materials stay
 //
@@ -32,7 +33,7 @@ import { BUILDINGS, GOLD_MINE } from '../../data/buildings.js';
 import {
   PLINTH, DEPTH, MARGIN, PI, BUCKETS, DEFAULT_STYLE,
   DEFAULT_COLORS, C, mix, shade, tint, SURF,
-  made, prep, box, frustum, cyl, cone,
+  made, prep, box, bevelBox, frustum, cyl, cone,
   ball, dome, octa, dodeca, torus, strut,
   pole, extrude, fromTris, soft, solid, hipLoft,
   GLOW, Kit, finishKit,
@@ -1174,15 +1175,52 @@ function buildTownCenter(k, P, st, tier) {
 // scaffold, foundation, gold mine
 // ---------------------------------------------------------------------------
 
+const cw0 = 0.085; // width of the curb stones round a court
+
 function buildFoundation(k, P, st, size, corners = true) {
   const s = size - 2 * MARGIN;
-  k.f(box(s, DEPTH + PLINTH - 0.03, s, 0, -DEPTH, 0), P.stoneD, 0.06);
-  k.f(box(s - 0.06, 0.03, s - 0.06, 0, PLINTH - 0.03, 0), P.yard, 0.05);
-  // a raised curb of cut stones frames the slab, with a heavier block at each
-  // corner, so the building stands on a built plinth rather than a flat pad
-  for (const sz of [-1, 1]) k.f(box(s + 0.002, 0.07, 0.07, 0, PLINTH - 0.035, sz * (s / 2 - 0.035)), P.stone, 0.05);
-  for (const sx of [-1, 1]) k.f(box(0.07, 0.07, s - 0.14, sx * (s / 2 - 0.035), PLINTH - 0.035, 0), P.stone, 0.05);
-  if (corners) for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.f(box(0.12, 0.09, 0.12, sx * (s / 2 - 0.06), PLINTH - 0.035, sz * (s / 2 - 0.06)), P.stoneL, 0.05);
+  if (!k.lod) {
+    k.f(box(s, DEPTH + PLINTH - 0.03, s, 0, -DEPTH, 0), P.stoneD, 0.06);
+    k.f(box(s - 0.06, 0.03, s - 0.06, 0, PLINTH - 0.03, 0), P.court, 0.05);
+    // a raised curb of cut stones frames the slab, with a heavier block at each
+    // corner, so the building stands on a built plinth rather than a flat pad
+    for (const sz of [-1, 1]) k.f(box(s + 0.002, 0.07, 0.07, 0, PLINTH - 0.035, sz * (s / 2 - 0.035)), P.curb, 0.05);
+    for (const sx of [-1, 1]) k.f(box(0.07, 0.07, s - 0.14, sx * (s / 2 - 0.035), PLINTH - 0.035, 0), P.curb, 0.05);
+    if (corners) for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.f(box(0.12, 0.09, 0.12, sx * (s / 2 - 0.06), PLINTH - 0.035, sz * (s / 2 - 0.06)), shade(P.curb, 1.1), 0.05);
+    return;
+  }
+  // a built plinth with soft edges: footing below the ground, a cobbled court, a rounded curb of cut
+  // stones round it and a heavier rounded block at each corner
+  k.f(box(s, DEPTH + PLINTH - 0.05, s, 0, -DEPTH, 0), P.stoneD, 0.06);
+  k.f(bevelBox(s - 0.02, 0.07, s - 0.02, 0.03, 0, PLINTH - 0.07, 0), P.court, 0.05);
+  const cw = cw0;
+  const ch = 0.078;
+  for (const sz of [-1, 1]) k.f(bevelBox(s - 0.01, ch, cw, 0.028, 0, PLINTH - 0.04, sz * (s / 2 - cw / 2)), P.curb, 0.05);
+  for (const sx of [-1, 1]) k.f(bevelBox(cw, ch, s - 2 * cw + 0.02, 0.028, sx * (s / 2 - cw / 2), PLINTH - 0.04, 0), P.curb, 0.05);
+  if (corners) {
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.f(bevelBox(0.13, 0.1, 0.13, 0.04, sx * (s / 2 - 0.065), PLINTH - 0.05, sz * (s / 2 - 0.065)), shade(P.curb, 1.1), 0.05);
+    strew(k, P, s);
+  }
+}
+
+/** Loose stones and tufts of grass along the edges of the court, so a plinth looks lived in rather than laid out. */
+function strew(k, P, s) {
+  const rock = made(shade(P.stoneD, 0.95), SURF.rock);
+  const grass = made(mix(P.leaf, '#9ab84a', 0.3), SURF.plain);
+  const inner = s / 2 - cw0 - 0.05;
+  for (let i = 0; i < 9; i++) {
+    const side = (k.rng.next() * 4) | 0;
+    const t = k.rand(-0.92, 0.92) * inner;
+    const x = side < 2 ? t : (side === 2 ? -inner : inner) - Math.sign(side - 2.5) * k.rand(0, 0.03);
+    const z = side < 2 ? (side === 0 ? -inner : inner) : t;
+    if (z > 0.2 && Math.abs(x) < 0.5) continue; // the doorstep stays clear
+    if (i % 3 === 2) {
+      k.f(cone(0.02, 0.07, 3, x, PLINTH - 0.005, z, true), grass, 0.12);
+    } else {
+      const r = k.rand(0.035, 0.07);
+      k.f(octa(r, 0, 0, 0).scale(1, 0.55, k.rand(0.7, 1)).rotateY(k.rand(0, PI)).translate(x, PLINTH + r * 0.15, z), rock, 0.1);
+    }
+  }
 }
 
 function scaffoldKit(size, H) {
@@ -1333,6 +1371,35 @@ const GEO_CACHE = new Map();
 const SCAFFOLD_CACHE = new Map();
 let MINE_GEO = null;
 
+/** The triangle budgets of the models (a building; a wall segment). */
+export const TRI_BUDGET = 3000;
+export const WALL_BUDGET = 700;
+
+/** Detail level new geometry is built at (see Kit): 0 low quality, 1 medium and up. */
+let DETAIL = 1;
+
+/**
+ * Switch the detail level (the renderer's quality tier). Returns whether it changed; models already
+ * built keep their geometry until they `refresh()`, and `pruneBuildingCaches()` then drops the old level's.
+ */
+export function setBuildingDetail(level) {
+  const l = level ? 1 : 0;
+  if (l === DETAIL) return false;
+  DETAIL = l;
+  return true;
+}
+
+export const getBuildingDetail = () => DETAIL;
+
+/** Dispose the cached geometry of every detail level but the current one. */
+export function pruneBuildingCaches() {
+  for (const [key, e] of GEO_CACHE) {
+    if (e.lod === DETAIL) continue;
+    for (const n of BUCKETS) if (e[n]) e[n].dispose();
+    GEO_CACHE.delete(key);
+  }
+}
+
 function resolveStyle(pantheon) {
   const st = { ...DEFAULT_STYLE, ...(pantheon && pantheon.style) };
   const colors = { ...DEFAULT_COLORS, ...(pantheon && pantheon.colors) };
@@ -1340,7 +1407,7 @@ function resolveStyle(pantheon) {
 }
 
 function styleKey(type, st, colors, tier) {
-  return `${type}|${tier}|${st.roof}|${st.wall}|${st.ornament}|${colors.wall}|${colors.roof}|${colors.trim}|${colors.accent}`;
+  return `${type}|${tier}|${st.roof}|${st.wall}|${st.ornament}|${colors.wall}|${colors.roof}|${colors.trim}|${colors.accent}|L${DETAIL}`;
 }
 
 /**
@@ -1356,22 +1423,34 @@ function getBuildingGeometry(type, pantheon, tier, mask = 0) {
   let entry = GEO_CACHE.get(key);
   if (entry) return entry;
   const P = makePalette(colors, st);
-  const k = new Kit(hashSeed(key));
-  // the city's walls and towers carry the corners; its triangle budget goes there. Wall segments stand on no foundation.
-  if (!wall) buildFoundation(k, P, st, size, !(type === 'town_center' && t === 3));
+  // A style the detailed build cannot fit in its triangle budget is built at the plain level instead.
+  const cap = wall ? WALL_BUDGET : TRI_BUDGET;
+  let level = DETAIL;
+  let k;
   let top;
-  switch (type) {
-    case 'wooden_wall': top = buildWoodenWall(k, P, mask & 255); break;
-    case 'stone_wall': top = buildStoneWall(k, P, mask & 255); break;
-    case 'town_center': top = buildTownCenter(k, P, st, t); break;
-    case 'house': top = buildHouse(k, P, st); break;
-    case 'barracks': top = buildBarracks(k, P, st); break;
-    case 'storehouse': top = buildStorehouse(k, P, st); break;
-    case 'shrine': top = buildShrine(k, P, st); break;
-    case 'temple': top = (TEMPLES[st.roof] || templeFlat)(k, P, st); break;
-    case 'tower': top = buildTower(k, P, st); break;
-    case 'titan_gate': top = buildTitanGate(k, P, st); break;
-    default: top = hall(k, P, st, { x: 0, z: 0, w: size - 0.6, d: size - 0.6, h: 0.7 }); break;
+  let geos;
+  for (;;) {
+    k = new Kit(hashSeed(key), level);
+    k.tight = type === 'town_center' && t === 3;
+    // the city's walls and towers carry the corners; its triangle budget goes there. Wall segments stand on no foundation.
+    if (!wall) buildFoundation(k, P, st, size, !k.tight);
+    switch (type) {
+      case 'wooden_wall': top = buildWoodenWall(k, P, mask & 255); break;
+      case 'stone_wall': top = buildStoneWall(k, P, mask & 255); break;
+      case 'town_center': top = buildTownCenter(k, P, st, t); break;
+      case 'house': top = buildHouse(k, P, st); break;
+      case 'barracks': top = buildBarracks(k, P, st); break;
+      case 'storehouse': top = buildStorehouse(k, P, st); break;
+      case 'shrine': top = buildShrine(k, P, st); break;
+      case 'temple': top = (TEMPLES[st.roof] || templeFlat)(k, P, st); break;
+      case 'tower': top = buildTower(k, P, st); break;
+      case 'titan_gate': top = buildTitanGate(k, P, st); break;
+      default: top = hall(k, P, st, { x: 0, z: 0, w: size - 0.6, d: size - 0.6, h: 0.7 }); break;
+    }
+    geos = finishKit(k);
+    if (!level || geos.triangles <= cap) break;
+    for (const name of BUCKETS) if (geos[name]) geos[name].dispose();
+    level = 0;
   }
   // Dev aid: set globalThis.__BLD_DEBUG = [] to collect the parts that reach past the footprint.
   if (globalThis.__BLD_DEBUG && !wall) {
@@ -1383,7 +1462,6 @@ function getBuildingGeometry(type, pantheon, tier, mask = 0) {
       if (e > lim + 0.005) globalThis.__BLD_DEBUG.push(`${key} ${name} ext ${e.toFixed(3)} > ${lim} box x[${bb.min.x.toFixed(2)},${bb.max.x.toFixed(2)}] y[${bb.min.y.toFixed(2)},${bb.max.y.toFixed(2)}] z[${bb.min.z.toFixed(2)},${bb.max.z.toFixed(2)}]`);
     }
   }
-  const geos = finishKit(k);
   // Safety net: scale any model that overhangs its footprint back inside it (a wall segment's arms
   // run on to the next tile on purpose).
   const limit = wall ? Infinity : size / 2 - MARGIN + 0.005;
@@ -1410,7 +1488,7 @@ function getBuildingGeometry(type, pantheon, tier, mask = 0) {
   }
   const height = Math.max(maxY, typeof top === 'number' ? top * fit : 0);
   entry = {
-    key, size, ...geos, height, fit, extent: ext * fit,
+    key, size, lod: DETAIL, level, ...geos, height, fit, extent: ext * fit,
     vortex: type === 'titan_gate' && { cx: 0, cy: (PLINTH + 0.27 + 0.05 + GATE.open * 0.5) * fit, rx: 0.84 * fit, ry: (GATE.open * 0.5 - 0.02) * fit },
     vortexColors: [tint(P.accent, 0.55), P.accent, mix(P.trim, '#5a2a9a', 0.5)],
     scaffoldH: Math.max(0.9, Math.min(height * 0.72, 2.6)),
@@ -1472,7 +1550,7 @@ export function buildBuildingModel(buildingTypeId, pantheon, teamColor, tier = 1
   let curTier = tier;
   let curMask = 0;
 
-  const model = { root, height: 1, setProgress, setTier, setConnections, animate, dispose, type: buildingTypeId };
+  const model = { root, height: 1, setProgress, setTier, setConnections, refresh, animate, dispose, type: buildingTypeId };
 
   function apply(e) {
     entry = e;
@@ -1583,6 +1661,11 @@ export function buildBuildingModel(buildingTypeId, pantheon, teamColor, tier = 1
     apply(getBuildingGeometry(buildingTypeId, pantheon, curTier, curMask));
   }
 
+  /** Rebuild from the geometry of the current detail level (after setBuildingDetail). */
+  function refresh() {
+    apply(getBuildingGeometry(buildingTypeId, pantheon, curTier, curMask));
+  }
+
   function animate(timeSec) {
     TIME.value = timeSec;
     if (vortex) vortex.rotation.z = -timeSec * 0.15;
@@ -1665,7 +1748,7 @@ export function getBuildingModelInfo(buildingTypeId, pantheon, tier = 1, mask = 
   mounted.root.traverse((o) => { if (o.isMesh) constructionMeshes++; });
   mounted.dispose();
   return {
-    triangles: e.triangles, meshes, constructionMeshes, height: e.height, extent: e.extent, fit: e.fit,
+    triangles: e.triangles, level: e.level, meshes, constructionMeshes, height: e.height, extent: e.extent, fit: e.fit,
     size: e.size, limit: e.wall ? TOWER_REACH + 0.05 : e.size / 2 - MARGIN,
   };
 }

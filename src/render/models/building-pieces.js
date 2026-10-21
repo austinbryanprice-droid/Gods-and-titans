@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import {
   PLINTH, PI, C, mix, shade, tint,
-  luma, clamp01, SURF, made, prep, box,
+  luma, clamp01, SURF, made, prep, box, bevelBox, courseSlope, shadedTris,
   frustum, cyl, cone, ball, dome, octa,
   dodeca, torus, strut, pole, extrude, fromTris,
   soft, orient, rectRing, loft, hipLoft, GLOW,
@@ -22,6 +22,12 @@ export const YARD_BY_WALL = {
   timber: '#6f5f45', brick: '#8a7a64', lacquer: '#948e83',
 };
 
+// The cobbled court a building stands on (earth set with stones), per wall style.
+export const COURT_BY_WALL = {
+  marble: '#8d7a5c', sandstone: '#9c7d4e', stone: '#7b6b53', mudbrick: '#8a6a47',
+  timber: '#6e5a3a', brick: '#76604a', lacquer: '#7d705a',
+};
+
 // What the palette colors are made of, per wall / roof style.
 export const WALL_SURF = {
   marble: SURF.marble, timber: SURF.wood, sandstone: SURF.sandstone, stone: SURF.stone,
@@ -30,7 +36,17 @@ export const WALL_SURF = {
 export const STONE_SURF = { marble: SURF.marble, sandstone: SURF.sandstone, mudbrick: SURF.mudbrick };
 export const YARD_SURF = { marble: SURF.marble, sandstone: SURF.sandstone, brick: SURF.brick, mudbrick: SURF.earth, timber: SURF.earth };
 
-export function roofSurf(st) {
+export /** The roof's surface where its slopes are laid in real courses (courseSlope). */
+function roofCourseSurf(st) {
+  switch (st.roof) {
+    case 'gable': return SURF.tileC;
+    case 'curved': return SURF.glazedTileC;
+    case 'pagoda': return SURF.slateTileC;
+    default: return roofSurf(st);
+  }
+}
+
+function roofSurf(st) {
   switch (st.roof) {
     case 'gable': return SURF.tile;
     case 'curved': return SURF.glazedTile;
@@ -45,34 +61,48 @@ export function roofSurf(st) {
   }
 }
 
+/**
+ * A building color graded for the world's light: near-white colors are pulled down a little (up to
+ * 14%), so a low golden sun does not burn marble, plaster and sand out to flat white.
+ */
+export function gradeColor(hex) {
+  const c = C(hex);
+  const l = luma(c);
+  const t = clamp01((l - 0.62) / 0.32);
+  return c.multiplyScalar(1 - 0.14 * t * t * (3 - 2 * t));
+}
+
 export function makePalette(colors, st) {
-  const wall = made(colors.wall, WALL_SURF[st.wall] || SURF.stone);
-  const roof = made(colors.roof, roofSurf(st));
+  const wall = made(gradeColor(colors.wall), WALL_SURF[st.wall] || SURF.stone);
+  const roof = made(gradeColor(colors.roof), roofSurf(st));
   const lacquer = st.wall === 'lacquer';
   const trimSurf = st.wall === 'timber' ? SURF.wood : lacquer ? SURF.lacquer : st.wall === 'mudbrick' && st.roof === 'stepped' ? SURF.glazed : SURF.paint;
-  const trim = made(colors.trim, trimSurf);
+  const trim = made(gradeColor(colors.trim), trimSurf);
   // gold-like accents are gold, pale ones silver
   const acc = C(colors.accent).convertLinearToSRGB();
   const accent = made(colors.accent, acc.r - acc.b > 0.25 ? SURF.gold : SURF.metal);
   let stone;
-  if (STONE_BY_WALL[st.wall]) stone = C(STONE_BY_WALL[st.wall]);
+  if (STONE_BY_WALL[st.wall]) stone = gradeColor(STONE_BY_WALL[st.wall]);
   else if (st.wall === 'sandstone') stone = mix(wall, '#b39566', 0.35);
   else stone = shade(wall, 0.88);
   stone.surf = STONE_SURF[st.wall] || SURF.stone;
   const lightTrim = luma(trim) > 0.62;
   return {
     wall, wallD: shade(wall, 0.76), wallL: tint(wall, 0.22),
-    roof, roofD: shade(roof, 0.68), roofL: tint(roof, 0.2),
+    roof, roofC: made(gradeColor(colors.roof), roofCourseSurf(st)), roofD: shade(roof, 0.68), roofL: tint(roof, 0.2),
     trim, trimD: shade(trim, 0.72), trimL: tint(trim, 0.3),
     accent, accentD: shade(accent, 0.7),
     stone, stoneD: shade(stone, 0.74), stoneL: tint(stone, 0.18),
     infill: made(lightTrim ? C(colors.trim) : mix(wall, '#2a1410', 0.3), st.wall === 'timber' ? SURF.wood : lightTrim || !lacquer ? SURF.plaster : SURF.lacquer),
     beam: made(lightTrim ? shade(wall, 0.9) : trim, lacquer ? SURF.lacquer : SURF.wood),
     yard: made(YARD_BY_WALL[st.wall] || '#8d877a', YARD_SURF[st.wall] || SURF.stone),
+    court: made(COURT_BY_WALL[st.wall] || '#8a8478', SURF.court),
+    // the curb stones round the court: matte stone (marble would blow out in a low sun)
+    curb: made(shade(stone, st.wall === 'marble' ? 0.93 : 1), st.wall === 'marble' || st.wall === 'stone' || st.wall === 'brick' || st.wall === 'timber' || st.wall === 'lacquer' ? SURF.stone : stone.surf),
     wood: made('#7b5536', SURF.wood), woodD: made('#4d3421', SURF.wood), woodL: made('#a27c54', SURF.wood),
     dark: made('#21180f', SURF.plain), metal: made('#8c949b', SURF.metal), cloth: made('#d6cbb0', SURF.cloth), white: made('#f2ede2', SURF.paint),
     straw: made('#c9a35a', SURF.thatch), leaf: C('#4f7a36'), sack: made('#bfa57a', SURF.cloth),
-    fire: C('#ff8a1e'), fireHot: C('#ffe07a'), lantern: C('#ff5a2a'),
+    fire: C('#ff8a1e'), fireHot: C('#ffe07a'), lantern: C('#ff5a2a'), lamp: C('#ffb04a'),
     gold: made('#f3c63c', SURF.gold),
   };
 }
@@ -478,6 +508,23 @@ export function ornamentPair(k, P, st, x, y, z, s) {
 
 export const isRound = (st) => st.roof === 'thatch_cone' || st.roof === 'dome';
 
+/**
+ * A box of the kit's detail level: rounded off by r at lod 1 (where the rounding can be seen: a
+ * thin post stays a plain box), a plain box at lod 0.
+ */
+export function bx(k, r, w, h, d, x = 0, y = 0, z = 0, ry = 0) {
+  return k.lod && r > 0 && Math.min(w, d) >= 0.2 ? bevelBox(w, h, d, r, x, y, z, ry) : box(w, h, d, x, y, z, ry);
+}
+
+/** A lantern hung from a bracket on a south-facing wall: iron cage, glowing body (lod 1). */
+export function wallLantern(k, P, x, y, fz, s = 1) {
+  if (!k.lod) return;
+  k.b(box(0.014 * s, 0.014 * s, 0.075 * s, x, y + 0.095 * s, fz + 0.035 * s), P.dark, 0);
+  k.b(box(0.05 * s, 0.012 * s, 0.05 * s, x, y + 0.085 * s, fz + 0.075 * s), P.dark, 0);
+  k.g(box(0.036 * s, 0.056 * s, 0.036 * s, x, y + 0.03 * s, fz + 0.075 * s), P.lamp, null, GLOW.lamp);
+  k.b(box(0.05 * s, 0.01 * s, 0.05 * s, x, y + 0.02 * s, fz + 0.075 * s), P.dark, 0);
+}
+
 export function door(k, P, st, x, y, fz, w, h, rich = true) {
   const frame = st.wall === 'timber' ? P.woodD : st.wall === 'lacquer' ? P.beam : P.trim;
   k.b(box(w + 0.1, h + 0.06, 0.05, x, y, fz + 0.005), frame, 0.03);
@@ -489,13 +536,22 @@ export function door(k, P, st, x, y, fz, w, h, rich = true) {
   if (st.wall === 'timber' || st.wall === 'marble' || st.wall === 'stone') k.b(box(w + 0.15, 0.04, 0.065, x, y + h + 0.05, fz + 0.015), P.stone, 0.04);
 }
 
-export function windowHole(k, P, x, y, fz, w = 0.12, h = 0.16, rich = true) {
+export function windowHole(k, P, x, y, fz, w = 0.12, h = 0.16, rich = true, shutters = true) {
   k.b(box(w + 0.05, h + 0.05, 0.03, x, y - 0.025, fz + 0.004), P.wallD, 0);
   k.hole(box(w, h, 0.04, x, y, fz + 0.008), y, h);
   if (!rich) return;
   // projecting sill and lintel give the opening a recess
   k.b(box(w + 0.1, 0.028, 0.06, x, y - 0.052, fz + 0.022), P.stoneL, 0.03);
   k.b(box(w + 0.09, 0.03, 0.05, x, y + h + 0.012, fz + 0.016), P.wallD, 0.02);
+  if (k.lod && shutters) {
+    // shutters in the trim color, hung open against the wall at a slight angle
+    const a = 0.05;
+    const ang = 0.5;
+    for (const sx of [-1, 1]) {
+      const hx = x + sx * (w / 2 + 0.03);
+      k.b(box(a, h + 0.03, 0.014, hx + sx * (a / 2) * Math.cos(ang), y - 0.012, fz + 0.016 + (a / 2) * Math.sin(ang), -sx * ang), P.trim, 0.05);
+    }
+  }
 }
 
 /** Wooden spikes (toron) protruding from a south and side walls. */
@@ -535,10 +591,10 @@ export function rectWalls(k, P, st, o) {
   let face = fz;
   switch (st.wall) {
     case 'timber': {
-      k.b(box(w + 0.05, 0.08, d + 0.05, x, y, z), P.stone, 0.1);
-      k.b(box(w, h - 0.08, d, x, y + 0.08, z), P.wall, 0.07);
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.b(box(0.08, h, 0.08, x + (sx * w) / 2, y, z + (sz * d) / 2), P.woodD, 0.03);
-      k.b(box(w + 0.07, 0.07, d + 0.07, x, y + h - 0.07, z), P.woodD, 0.03);
+      k.b(bx(k, 0.02, w + 0.05, 0.08, d + 0.05, x, y, z), P.stone, 0.1);
+      k.b(bx(k, 0.025, w, h - 0.08, d, x, y + 0.08, z), P.wall, 0.07);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.b(bx(k, 0.02, 0.08, h, 0.08, x + (sx * w) / 2, y, z + (sz * d) / 2), P.woodD, 0.03);
+      k.b(bx(k, 0.022, w + 0.07, 0.07, d + 0.07, x, y + h - 0.07, z), P.woodD, 0.03);
       const n = Math.max(1, Math.round(w / 0.3));
       for (let i = 1; i < n; i++) k.b(box(0.022, h - 0.16, 0.02, x - w / 2 + (w * i) / n, y + 0.08, fz), P.woodD, 0);
       // a tie rail and diagonal braces make the front read as a framed wall
@@ -556,10 +612,10 @@ export function rectWalls(k, P, st, o) {
       break;
     }
     case 'marble':
-      k.b(box(w + 0.08, 0.06, d + 0.08, x, y, z), P.stoneL, 0.02);
-      k.b(box(w, h, d, x, y, z), P.wall, 0.025);
-      k.b(box(w + 0.06, 0.1, d + 0.06, x, y + h - 0.1, z), P.wallL, 0.02);
-      k.b(box(w + 0.075, 0.035, d + 0.075, x, y + h - 0.07, z), P.trim, 0.02);
+      k.b(bx(k, 0.022, w + 0.08, 0.06, d + 0.08, x, y, z), P.stoneL, 0.02);
+      k.b(bx(k, 0.03, w, h, d, x, y, z), P.wall, 0.025);
+      k.b(bx(k, 0.022, w + 0.06, 0.1, d + 0.06, x, y + h - 0.1, z), P.wallL, 0.02);
+      k.b(bx(k, 0.012, w + 0.075, 0.035, d + 0.075, x, y + h - 0.07, z), P.trim, 0.02);
       break;
     case 'sandstone':
       k.b(box(w + 0.06, 0.06, d + 0.06, x, y, z), P.wallD, 0.03);
@@ -575,34 +631,34 @@ export function rectWalls(k, P, st, o) {
       face = z + (d / 2) * 0.97;
       break;
     case 'brick':
-      k.b(box(w, h, d, x, y, z), P.wall, 0.05);
+      k.b(bx(k, 0.025, w, h, d, x, y, z), P.wall, 0.05);
       for (let i = 1; i <= 2; i++) k.b(box(w + 0.02, 0.025, d + 0.02, x, y + (i * h) / 3, z), P.wallD, 0);
-      k.b(box(w + 0.06, 0.06, d + 0.06, x, y + h - 0.06, z), P.trim, 0.02);
+      k.b(bx(k, 0.02, w + 0.06, 0.06, d + 0.06, x, y + h - 0.06, z), P.trim, 0.02);
       break;
     case 'lacquer': {
-      k.b(box(w + 0.08, 0.09, d + 0.08, x, y, z), P.stone, 0.06);
-      k.b(box(w - 0.04, h - 0.09, d - 0.04, x, y + 0.09, z), P.infill, 0.03);
+      k.b(bx(k, 0.025, w + 0.08, 0.09, d + 0.08, x, y, z), P.stone, 0.06);
+      k.b(bx(k, 0.02, w - 0.04, h - 0.09, d - 0.04, x, y + 0.09, z), P.infill, 0.03);
       const n = Math.max(2, Math.round(w / 0.55) + 1);
       for (let i = 0; i < n; i++) {
         const px = x - w / 2 + (w * i) / (n - 1);
-        k.b(box(0.08, h - 0.09, 0.08, px, y + 0.09, fz - 0.02), P.wall, 0.03);
-        k.b(box(0.08, h - 0.09, 0.08, px, y + 0.09, z - d / 2 + 0.02), P.wall, 0.03);
+        k.b(bx(k, 0.025, 0.08, h - 0.09, 0.08, px, y + 0.09, fz - 0.02), P.wall, 0.03);
+        k.b(bx(k, 0.025, 0.08, h - 0.09, 0.08, px, y + 0.09, z - d / 2 + 0.02), P.wall, 0.03);
       }
-      k.b(box(w + 0.04, 0.08, d + 0.04, x, y + h - 0.08, z), P.wall, 0.02);
-      k.b(box(w + 0.1, 0.05, d + 0.1, x, y + h - 0.02, z), P.beam, 0.02);
+      k.b(bx(k, 0.02, w + 0.04, 0.08, d + 0.04, x, y + h - 0.08, z), P.wall, 0.02);
+      k.b(bx(k, 0.02, w + 0.1, 0.05, d + 0.1, x, y + h - 0.02, z), P.beam, 0.02);
       break;
     }
     case 'stone':
     default: {
-      k.b(box(w + 0.06, 0.1, d + 0.06, x, y, z), P.stoneD, 0.08);
-      k.b(box(w, h, d, x, y, z), P.wall, 0.08);
+      k.b(bx(k, 0.025, w + 0.06, 0.1, d + 0.06, x, y, z), P.stoneD, 0.08);
+      k.b(bx(k, 0.03, w, h, d, x, y, z), P.wall, 0.08);
       for (const sx of [-1, 1]) {
         for (let i = 0; i < 3; i++) {
           const qy = y + 0.12 + (i * (h - 0.22)) / 3;
           k.b(box(0.1 + (i % 2) * 0.06, 0.1, 0.05, x + sx * (w / 2 - 0.04 - (i % 2) * 0.03), qy, fz + 0.004), P.wallL, 0.03);
         }
       }
-      k.b(box(w + 0.04, 0.05, d + 0.04, x, y + h - 0.05, z), P.wallD, 0.04);
+      k.b(bx(k, 0.02, w + 0.04, 0.05, d + 0.04, x, y + h - 0.05, z), P.wallD, 0.04);
       break;
     }
   }
@@ -610,6 +666,7 @@ export function rectWalls(k, P, st, o) {
     const dw = o.doorW ?? Math.min(0.32, w * 0.24);
     const dh = o.doorH ?? Math.min(h * 0.62, 0.5);
     door(k, P, st, x, y, face, dw, dh, !o.simple);
+    if (!o.simple && o.lantern !== false) wallLantern(k, P, x + dw / 2 + 0.12, y + dh * 0.58, face + 0.01);
   }
   const nw = o.windows ?? 0;
   if (nw > 0) {
@@ -624,7 +681,7 @@ export function rectWalls(k, P, st, o) {
   }
   if (st.ornament === 'spikes') torons(k, P, x, z, w, d, y, h);
   if (st.ornament === 'carvings' && st.wall !== 'timber') frieze(k, P, x, face, w * 0.9, y + h - 0.2);
-  if (st.ornament === 'carvings' && st.wall === 'timber') {
+  if (st.ornament === 'carvings' && st.wall === 'timber' && o.door !== false) { // the boards flank the door
     for (const sx of [-1, 1]) carvedBoard(k, P, x + sx * (o.doorW ?? Math.min(0.32, w * 0.24)) * 0.5 + sx * 0.08, y, face, Math.min(h * 0.72, 0.6));
   }
 }
@@ -722,11 +779,12 @@ export function roofGable(k, P, st, o) {
   const S = span / 2 + over;
   const ye = (-over * h) / (span / 2);
   const put = placer(k, x, y, z, alongX ? 0 : PI / 2);
-  const slopes = fromTris([
-    [[-L, ye, S], [L, ye, S], [L, h, 0]], [[-L, ye, S], [L, h, 0], [-L, h, 0]],
-    [[L, ye, -S], [-L, ye, -S], [-L, h, 0]], [[L, ye, -S], [-L, h, 0], [L, h, 0]],
-  ]);
-  put('body', slopes, P.roof, 0.05);
+  // each slope laid in courses, so the rows are real: a dark butt edge, a face shadowed under the next row
+  const rows = Math.max(4, Math.min(12, Math.round(Math.hypot(S, h - ye) / 0.12)));
+  const lip = Math.min(0.034, 0.02 + h * 0.03);
+  const rnd = () => k.rng.next();
+  put('body', courseSlope([-L, ye, S], [L, ye, S], [-L, h, 0], [L, h, 0], rows, lip, { rnd }), P.roofC, 0.02);
+  put('body', courseSlope([L, ye, -S], [-L, ye, -S], [L, h, 0], [-L, h, 0], rows, lip, { rnd }), P.roofC, 0.02);
   const hl = len / 2;
   const sp = span / 2;
   const ends = fromTris(orient([
@@ -757,15 +815,8 @@ export function roofGable(k, P, st, o) {
       put('body', rake, P.roofD, 0.02);
     }
   }
-  if (grade !== 'small') {
-    for (const sz of [-1, 1]) {
-      for (const t of [0.35, 0.68]) {
-        const strip = box(2 * L, 0.025, 0.03, 0, ye + (h - ye) * t + 0.005, sz * S * (1 - t));
-        put('body', strip, P.roofD, 0.02);
-      }
-    }
-  }
-  const cap = box(2 * L + 0.03, 0.055, 0.1, 0, h - 0.025, 0);
+  // a rounded ridge
+  const cap = pole([-L - 0.015, h - 0.002, 0], [L + 0.015, h - 0.002, 0], 0.056, 6);
   if (team) put('team', cap, 1);
   else put('body', cap, P.roofD, 0.02);
   if (grade === 'grand' || st.ornament === 'columns') {
@@ -780,79 +831,66 @@ export function roofLonghouse(k, P, st, o) {
   const len = alongX ? w : d;
   const span = alongX ? d : w;
   const put = placer(k, x, y, z, alongX ? 0 : PI / 2);
-  const n = o.simple ? 2 : 4;
   const L = len / 2 + 0.04;
-  const sag = h * 0.28;
-  const sec = [];
-  for (let i = 0; i <= n; i++) {
-    const u = (2 * i) / n - 1;
-    const px = u * L;
-    const lift = sag * u * u;
-    const S = (span / 2 + 0.12) * (1 + 0.07 * (1 - u * u));
-    sec.push({ l: [px, -0.06 + lift * 0.5, S], r: [px, -0.06 + lift * 0.5, -S], t: [px, h + lift, 0] });
-  }
-  // turf / shingle courses: three bands per slope, darker toward the eaves
-  const lerp3 = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f];
-  const BANDS = [[0, 0.3, 0.74], [0.3, 0.66, 1], [0.66, 1, 0.88]];
-  for (const [f0, f1, sh] of BANDS) {
-    const tris = [];
-    for (let i = 0; i < n; i++) {
-      const a = sec[i];
-      const b = sec[i + 1];
-      for (const side of ['l', 'r']) {
-        const a0 = lerp3(a[side], a.t, f0);
-        const a1 = lerp3(a[side], a.t, f1);
-        const b0 = lerp3(b[side], b.t, f0);
-        const b1 = lerp3(b[side], b.t, f1);
-        tris.push([a0, b0, b1], [a0, b1, a1]);
-      }
-    }
-    put('body', soft(fromTris(orient(tris, (mx, my) => [mx, my - 1, 0]))), shade(P.roof, sh), 0.03);
-  }
-  // dark eave boards give the turf a visible edge
-  if (!o.simple) {
-    const m = n / 2;
-    for (const [i0, i1] of [[0, m], [m, n]]) {
-      for (const side of ['l', 'r']) put('body', strut(sec[i0][side], sec[i1][side], 0.05, 0.06), P.woodD, 0.02);
-    }
-  }
+  const S = span / 2 + 0.12;
+  const ye = -0.06;
+  // the sod laid in thick overlapping strips, each shadowed under the next, with a dark underside
+  const rows = o.simple ? 4 : Math.max(5, Math.min(9, Math.round(Math.hypot(S, h - ye) / 0.14)));
+  const rnd = () => k.rng.next();
+  const opts = { shadow: 0.28, butt: 0.5, tint: 0.1, rnd };
+  put('body', courseSlope([-L, ye, S], [L, ye, S], [-L, h, 0], [L, h, 0], rows, 0.04, opts), P.roof, 0.03);
+  put('body', courseSlope([L, ye, -S], [-L, ye, -S], [L, h, 0], [-L, h, 0], rows, 0.04, opts), P.roof, 0.03);
+  // the edge of the turf: a thick, dark roll (round from a hall's roof on, a square beam on a lookout's)
+  const sg = o.simple ? 4 : 6;
+  const roll = shade(P.roofD, 0.8);
+  for (const sz of [-1, 1]) put('body', pole([-L, ye + 0.03, sz * S * 0.985], [L, ye + 0.03, sz * S * 0.985], 0.05, sg), roll, 0.03);
   const sp = span / 2;
   const hl = len / 2;
-  const endH = h + sag * Math.pow(hl / L, 2) - 0.05;
   put('body', fromTris(orient([
-    [[hl, 0, sp], [hl, 0, -sp], [hl, endH, 0]],
-    [[-hl, 0, -sp], [-hl, 0, sp], [-hl, endH, 0]],
+    [[hl, 0, sp], [hl, 0, -sp], [hl, h - 0.05, 0]],
+    [[-hl, 0, -sp], [-hl, 0, sp], [-hl, h - 0.05, 0]],
   ], () => [0, 0, 0])), P.wallD, 0.04);
-  // ridge cap: one beam per section
-  for (let i = 0; i < n; i++) {
-    const g = strut(sec[i].t, sec[i + 1].t, 0.07, 0.07);
-    if (team) put('team', g, 1);
-    else put('body', g, P.roofD, 0.02);
+  // ridge: a round beam in the team's color
+  const ridge = pole([-L, h, 0], [L, h, 0], 0.045, sg);
+  if (team) put('team', ridge, 1);
+  else put('body', ridge, P.roofD, 0.02);
+  // grass takes root along the ridge of a sod roof and hangs over its eaves in strands
+  if (k.lod && !o.simple && !k.tight) {
+    const grass = made(mix(P.roof, '#a8c24e', 0.35), SURF.plain);
+    const nh = Math.max(3, Math.round(len / 0.2));
+    for (const sz of [-1, 1]) {
+      for (let i = 0; i < nh; i++) {
+        const px = (((i + 0.5) / nh) * 2 - 1) * L * 0.96 + k.rand(-0.04, 0.04);
+        const drop = k.rand(0.045, 0.085);
+        put('body', pole([px, ye + 0.03, sz * S * 0.985], [px + k.rand(-0.02, 0.02), ye + 0.03 - drop, sz * (S + 0.005)], 0.016, 3), grass, 0.1);
+      }
+    }
+    const nt = Math.max(4, Math.round(len / 0.2));
+    for (let i = 0; i < nt; i++) {
+      const sc = k.rand(0.6, 1.15);
+      put('body', cone(0.024 * sc, 0.09 * sc, 3, (((i + 0.5) / nt) * 2 - 1) * L * 0.94 + k.rand(-0.03, 0.03), h - 0.012, k.rand(-0.06, 0.06), true), grass, 0.1);
+    }
   }
   // crossed gable boards, carved into dragon heads on grander halls
   const dragons = !o.simple && (grade !== 'small' || st.ornament === 'carvings');
   for (const sx of [-1, 1]) {
-    const top = sec[sx < 0 ? 0 : n].t;
-    const ex = top[0];
-    const eS = sec[sx < 0 ? 0 : n].l[2];
-    const ey = sec[sx < 0 ? 0 : n].l[1];
+    const ex = sx * L;
     const tip = dragons ? 0.08 : 0.14;
-    for (const sz of [-1, 1]) {
-      const p0 = [ex, ey, sz * eS];
-      const t = (top[1] + tip - ey) / (top[1] - ey);
-      put('body', strut(p0, [ex, ey + (top[1] - ey) * t, sz * eS * (1 - t)], 0.05, 0.05), P.trim, 0.03);
+    if (!o.simple) {
+      for (const sz of [-1, 1]) {
+        const t = (h + tip - ye) / (h - ye);
+        put('body', strut([ex, ye, sz * S], [ex, ye + (h - ye) * t, sz * S * (1 - t)], 0.05, 0.05), P.trim, 0.03);
+      }
     }
     if (dragons) {
-      const hx = ex;
-      const hy = top[1] + 0.04;
-      put('body', strut([hx, hy - 0.04, 0], [hx + sx * 0.05, hy + 0.13, 0], 0.07), P.trim, 0.04);
-      put('body', strut([hx + sx * 0.03, hy + 0.13, 0], [hx + sx * 0.17, hy + 0.15, 0], 0.075, 0.065), P.trim, 0.04);
-      put('body', strut([hx + sx * 0.05, hy + 0.08, 0], [hx + sx * 0.15, hy + 0.07, 0], 0.03, 0.05), P.trim, 0.04);
-      put('body', box(0.025, 0.03, 0.08, hx + sx * 0.09, hy + 0.18, 0), P.accent, 0);
-      put('body', cone(0.025, 0.08, 4, hx + sx * 0.04, hy + 0.17, 0, true), P.trim, 0);
+      const hy = h + 0.04;
+      put('body', strut([ex, hy - 0.04, 0], [ex + sx * 0.05, hy + 0.13, 0], 0.07), P.trim, 0.04);
+      put('body', strut([ex + sx * 0.03, hy + 0.13, 0], [ex + sx * 0.17, hy + 0.15, 0], 0.075, 0.065), P.trim, 0.04);
+      put('body', strut([ex + sx * 0.05, hy + 0.08, 0], [ex + sx * 0.15, hy + 0.07, 0], 0.03, 0.05), P.trim, 0.04);
+      put('body', cone(0.025, 0.08, 4, ex + sx * 0.04, hy + 0.17, 0, true), P.accent, 0);
     }
   }
-  return y + h + sag + (dragons ? 0.24 : 0.16);
+  return y + h + (dragons ? 0.24 : 0.16);
 }
 
 export function roofPyramid(k, P, st, o) {
