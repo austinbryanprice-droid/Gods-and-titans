@@ -2,16 +2,19 @@
 // revives), the Titan, a mixed army from the Barracks and Shrine, and building
 // upgrades from a surplus.
 import { BUILDINGS, UPGRADES, getUnitType } from '../data/index.js';
-import { MAX_GODS, GOD_SLOT_TIER, REVIVE_COST_MULT, MAX_QUEUE, POP_MAX } from '../config.js';
+import { reviveMult } from '../data/upgrades.js';
+import { MAX_GODS, GOD_SLOT_TIER, MAX_QUEUE, POP_MAX } from '../config.js';
 import { countOf, doneOf } from './scan.js';
 import { unitInfo, godRoles } from './unit-info.js';
 import { workerNeed } from './economy.js';
 
-function halfCost(cost) {
+/** What reviving a fallen god costs this player: the usual share of its price, less with Hindu Samsara. */
+function reviveCost(cost, mods) {
+  const m = reviveMult(mods);
   return {
-    gold: Math.round((cost.gold || 0) * REVIVE_COST_MULT),
-    wood: Math.round((cost.wood || 0) * REVIVE_COST_MULT),
-    faith: Math.round((cost.faith || 0) * REVIVE_COST_MULT),
+    gold: Math.round((cost.gold || 0) * m),
+    wood: Math.round((cost.wood || 0) * m),
+    faith: Math.round((cost.faith || 0) * m),
   };
 }
 
@@ -186,7 +189,7 @@ export function planProduction(ai, s, wants) {
         // Revive the highest level fallen god.
         fallen.sort((a, b) => (p.fallen[b].level || 1) - (p.fallen[a].level || 1) || (a < b ? -1 : 1));
         pick = fallen[0];
-        cost = halfCost(getUnitType(pick).cost);
+        cost = reviveCost(getUnitType(pick).cost, p.mods);
       } else {
         const plan = godPlan(ai);
         const have = new Set([...s.gods.map((g) => g.type), ...temple.queue.map((q) => q.u)]);
