@@ -321,6 +321,7 @@ export function holdSpot(u, t) {
     s.R = hyp(u.x - t.x, u.y - t.y);
   }
   s.lastD = Infinity;
+  s.cut = 0; // a way to the target exists, whatever failed before
 }
 
 function markBad(s, p, now) {
@@ -400,10 +401,12 @@ export function approachSpot(world, u, t) {
       markBad(s, p, now);
       u.blockedT += 2;
       // Two spots in a row that no path reaches: the building is shut in (behind a wall, say).
-      if (!mv.complete && ++s.cut >= CUT_SPOTS) {
-        stopMove(u);
-        return 'unreachable';
-      }
+      if (!mv.complete) {
+        if (++s.cut >= CUT_SPOTS) {
+          stopMove(u);
+          return 'unreachable';
+        }
+      } else if (!mv.failed) s.cut = 0; // a spot it walked all the way to: the building can be reached
       return 'blocked';
     }
   } else {

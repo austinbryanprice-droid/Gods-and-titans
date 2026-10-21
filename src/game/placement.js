@@ -4,7 +4,7 @@
 // stand until seen), explored tiles, gold mines,
 // own / allied buildings, enemy buildings that are visible or remembered, and
 // visible enemy / neutral ground units. Pure: runs in Node tests.
-import { TERRAIN, DROPOFF_MINE_GAP } from '../config.js';
+import { TERRAIN, DROPOFF_MINE_GAP, WALL_PLACE_RANGE } from '../config.js';
 import { BUILDINGS, UNITS, GOLD_MINE } from '../data/index.js';
 import { wallLine } from '../data/walls.js';
 
@@ -22,6 +22,7 @@ export const MINE_IN_WAY = 'A gold mine is in the way.';
 export const UNIT_IN_WAY = 'Something is in the way.';
 export const UNEXPLORED = 'Unexplored ground.';
 export const WALL_THERE = 'The wall is already there.';
+export const WALL_TOO_FAR = 'Too far from your Worshippers.';
 
 const WALKABLE = new Set([TERRAIN.GRASS, TERRAIN.DIRT, TERRAIN.SAND]);
 
@@ -184,23 +185,32 @@ function checkFootprint(vs, def, tx, ty, footprints) {
  * What a wall dragged from tile (x0, y0) towards (x1, y1) would do (the sim's issueBuildLine):
  * every tile of data/walls.js wallLine as 'build' (a segment will be raised there), 'held' (my
  * wall, or a tower joined to it, already stands there: skipped and free) or 'blocked' (cannot be
- * built on: left out, with the reason). The segments to build are paid for together.
+ * built on, or is more than WALL_PLACE_RANGE from every one of `workers`: left out, with the
+ * reason). The segments to build are paid for together.
+ * @param {{ x: number, y: number }[]|null} [workers] the worshippers the line would be ordered to; null
+ *   when there are none to tell, which leaves the range out
  * @returns {{ tiles: { tx: number, ty: number, state: string, message: string|null }[], build: number,
  *   cost: { gold: number, wood: number, faith: number }, message: string|null }} message: null when at
  *   least one segment can be raised, else why not
  */
-export function checkWallLine(vs, playerIndex, typeId, x0, y0, x1, y1, planned = null) {
+export function checkWallLine(vs, playerIndex, typeId, x0, y0, x1, y1, planned = null, workers = null) {
   const def = typeof typeId === 'string' && Object.hasOwn(BUILDINGS, typeId) ? BUILDINGS[typeId] : null;
   const none = { tiles: [], build: 0, cost: { gold: 0, wood: 0, faith: 0 }, message: CANT_BUILD };
   if (!def || !def.wall || ![x0, y0, x1, y1].every(Number.isFinite)) return none;
   const footprints = knownFootprints(vs, planned);
   const held = (tx, ty) => footprints.some((f) => f.joins && tx >= f.tx && tx < f.tx + f.size && ty >= f.ty && ty < f.ty + f.size);
+  const inReach = (tx, ty) => !workers || workers.some((w) => Math.hypot(w.x - (tx + 0.5), w.y - (ty + 0.5)) <= WALL_PLACE_RANGE);
   const tiles = [];
   let build = 0;
   let reason = null;
   for (const [tx, ty] of wallLine(x0, y0, x1, y1)) {
     if (held(tx, ty)) {
       tiles.push({ tx, ty, state: 'held', message: null });
+      continue;
+    }
+    if (!inReach(tx, ty)) {
+      reason = reason || WALL_TOO_FAR;
+      tiles.push({ tx, ty, state: 'blocked', message: WALL_TOO_FAR });
       continue;
     }
     const chk = checkFootprint(vs, def, tx, ty, footprints);

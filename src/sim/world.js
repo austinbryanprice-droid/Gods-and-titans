@@ -654,7 +654,9 @@ export class World {
     if (!p || p.defeated) return;
     p.defeated = true;
     for (const u of this.unitList) if (!u.dead && u.owner === i) this.killEntity(u, null);
-    if (surrender) for (const b of this.buildingList) if (!b.dead && b.owner === i) this.killEntity(b, null);
+    // A surrendering player's buildings fall with them. Otherwise only wall segments can be left (they
+    // do not keep a player in the game): they come down too, or no teammate could ever open them.
+    for (const b of this.buildingList) if (!b.dead && b.owner === i && (surrender || b.def.wall)) this.killEntity(b, null);
     this.emit({ type: 'playerDefeated', player: i });
     if (!deferVictory) this.checkVictory();
   }

@@ -45,6 +45,7 @@ export const AUTO_REPAIR_RANGE = 10; // idle worshippers with Auto-Repair on loo
 // Walls (data/walls.js, DESIGN 4.3 and 5.3): worshippers drag out a line of one-tile segments.
 export const MAX_WALL_LINE = 48; // tiles in one dragged line (one build command)
 export const WALL_HELP_RANGE = 14; // a worshipper that finished a wall segment walks on to an unfinished one this near
+export const WALL_PLACE_RANGE = 24; // a dragged wall is placed all at once, so only where one of the ordered worshippers is this near
 export const WALL_REMOVE_REFUND = 0.5; // share of a completed wall segment's cost back when its owner takes it down
 export const MAX_WALL_SELECTION = 160; // segments a wall-only selection holds (any other selection holds MAX_SELECTION)
 export const BREACH_RANGE = 4; // a blocked attacker breaks an enemy wall segment this close to it

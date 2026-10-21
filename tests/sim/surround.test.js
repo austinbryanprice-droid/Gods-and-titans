@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { TICK_RATE } from '../../src/config.js';
 import { edgeDist } from '../../src/sim/common.js';
 import { hasFreeSpot } from '../../src/sim/surround.js';
-import { makeWorld, spawn, clearUnits, runUntil } from './helpers.js';
+import { makeWorld, spawn, clearUnits, runUntil, run, place } from './helpers.js';
 
 // Melee surround and re-targeting (DESIGN 5.4): attackers spread over free
 // spots on the target's perimeter instead of piling up behind each other.
@@ -190,4 +190,20 @@ test('explicit attack on a walled-in enemy keeps the target', () => {
     assert.equal(u.order && u.order.target, a.id);
   }
   assert.equal(u.state === 'attack' || u.state === 'move' || u.state === 'idle', true);
+});
+
+test('hitting the target clears the count of attack spots no path reached', () => {
+  // Two such spots in a row make a building count as shut in (an explicit attack on it is then dropped),
+  // so one failed spot from long ago must not add up with a later one once the attacker has reached it.
+  const w = makeWorld();
+  clearUnits(w, 0);
+  clearUnits(w, 1);
+  const house = place(w, 1, 'house', 20, 20);
+  const u = spawn(w, 0, 'warrior', 20.5, 24);
+  w.issueCommand(0, { type: 'attack', units: [u.id], target: house.id });
+  assert.ok(runUntil(w, () => u.state === 'attack', 30) > 0, 'it reaches the house');
+  u.atk.cut = 1; // an earlier spot had no path
+  run(w, 1);
+  assert.equal(u.state, 'attack');
+  assert.equal(u.atk.cut, 0);
 });

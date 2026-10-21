@@ -359,7 +359,10 @@ Pop used = pop of living units + pop of everything queued in production.
     already blocks the way and can be attacked (hp 10% of max). Tiles the wall already holds (an own
     segment, or a tower that joined it) are skipped and tiles that cannot be built on are left out;
     when nothing at all can be built the first reason is the error (`The wall is already there.` when
-    the line is all built).
+    the line is all built). The sites appear with no worker on the spot, so only tiles within
+    `WALL_PLACE_RANGE` (24) of one of the ordered workers are raised; the rest are left out like a
+    tile that cannot be built on (`Too far from your Worshippers.` when nothing is in reach). Nobody
+    can wall off, or look from, a far-off place without sending a Worshipper there first.
   - Crew: the workers are ordered along the line and each takes a contiguous stretch; extra workers
     help the nearest one. A worker that finishes a segment, or cannot reach it (it is boxed in), walks
     on to the next of its stretch and then to the nearest unfinished segment of the player's walls
@@ -375,6 +378,8 @@ Pop used = pop of living units + pop of everything queued in production.
     meanwhile and `world.changeBuildingType` then turns the same entity into stone in place (it keeps
     the health it is missing; armor and maximum health follow the new type). Imperial Bureaucracy's
     `techSpeed` quickens it, like any growth.
+  - A `build` command only takes the types of `BUILD_MENU` (`buildableDef`): a Stone Wall comes from the
+    upgrade alone, so a client that orders one is ignored.
   - A building with `joinsWalls` may be placed over the owner's own wall segments (the placement check
     ignores them); when the builder starts it the segments under its footprint are removed with a full
     refund and the tower stands in their place, joined to the wall (the renderer reaches the
@@ -468,8 +473,9 @@ Pop used = pop of living units + pop of everything queued in production.
   enemy segment within `BREACH_RANGE` (4) with the least health left (nearest on a tie), so a crowd
   works on one segment and a wooden stretch in a stone wall is where they break in. The order
   carries on once the segment falls and finds the way open. An attack-move drops the breach when an
-  enemy unit comes within reach. Ranged attackers shoot over a wall and never break it, and the AI
-  never targets a wall segment (10). Rams hit walls like any building. A wall segment is worth no
+  enemy unit comes within reach. Ranged attackers shoot over a wall at whatever is within their range; one
+  that would have to come nearer and finds the wall in its way breaks it like anyone else (slowly: arrows
+  against its armor), so no army stands outside a wall for good. The AI never targets a wall segment (10). Rams hit walls like any building. A wall segment is worth no
   experience (5.9); it pays spoils like any finished building. Nothing breaks a wall during a
   Decade of Peace (5.10).
 - Neutral creeps (owner −1) sit at camps, attack anything within `CREEP_AGGRO_RANGE`, chase up
@@ -499,7 +505,7 @@ from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid).
 
 ### 5.8 Victory
 A player is **defeated** when they own no buildings (finished or not; wall segments do not count).
-Their remaining units die. A team wins when every player not on that team is defeated (neutral excluded).
+Their remaining units die and so do their wall segments (an ally could never open them). A team wins when every player not on that team is defeated (neutral excluded).
 `surrender` defeats the issuing player. Then `gameOver: { winningTeam }`.
 
 ### 5.9 Soldier ranks
@@ -1026,10 +1032,12 @@ per-frame budget, so a revealed army appears over a few frames.
   orders it for all selected workers (`build` with `tx2` / `ty2`; Shift keeps laying walls). A tip by
   the cursor says what the line would build and cost ("12 × Wooden Wall 🌲 144", red when it is
   short or nothing can be built); a refused line keeps the mode so a shorter one can be tried.
+  The ghost shows tiles farther than `WALL_PLACE_RANGE` from every selected worker as blocked
+  (`checkWallLine(..., workers)`, the sim's `Too far from your Worshippers.`).
   Right-click, Esc or losing the window drops the drag first and leaves placement on the second
-  press. A wall-only selection holds up to `MAX_WALL_SELECTION` (160) segments (any other selection
+  press; letting go where no ground shows (past the map's edge) orders nothing. A wall-only selection holds up to `MAX_WALL_SELECTION` (160) segments (any other selection
   `MAX_SELECTION`); a selection of more than 24 shows a crowd panel (a stack per type with its count,
-  the total health, how many are hurt, being built or upgrading) in place of the icon grid; a drag box prefers other buildings
+  the total health, how many are hurt, being built or upgrading) in place of the icon grid (rebuilt when walls of the selection turn to stone); a drag box prefers other buildings
   over wall segments, so the walls are not picked by accident. `game.js` folds a run of
   destroyed segments into one "Your wall was breached!" message per 6 s.
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.

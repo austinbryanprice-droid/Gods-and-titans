@@ -133,6 +133,15 @@ function shapeOf(e, vs) {
   return `${e.id}|${e.t}|${e.o}|${e.k === 'b' ? (isComplete(e) ? 1 : 0) : ''}|${q}|${e.lv || ''}|${e.tr || ''}|${vs.relation(e.o)}`;
 }
 
+/** "wooden_wall×20,stone_wall×10": how many of each type are selected. It changes when walls are upgraded in place. */
+function typeMix(ents) {
+  const n = new Map();
+  for (const e of ents) n.set(e.t, (n.get(e.t) || 0) + 1);
+  let out = '';
+  for (const [t, c] of n) out += `${out ? ',' : ''}${t}×${c}`;
+  return out;
+}
+
 export class InfoView {
   /**
    * @param {HTMLElement} root container
@@ -153,7 +162,7 @@ export class InfoView {
     let sig;
     if (ents.length === 0) sig = 'empty';
     else if (ents.length === 1) sig = `1:${shapeOf(ents[0], vs)}`;
-    else sig = `n:${ents.map((e) => e.id).join(',')}:${active ? active.type : ''}`;
+    else sig = `n:${ents.map((e) => e.id).join(',')}:${active ? active.type : ''}:${typeMix(ents)}`;
     if (sig !== this.sig) {
       this.sig = sig;
       this.root.textContent = '';

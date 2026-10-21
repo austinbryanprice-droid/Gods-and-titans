@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BUILDINGS, BUILD_MENU } from '../../src/data/index.js';
 import { isWallType, wallUpgradeOf, wallLine, wallMask, WALL_N, WALL_E, WALL_S, WALL_W } from '../../src/data/walls.js';
-import { MAX_WALL_LINE } from '../../src/config.js';
+import { MAX_WALL_LINE, WALL_PLACE_RANGE } from '../../src/config.js';
+import { WALL_TOO_FAR } from '../../src/sim/construction.js';
 import { findTarget, findBreach } from '../../src/sim/combat.js';
 import { makeWorld, run, runCollect, runUntil, place, spawn, clearUnits, eventsOf, errorsOf } from './helpers.js';
 
@@ -27,6 +28,78 @@ test('wall data: two segment types, the stone one reached by upgrading the woode
   assert.ok(BUILD_MENU.includes('wooden_wall'), 'worshippers build the wooden wall from the menu');
   assert.ok(!BUILD_MENU.includes('stone_wall'), 'stone comes only from the upgrade');
   assert.equal(BUILDINGS.tower.joinsWalls, true);
+});
+
+test('stone comes only from the upgrade: a build command for a Stone Wall, single or as a line, is refused', () => {
+  const w = makeWorld();
+  w.players[0].wood = 1000;
+  w.players[0].gold = 1000;
+  const ws = workers(w).slice(0, 2);
+  buildLine(w, ws, 'stone_wall', 14, 20, 20, 20);
+  w.issueCommand(0, { type: 'build', units: ws.map((u) => u.id), building: 'stone_wall', tx: 14, ty: 24 });
+  w.tick();
+  assert.equal(walls(w).length, 0, 'nothing is raised');
+  assert.equal(w.players[0].wood, 1000);
+  assert.equal(w.players[0].gold, 1000);
+  assert.ok(ws.every((u) => !u.order || u.order.type !== 'build'), 'and no worshipper was sent');
+  buildLine(w, ws, 'wooden_wall', 14, 20, 20, 20);
+  w.tick();
+  assert.equal(walls(w).length, 7, 'the wooden wall is still built');
+});
+
+test('a dragged wall goes up only within WALL_PLACE_RANGE of an ordered worshipper; the rest of the line is left out and not paid for', () => {
+  const w = makeWorld();
+  clearUnits(w, 0);
+  const a = spawn(w, 0, 'worshipper', 10, 12);
+  w.players[0].wood = 1000;
+  buildLine(w, [a], 'wooden_wall', 4, 12, 47, 12);
+  w.tick();
+  assert.deepEqual(errorsOf(w.events), [], 'part of the line is raised, so there is no refusal');
+  const xs = walls(w).map((b) => b.tx).sort((p, q) => p - q);
+  assert.equal(xs[0], 4);
+  assert.equal(xs.at(-1), 33, 'the last segment is the one whose centre is still 23.5 tiles from the worshipper');
+  assert.equal(xs.length, 30);
+  assert.equal(w.players[0].wood, 1000 - 30 * BUILDINGS.wooden_wall.cost.wood, 'only the segments raised are paid for');
+  // The reach is measured from the worshipper where it stands, not from the end of the line.
+  assert.ok(Math.hypot(33.5 - 10, 0.5) <= WALL_PLACE_RANGE && Math.hypot(34.5 - 10, 0.5) > WALL_PLACE_RANGE);
+});
+
+test('a wall line wholly out of reach is refused: nothing is placed, paid, or ordered', () => {
+  const w = makeWorld();
+  clearUnits(w, 0);
+  const a = spawn(w, 0, 'worshipper', 10, 12);
+  w.players[0].wood = 1000;
+  buildLine(w, [a], 'wooden_wall', 40, 12, 47, 12);
+  w.tick();
+  assert.deepEqual(errorsOf(w.events), [WALL_TOO_FAR]);
+  assert.equal(walls(w).length, 0);
+  assert.equal(w.players[0].wood, 1000);
+  assert.ok(!a.order || a.order.type !== 'build', 'and the worshipper was not sent');
+  // Even a single segment, as a click makes it.
+  buildLine(w, [a], 'wooden_wall', 44, 12, 44, 12);
+  w.tick();
+  assert.equal(walls(w).length, 0);
+});
+
+test('any one of the ordered worshippers can bring a stretch of the line into reach', () => {
+  const w = makeWorld();
+  clearUnits(w, 0);
+  const near = spawn(w, 0, 'worshipper', 10, 12);
+  const far = spawn(w, 0, 'worshipper', 44, 12);
+  w.players[0].wood = 1000;
+  buildLine(w, [near, far], 'wooden_wall', 4, 12, 47, 12);
+  w.tick();
+  assert.deepEqual(errorsOf(w.events), []);
+  assert.equal(walls(w).length, 44, 'the whole line');
+  // A worshipper that was not ordered counts for nothing.
+  const w2 = makeWorld();
+  clearUnits(w2, 0);
+  const one = spawn(w2, 0, 'worshipper', 10, 12);
+  spawn(w2, 0, 'worshipper', 44, 12);
+  w2.players[0].wood = 1000;
+  buildLine(w2, [one], 'wooden_wall', 4, 12, 47, 12);
+  w2.tick();
+  assert.equal(walls(w2).length, 30);
 });
 
 test('wallLine: eight directions, the start tile first, diagonals joined edge to edge, capped', () => {
@@ -322,6 +395,23 @@ test('walls do not keep a player in the game', () => {
   assert.ok(w.gameOver && w.gameOver.winningTeam === 2);
 });
 
+test('a defeated player\'s walls come down with them, so no teammate is shut in or out for good', () => {
+  const w = makeWorld({ players: 3, teams: [1, 1, 2] });
+  for (let x = 20; x < 30; x++) {
+    place(w, 0, 'stone_wall', x, 20);
+    place(w, 1, 'wooden_wall', x, 22);
+  }
+  assert.ok(!w.map.isPassable(25, 22), 'the teammate\'s wall blocks the way');
+  const tc = w.buildingList.find((b) => b.owner === 1 && b.type === 'town_center');
+  w.killEntity(tc, null);
+  w.tick();
+  assert.ok(w.players[1].defeated);
+  assert.equal(walls(w, 1).length, 0, 'their walls are gone');
+  assert.ok(w.map.isPassable(25, 22), 'and the way is open');
+  assert.equal(walls(w, 0).length, 10, 'the surviving teammate\'s walls stand');
+  assert.ok(!w.gameOver, 'the game goes on');
+});
+
 test('soldiers do not pick walls as targets; towers and idle soldiers leave them alone', () => {
   const w = makeWorld();
   clearUnits(w, 0);
@@ -373,10 +463,15 @@ test('soldiers shut out by a wall break through it and go on to the buildings be
   w.issueCommand(1, { type: 'attackMove', units: army.map((u) => u.id), x: 8, y: 8 });
   const tc = w.buildingList.find((b) => b.owner === 0 && b.type === 'town_center');
   const searchesBefore = w.paths.stats.expanded;
-  const t = runUntil(w, () => tc.dead, 400);
+  // (With the Town Center gone the player is defeated and the rest of the ring comes down: count before that.)
+  let lost = 0;
+  const t = runUntil(w, () => {
+    if (!tc.dead) lost = ring.length - walls(w).length;
+    return tc.dead;
+  }, 400);
   assert.ok(t > 0, 'the Town Center falls');
-  assert.ok(walls(w).length < ring.length, 'a way in was broken');
-  assert.ok(walls(w).length >= ring.length - 4, `the army broke in, it did not tear the ring down (${ring.length - walls(w).length} segments lost)`);
+  assert.ok(lost > 0, 'a way in was broken');
+  assert.ok(lost <= 4, `the army broke in, it did not tear the ring down (${lost} segments lost)`);
   assert.ok(w.paths.stats.expanded - searchesBefore < 400000, `pathfinding stayed cheap while shut out (${w.paths.stats.expanded - searchesBefore} nodes)`);
   assert.equal(w.perf.commandErrors, 0);
 });
@@ -432,6 +527,23 @@ test('archers shoot over a wall without breaking it', () => {
   run(w, 20);
   assert.ok(tc.hp < tc.maxHp, 'the Town Center is being shot');
   assert.equal(walls(w).length, ring.length);
+});
+
+test('archers that cannot come within range of what lies behind a wall break it, slowly', () => {
+  // A wide ring with a house deep inside: no spot outside the wall is within an archer's range of it.
+  const w = makeWorld();
+  clearUnits(w, 0);
+  clearUnits(w, 1);
+  const ring = [];
+  for (let x = 2; x <= 30; x++) ring.push([x, 2], [x, 30]);
+  for (let y = 3; y <= 29; y++) ring.push([2, y], [30, y]);
+  for (const [x, y] of ring) place(w, 0, 'wooden_wall', x, y);
+  const house = place(w, 0, 'house', 15, 15);
+  const archers = [0, 1, 2, 3].map((i) => spawn(w, 1, 'archer', 34, 14 + i));
+  w.issueCommand(1, { type: 'attack', units: archers.map((u) => u.id), target: house.id });
+  assert.ok(runUntil(w, () => walls(w).length < ring.length, 150) > 0, 'a segment falls to their arrows');
+  assert.equal(house.hp, house.maxHp, 'the house was out of reach until then');
+  assert.ok(runUntil(w, () => house.dead, 150) > 0, 'and with the way open they get to it');
 });
 
 test('your own wall blocks your own soldiers, and taking a segment down opens the way', () => {
