@@ -188,6 +188,22 @@ test('delta carries events, felled and gameOver; unchanged entities stay shared'
   assert.notEqual(out.entities[2], a.entities[2]);
 });
 
+test('delta packs bounty events, with and without the resource they pay in', () => {
+  const r = new RNG(5);
+  const a = initialSnapshot(r, 3, { v: 1 });
+  const events = [
+    { type: 'bounty', player: 0, amount: 25, x: 10.5, y: 20.25 }, // a creep's gold, as before
+    { type: 'bounty', player: 1, amount: 16, x: 3, y: 4, res: 'g' }, // Norse plunder
+    { type: 'bounty', player: 0, amount: 6, x: 12.5, y: 7, res: 'f' }, // Aztec sacrifice
+  ];
+  const b = { ...a, tick: 1, events };
+  const d = encode(a, b);
+  assert.deepEqual(d.e.map((e) => e.length), [5, 6, 6], 'packed as arrays; the plain gold bounty keeps its short shape, the others carry res');
+  const out = apply(a, json(d)).events;
+  assert.deepEqual(out.map((e) => [e.player, e.amount, e.res || 'g']), [[0, 25, 'g'], [1, 16, 'g'], [0, 6, 'f']]);
+  assert.deepEqual(out, events.map((e) => ({ ...e })));
+});
+
 test('delta round-trips FakeWorld streams (big snapshots, small deltas)', () => {
   const setup = { seed: 11, mapSize: 'small', players: [0, 1, 2].map((i) => ({ index: i, name: `P${i}`, team: i + 1, pantheon: 'greek', color: '#fff', kind: 'human' })) };
   const w = new FakeWorld(setup, { units: 500, buildings: 8, churn: 3, gameOverTick: 700 });

@@ -1,6 +1,8 @@
 // Vocabulary and validation for game data. The content files, the simulation,
 // the AI and the 3D model builders all agree on the values listed here.
 // See DESIGN.md section 4 for field meanings.
+import { BUILDINGS } from './buildings.js';
+import { MORTALS } from './mortals.js';
 
 export const UNIT_CLASSES = ['worker', 'infantry', 'ranged', 'support', 'siege', 'creature', 'god', 'titan', 'minion'];
 
@@ -148,16 +150,23 @@ export function validatePantheon(p, errors, unitIds) {
     if (u.pantheon !== p.id) errors.push(`${w}: unit ${u.id} has pantheon ${u.pantheon}`);
     validateUnit(u, errors, unitIds);
   }
+  validateIdentity(p, errors, unitIds);
+  validateElite(p, errors, unitIds);
+  validateLooks(p, errors);
 }
 
 // ---- Building upgrades (src/data/upgrades.js) ----
+// Pantheon traits a 'perk' effect can raise (each is read by one sim rule; see data/upgrades.js).
+export const PERK_STATS = ['plunder', 'sacrifice', 'karma', 'shrineFaith', 'buildSpeed', 'techSpeed', 'cooldown', 'revive'];
+
 export const UPGRADE_EFFECTS = {
   building: ['hp', 'armor', 'pop', 'range', 'damage', 'faith', 'train'],
-  unit: ['damage', 'hp', 'armor', 'regen'],
+  unit: ['damage', 'hp', 'armor', 'regen', 'speed'],
   carry: null,
   chop: null,
   work: null,
   godLevel: null,
+  perk: PERK_STATS,
 };
 
 /** Validate one upgrade listed in a building's `upgrades`. */
@@ -226,5 +235,104 @@ export function validateUpgradeLines(building, errors) {
     const seen = keys.get(up.hotkey);
     if (seen !== undefined && seen !== owner) errors.push(`building(${building.id}): hotkey ${up.hotkey} is used by ${seen} and ${owner}`);
     keys.set(up.hotkey, owner);
+  }
+}
+
+// ---- Pantheon identity (blessings, elite soldier, mortal looks) ----
+// DESIGN.md section 4.10. Every pantheon plays differently: its blessings are always-on
+// effects in the upgrade vocabulary, its elite is a fifth Barracks soldier, and its looks
+// restyle the shared mortals (visuals only).
+
+/** Elite soldiers: a melee one stands in for the Warrior, a ranged one for the Archer. */
+export const ELITE_KINS = { infantry: 'warrior', ranged: 'archer' };
+
+/** Shape of the effects of a blessing (the same effects an upgrade has). */
+function validateEffects(effects, w, errors, unitIds) {
+  for (const e of effects || []) {
+    if (!e || !Object.hasOwn(UPGRADE_EFFECTS, e.type)) {
+      errors.push(`${w}: bad effect type ${e && e.type}`);
+      continue;
+    }
+    const stats = UPGRADE_EFFECTS[e.type];
+    if (stats && !stats.includes(e.stat)) errors.push(`${w}: bad ${e.type} stat ${e.stat}`);
+    if (!isNum(e.amount)) errors.push(`${w}: bad amount`);
+    if (e.type === 'carry' && e.resource !== 'g' && e.resource !== 'w') errors.push(`${w}: carry resource must be g or w`);
+    if (e.type === 'building' && e.building !== '*' && !Object.hasOwn(BUILDINGS, e.building)) errors.push(`${w}: unknown building ${e.building}`);
+    if (e.type === 'unit') {
+      if (!e.units && !e.classes) errors.push(`${w}: unit effect needs units or classes`);
+      for (const id of e.units || []) if (!unitIds.has(id)) errors.push(`${w}: unknown unit ${id}`);
+      for (const c of e.classes || []) if (!UNIT_CLASSES.includes(c)) errors.push(`${w}: unknown class ${c}`);
+    }
+  }
+}
+
+/** Validate a pantheon's `identity`: tagline, playstyle and two or three blessings. */
+export function validateIdentity(p, errors, unitIds) {
+  const w = `pantheon(${p.id})`;
+  const id = p.identity;
+  if (!id || typeof id !== 'object') return errors.push(`${w}: needs an identity`);
+  for (const f of ['tagline', 'playstyle']) if (typeof id[f] !== 'string' || !id[f]) errors.push(`${w}: identity needs ${f}`);
+  if (!Array.isArray(id.blessings) || id.blessings.length < 2 || id.blessings.length > 3) {
+    return errors.push(`${w}: identity needs 2 or 3 blessings`);
+  }
+  for (const bl of id.blessings) {
+    const bw = `${w}.blessing(${bl && bl.id})`;
+    if (!bl || typeof bl !== 'object') {
+      errors.push(`${w}: blessing is not an object`);
+      continue;
+    }
+    if (typeof bl.id !== 'string' || !bl.id.startsWith(`${p.id}_`)) errors.push(`${bw}: id must start with ${p.id}_`);
+    for (const f of ['name', 'icon', 'description']) if (typeof bl[f] !== 'string' || !bl[f]) errors.push(`${bw}: missing ${f}`);
+    if (!Array.isArray(bl.effects) || bl.effects.length === 0) errors.push(`${bw}: needs effects`);
+    validateEffects(bl.effects, bw, errors, unitIds);
+  }
+}
+
+/** Validate a pantheon's elite soldier (the fifth Barracks unit). */
+export function validateElite(p, errors, unitIds) {
+  const u = p.elite;
+  const w = `pantheon(${p.id}).elite`;
+  if (!u || typeof u !== 'object') return errors.push(`${w}: missing`);
+  if (u.pantheon !== p.id) errors.push(`${w}: unit ${u.id} has pantheon ${u.pantheon}`);
+  if (u.producedAt !== 'barracks') errors.push(`${w}: must be produced at the barracks`);
+  if (!Object.hasOwn(ELITE_KINS, u.class)) errors.push(`${w}: class must be infantry or ranged, not ${u.class}`);
+  else if (u.kin !== ELITE_KINS[u.class]) errors.push(`${w}: ${u.class} elites are kin of the ${ELITE_KINS[u.class]}, not ${u.kin}`);
+  if (u.mortal !== true) errors.push(`${w}: must be flagged mortal (drawn as a soldier)`);
+  if (u.plural !== undefined && typeof u.plural !== 'string') errors.push(`${w}: plural must be a string`);
+  if (u.tier !== 2) errors.push(`${w}: must be tier 2 (Town)`);
+  if (!u.attack) errors.push(`${w}: needs an attack`);
+  if (u.abilities && u.abilities.length) errors.push(`${w}: soldiers have no abilities`);
+  validateUnit(u, errors, unitIds);
+}
+
+/** Validate the optional `looks`: visual overrides for the shared mortals, by unit id. */
+export function validateLooks(p, errors) {
+  const w = `pantheon(${p.id}).looks`;
+  const looks = p.looks;
+  if (looks === undefined) return;
+  if (!looks || typeof looks !== 'object') return errors.push(`${w}: not an object`);
+  for (const [unitId, look] of Object.entries(looks)) {
+    const lw = `${w}.${unitId}`;
+    if (!Object.hasOwn(MORTALS, unitId)) {
+      errors.push(`${lw}: not a mortal unit`);
+      continue;
+    }
+    if (!look || typeof look !== 'object') {
+      errors.push(`${lw}: not an object`);
+      continue;
+    }
+    for (const k of Object.keys(look)) {
+      if (!['colors', 'head', 'headgear', 'weapon', 'offhand', 'extras'].includes(k)) errors.push(`${lw}: cannot restyle ${k}`);
+    }
+    if (look.head !== undefined && !HEADS.includes(look.head)) errors.push(`${lw}: bad head ${look.head}`);
+    if (look.headgear !== undefined && !HEADGEAR.includes(look.headgear)) errors.push(`${lw}: bad headgear ${look.headgear}`);
+    if (look.weapon !== undefined && !WEAPONS.includes(look.weapon)) errors.push(`${lw}: bad weapon ${look.weapon}`);
+    if (look.offhand !== undefined && !OFFHANDS.includes(look.offhand)) errors.push(`${lw}: bad offhand ${look.offhand}`);
+    if (look.extras !== undefined && (!Array.isArray(look.extras) || look.extras.some((x) => !EXTRAS.includes(x)))) errors.push(`${lw}: bad extras ${look.extras}`);
+    if (look.colors !== undefined) {
+      const ok = look.colors && typeof look.colors === 'object'
+        && Object.entries(look.colors).every(([k, c]) => ['skin', 'primary', 'secondary', 'accent'].includes(k) && /^#[0-9a-f]{6}$/i.test(c));
+      if (!ok) errors.push(`${lw}: colors must be #rrggbb values for skin, primary, secondary or accent`);
+    }
   }
 }

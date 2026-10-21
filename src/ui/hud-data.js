@@ -218,15 +218,26 @@ export function upgradesOf(vs, owner) {
 }
 
 const modsCache = new Map();
-/** Combined upgrade effects of a player (data/upgrades.js computeMods), cached by upgrade list. */
+/** Pantheon id of a player in the view (null for a spectator slot or neutral). */
+export function pantheonOf(vs, owner) {
+  if (!Number.isInteger(owner) || owner < 0) return null;
+  const p = (vs.players && vs.players[owner]) || (vs.setup && vs.setup.players && vs.setup.players[owner]);
+  return p && typeof p.pantheon === 'string' && Object.hasOwn(PANTHEONS, p.pantheon) ? p.pantheon : null;
+}
+
+/**
+ * Combined effects of a player's pantheon blessings and researched upgrades
+ * (data/upgrades.js computeMods), cached by pantheon and upgrade list.
+ */
 export function modsOf(vs, owner) {
   const up = upgradesOf(vs, owner);
-  if (!up.length) return NO_MODS;
-  const key = up.join(',');
+  const pantheon = pantheonOf(vs, owner);
+  if (!up.length && !pantheon) return NO_MODS;
+  const key = `${pantheon || ''}|${up.join(',')}`;
   let m = modsCache.get(key);
   if (!m) {
     if (modsCache.size > 64) modsCache.clear();
-    m = computeMods(up);
+    m = computeMods(up, pantheon);
     modsCache.set(key, m);
   }
   return m;

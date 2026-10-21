@@ -19,7 +19,7 @@ const push = (world, vs) => vs.pushSnapshot(world.getSnapshot(), (clock += 50));
 
 /** Player 0's view with a Warrior, an Archer, a Worshipper and a god of mine in the open. */
 function scene() {
-  const world = makeWorld();
+  const world = makeWorld({ pantheons: ['norse', 'greek'] }); // Norse blessings leave a Warrior's plain stats alone
   const tc = world.buildingsOf(0).find((b) => b.type === 'town_center');
   const warrior = spawn(world, 0, 'warrior', tc.x + 4, tc.y + 5);
   const archer = spawn(world, 0, 'archer', tc.x + 5, tc.y + 5);

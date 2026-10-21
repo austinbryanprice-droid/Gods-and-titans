@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MORTALS, godsFor, titanFor, creaturesFor, getUnitType } from '../../src/data/index.js';
 import { REVIVE_COST_MULT } from '../../src/config.js';
-import { makeWorld, run, runCollect, runUntil, place, eventsOf, errorsOf, spawn } from './helpers.js';
+import { makeWorld, run, runCollect, runUntil, place, eventsOf, errorsOf, spawn, PLAIN_PANTHEONS } from './helpers.js';
 
 const tcOf = (w, p = 0) => w.buildingsOf(p).find((b) => b.type === 'town_center');
 
@@ -248,7 +248,7 @@ test('cancelling a revive restores the fallen god', () => {
 });
 
 test('god summoned through the temple gets level 1 stats', () => {
-  const w = makeWorld();
+  const w = makeWorld({ pantheons: PLAIN_PANTHEONS });
   const p = w.players[0];
   p.gold = 5000;
   p.faith = 5000;

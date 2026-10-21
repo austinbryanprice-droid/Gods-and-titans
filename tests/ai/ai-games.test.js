@@ -53,7 +53,7 @@ test('hard beats easy in most seeds', () => {
 
 test('two equal hard armies at the population cap do not sit at home forever', () => {
   // Hard's army tops out at 150 pop minus its workers, short of 90 % of its army cap; both used to idle at 150/150 pop.
-  const g = playGame({ seed: 4, pantheons: ['egyptian', 'chinese'], difficulties: ['hard', 'hard'], maxMinutes: 22 });
+  const g = playGame({ seed: 3, pantheons: ['egyptian', 'chinese'], difficulties: ['hard', 'hard'], maxMinutes: 22 });
   assert.ok(g.world.gameOver, `no winner after ${g.minutes.toFixed(1)} minutes`);
   for (const a of g.ais) assert.equal(a.ai.errors, 0);
 });

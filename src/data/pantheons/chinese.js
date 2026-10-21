@@ -9,6 +9,40 @@ export default {
   colors: { wall: '#a8241c', roof: '#e0a526', trim: '#1f6b5a', accent: '#f2c94c' },
   style: { roof: 'curved', wall: 'lacquer', ornament: 'lanterns' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Mandate of Heaven',
+    playstyle: 'Order and craft: research and city growth come fast, fortified towers anchor your borders, and crossbowmen out-range everyone.',
+    blessings: [
+      {
+        id: 'chinese_bureaucracy',
+        name: 'Imperial Bureaucracy',
+        icon: '📜',
+        description: 'Upgrades finish researching, and the Town Center finishes growing, 30% faster.',
+        effects: [{ type: 'perk', stat: 'techSpeed', amount: 0.3 }],
+      },
+      {
+        id: 'chinese_great_wall',
+        name: 'Great Wall',
+        icon: '🧱',
+        description: 'Watch Towers have +300 health and +3 armor, and reach 1 tile farther.',
+        effects: [
+          { type: 'building', building: 'tower', stat: 'hp', amount: 300 },
+          { type: 'building', building: 'tower', stat: 'armor', amount: 3 },
+          { type: 'building', building: 'tower', stat: 'range', amount: 1 },
+        ],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'hood', colors: { primary: '#d9c58a', secondary: '#a8241c', accent: '#f2c94c' } },
+    warrior: { headgear: 'helmet', weapon: 'halberd', offhand: 'shield', extras: ['armor'], colors: { secondary: '#1f6b5a', accent: '#f2c94c' } },
+    archer: { headgear: 'hood', colors: { primary: '#a8241c', secondary: '#1f6b5a', accent: '#f2c94c' } },
+    priest: { headgear: 'tall_crown', weapon: 'fan', colors: { primary: '#e8d9a8', secondary: '#a8241c', accent: '#f2c94c' } },
+    battering_ram: { colors: { primary: '#a8241c', accent: '#f2c94c' } },
+  },
+
   gods: [
     {
       id: 'chinese_sun_wukong',
@@ -622,4 +656,43 @@ export default {
       description: 'A soldier molded by Nüwa from the yellow earth of the river banks, sturdy and unyielding.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a long-range, slow-firing crossbowman.
+  elite: {
+    id: 'chinese_crossbowman',
+    name: 'Crossbowman',
+    plural: 'Crossbowmen',
+    title: 'Repeating Bolt',
+    pantheon: 'chinese',
+    class: 'ranged',
+    kin: 'archer',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 170, wood: 60, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 300,
+    armor: 1,
+    speed: 2.6,
+    radius: 0.34,
+    sight: 10,
+    air: false,
+    attack: { damage: 26, range: 7, cooldown: 1.8, canHitAir: true, projectile: 'arrow', element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [],
+    visual: {
+      body: 'humanoid',
+      scale: 1.04,
+      colors: { skin: '#c8a07a', primary: '#a8241c', secondary: '#1f6b5a', accent: '#f2c94c' },
+      head: 'human',
+      headgear: 'helmet',
+      weapon: 'bow',
+      offhand: 'none',
+      extras: ['armor', 'cape'],
+      aura: null,
+    },
+    icon: '🎯',
+    description: 'Heavy crossbow with the longest range of any soldier. Slow to reload but hits hard, and can shoot down flyers. Requires Town.',
+  },
 };

@@ -10,6 +10,36 @@ export default {
   colors: { wall: '#cfbf9f', roof: '#b5452b', trim: '#2aa198', accent: '#e8b830' },
   style: { roof: 'stepped', wall: 'stone', ornament: 'serpents' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Blood of the Sun',
+    playstyle: 'War feeds the gods: every enemy that falls pays you faith, and your shrines summon beasts at a furious pace.',
+    blessings: [
+      {
+        id: 'aztec_flower_war',
+        name: 'Flower War',
+        icon: '🌺',
+        description: 'Each enemy unit you slay grants 3 faith for every population point it held.',
+        effects: [{ type: 'perk', stat: 'sacrifice', amount: 3 }],
+      },
+      {
+        id: 'aztec_temple_drums',
+        name: 'Temple Drums',
+        icon: '🌋',
+        description: 'Shrines summon mythical creatures 25% faster.',
+        effects: [{ type: 'building', building: 'shrine', stat: 'train', amount: 0.25 }],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'feathers', colors: { primary: '#d8c9a0', secondary: '#2aa198', accent: '#e8b830' } },
+    warrior: { headgear: 'feathers', weapon: 'club', offhand: 'shield', extras: ['armor'], colors: { secondary: '#2aa198', accent: '#e8b830' } },
+    archer: { headgear: 'feathers', colors: { primary: '#b5452b', secondary: '#2aa198', accent: '#e8b830' } },
+    priest: { headgear: 'headdress', extras: ['skirt', 'jewelry'], colors: { primary: '#e8e0c8', secondary: '#2aa198', accent: '#e8b830' } },
+    battering_ram: { colors: { primary: '#7a4a2a', accent: '#2aa198' } },
+  },
+
   gods: [
     {
       id: 'aztec_quetzalcoatl',
@@ -607,4 +637,44 @@ export default {
       description: 'One of Tlaloc\'s little rain helpers, who smash their jars to pour down rain, hail and lightning.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a nimble elite who dodges blows.
+  elite: {
+    id: 'aztec_eagle_warrior',
+    name: 'Eagle Warrior',
+    title: 'Elite of the Sun',
+    pantheon: 'aztec',
+    class: 'infantry',
+    kin: 'warrior',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 170, wood: 30, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 400,
+    armor: 1,
+    speed: 3.3,
+    radius: 0.36,
+    sight: 8,
+    air: false,
+    attack: { damage: 16, range: 0.5, cooldown: 1.15, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [
+      { type: 'evasion', pct: 0.15, name: 'Eagle Eyes', description: '15% chance to dodge attacks.' },
+    ],
+    visual: {
+      body: 'humanoid',
+      scale: 1.1,
+      colors: { skin: '#c8a07a', primary: '#b5452b', secondary: '#2aa198', accent: '#e8b830' },
+      head: 'human',
+      headgear: 'headdress',
+      weapon: 'club',
+      offhand: 'none',
+      extras: ['armor'],
+      aura: null,
+    },
+    icon: '🦅',
+    description: 'Feathered warrior of the eagle order. Fast and quick to strike, with a 15% chance to dodge any attack. Requires Town.',
+  },
 };

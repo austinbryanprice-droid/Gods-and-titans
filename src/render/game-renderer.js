@@ -13,6 +13,7 @@ import { NEUTRAL_COLOR, PLAYER_COLORS, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT, 
 import { UNITS, BUILDINGS, PANTHEONS } from '../data/index.js';
 import { rankName, RANK_COLORS } from '../data/ranks.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
+import { unitLook } from './models/unit-looks.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
 import { createForest, createDecor } from './models/props.js';
 import { createGroundCover } from './models/ground-cover.js';
@@ -452,14 +453,19 @@ export class GameRenderer {
 
   preload() {
     const types = [];
-    for (const u of Object.values(UNITS)) {
-      if (!u.pantheon) types.push(u);
-    }
     const pantheons = new Set();
     for (const p of this.setup.players || []) if (p && p.pantheon) pantheons.add(p.pantheon);
     for (const p of this.vs.players || []) if (p && p.pantheon) pantheons.add(p.pantheon);
-    for (const u of Object.values(UNITS)) if (u.pantheon && pantheons.has(u.pantheon)) types.push(u);
-    for (const e of this.vs.entities.values()) if (e.k === 'u' && UNITS[e.t]) types.push(UNITS[e.t]);
+    for (const u of Object.values(UNITS)) {
+      if (u.pantheon) {
+        if (pantheons.has(u.pantheon)) types.push(u);
+        continue;
+      }
+      // the shared mortals, as each pantheon in the match dresses them
+      if (!pantheons.size) types.push(u);
+      for (const id of pantheons) types.push(unitLook(u, id));
+    }
+    for (const e of this.vs.entities.values()) if (e.k === 'u' && UNITS[e.t]) types.push(unitLook(UNITS[e.t], this.pantheonOf(e.o)));
     try {
       preloadUnitModels(types);
     } catch (err) {
@@ -499,7 +505,7 @@ export class GameRenderer {
         const fades = rel !== 'own' && rel !== 'ally' ? new Set() : null;
         for (const u of Object.values(UNITS)) {
           if (!u.visual || (u.pantheon && u.pantheon !== p.pantheon)) continue;
-          const m = buildUnitModel(u, color);
+          const m = buildUnitModel(unitLook(u, p.pantheon), color);
           add(m);
           if (!fades) continue;
           // the see-through variants enemy units use while fading at the vision edge
@@ -986,7 +992,9 @@ export class GameRenderer {
       }
       case 'bounty': {
         if (ev.player !== vs.myIndex || !this.visibleAt(ev.x, ev.y)) break;
-        this.showFloatingText(ev.x, ev.y, `+${ev.amount}`, '#ffd23a', 1.9);
+        // Gold bounty and plunder float low and yellow; sacrificed faith floats higher, in blue.
+        if (ev.res === 'f') this.showFloatingText(ev.x, ev.y, `+${ev.amount} faith`, '#9fd8ff', 2.6);
+        else this.showFloatingText(ev.x, ev.y, `+${ev.amount}`, '#ffd23a', 1.9);
         break;
       }
       case 'resourceDepleted': {
@@ -1314,7 +1322,7 @@ export class GameRenderer {
     if (!def || !def.visual) return null;
     let model;
     try {
-      model = buildUnitModel(def, this.colorOf(e.o));
+      model = buildUnitModel(unitLook(def, this.pantheonOf(e.o)), this.colorOf(e.o));
     } catch (err) {
       console.error('[render] unit model failed', e.t, err);
       return null;

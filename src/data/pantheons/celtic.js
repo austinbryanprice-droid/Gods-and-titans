@@ -10,6 +10,36 @@ export default {
   colors: { wall: '#b4ae9c', roof: '#b08a4a', trim: '#2f6b3a', accent: '#d9a833' },
   style: { roof: 'thatch_cone', wall: 'stone', ornament: 'knots' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Children of the Wild',
+    playstyle: 'Live off the forest and strike fast: wood comes quickly, and your warbands, beasts and gods outpace the enemy on the march.',
+    blessings: [
+      {
+        id: 'celtic_woodcraft',
+        name: 'Woodcraft',
+        icon: '🌲',
+        description: 'Worshippers chop wood 30% faster.',
+        effects: [{ type: 'chop', amount: 0.3 }],
+      },
+      {
+        id: 'celtic_swift_warbands',
+        name: 'Swift Warbands',
+        icon: '🍃',
+        description: 'Soldiers, creatures, gods and titans move 8% faster.',
+        effects: [{ type: 'unit', classes: ['infantry', 'ranged', 'support', 'siege', 'creature', 'god', 'titan'], stat: 'speed', amount: 0.08 }],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'hood', extras: ['skirt', 'long_hair'], colors: { primary: '#7a8a5a', secondary: '#4a3a28', accent: '#d9a833' } },
+    warrior: { headgear: 'none', weapon: 'sword', offhand: 'shield', extras: ['armor', 'long_hair', 'beard'], colors: { secondary: '#2f6b3a', accent: '#d9a833' } },
+    archer: { headgear: 'hood', extras: ['cape', 'long_hair'], colors: { primary: '#4a6a3a', secondary: '#2f6b3a', accent: '#d9a833' } },
+    priest: { headgear: 'antlers', extras: ['skirt', 'beard'], colors: { primary: '#e6e0c8', secondary: '#2f6b3a', accent: '#d9a833' } },
+    battering_ram: { colors: { primary: '#6a4a2a', accent: '#d9a833' } },
+  },
+
   gods: [
     // ---- The Dagda: tank / warrior with healing ----
     {
@@ -636,4 +666,42 @@ export default {
       description: 'One of the Morrígan\'s carrion crows, a flying harbinger of slaughter that pecks at the eyes of her enemies.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: the fastest soldier on foot.
+  elite: {
+    id: 'celtic_woad_raider',
+    name: 'Woad Raider',
+    title: 'Blue-Painted Reaver',
+    pantheon: 'celtic',
+    class: 'infantry',
+    kin: 'warrior',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 165, wood: 30, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 430,
+    armor: 1,
+    speed: 3.5,
+    radius: 0.37,
+    sight: 8,
+    air: false,
+    attack: { damage: 19, range: 0.5, cooldown: 1.3, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [],
+    visual: {
+      body: 'humanoid',
+      scale: 1.08,
+      colors: { skin: '#9fb4d6', primary: '#2f6b3a', secondary: '#4a3a28', accent: '#d9a833' },
+      head: 'human',
+      headgear: 'none',
+      weapon: 'double_axe',
+      offhand: 'none',
+      extras: ['armor', 'long_hair', 'beard'],
+      aura: null,
+    },
+    icon: '🐗',
+    description: 'Blue-painted raider who charges bare-chested into battle. The fastest soldier on foot, he hits hard but wears little armor. Requires Town.',
+  },
 };

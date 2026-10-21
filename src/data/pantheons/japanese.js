@@ -9,6 +9,36 @@ export default {
   colors: { wall: '#d9442e', roof: '#3a3f4a', trim: '#f3ece0', accent: '#d4af37' },
   style: { roof: 'pagoda', wall: 'lacquer', ornament: 'torii' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Way of the Kami',
+    playstyle: 'Patient and precise: shrines pour out faith by themselves while disciplined swordsmen strike hard.',
+    blessings: [
+      {
+        id: 'japanese_kami_shrines',
+        name: 'Kami of the Shrine',
+        icon: '🌸',
+        description: 'Each finished Shrine and Temple (up to 4) trickles 0.35 faith per second, even when no one prays.',
+        effects: [{ type: 'perk', stat: 'shrineFaith', amount: 0.35 }],
+      },
+      {
+        id: 'japanese_bushido',
+        name: 'Bushidō',
+        icon: '⚔️',
+        description: 'Infantry deal 12% more damage.',
+        effects: [{ type: 'unit', classes: ['infantry'], stat: 'damage', amount: 0.12 }],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'topknot', colors: { primary: '#e6dfd0', secondary: '#3a3f4a', accent: '#d9442e' } },
+    warrior: { headgear: 'helmet', weapon: 'spear', offhand: 'none', extras: ['armor'], colors: { secondary: '#3a3f4a', accent: '#d4af37' } },
+    archer: { headgear: 'topknot', colors: { primary: '#3a3f4a', secondary: '#d9442e', accent: '#d4af37' } },
+    priest: { headgear: 'topknot', weapon: 'fan', colors: { primary: '#f6f1e6', secondary: '#d9442e', accent: '#ffe9a0' } },
+    battering_ram: { colors: { primary: '#3a3f4a', accent: '#d9442e' } },
+  },
+
   gods: [
     {
       id: 'japanese_amaterasu',
@@ -637,4 +667,45 @@ export default {
       description: 'A thousand-year-old celestial fox with golden fur, whose holy foxfire strikes even flying foes.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a duelist whose cuts can land twice as hard.
+  elite: {
+    id: 'japanese_samurai',
+    name: 'Samurai',
+    plural: 'Samurai',
+    title: 'Sword Master',
+    pantheon: 'japanese',
+    class: 'infantry',
+    kin: 'warrior',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 195, wood: 30, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 450,
+    armor: 3,
+    speed: 2.8,
+    radius: 0.38,
+    sight: 8,
+    air: false,
+    attack: { damage: 18, range: 0.5, cooldown: 1.35, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [
+      { type: 'critical', chance: 0.2, mult: 2, name: 'Iaijutsu', description: '20% chance for a cut to deal double damage.' },
+    ],
+    visual: {
+      body: 'humanoid',
+      scale: 1.08,
+      colors: { skin: '#c8a07a', primary: '#d9442e', secondary: '#3a3f4a', accent: '#d4af37' },
+      head: 'human',
+      headgear: 'horned_helmet',
+      weapon: 'katana',
+      offhand: 'none',
+      extras: ['armor', 'cape'],
+      aura: null,
+    },
+    icon: '🎌',
+    description: 'Armored swordsman of the warrior class. One cut in five lands for double damage, and he is hard to dislodge. Requires Town.',
+  },
 };

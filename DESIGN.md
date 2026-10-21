@@ -58,7 +58,8 @@ the authoritative simulation.
 ## 4. Data (src/data/)
 
 Files: `config.js` (constants, at `src/config.js`), `data/schema.js` (vocabulary + validator),
-`data/mortals.js`, `data/buildings.js`, `data/index.js` (registry), `data/pantheons/<id>.js`.
+`data/mortals.js`, `data/buildings.js`, `data/index.js` (registry), `data/pantheons/<id>.js`,
+`data/pantheon-list.js` (the ten pantheon objects, imported by both the registry and `upgrades.js`).
 Read `src/data/mortals.js` and `src/data/buildings.js` — they are canonical examples.
 
 ### 4.1 Unit type
@@ -113,6 +114,9 @@ export default {
   titan: { /* unit type, class 'titan' */ },
   creatures: [ /* exactly 3, tiers 1, 2, 3 in order */ ],
   minions: [ /* summoned-only units, may be empty */ ],
+  identity: { tagline, playstyle, blessings: [ /* 2, see 4.10 */ ] },                // what makes it play differently
+  elite: { /* the pantheon's own Barracks soldier, see 4.10 */ },
+  looks: { warrior: { headgear: 'helmet', colors: { … } }, … },                       // restyles the shared mortals (visuals only)
 };
 ```
 
@@ -236,6 +240,7 @@ figures of living monotheistic faiths.
 |---|---|---|---|---|---|
 | Worshipper | 50/0/0 | 1 | 220 | 3 | |
 | Warrior | 135/0/0 | 2 | 420 | 9.6 | armor 2 |
+| Elite soldier | 150–195 / 30–60 / 0 | 2 | 280–640 | 10–17 | Town; one edge, one cost (4.10) |
 | T1 creature | ~80/0/40 | 2 | 350–500 | 9–12 | train 20 s, Village |
 | T2 creature | ~120/20/100 | 3 | 550–800 (air 450–600) | 14–20 | 1 ability or strong passive, train 28 s, Town |
 | T3 creature | ~180/60/180 | 5 | 1000–1400 | 25–40 | splash or siege (buildingMult 2), train 40 s, City |
@@ -243,6 +248,40 @@ figures of living monotheistic faiths.
 | God abilities | | | | | Q: cd 8–14, ~120–160 dmg r≈2 or equivalent. W: cd 14–25 utility (heal/buff/cc/summon). R: cd 60–120, big (≈400 dmg r≈4, or an army buff, or a summon of 3–5 minions) |
 | Titan | 400/200/800 | 10 | 5000–6500 | 70–100 | armor 6–8, speed 2.0–2.4, radius 1.2–1.6, splash ~1.5, buildingMult 2, summon 60 s; Q cd 20–40, R cd 60–90 |
 | Minion | 0 | 0 | 150–400 | 6–12 | duration 20–40 s |
+
+### 4.10 Pantheon identity
+Ten pantheons that only differ in their gods would play alike, so each one also has an *identity* (what the
+player feels in the first minutes), an *elite soldier* and a *look*. All of it is data in the pantheon file; the
+sim reads it through the same pipes as building upgrades.
+- **Blessings** (`identity.blessings`, exactly 2): always-on effects from the first second of a match, written in
+  the upgrade vocabulary (`src/data/upgrades.js`: `building`, `unit`, `carry`, `chop`, `work`, `godLevel`) plus one
+  new effect, `{ type: 'perk', stat, amount }`, for the few traits that need a sim rule of their own
+  (`PERK_STATS` in `schema.js`). A `building` effect may name `'*'` for every building type; a `unit` effect may
+  raise `speed` (fraction). `computeMods(upgradeIds, pantheonId)` folds the blessings in before any researched
+  upgrade, so `p.mods` (set at start and after every research) already carries them and the HUD, which reads the
+  same numbers, shows them with no extra code. Perks:
+  `plunder` (share of a slain enemy's gold + wood cost paid to the killer as gold; creeps and summoned units pay
+  nothing), `sacrifice` (faith per population point of every enemy unit slain), `karma` (faith/s per worshipper
+  mining, chopping, building or repairing), `shrineFaith` (faith/s per finished Shrine or Temple, up to 4, with or
+  without prayer; `src/sim/spoils.js`), `buildSpeed` (construction and repair rate), `techSpeed` (research and
+  Town Center growth), `cooldown` (god and titan ability cooldowns), `revive` (cheaper, faster revival).
+- **Elite soldier** (`elite`): a fifth Barracks unit, tier 2 (Town), pop 2, 150–195 gold + 30–60 wood, 26 s, with a
+  stat line and often a passive of its own. `class` is `infantry` or `ranged` and `kin` is the mortal it stands in
+  for (`warrior` or `archer`): upgrades that name that mortal (Bronze Weapons, Hoplite Shields …) also reach the
+  elite (`unitMods` matches `def.kin`). `mortal: true` draws it as a soldier; `plural` overrides "<name>s" in text.
+  `producedAt: 'barracks'`, so `producibleAt()` lists it for its own pantheon only and it ranks up (5.9). It is
+  never a copy of the Warrior or Archer: **each elite has one edge and one cost** (slow and armored, fast and
+  fragile, long range and slow reload …) and its power per population point and per gold stays near the base
+  soldier's, so it is a choice, not an upgrade. The AI builds it as the melee or ranged soldier it is short of
+  (up to 45 % of its army).
+- **Looks** (`looks`): per shared mortal, visual overrides (`colors` merged key by key, `head`, `headgear`,
+  `weapon`, `offhand`, `extras` replaced). Render only: `unit-looks.js` lays a look over the mortal's visual when
+  the model is built for a player of that pantheon, so the sim, the data registry and the net never see it.
+- **Where it shows:** the HUD pantheon chip (top left, hover for blessings and elite), the pantheon picker and the
+  lobby preview (blessings + elite rows), the Barracks card (key `E`, tooltip with the stat line), How to Play.
+- **Rules for new content:** every blessing is a small, readable, always-on edge, never a second race; nothing
+  here may change a rule for the other players; a new `perk` needs one line in `PERK_STATS`, one sim hook, one
+  test and one sentence in its blessing's description. Icons are single Emoji.
 
 ## 5. Rules
 
@@ -332,6 +371,11 @@ Pop used = pop of living units + pop of everything queued in production.
   (1st Village, 2nd Town, 3rd City). Titan: max 1 alive+queued, needs Titan Gate (City).
 - **Revive:** a fallen god can be re-summoned at a Temple for `REVIVE_COST_MULT` of its cost
   and time, keeping its level and xp (`train` with that god's id when it is in `fallen`).
+  Hindu Samsara cuts both by 40 % (`reviveMult`).
+- **Elite soldier:** the Barracks also trains its owner's pantheon elite (4.10) once the player is a Town.
+- **Blessing speeds:** Barracks and Shrine training speed (`train` building effect), research and Town Center
+  growth (`techSpeed`) and construction and repair (`buildSpeed`) all run faster by their fractions; god and
+  titan ability cooldowns shrink by the `cooldown` perk (`cooldownScale` in `abilities.js`).
 - **Tier up:** `upgradeTier` on the Town Center queues a `tier_up` item (cost from
   `tierUpgrades`, `requires` buildings). While it runs, that Town Center cannot train.
   Player tier = highest tier among their completed Town Centers.
@@ -376,6 +420,9 @@ Pop used = pop of living units + pop of everything queued in production.
 - Neutral creeps (owner −1) sit at camps, attack anything within `CREEP_AGGRO_RANGE`, chase up
   to `CREEP_LEASH_RANGE` from camp, then walk back and heal to full. They give the killer's
   owner a bounty of `10 + 10 × tier` gold.
+- **Spoils** (Norse Plunder, Aztec Flower War): a kill of an enemy unit, or the razing of a finished enemy
+  building, pays the killer's owner gold (`plunder` × the victim's gold + wood cost) and/or faith (`sacrifice`
+  × its pop). Creeps (they already pay a bounty), summoned units and unfinished sites pay nothing.
 
 ### 5.6 Gods
 - Levels 1–6 by cumulative xp `GOD_XP_LEVELS`. When an enemy unit dies, every living god of
@@ -401,8 +448,8 @@ die. A team wins when every player not on that team is defeated (neutral exclude
 `surrender` defeats the issuing player. Then `gameOver: { winningTeam }`.
 
 ### 5.9 Soldier ranks
-Mortal soldiers (every unit the Barracks trains: Warrior, Archer, Priest, Battering Ram; `canRank` in
-`src/data/ranks.js`) earn experience and rise through four ranks: Recruit, Veteran, Elite, Champion.
+Mortal soldiers (every unit the Barracks trains: Warrior, Archer, Priest, Battering Ram and the pantheon's
+elite soldier; `canRank` in `src/data/ranks.js`) earn experience and rise through four ranks: Recruit, Veteran, Elite, Champion.
 Worshippers, gods (they have levels), titans, creatures and summoned minions do not rank.
 - **Experience:** the unit that lands the killing blow on an enemy unit earns what the kill is worth to
   gods (`xpValue`: `10 × pop + hp / 40`, so a Warrior is worth 31; gods `100 × level`, titans 400; neutral
@@ -594,7 +641,7 @@ EntityView = {
 { type: 'cast',    src, ability, x, y, target }
 { type: 'effect',  el, shape, x, y, r, fx?, fy?, points?, duration, src, ability, delay? }
                    // VFX request; fx/fy for lines, points for chains, delay (s) when > 0
-{ type: 'bounty',  player, amount, x, y }                            // creep-kill gold
+{ type: 'bounty',  player, amount, x, y, res? }                      // creep-kill gold; res 'g' | 'f' for plunder gold / sacrifice faith
 { type: 'spawn',   id, t, o }                                        // unit trained/summoned/revived
 { type: 'construction', id, t, o }                                   // building placed
 { type: 'buildingComplete', id, t, o }
@@ -801,7 +848,10 @@ per-frame budget, so a revealed army appears over a few frames.
 - Models: `src/render/models/unit-models.js` exports `buildUnitModel(unitType, teamColor) → UnitModel`
   (`{ root: THREE.Group, height, animate(state, timeSec, dt, extra) }`, where `state` is the
   EntityView `st` plus `'dead'` for the death animation; `extra = { moving, attackPhase (0..1 after an attack event), level }`)
-  and caches geometry/materials per unit type. `src/render/models/building-models.js` exports
+  and caches geometry/materials per unit type (the cache key includes the visual, so a pantheon's dressed
+  mortal is a template of its own). `src/render/models/unit-looks.js` `unitLook(unitType, pantheonId)`
+  returns the shared mortal with its pantheon's `looks` laid over the visual; `createUnitView` is the one
+  place that picks the model for a unit. `src/render/models/building-models.js` exports
   `buildBuildingModel(buildingTypeId, pantheon, teamColor, tier) → { root, height, setProgress(bp) }`
   and `buildGoldMineModel()`. `src/render/models/props.js` exports tree instancing helpers
   (`createForest(mapData, heightFn)` → `{ object3d, fell(tx, ty) }`), `createDecor(mapData, heightFn)`;
@@ -854,7 +904,9 @@ per-frame budget, so a revealed army appears over a few frames.
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, edge scrolling). Pantheon picker shows each pantheon's gods,
-  titan and creatures (from data) so choosing is fun.
+  titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
+  preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
+  emblem and name, and its tooltip lists the blessings and the elite soldier.
 - `hud.js` (+ `hud.css`): WC3-like layout. Top bar: gold, wood, faith (+rate), population,
   game clock, menu button. Bottom panel: minimap (left), selection (center: single unit
   portrait/icon, name, hp, armor, damage, level/xp bar, statuses, queue with progress and
@@ -903,7 +955,7 @@ per-frame budget, so a revealed army appears over a few frames.
   Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C), P pray,
   C return cargo, R repair (targets an own building), T Auto-Repair on/off (lit while on);
   abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:
-  Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R; Shrine: creatures Q W E;
+  Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R, pantheon elite E; Shrine: creatures Q W E;
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
   Each building's upgrades fill the free middle / bottom slots with their data hotkey (no two
   buttons of a card share a key); researched ones stay as dim "(researched)" buttons. An upgrade
@@ -933,7 +985,8 @@ second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/cre
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
 games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, ultimates in
-big fights); retreat badly hurt gods to base. Hard is fair (no resource cheats). Army size stops at the
+big fights); retreat badly hurt gods to base. Its Barracks also trains the pantheon elite soldier (4.10)
+once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
 population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point.

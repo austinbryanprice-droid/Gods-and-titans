@@ -21,17 +21,18 @@
 //   action,             // what input.js does: { kind: 'move' | 'stop' | … }
 // }
 import {
-  MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, REVIVE_COST_MULT, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
+  MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
   MINE_SLOTS, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE, POP_MAX,
 } from '../config.js';
-import { UNITS, BUILDINGS, BUILD_MENU, producibleAt } from '../data/index.js';
-import { offeredUpgrades, lineOf, getUpgrade } from '../data/upgrades.js';
-import { selectionIds, subgroups, isComplete, ownBuildings, tierName, upgradesOf, modsOf, mineTripText } from './hud-data.js';
+import { UNITS, BUILDINGS, BUILD_MENU, producibleAt, eliteFor } from '../data/index.js';
+import { offeredUpgrades, lineOf, getUpgrade, reviveMult } from '../data/upgrades.js';
+import { selectionIds, subgroups, isComplete, ownBuildings, tierName, upgradesOf, modsOf, pantheonOf, mineTripText } from './hud-data.js';
 
 export const CARD_SLOTS = 12;
 
 const ABILITY_SLOT = { Q: 8, W: 9, E: 10, R: 11 };
 const BARRACKS_KEYS = { warrior: 'W', archer: 'A', priest: 'P', battering_ram: 'R' };
+const ELITE_KEY = 'E'; // the pantheon's own soldier, the fifth Barracks unit
 const CREATURE_KEYS = ['Q', 'W', 'E'];
 const GOD_KEYS = ['Q', 'W', 'E', 'R'];
 const PASSIVE_ICONS = {
@@ -148,8 +149,9 @@ export function trainCheck(vs, unitId, buildings) {
   const def = UNITS[unitId];
   const fallenLevel = def && def.class === 'god' && me && me.fallen ? me.fallen[unitId] : undefined;
   const revive = fallenLevel !== undefined && fallenLevel !== null ? fallenLevel : null;
-  const base = def ? (revive !== null ? scaled(def.cost, REVIVE_COST_MULT) : { gold: def.cost.gold || 0, wood: def.cost.wood || 0, faith: def.cost.faith || 0 }) : {};
-  const cost = { ...base, pop: def ? def.pop : 0, time: def ? def.buildTime * (revive !== null ? REVIVE_COST_MULT : 1) : 0 };
+  const reviveShare = reviveMult(modsOf(vs, vs.myIndex));
+  const base = def ? (revive !== null ? scaled(def.cost, reviveShare) : { gold: def.cost.gold || 0, wood: def.cost.wood || 0, faith: def.cost.faith || 0 }) : {};
+  const cost = { ...base, pop: def ? def.pop : 0, time: def ? def.buildTime * (revive !== null ? reviveShare : 1) : 0 };
   const out = (state, reason) => ({ state, reason, cost, revive });
   if (!def || !me) return out('disabled', null);
   const ready = buildings.filter((b) => isComplete(b));
@@ -312,7 +314,9 @@ export function buildingDescription(typeId) {
 /** What growing to `tier` unlocks, from the data (units, creatures, buildings, god slots). */
 export function tierUnlocks(tier, pantheon = null) {
   const parts = [];
-  const mortals = Object.values(UNITS).filter((u) => !u.pantheon && u.producedAt && u.tier === tier).map((u) => `${u.name}s`);
+  const elite = pantheon ? eliteFor(pantheon) : null;
+  const mortals = [...Object.values(UNITS).filter((u) => !u.pantheon && u.producedAt && u.tier === tier), ...(elite && elite.tier === tier ? [elite] : [])]
+    .map((u) => u.plural || `${u.name}s`);
   if (mortals.length) parts.push(mortals.join(' and '));
   const blds = Object.values(BUILDINGS).filter((b) => b.tier === tier).map((b) => `the ${b.name}`);
   if (blds.length) parts.push(blds.join(' and '));
@@ -451,6 +455,8 @@ function unitCard(card, vs, group, ownIds, mode) {
       const lockText = def.class === 'god' && (ab.unlockLevel || 1) > 1 && unlockedUnits.length < activeUnits.length && unlockedUnits.length
         ? ` Unlocks at level ${ab.unlockLevel}.` : '';
       const lv = def.class === 'god' ? Math.max(1, ...activeUnits.map((u) => u.lv || 1)) : 1;
+      // Àṣẹ shortens the cooldowns of a blessed pantheon's gods and titans.
+      const cooldownTime = def.class === 'god' || def.class === 'titan' ? ab.cooldown * (1 - modsOf(vs, vs.myIndex).perks.cooldown) : ab.cooldown;
       // Autocast mark when every own unit of the group has it on (view key mc: manual bits).
       const bit = 1 << def.abilities.indexOf(ab);
       const mine = activeUnits.filter((u) => u.k === 'u' && u.o === vs.myIndex);
@@ -464,9 +470,9 @@ function unitCard(card, vs, group, ownIds, mode) {
         description: `${ab.description}${lockText}${levelText ? ` ${levelText}` : ''}`,
         state,
         reason,
-        cooldown: left > 0 ? Math.min(1, left / ab.cooldown) : 0,
+        cooldown: left > 0 ? Math.min(1, left / cooldownTime) : 0,
         cooldownLeft: left,
-        cost: { cooldown: ab.cooldown, range: ab.target === 'none' ? 0 : ab.range, target: TARGET_TEXT[ab.target] || '' },
+        cost: { cooldown: Math.round(cooldownTime * 10) / 10, range: ab.target === 'none' ? 0 : ab.range, target: TARGET_TEXT[ab.target] || '' },
         autocast,
         toggle: mine.length ? { kind: 'autocast', ability: ab.id, unitType: group.type, on: !autocast } : null,
         level: ab.unlockLevel || 1,
@@ -499,7 +505,7 @@ function trainButton(slot, key, vs, unitId, buildings, verb) {
   const title = revive ? `Revive ${def.name} (level ${chk.revive})` : `${verb} ${def.name}`;
   let description = describeUnit(def);
   if (def.class === 'god' && !revive) description += ` Gods: ${godCount(vs)}/${MAX_GODS} (${GOD_SLOT_TEXT}).`;
-  if (revive) description = `${def.name} fell in battle. Revive for ${costShare(REVIVE_COST_MULT)} the cost and time, keeping level ${chk.revive}. ${description}`;
+  if (revive) description = `${def.name} fell in battle. Revive for ${costShare(reviveMult(modsOf(vs, vs.myIndex)))} the cost and time, keeping level ${chk.revive}. ${description}`;
   return button(slot, {
     id: `train:${unitId}`,
     key,
@@ -512,6 +518,13 @@ function trainButton(slot, key, vs, unitId, buildings, verb) {
     queued,
     action: { kind: 'train', unit: unitId },
   });
+}
+
+/** An upgrade's text, plus a note when it also reaches the player's elite soldier (it counts as a Warrior or an Archer). */
+function researchText(vs, up) {
+  const elite = eliteFor(pantheonOf(vs, vs.myIndex));
+  if (!elite || !up.effects.some((e) => e.type === 'unit' && e.units && e.units.includes(elite.kin))) return up.description;
+  return `${up.description} Your ${elite.plural || `${elite.name}s`} count too.`;
 }
 
 function buildingCard(card, vs, group) {
@@ -546,7 +559,7 @@ function buildingCard(card, vs, group) {
     }
     case 'barracks':
       units.forEach((u, i) => {
-        if (i < 4) card[i] = trainButton(i, BARRACKS_KEYS[u] || GOD_KEYS[i], vs, u, buildings, 'Train');
+        if (i < 5) card[i] = trainButton(i, BARRACKS_KEYS[u] || (UNITS[u].kin ? ELITE_KEY : GOD_KEYS[i]), vs, u, buildings, 'Train');
       });
       break;
     case 'shrine':
@@ -577,7 +590,7 @@ function buildingCard(card, vs, group) {
       key: done ? null : up.hotkey,
       icon: up.icon,
       title: done ? `${up.name} (researched)` : `Research ${up.name}`,
-      description: levels.length ? `${up.description} Level ${levels.indexOf(up) + 1} of ${levels.length}.` : up.description,
+      description: levels.length ? `${researchText(vs, up)} Level ${levels.indexOf(up) + 1} of ${levels.length}.` : researchText(vs, up),
       state: chk.state,
       reason: chk.reason,
       cost: done ? null : chk.cost,

@@ -19,6 +19,7 @@ import { updateDelayed, updateFields, defaultManualMask, refreshAutocast } from 
 import { computePrayerSpots, mineSpots, nearestMine } from './economy.js';
 import { canPlace, placementError, findPlacement, updateConstruction, updateBuildingRepair } from './construction.js';
 import { updateProduction } from './production.js';
+import { awardSpoils, accrueBlessedFaith } from './spoils.js';
 import { spawnCreeps } from './creeps.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
@@ -95,7 +96,7 @@ export class World {
         fallen: {},
         upgrades: {}, // researched upgrade id -> true
         upList: [], // the same ids in the order they finished (snapshot)
-        mods: NO_MODS, // their combined effects (data/upgrades.js computeMods)
+        mods: computeMods([], pantheon), // their pantheon's blessings and upgrades combined (data/upgrades.js computeMods)
         autoRepair: false, // idle worshippers mend nearby damaged buildings
         lastAlert: -Infinity,
         stats: { gathered: 0, unitsTrained: 0, kills: 0, losses: 0, buildings: 0 },
@@ -270,6 +271,7 @@ export class World {
     u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) * (1 + rk.damage) : 0;
     u.baseArmor = def.armor + GOD_LEVEL_ARMOR * lv + m.armor + rk.armor;
     u.baseRegen = u.regen0 + m.regen;
+    u.baseSpeed = def.speed * (1 + m.speed);
   }
 
   /** Max hp, armor, damage and range of a building from its type and the owner's upgrades. */
@@ -290,7 +292,7 @@ export class World {
     if (!p || p.upgrades[upId]) return;
     p.upgrades[upId] = true;
     p.upList.push(upId);
-    p.mods = computeMods(p.upList);
+    p.mods = computeMods(p.upList, p.pantheon);
     for (const u of this.unitList) if (!u.dead && u.owner === i) this.applyUnitStats(u);
     for (const b of this.buildingList) if (!b.dead && b.owner === i) this.applyBuildingStats(b);
     this.recomputePopCap(i);
@@ -520,6 +522,7 @@ export class World {
       this.releaseBuilding(e);
       if (killer !== undefined && killer >= 0 && src.kind === 'unit' && this.areEnemies(killer, e.owner)) this.gainRankXp(src, killXp(e));
     }
+    if (killer !== undefined && killer >= 0 && !expired && this.areEnemies(killer, e.owner)) awardSpoils(this, e, killer);
   }
 
   grantXp(dead, killerOwner) {
@@ -750,6 +753,7 @@ export class World {
         p.faith += rate * DT;
       }
     }
+    accrueBlessedFaith(this);
   }
 
   cleanup() {

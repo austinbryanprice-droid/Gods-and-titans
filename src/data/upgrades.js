@@ -6,17 +6,25 @@
 // Effect types:
 //   { type: 'building', building, stat, amount }  stat: hp | armor | pop | range (flat),
 //                                                  damage | faith | train (fraction, 0.25 = +25%)
-//   { type: 'unit', classes?, units?, stat, amount } stat: damage | hp (fraction), armor | regen (flat)
+//   { type: 'unit', classes?, units?, stat, amount } stat: damage | hp | speed (fraction), armor | regen (flat)
 //   { type: 'carry', resource: 'g' | 'w', amount }  extra gold / wood per trip
 //   { type: 'chop', amount }                         chopping speed (fraction faster)
 //   { type: 'work', amount }                         Worshippers mine, chop, build and repair faster (fraction)
 //   { type: 'godLevel', amount }                     levels added to newly summoned / revived gods
+//   { type: 'perk', stat, amount }                   a pantheon trait the sim reads by name (PERK_STATS in schema.js)
 //
 // An upgrade line is a chain of levels researched one after the other: each level
 // after the first names the previous one in `after` and every level carries the
 // same `line` id and hotkey. The command card shows one button per line, always
 // the next level to research (offeredUpgrades).
+//
+// Each pantheon also has blessings (`identity.blessings` in its data file): always-on effects in
+// this same vocabulary, folded in by computeMods before any researched upgrade. A building effect
+// whose `building` is '*' applies to every building type.
 import { BUILDINGS } from './buildings.js';
+import { PANTHEONS } from './pantheon-list.js';
+import { PERK_STATS } from './schema.js';
+import { REVIVE_COST_MULT } from '../config.js';
 
 /** Every upgrade by id, each with the `building` that researches it. */
 export const UPGRADES = {};
@@ -35,27 +43,53 @@ export function upgradesFor(buildingId) {
 }
 
 const NO_BUILDING_MODS = Object.freeze({ hp: 0, armor: 0, pop: 0, range: 0, damage: 0, faith: 0, train: 0 });
-const NO_UNIT_MODS = Object.freeze({ damage: 0, hp: 0, armor: 0, regen: 0 });
+const NO_UNIT_MODS = Object.freeze({ damage: 0, hp: 0, armor: 0, regen: 0, speed: 0 });
 
 /**
- * Combined effects of a list of owned upgrade ids (unknown ids are ignored).
- * @param {string[]} ids
+ * Pantheon traits a perk effect can raise (PERK_STATS in schema.js), each read by one sim rule:
+ *   plunder      share of a slain enemy's gold and wood cost the killer gets, as gold (sim/spoils.js)
+ *   sacrifice    faith per population point of every enemy unit slain (sim/spoils.js)
+ *   karma        faith per second from each worshipper at work (sim/spoils.js)
+ *   shrineFaith  faith per second from each finished Shrine or Temple, up to a few (sim/spoils.js)
+ *   buildSpeed   faster construction and repair (fraction)
+ *   techSpeed    faster research and growing the Town Center (fraction)
+ *   cooldown     shorter god and titan ability cooldowns (fraction)
+ *   revive       cheaper, faster revival of fallen gods (fraction off the usual revive price)
  */
-export function computeMods(ids) {
-  const mods = { buildings: {}, units: [], carry: { g: 0, w: 0 }, chop: 0, work: 0, godLevel: 0 };
+const NO_PERKS = Object.freeze(Object.fromEntries(PERK_STATS.map((k) => [k, 0])));
+
+function addEffect(mods, e) {
+  if (e.type === 'building') {
+    for (const id of e.building === '*' ? Object.keys(BUILDINGS) : [e.building]) {
+      const m = mods.buildings[id] || (mods.buildings[id] = { ...NO_BUILDING_MODS });
+      m[e.stat] += e.amount;
+    }
+  } else if (e.type === 'unit') mods.units.push(e);
+  else if (e.type === 'carry') mods.carry[e.resource] += e.amount;
+  else if (e.type === 'chop') mods.chop += e.amount;
+  else if (e.type === 'work') mods.work += e.amount;
+  else if (e.type === 'godLevel') mods.godLevel += e.amount;
+  else if (e.type === 'perk') mods.perks[e.stat] += e.amount;
+}
+
+/** A pantheon's blessings (its identity's always-on effects), or [] for none / an unknown id. */
+export function blessingsOf(pantheonId) {
+  const p = typeof pantheonId === 'string' && Object.hasOwn(PANTHEONS, pantheonId) ? PANTHEONS[pantheonId] : null;
+  return (p && p.identity && p.identity.blessings) || [];
+}
+
+/**
+ * Combined effects of a pantheon's blessings and a list of owned upgrade ids
+ * (unknown ids are ignored).
+ * @param {string[]} ids
+ * @param {string|null} [pantheonId]
+ */
+export function computeMods(ids, pantheonId = null) {
+  const mods = { buildings: {}, units: [], carry: { g: 0, w: 0 }, chop: 0, work: 0, godLevel: 0, perks: { ...NO_PERKS } };
+  for (const bl of blessingsOf(pantheonId)) for (const e of bl.effects) addEffect(mods, e);
   for (const id of ids || []) {
     const up = getUpgrade(id);
-    if (!up) continue;
-    for (const e of up.effects) {
-      if (e.type === 'building') {
-        const m = mods.buildings[e.building] || (mods.buildings[e.building] = { ...NO_BUILDING_MODS });
-        m[e.stat] += e.amount;
-      } else if (e.type === 'unit') mods.units.push(e);
-      else if (e.type === 'carry') mods.carry[e.resource] += e.amount;
-      else if (e.type === 'chop') mods.chop += e.amount;
-      else if (e.type === 'work') mods.work += e.amount;
-      else if (e.type === 'godLevel') mods.godLevel += e.amount;
-    }
+    if (up) for (const e of up.effects) addEffect(mods, e);
   }
   return mods;
 }
@@ -67,12 +101,21 @@ export function buildingMods(mods, typeId) {
   return (mods && mods.buildings[typeId]) || NO_BUILDING_MODS;
 }
 
-/** Stat changes for a unit type: damage and hp as fractions, armor and regen flat. */
+/** Fraction of a fallen god's price (and summoning time) that reviving it costs. */
+export function reviveMult(mods) {
+  return REVIVE_COST_MULT * (1 - ((mods && mods.perks && mods.perks.revive) || 0));
+}
+
+/**
+ * Stat changes for a unit type: damage, hp and speed as fractions, armor and regen flat.
+ * A pantheon's elite soldier lists the mortal it `kin`s with (warrior, archer), so it is
+ * covered by every effect that names that mortal.
+ */
 export function unitMods(mods, def) {
   if (!mods || !def || !mods.units.length) return NO_UNIT_MODS;
   let out = null;
   for (const e of mods.units) {
-    if (!(e.units ? e.units.includes(def.id) : e.classes && e.classes.includes(def.class))) continue;
+    if (!(e.units ? e.units.includes(def.id) || (def.kin && e.units.includes(def.kin)) : e.classes && e.classes.includes(def.class))) continue;
     if (!out) out = { ...NO_UNIT_MODS };
     out[e.stat] += e.amount;
   }

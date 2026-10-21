@@ -708,8 +708,8 @@ export class Game {
         sfx.play('horn');
         break;
       case 'bounty':
-        // The renderer shows the floating "+N" gold.
-        if (ev.player === me) this.worldSound('mine', ev.x, ev.y, 0.7);
+        // The renderer shows the floating "+N" gold (or faith).
+        if (ev.player === me) this.worldSound('mine', ev.x, ev.y, ev.res === 'f' ? 0.5 : 0.7);
         break;
       case 'resourceDepleted': {
         // The mine has already left the view: where it was comes from the view's memory.

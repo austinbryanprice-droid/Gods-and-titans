@@ -1,9 +1,11 @@
-// Two HUD lines that come from the session / setup (src/ui/hud.js, hud-data.js): the
-// "Connection problem" banner while the host is silent (ClientSession.stalled), and the
-// one-off "You lead the Norse pantheon." message at game start. Fake DOM, fake game.
+// HUD lines that come from the session / setup (src/ui/hud.js, hud-data.js): the
+// "Connection problem" banner while the host is silent (ClientSession.stalled), the
+// one-off "You lead the Norse pantheon." message at game start, and the pantheon chip
+// with its blessings. Fake DOM, fake game.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hud } from '../../src/ui/hud.js';
+import { PANTHEON_LIST } from '../../src/data/index.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { leadText, stallText } from '../../src/ui/hud-data.js';
 import { ViewState } from '../../src/game/view-state.js';
@@ -28,8 +30,7 @@ after(() => {
   for (const h of huds) h.dispose(); // clears the message timers so the test process can exit at once
 });
 
-function setup({ session, me = 0, pantheon } = {}) {
-  const world = makeWorld();
+function setup({ session, me = 0, pantheon, world = makeWorld() } = {}) {
   if (pantheon) world.setup.players[0].pantheon = pantheon;
   const vs = viewOf(world, me);
   const root = document.createElement('div');
@@ -119,4 +120,22 @@ test('a spectator gets no "You lead" line', () => {
   const { hud } = setup({ session: clientSession(), me: -1 });
   hud.update(1000);
   assert.equal(hud.msgs.children.length, 0);
+});
+
+test('the pantheon chip names your pantheon and lists its blessings and elite soldier; spectators get none', () => {
+  for (const p of PANTHEON_LIST) {
+    const { hud } = setup({ session: clientSession(), world: makeWorld({ pantheons: [p.id, 'greek'] }) });
+    assert.equal(hud.rPantheon.n.hidden, true, 'nothing before the first update');
+    hud.update(1000);
+    assert.equal(hud.rPantheon.n.hidden, false, p.id);
+    assert.equal(hud.rPantheon.v.textContent, p.name);
+    const tip = hud.rPantheon.n.title;
+    assert.ok(tip.startsWith(`${p.name}: ${p.identity.tagline}`), p.id);
+    for (const b of p.identity.blessings) assert.ok(tip.includes(`${b.name}: ${b.description}`), b.id);
+    assert.ok(tip.includes(p.elite.name), `${p.id}: elite soldier`);
+    assert.ok(!tip.includes('Requires Town'), 'the tier note is not repeated in the tooltip');
+  }
+  const { hud } = setup({ session: clientSession(), me: -1 });
+  hud.update(1000);
+  assert.equal(hud.rPantheon.n.hidden, true);
 });

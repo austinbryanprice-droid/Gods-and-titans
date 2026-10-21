@@ -10,6 +10,36 @@ export default {
   colors: { wall: '#8b6a45', roof: '#5d7a3a', trim: '#3b2a1a', accent: '#b8c4cc' },
   style: { roof: 'longhouse', wall: 'timber', ornament: 'carvings' },
 
+  // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
+  identity: {
+    tagline: 'Raiders of the North',
+    playstyle: 'Strike early and live off the spoils: every foe you cut down pays your treasury, and your mead halls drill warriors fast.',
+    blessings: [
+      {
+        id: 'norse_plunder',
+        name: 'Plunder',
+        icon: '💰',
+        description: 'Slain enemy units and razed buildings pay you gold: 12% of their gold and wood cost.',
+        effects: [{ type: 'perk', stat: 'plunder', amount: 0.12 }],
+      },
+      {
+        id: 'norse_mead_hall',
+        name: 'Mead Hall',
+        icon: '🍺',
+        description: 'Barracks train soldiers 20% faster.',
+        effects: [{ type: 'building', building: 'barracks', stat: 'train', amount: 0.2 }],
+      },
+    ],
+  },
+  // How the shared mortals look in this pantheon's colors (visuals only).
+  looks: {
+    worshipper: { headgear: 'hood', extras: ['skirt', 'fur'], colors: { primary: '#7a6a50', secondary: '#4a3a28', accent: '#b8c4cc' } },
+    warrior: { headgear: 'horned_helmet', weapon: 'axe', offhand: 'shield', extras: ['armor', 'fur', 'beard'], colors: { secondary: '#4a4f58', accent: '#b8c4cc' } },
+    archer: { headgear: 'hood', extras: ['cape', 'fur', 'beard'], colors: { primary: '#56644a', secondary: '#4a3a28', accent: '#b8c4cc' } },
+    priest: { headgear: 'hood', extras: ['skirt', 'fur'], colors: { primary: '#dfe6ea', secondary: '#4a6a8a', accent: '#9fd8ff' } },
+    battering_ram: { colors: { primary: '#5a4630', secondary: '#3a2c1c' } },
+  },
+
   gods: [
     // ---- Odin: summoner and leader ----
     {
@@ -659,4 +689,44 @@ export default {
       description: 'One of Odin\'s keen-eyed ravens: fragile, but it sees far and pecks at foes.',
     },
   ],
+
+  // The fifth Barracks soldier, available at Town: a frenzied raider.
+  elite: {
+    id: 'norse_berserker',
+    name: 'Berserker',
+    title: 'Bear-Shirt',
+    pantheon: 'norse',
+    class: 'infantry',
+    kin: 'warrior',
+    mortal: true,
+    tier: 2,
+    cost: { gold: 175, wood: 30, faith: 0 },
+    pop: 2,
+    buildTime: 26,
+    producedAt: 'barracks',
+    hp: 400,
+    armor: 1,
+    speed: 3,
+    radius: 0.38,
+    sight: 8,
+    air: false,
+    attack: { damage: 20, range: 0.5, cooldown: 1.2, canHitAir: false, projectile: null, element: 'physical', splash: 0, buildingMult: 1 },
+    abilities: [],
+    passives: [
+      { type: 'lifesteal', pct: 0.2, name: 'Battle Frenzy', description: 'Heals for 20% of the attack damage he deals.' },
+    ],
+    visual: {
+      body: 'humanoid',
+      scale: 1.1,
+      colors: { skin: '#c8a07a', primary: '#6a3a2a', secondary: '#4a4f58', accent: '#b8c4cc' },
+      head: 'human',
+      headgear: 'none',
+      weapon: 'double_axe',
+      offhand: 'none',
+      extras: ['armor', 'fur', 'beard', 'long_hair'],
+      aura: null,
+    },
+    icon: '🐻',
+    description: 'Fur-clad warrior who fights in a trance. Fast and savage, he heals for 20% of the damage he deals, but has little armor. Requires Town.',
+  },
 };

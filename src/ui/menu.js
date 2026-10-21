@@ -13,7 +13,7 @@ import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { h, setChildren, copyText } from './menu-dom.js';
 import { createMenuBackdrop } from './menu-fx.js';
-import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow } from './menu-pantheons.js';
+import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
 import * as M from './menu-model.js';
 
@@ -612,6 +612,9 @@ export function createMenu({ root, onStart }) {
           h('span.mw-preview-emblem', sum.emblem),
           h('div', h('div.mw-preview-name', sum.name), h('div.mw-preview-culture', sum.culture))),
         h('p.mw-preview-desc', { title: sum.description }, sum.description),
+        styleLine(sum),
+        sum.blessings.length ? h('div.mw-pcard-label', 'Blessings') : null,
+        sum.blessings.length ? h('ul.mw-pcard-gods', sum.blessings.map(blessingRow)) : null,
         h('div.mw-pcard-label', 'Gods'),
         h('ul.mw-pcard-gods', sum.gods.map((g) => unitRow(g, 'god'))),
         h('div.mw-pcard-label', 'Titan'),
@@ -620,6 +623,8 @@ export function createMenu({ root, onStart }) {
         h('div.mw-preview-chips',
           sum.creatures.map((c) => h('span.mw-chip', { title: c.description }, `${c.icon} ${c.name}`, c.air ? h('span.mw-air', { title: 'Flying' }, '✈') : null)),
         ),
+        sum.elite ? h('div.mw-pcard-label', 'Elite soldier') : null,
+        sum.elite ? h('ul.mw-pcard-small', unitRow(sum.elite, 'elite')) : null,
       );
     }
 
