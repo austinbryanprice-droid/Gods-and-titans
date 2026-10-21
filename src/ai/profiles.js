@@ -1,6 +1,6 @@
 // Difficulty profiles for the computer opponents (DESIGN 10). Every number the
 // AI tunes by difficulty lives here. Times are game seconds.
-import { AI_THINK_INTERVAL } from '../config.js';
+import { AI_THINK_INTERVAL, POP_MAX } from '../config.js';
 
 const BASE = {
   think: AI_THINK_INTERVAL.normal,
@@ -44,7 +44,7 @@ const BASE = {
   micro: true, // focus fire, rams on buildings, wounded units pulled back
   militia: true, // workers fight in emergencies
   helpAllies: true,
-  armyCap: 120, // pop the army stops growing at
+  armyCap: Math.round(POP_MAX * 0.8), // pop the army (gods and Titan included) stops growing at
 };
 
 export const PROFILES = {
@@ -84,7 +84,7 @@ export const PROFILES = {
     castThreshold: 1.6,
     micro: false,
     militia: false,
-    armyCap: 60,
+    armyCap: Math.round(POP_MAX * 0.4),
   },
   normal: { ...BASE },
   hard: {
@@ -120,7 +120,7 @@ export const PROFILES = {
     godRetreat: 0.3,
     godRejoin: 0.55,
     castThreshold: 0.85,
-    armyCap: 140,
+    armyCap: Math.round(POP_MAX * 0.93),
   },
 };
 

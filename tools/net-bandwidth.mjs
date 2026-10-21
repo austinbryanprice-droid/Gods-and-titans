@@ -9,8 +9,12 @@
 // delta encode. Every --verify ticks each client's reconstructed snapshot is
 // compared with the host's (deep equality after a JSON round trip).
 //
+// --fill=200 starts every player already at that population (Houses for the cap, 30
+// worshippers, 3 gods, the Titan and a mixed army) with the armies sent to the middle, so
+// the heaviest battle the population cap allows is on screen from the first second.
+//
 //   node tools/net-bandwidth.mjs [--minutes=18] [--seed=7] [--clients=3]
-//        [--size=medium] [--teams=2v2|ffa] [--difficulty=normal]
+//        [--size=medium] [--teams=2v2|ffa] [--difficulty=normal] [--fill=200]
 //        [--verify=10] [--json=out.json] [--quiet]
 import { isDeepStrictEqual } from 'node:util';
 import { writeFileSync } from 'node:fs';
@@ -18,7 +22,8 @@ import { createWorld } from '../src/sim/world.js';
 import { createAI } from '../src/ai/ai.js';
 import { HostSession, ClientSession } from '../src/net/session.js';
 import { createLoopbackPair } from '../src/net/transport.js';
-import { PLAYER_COLORS, TICK_RATE } from '../src/config.js';
+import { PLAYER_COLORS, TICK_RATE, POP_MAX } from '../src/config.js';
+import { PANTHEONS as PANTHEON_DATA, getUnitType } from '../src/data/index.js';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => {
   const m = a.match(/^--([^=]+)(?:=(.*))?$/);
@@ -31,6 +36,7 @@ const SIZE = args.size || 'medium';
 const TEAMS = args.teams || '2v2';
 const DIFF = args.difficulty || 'normal';
 const VERIFY = Math.max(1, Number(args.verify ?? 10));
+const FILL = Math.min(POP_MAX, Math.max(0, Number(args.fill ?? 0)));
 const QUIET = !!args.quiet;
 const PANTHEONS = (args.pantheons || 'greek,norse,egyptian,japanese').split(',');
 
@@ -43,6 +49,40 @@ function summary(values) {
   const s = Float64Array.from(values).sort();
   const sum = values.reduce((a, b) => a + b, 0);
   return { n: values.length, avg: values.length ? sum / values.length : 0, p50: pct(s, 0.5), p95: pct(s, 0.95), p99: pct(s, 0.99), max: s.length ? s[s.length - 1] : 0 };
+}
+
+/** Give every player `pop` population at once: Houses, 30 worshippers, 3 gods, the Titan and a mixed army. */
+function fillToPop(world, pop) {
+  for (const p of world.players) {
+    const tc = world.buildingList.find((b) => b.owner === p.index && b.type === 'town_center');
+    Object.assign(p, { gold: 20000, wood: 20000, faith: 5000 });
+    for (let n = 0; p.popCap < pop && n < 80; n++) {
+      const spot = world.findPlacement(p.index, 'house', tc.x, tc.y, 30);
+      if (!spot) break;
+      world.createBuilding(p.index, 'house', spot.tx, spot.ty, true, true);
+    }
+    const pan = PANTHEON_DATA[p.pantheon];
+    let k = 0;
+    const spawn = (type) => {
+      const a = k * 2.399963;
+      const r = 6 + (k % 7) + 3;
+      k++;
+      return world.spawnUnit(p.index, type, tc.x + Math.cos(a) * r, tc.y + Math.sin(a) * r, { silent: true });
+    };
+    while (world.unitList.filter((u) => u.owner === p.index && u.def.class === 'worker').length < 30) spawn('worshipper');
+    for (const g of pan.gods.slice(0, 3)) spawn(g.id);
+    spawn(pan.titan.id);
+    const mix = ['warrior', 'archer', 'warrior', 'archer', pan.creatures[0].id, 'priest', pan.creatures[1].id, 'warrior', 'archer', pan.creatures[0].id, pan.creatures[2].id, 'warrior'];
+    for (let m = 0; p.popUsed < Math.min(pop, p.popCap) && m < 1000; m++) {
+      const type = mix[m % mix.length];
+      if (p.popUsed + getUnitType(type).pop <= Math.min(pop, p.popCap)) spawn(type);
+      else if (p.popUsed >= Math.min(pop, p.popCap) - 1) break;
+    }
+    const army = world.unitList.filter((u) => u.owner === p.index && u.def.class !== 'worker').map((u) => u.id);
+    world.issueCommand(p.index, { type: 'attackMove', units: army, x: world.map.width / 2, y: world.map.height / 2 });
+  }
+  world.time = 600; // the AIs are past every first-attack timer
+  world.hash.rebuild(world.unitList);
 }
 
 async function main() {
@@ -109,6 +149,12 @@ async function main() {
   host.viewState.on('*', (ev) => {
     counts.eventTypes[ev.type] = (counts.eventTypes[ev.type] || 0) + 1;
   });
+  if (FILL) {
+    fillToPop(host.world, FILL);
+    host.lastSnap = null;
+    host.takeSnapshot(); // the first full snapshot already holds the filled armies
+    console.log(`filled to ${FILL}: pop ${host.world.players.map((p) => `${p.popUsed}/${p.popCap}`).join(' ')}, ${host.lastSnap.entities.length} entities`);
+  }
   host.start();
   for (const c of clients) c.start();
   await sleepImmediate();
