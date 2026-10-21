@@ -23,6 +23,7 @@ import { patchFowMaterial, FOW_UNIFORMS } from './fog.js';
 import { patchWorldMaterial } from './shading.js';
 import { LAYER, LAYER_COUNT, createTerrainTextures } from './terrain-textures.js';
 import { WATER_LEVEL, buildWater, setWaterQuality } from './terrain-water.js';
+import { FIELD_RES, SHORE_MIN, SHORE_MAX, RISE_MAX, groundField } from './ground-field.js';
 
 export { WATER_LEVEL, buildWater };
 
@@ -130,167 +131,101 @@ export function tileLayers(map, dryness = tileDryness(map)) {
   return out;
 }
 
+/** Tiles per terrain chunk (a chunk is one draw call, culled on its own). */
+const CHUNK = 16;
+
 /**
- * Per-vertex shade (linear RGB multipliers on the textured ground) for the
- * corner grid, tile centers and the midpoints of horizontal (top/bottom) and
- * vertical (left/right) tile edges: darker under the forest canopy and on deep
- * lake beds, a touch brighter on hilltops, a little per-vertex variation.
- * Corners average their four tiles, edge midpoints their two, centers lean
- * 25% toward their neighbors.
- * @returns {{corner: Float32Array, center: Float32Array, hEdge: Float32Array, vEdge: Float32Array}}
+ * Terrain geometry from the ground field (ground-field.js): one vertex per field
+ * sample (FIELD_RES per tile), normals from the field's slope so the shading is
+ * continuous over tile and chunk edges, two triangles per cell with the diagonal
+ * alternating, counter-clockwise seen from above. The index runs chunk after chunk
+ * (CHUNK × CHUNK tiles): geometry.userData.chunks lists { start, count, box } of
+ * each, so the renderer can draw and cull them separately over shared vertices.
+ * @param {object} map mapData
+ * @param {import('./ground-field.js').GroundField} [field]
  */
-export function terrainColors(map) {
+export function buildTerrainGeometry(map, field = groundField(map)) {
   const W = map.width;
-  const H = map.height;
-  const T = map.terrain;
-  const seed = (Number(map.seed) | 0) || 7;
-  const hs = map.heights;
-  const VW = W + 1;
-  const hAt = (vx, vy) => (hs ? hs[vy * VW + vx] : 0);
-  // shade from height and forest share; a faint cool tint in the forest shadow
-  const write = (out, o, h, forestShare, hash) => {
-    let k = 0.96 + 0.08 * hash;
-    k *= 1 - 0.22 * forestShare;
-    if (h > 0.25) k *= 1 + (h - 0.25) * 0.12;
-    if (h < -0.3) k *= 0.8 + 0.33 * Math.max(0, h + 0.6);
-    out[o] = k * (1 - 0.04 * forestShare);
-    out[o + 1] = k;
-    out[o + 2] = k * (1 + 0.03 * forestShare);
-  };
+  const H = map.height ?? map.width;
+  const R = FIELD_RES;
+  const nx = field.nx;
+  const ny = field.ny;
+  const pos = new Float32Array(nx * ny * 3);
+  const nor = new Float32Array(nx * ny * 3);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = (j * nx + i) * 3;
+      pos[k] = i / R;
+      pos[k + 1] = field.hgt[j * nx + i];
+      pos[k + 2] = j / R;
+      field.normalAt(i, j, nor, k);
+    }
+  }
+  const idx = new Uint32Array(W * H * R * R * 6);
+  const chunks = [];
   let n = 0;
-  let f = 0;
-  const addTile = (tx, ty) => {
-    if (tx < 0 || ty < 0 || tx >= W || ty >= H) return;
-    n++;
-    if (T[ty * W + tx] === TERRAIN.FOREST) f++;
-  };
-  const share = () => {
-    const s = n ? f / n : 0;
-    n = f = 0;
-    return s;
-  };
-  const corner = new Float32Array(VW * (H + 1) * 3);
-  for (let vy = 0; vy <= H; vy++) {
-    for (let vx = 0; vx <= W; vx++) {
-      addTile(vx - 1, vy - 1);
-      addTile(vx, vy - 1);
-      addTile(vx - 1, vy);
-      addTile(vx, vy);
-      write(corner, (vy * VW + vx) * 3, hAt(vx, vy), share(), hash2(vx, vy, seed + 3));
-    }
-  }
-  const hEdge = new Float32Array(W * (H + 1) * 3);
-  for (let vy = 0; vy <= H; vy++) {
-    for (let tx = 0; tx < W; tx++) {
-      addTile(tx, vy - 1);
-      addTile(tx, vy);
-      write(hEdge, (vy * W + tx) * 3, (hAt(tx, vy) + hAt(tx + 1, vy)) / 2, share(), hash2(tx * 2 + 1, vy * 2, seed + 5));
-    }
-  }
-  const vEdge = new Float32Array(VW * H * 3);
-  for (let ty = 0; ty < H; ty++) {
-    for (let vx = 0; vx <= W; vx++) {
-      addTile(vx - 1, ty);
-      addTile(vx, ty);
-      write(vEdge, (ty * VW + vx) * 3, (hAt(vx, ty) + hAt(vx, ty + 1)) / 2, share(), hash2(vx * 2, ty * 2 + 1, seed + 5));
-    }
-  }
-  const center = new Float32Array(W * H * 3);
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const i = ty * W + tx;
-      addTile(tx - 1, ty);
-      addTile(tx + 1, ty);
-      addTile(tx, ty - 1);
-      addTile(tx, ty + 1);
-      const own = T[i] === TERRAIN.FOREST ? 1 : 0;
-      const h = (hAt(tx, ty) + hAt(tx + 1, ty) + hAt(tx, ty + 1) + hAt(tx + 1, ty + 1)) / 4;
-      write(center, i * 3, h, 0.75 * own + 0.25 * share(), hash2(i, 77, seed + 4));
-    }
-  }
-  return { corner, center, hEdge, vEdge };
-}
-
-/**
- * Terrain geometry: every tile is an 8-triangle fan around a center vertex,
- * through its four corners and four edge midpoints. Corner heights come from
- * map.heights, edge midpoints and centers from the bilinear surface, so the mesh
- * matches heightAt() at every vertex. Smooth vertex normals.
- */
-export function buildTerrainGeometry(map) {
-  const W = map.width;
-  const H = map.height;
-  const VW = W + 1;
-  const nCorner = VW * (H + 1);
-  const cBase = nCorner; // tile centers
-  const hBase = cBase + W * H; // horizontal edge midpoints
-  const vBase = hBase + W * (H + 1); // vertical edge midpoints
-  const nVert = vBase + VW * H;
-  const pos = new Float32Array(nVert * 3);
-  const col = new Float32Array(nVert * 3);
-  const hs = map.heights;
-  const hAt = (vx, vy) => (hs ? hs[vy * VW + vx] : 0);
-  const { corner, center, hEdge, vEdge } = terrainColors(map);
-  const put = (i, x, y, z) => {
-    pos[i * 3] = x;
-    pos[i * 3 + 1] = y;
-    pos[i * 3 + 2] = z;
-  };
-  for (let vy = 0; vy <= H; vy++) for (let vx = 0; vx <= W; vx++) put(vy * VW + vx, vx, hAt(vx, vy), vy);
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const h = (hAt(tx, ty) + hAt(tx + 1, ty) + hAt(tx, ty + 1) + hAt(tx + 1, ty + 1)) / 4;
-      put(cBase + ty * W + tx, tx + 0.5, h, ty + 0.5);
-    }
-  }
-  for (let vy = 0; vy <= H; vy++) {
-    for (let tx = 0; tx < W; tx++) put(hBase + vy * W + tx, tx + 0.5, (hAt(tx, vy) + hAt(tx + 1, vy)) / 2, vy);
-  }
-  for (let ty = 0; ty < H; ty++) {
-    for (let vx = 0; vx <= W; vx++) put(vBase + ty * VW + vx, vx, (hAt(vx, ty) + hAt(vx, ty + 1)) / 2, ty + 0.5);
-  }
-  col.set(corner, 0);
-  col.set(center, cBase * 3);
-  col.set(hEdge, hBase * 3);
-  col.set(vEdge, vBase * 3);
-
-  const idx = new Uint32Array(W * H * 24);
-  let k = 0;
-  const tri = (a, b, c) => {
-    idx[k++] = a;
-    idx[k++] = b;
-    idx[k++] = c;
-  };
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const c = cBase + ty * W + tx;
-      const tl = ty * VW + tx;
-      const tr = tl + 1;
-      const bl = tl + VW;
-      const br = bl + 1;
-      const top = hBase + ty * W + tx;
-      const bottom = top + W;
-      const left = vBase + ty * VW + tx;
-      const right = left + 1;
-      // counter-clockwise seen from above (+Y): x east, z south
-      tri(c, tr, top);
-      tri(c, top, tl);
-      tri(c, br, right);
-      tri(c, right, tr);
-      tri(c, bl, bottom);
-      tri(c, bottom, br);
-      tri(c, tl, left);
-      tri(c, left, bl);
+  for (let cy = 0; cy < H; cy += CHUNK) {
+    for (let cx = 0; cx < W; cx += CHUNK) {
+      const i0 = cx * R;
+      const i1 = Math.min(W, cx + CHUNK) * R;
+      const j0 = cy * R;
+      const j1 = Math.min(H, cy + CHUNK) * R;
+      const start = n;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let j = j0; j < j1; j++) {
+        for (let i = i0; i < i1; i++) {
+          const tl = j * nx + i;
+          const tr = tl + 1;
+          const bl = tl + nx;
+          const br = bl + 1;
+          // counter-clockwise from above (+Y): x east, z south
+          if ((i + j) & 1) {
+            idx[n++] = tl; idx[n++] = bl; idx[n++] = br;
+            idx[n++] = tl; idx[n++] = br; idx[n++] = tr;
+          } else {
+            idx[n++] = tl; idx[n++] = bl; idx[n++] = tr;
+            idx[n++] = tr; idx[n++] = bl; idx[n++] = br;
+          }
+        }
+      }
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const h = field.hgt[j * nx + i];
+          if (h < lo) lo = h;
+          if (h > hi) hi = h;
+        }
+      }
+      const box = new THREE.Box3(new THREE.Vector3(i0 / R, lo, j0 / R), new THREE.Vector3(i1 / R, hi, j1 / R));
+      chunks.push({ cx, cy, start, count: n - start, box });
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
+  geo.userData.chunks = chunks;
   geo.computeBoundingSphere();
   geo.computeBoundingBox();
   return geo;
+}
+
+/**
+ * The ground data texture the shader reads per pixel (one texel per field sample,
+ * bilinear): R shore distance (SHORE_MIN..SHORE_MAX tiles, + on land), G outcrop
+ * rise (0..RISE_MAX), B forest share, A cavity (0.5 flat, below it a crest).
+ */
+function groundDataTexture(field) {
+  const tex = new THREE.DataTexture(field.dataBytes(), field.nx, field.ny, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.name = 'terrain-ground-data';
+  tex.needsUpdate = true;
+  return tex;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +245,8 @@ uniform sampler2DArray uGround;
 uniform sampler2D uTNoise;
 uniform sampler2D uTFx;
 uniform sampler2D uTiles;
+uniform sampler2D uGData;
+uniform vec4 uGMap;
 uniform vec4 uTileSize; // width, height (tiles)
 uniform vec4 uLayer[ ${LAYER_COUNT} ];
 uniform float uTTime;
@@ -379,6 +316,13 @@ vec2 tdy = dFdy( tp );
 vec4 tnA = texture2D( uTNoise, tp * 0.029 ); // ~34-tile features
 vec4 tnB = texture2D( uTNoise, tp * 0.13 + 0.37 ); // ~8-tile features
 vec4 tnC = texture2D( uTNoise, tp * 0.41 + 0.71 ); // ~2-tile features: ragged, hand-drawn edges
+// the ground field's smooth per-pixel data (ground-field.js): shore distance (tiles, + on
+// land), outcrop rise, forest share, cavity (+ hollows, - crests)
+vec4 gd = texture2D( uGData, tp * uGMap.xy + uGMap.zw );
+float gShore = gd.r * ${(SHORE_MAX - SHORE_MIN).toFixed(1)} + ${SHORE_MIN.toFixed(1)};
+float gRise = gd.g * ${RISE_MAX.toFixed(2)};
+float gForest = gd.b;
+float gCav = gd.a * 2.0 - 1.0;
 // The tile map is looked up through a warped grid, so type borders meander
 // across tiles instead of tracing the grid; the four tiles around the warped
 // point give bilinear weights, merged where they share a type.
@@ -495,6 +439,11 @@ float tUnder = 1.0 - smoothstep( -0.02, 0.0, tAbove );
 tAlbedo *= 1.0 - 0.4 * tWet;
 tRough = mix( mix( tRough, 0.42, tWet ), 0.9, tUnder );
 tBump *= 1.0 - 0.5 * tWet;
+// under the canopy the ground is darker and a touch cooler; hollows and cliff feet are
+// shaded, crests catch more light (from the smooth field, so no tile-sized blotches)
+tAlbedo *= 1.0 - 0.22 * gForest;
+tAlbedo *= vec3( 1.0 - 0.04 * gForest, 1.0, 1.0 + 0.03 * gForest );
+tAlbedo *= 1.0 - 0.3 * max( gCav, 0.0 ) + 0.12 * max( - gCav, 0.0 );
 diffuseColor.rgb *= tAlbedo;`;
 
 const TERRAIN_BUMP = /* glsl */ `
@@ -536,8 +485,8 @@ if ( tUnder > 0.0 ) {
  * The ground material: a MeshStandardMaterial (rough, so it takes the sky's
  * image-based light like the models) with the layer blending patched in.
  */
-function terrainMaterial(textures, tiles, map, time, quality) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 });
+function terrainMaterial(textures, tiles, gdata, field, map, time, quality) {
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0 });
   mat.name = 'terrain';
   const uniforms = {
     uGround: { value: textures.ground },
@@ -545,6 +494,9 @@ function terrainMaterial(textures, tiles, map, time, quality) {
     uTFx: { value: textures.fx },
     uTiles: { value: tiles },
     uTileSize: { value: new THREE.Vector4(map.width, map.height, 1 / map.width, 1 / map.height) },
+    uGData: { value: gdata },
+    // world (tiles) → ground data uv: one texel per field sample, texel centers on the samples
+    uGMap: { value: new THREE.Vector4(FIELD_RES / field.nx, FIELD_RES / field.ny, 0.5 / field.nx, 0.5 / field.ny) },
     uLayer: { value: LAYER_PARAMS.map((p) => new THREE.Vector4(...p)) },
     uTTime: time,
     uWaterLevel: { value: WATER_LEVEL },
@@ -562,7 +514,7 @@ function terrainMaterial(textures, tiles, map, time, quality) {
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${TERRAIN_BUMP}`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${TERRAIN_CAUSTICS}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-terrain-v3';
+  mat.customProgramCacheKey = () => 'mythicwar-terrain-v4';
   setTerrainQuality(mat, quality);
   // order matters: the fog-of-war patch keeps the hooks installed before it
   patchWorldMaterial(mat, { cloud: true });
@@ -695,7 +647,7 @@ function borderMesh(map) {
  * Build terrain, water and the border beyond the map edge for a map.
  * @param {object} map mapData (width, height, terrain, heights, seed)
  * @param {{ quality?: 'low'|'medium'|'high'|'ultra' }} [o]
- * @returns {{group: THREE.Group, terrain: THREE.Mesh, water: THREE.Mesh|null, border: THREE.Mesh,
+ * @returns {{group: THREE.Group, terrain: THREE.Group, chunks: THREE.Mesh[], material: THREE.Material, field: object, water: THREE.Mesh|null, border: THREE.Mesh,
  *   height: (x:number,y:number)=>number, update: (timeSec:number)=>void, setQuality: (q:string)=>void, dispose: ()=>void}}
  */
 export function createTerrain(map, { quality = 'medium' } = {}) {
@@ -705,16 +657,34 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
   const textures = createTerrainTextures(ANISOTROPY[q]);
   const tiles = tileTexture(map);
   const time = { value: 0 };
-  const geo = buildTerrainGeometry(map);
-  const mat = terrainMaterial(textures, tiles, map, time, q);
-  const terrain = new THREE.Mesh(geo, mat);
+  const field = groundField(map);
+  const gdata = groundDataTexture(field);
+  const geo = buildTerrainGeometry(map, field);
+  const mat = terrainMaterial(textures, tiles, gdata, field, map, time, q);
+  // one mesh per chunk over the shared vertices, so only the chunks in view are drawn
+  const terrain = new THREE.Group();
   terrain.name = 'terrain';
-  terrain.receiveShadow = true;
-  terrain.matrixAutoUpdate = false;
-  terrain.updateMatrix();
+  const chunks = [];
+  const chunkGeos = [];
+  for (const c of geo.userData.chunks) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', geo.attributes.position);
+    g.setAttribute('normal', geo.attributes.normal);
+    g.setIndex(new THREE.BufferAttribute(geo.index.array.subarray(c.start, c.start + c.count), 1));
+    g.boundingBox = c.box.clone();
+    g.boundingSphere = c.box.getBoundingSphere(new THREE.Sphere());
+    const m = new THREE.Mesh(g, mat);
+    m.name = `terrain-${c.cx}-${c.cy}`;
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false;
+    m.updateMatrix();
+    terrain.add(m);
+    chunks.push(m);
+    chunkGeos.push(g);
+  }
   group.add(terrain);
 
-  const water = buildWater(map, { fx: textures.fx, noise: textures.noise, time, hq: q !== 'low' });
+  const water = buildWater(map, { fx: textures.fx, noise: textures.noise, time, hq: q !== 'low', field });
   if (water) group.add(water);
 
   const border = borderMesh(map);
@@ -723,6 +693,9 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
   return {
     group,
     terrain,
+    chunks,
+    material: mat,
+    field,
     water,
     border,
     height: (x, y) => heightAt(map, x, y),
@@ -775,8 +748,10 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
     },
     dispose() {
       group.removeFromParent();
+      for (const g of chunkGeos) g.dispose();
       geo.dispose();
       mat.dispose();
+      gdata.dispose();
       tiles.dispose();
       textures.dispose();
       if (water) {

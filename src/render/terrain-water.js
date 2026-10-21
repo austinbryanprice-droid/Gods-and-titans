@@ -1,30 +1,44 @@
-// Lake surface for the terrain (DESIGN 8): one flat mesh at WATER_LEVEL over
-// every tile that dips below it, built with the terrain's own 8-triangle fan
-// per tile so the per-vertex depth (water level − ground height) interpolates
-// to the exact depth of the ground under every pixel. The shader then has a
-// precise shoreline without reading the depth buffer:
+// Lake surface for the terrain (DESIGN 8): one flat mesh at WATER_LEVEL over every
+// cell of the ground field that dips below it (ground-field.js), with the per-vertex
+// depth (water level − ground height) interpolating to the exact depth of the ground
+// under every pixel, so the shader has a precise shoreline without reading the depth
+// buffer:
 //
-//   - animated normals: two scrolling ripple layers (fx texture slopes) on a
-//     few analytic swells, calmer in the shallows;
-//   - Fresnel reflection of the sky gradient the environment map is built
-//     from, with the drifting clouds mirrored in it;
-//   - sun glints from SUN_DIR (the sun is behind the RTS camera, so a mirror
-//     reflection never shows: glints come from an exaggerated ripple normal);
-//   - depth-based absorption color and opacity, a slight refraction-like
-//     wobble of the opacity, soft foam bands rolling in to the shore.
+//   - animated normals: two scrolling ripple layers (fx texture slopes) on a few
+//     analytic swells, calmer in the shallows;
+//   - depth color: pale aqua over the sand shelf, clear teal further out, a deep
+//     blue-green in the middle, and an opacity that follows (the bed shows through
+//     the shallows);
+//   - Fresnel reflection of the sky the Lighting thread keeps (zenith, horizon, with
+//     the drifting clouds mirrored in it), lit by the key light, which is the sun by
+//     day and the moon at night;
+//   - sun (or moon) glints: a soft sheen on the swells and sparkles from a fine,
+//     fast-moving ripple normal, strong enough to bloom;
+//   - soft foam: a lace line along the shore and washes rolling in over the shallows;
+//   - at night a cyan glow rises out of the water (uNight), strongest over the
+//     shallows and in the foam, so lakes never go flat and black.
 //
-// Output is premultiplied (reflections add light, the body absorbs what is
-// behind), linear in the HDR target and tone mapped on the low path; the fog
-// of war goes through fowApply like every other world material.
+// Output is premultiplied (reflections add light, the body absorbs what is behind),
+// linear in the HDR target and tone mapped on the low path; the fog of war goes
+// through fowApply like every other world material.
 import * as THREE from 'three';
-import { TERRAIN } from '../config.js';
 import { FOW_UNIFORMS, FOW_PARS_FRAGMENT } from './fog.js';
-import { SUN_DIR, WORLD_UNIFORMS } from './shading.js';
+import { WORLD_UNIFORMS } from './shading.js';
+import { WATER_LEVEL, FIELD_RES, groundField } from './ground-field.js';
 
-/** Water surface height (notes/decisions.md [map]: lines up with the tile edges). */
-export const WATER_LEVEL = -0.2;
+export { WATER_LEVEL };
 
 const lin = (hex) => new THREE.Color(hex); // sRGB hex → linear working space
+
+// The Lighting thread's shared uniforms (shading.js WORLD_UNIFORMS) are read by
+// reference so the lake follows the time of day. Builds without them (older
+// shading.js) get fixed stand-ins with the same shape, tuned to a clear noon.
+const STAND_IN = {};
+function shared(name, make) {
+  const u = WORLD_UNIFORMS[name];
+  if (u) return u;
+  return STAND_IN[name] || (STAND_IN[name] = { value: make() });
+}
 
 const WATER_VS = /* glsl */ `
 attribute float aDepth;
@@ -47,13 +61,17 @@ uniform sampler2D uFx;
 uniform sampler2D uNoise;
 uniform sampler2D uCloudTex;
 uniform vec4 uCloud;
-uniform vec3 uSunDir;
+uniform vec3 uSunDirW;
 uniform vec3 uSunColor;
+uniform vec3 uSkyZenith;
+uniform vec3 uSkyHorizon;
+uniform vec3 uSkyAmbient;
+uniform float uNight;
 uniform vec3 uShallow;
+uniform vec3 uMid;
 uniform vec3 uDeep;
 uniform vec3 uFoam;
-uniform vec3 uZenith;
-uniform vec3 uHorizon;
+uniform vec3 uGlow;
 varying float vDepth;
 varying vec3 vWPos;
 #include <common>
@@ -73,78 +91,101 @@ vec2 swell( vec2 p, float t ) {
 }
 
 void main() {
-  if ( vDepth < -0.03 ) discard; // over dry ground (hidden by it anyway)
+  if ( vDepth < -0.06 ) discard; // over dry ground (hidden by it anyway)
   vec2 p = vWPos.xz;
   float t = uTime;
-  // The ground's contour at the water level follows the tile grid; letting the
-  // water thin out over a noisy margin in the shallows gives an organic shoreline.
-  float depth = vDepth - 0.1 * texture2D( uNoise, p * 0.23 ).b;
-  float calm = 0.35 + 0.65 * smoothstep( 0.0, 0.18, depth );
+  // The contour of the ground at the water level is smooth, but a noisy margin in the
+  // shallows still breaks up the cell-sized kinks of the interpolated depth and gives
+  // a living, lapping shoreline.
+  float nz = texture2D( uNoise, p * 0.23 ).b;
+  float depth = vDepth - 0.06 * ( nz - 0.35 ) - 0.012 * sin( t * 1.1 + p.x * 0.8 + p.y * 0.6 );
+  float calm = 0.35 + 0.65 * smoothstep( 0.0, 0.14, depth );
 
   // ---- surface normal
-  vec2 slope = ( texture2D( uFx, p * 0.19 + vec2( t * 0.027, t * 0.016 ) ).rg - 0.5 ) * 0.28;
+  vec2 slope = ( texture2D( uFx, p * 0.19 + vec2( t * 0.027, t * 0.016 ) ).rg - 0.5 ) * 0.3;
   #ifdef WATER_HQ
-    slope += ( texture2D( uFx, p * vec2( 0.31, 0.29 ) + vec2( - t * 0.021, t * 0.033 ) + 0.41 ).gr - 0.5 ) * 0.2;
+    slope += ( texture2D( uFx, p * vec2( 0.31, 0.29 ) + vec2( - t * 0.021, t * 0.033 ) + 0.41 ).gr - 0.5 ) * 0.22;
   #endif
   slope = slope * calm + swell( p, t ) * calm;
   vec3 N = normalize( vec3( - slope.x, 1.0, - slope.y ) );
   vec3 V = normalize( cameraPosition - vWPos );
   float NdV = saturate( dot( N, V ) );
 
+  // ---- light: the key light (sun by day, moon at night) and the sky
+  vec3 L = normalize( uSunDirW );
+  float sunI = dot( uSunColor, vec3( 0.2126, 0.7152, 0.0722 ) );
+  float ambI = dot( uSkyAmbient, vec3( 0.2126, 0.7152, 0.0722 ) );
+  // 1 at a clear noon (ambient about 0.4, sun about 2.5), falling toward dusk and night
+  float lightK = saturate( ( ambI + 0.09 * sunI ) / 0.62 );
+
   // ---- cloud shade (the same drifting clouds that shade the ground)
   float shade = 1.0;
-  vec2 cp = ( p - uSunDir.xz * ( vWPos.y / max( uSunDir.y, 0.2 ) ) ) * uCloud.y + uCloud.zw * t * uCloud.y;
+  vec2 cp = ( p - L.xz * ( vWPos.y / max( L.y, 0.2 ) ) ) * uCloud.y + uCloud.zw * t * uCloud.y;
   if ( uCloud.x > 0.0 ) {
     float n = texture2D( uCloudTex, cp ).r;
     shade = 1.0 - uCloud.x * smoothstep( 0.58, 0.72, n ); // as cloudShade (shading.js)
   }
 
   // ---- body: absorption deepens the color and the opacity with depth
-  float dd = 1.0 - exp( - max( depth, 0.0 ) * 4.2 );
-  vec3 body = mix( uShallow, uDeep, smoothstep( 0.0, 0.85, dd ) ) * ( 0.55 + 0.45 * shade );
-  float alpha = mix( 0.22, 0.9, dd );
+  float dd = 1.0 - exp( - max( depth, 0.0 ) * 3.4 );
+  vec3 body = mix( uShallow, uMid, smoothstep( 0.0, 0.5, dd ) );
+  body = mix( body, uDeep, smoothstep( 0.4, 0.95, dd ) );
+  // lit by the sky and, a little, by the sun that gets in under the surface
+  body *= lightK * ( 0.62 + 0.38 * shade );
+  float alpha = mix( 0.1, 0.93, smoothstep( 0.0, 0.8, dd ) );
   // refraction-like wobble: the ripples tilt how much of the bed shows through
   alpha = saturate( alpha + ( slope.x - slope.y ) * 0.6 * dd );
 
-  // ---- reflection: Fresnel (water F0 0.02, a little lifted so it reads from above)
+  // ---- reflection: Fresnel (a little lifted so the sky reads from above)
   vec3 R = reflect( - V, N );
   float ry = saturate( R.y );
-  vec3 sky = mix( uHorizon, uZenith, pow( ry, 0.55 ) );
+  vec3 sky = mix( uSkyHorizon, uSkyZenith, pow( ry, 0.55 ) );
   #ifdef WATER_HQ
     // clouds mirrored in the water drift with the ones overhead
     vec2 rc = ( p + R.xz / max( R.y, 0.2 ) * 8.0 ) * uCloud.y * 1.3 + uCloud.zw * t * uCloud.y;
     float cl = texture2D( uCloudTex, rc ).r;
-    sky = mix( sky, uHorizon * 1.25, smoothstep( 0.48, 0.72, cl ) * 0.55 );
+    sky = mix( sky, uSkyHorizon * 1.25, smoothstep( 0.48, 0.72, cl ) * 0.55 );
   #endif
-  float F = 0.02 + 0.98 * pow( 1.0 - NdV, 5.0 );
-  F = min( 1.0, F * 1.8 + 0.035 );
+  float F = 0.03 + 0.97 * pow( 1.0 - NdV, 5.0 );
+  F = min( 1.0, F * 2.2 + 0.06 );
   vec3 refl = sky * F;
 
-  // ---- sun: a soft sheen on the swells, sparse glints from an exaggerated ripple normal
-  vec3 H = normalize( uSunDir + V );
-  vec3 Ng = normalize( vec3( - slope.x * 7.0, 1.0, - slope.y * 7.0 ) );
-  float glint = pow( saturate( dot( Ng, H ) ), 220.0 ) * 6.0;
-  float sheen = pow( saturate( dot( N, H ) ), 24.0 ) * 0.05;
-  // twinkle: glints come and go with a fast-moving noise, which also breaks the
-  // broad highlights of the smoother single-layer ripples into sparkles
-  glint *= smoothstep( 0.45, 0.8, texture2D( uFx, p * 0.83 + vec2( t * 0.11, - t * 0.07 ) ).a );
-  vec3 sun = uSunColor * ( glint + sheen ) * shade * calm;
+  // ---- key light: a soft sheen on the swells, sparkles from a fine, fast ripple normal
+  vec3 H = normalize( L + V );
+  float sheen = pow( saturate( dot( N, H ) ), 28.0 ) * 0.08;
+  vec2 fine = ( texture2D( uFx, p * vec2( 0.83, 0.79 ) + vec2( t * 0.07, - t * 0.05 ) ).gr - 0.5 ) * 0.95;
+  #ifdef WATER_HQ
+    fine += ( texture2D( uFx, p * vec2( 1.37, 1.31 ) + vec2( - t * 0.06, - t * 0.09 ) + 0.27 ).rg - 0.5 ) * 0.7;
+  #endif
+  vec3 Nf = normalize( vec3( - ( slope.x * 4.0 + fine.x ), 1.0, - ( slope.y * 4.0 + fine.y ) ) );
+  float spark = pow( saturate( dot( Nf, H ) ), 420.0 );
+  // twinkle: sparkles come and go with a fast-moving noise
+  spark *= smoothstep( 0.35, 0.75, texture2D( uFx, p * 0.61 + vec2( t * 0.13, - t * 0.09 ) ).a );
+  vec3 sunTint = uSunColor / max( max( uSunColor.r, uSunColor.g ), max( uSunColor.b, 1e-3 ) );
+  float sunPow = clamp( sqrt( sunI / 2.5 ), 0.0, 1.4 );
+  vec3 sun = sunTint * ( spark * 26.0 + sheen * 2.0 ) * sunPow * shade * calm;
 
-  // ---- foam: a lapping line at the shore and bands rolling in over the shallows
+  // ---- foam: a lapping lace line at the shore and bands rolling in over the shallows
   float fn = texture2D( uFx, p * 0.45 + vec2( t * 0.02, - t * 0.015 ) ).a;
-  float edge = 1.0 - smoothstep( 0.0, 0.022 + 0.01 * sin( t * 1.3 + p.x * 0.7 + p.y * 0.5 ), depth );
-  float phase = depth * 26.0 + t * 0.55 + fn * 1.2;
-  float band = smoothstep( 0.72, 0.86, fract( phase ) ) * ( 1.0 - smoothstep( 0.86, 1.0, fract( phase ) ) );
-  band *= ( 1.0 - smoothstep( 0.03, 0.13, depth ) ) * smoothstep( 0.35, 0.6, fn );
-  float foam = saturate( edge * smoothstep( 0.15, 0.65, fn + 0.25 * edge ) + band * 0.8 );
+  float fn2 = texture2D( uFx, p * 1.1 + vec2( - t * 0.03, t * 0.02 ) ).a;
+  float edge = 1.0 - smoothstep( 0.0, 0.03 + 0.016 * sin( t * 1.3 + p.x * 0.7 + p.y * 0.5 ), depth );
+  float lace = smoothstep( 0.2, 0.62, fn + 0.3 * edge + 0.18 * ( fn2 - 0.5 ) );
+  float phase = depth * 18.0 + t * 0.5 + fn * 1.4;
+  float band = smoothstep( 0.7, 0.86, fract( phase ) ) * ( 1.0 - smoothstep( 0.86, 1.0, fract( phase ) ) );
+  band *= ( 1.0 - smoothstep( 0.04, 0.17, depth ) ) * smoothstep( 0.32, 0.6, fn );
+  float foam = saturate( edge * lace + band * 0.7 );
   // a faint shadow just behind each band reads as a wave lip
-  alpha = saturate( alpha + band * 0.12 );
+  alpha = saturate( alpha + band * 0.1 );
 
-  vec3 col = body * alpha + refl + sun; // premultiplied
-  col = mix( col, uFoam * ( 0.6 + 0.4 * shade ), foam );
+  // ---- night glow: cool cyan rising out of the water, most over the shallows and in the foam
+  vec3 glow = uGlow * uNight * ( 0.55 + 0.45 * ( 1.0 - dd ) ) * ( 0.8 + 0.4 * ( fn - 0.5 ) + 2.0 * length( slope ) );
+
+  vec3 col = body * alpha + refl + sun + glow * alpha; // premultiplied
+  vec3 foamLit = uFoam * ( 0.35 + 0.65 * lightK ) * ( 0.6 + 0.4 * shade ) + uGlow * uNight * 0.9;
+  col = mix( col, foamLit, foam );
   alpha = mix( alpha, 1.0, foam );
   // thin out over the noisy margin (premultiplied: color and alpha together)
-  float fade = smoothstep( -0.012, 0.004, depth );
+  float fade = smoothstep( -0.018, 0.006, depth );
   col *= fade;
   alpha *= fade;
   if ( alpha < 0.004 ) discard; // nothing to show
@@ -160,66 +201,50 @@ void main() {
 }`;
 
 /**
- * Water surface over every tile that dips below the water level, as 8-triangle
- * fans like the terrain (corner, edge midpoint and center vertices shared).
+ * Water surface over every cell of the ground field that dips below the water
+ * level (a small margin of dry cells too, where the shoreline fades out).
  * @param {object} map mapData
  * @param {object} o
  * @param {THREE.Texture} o.fx ripple / foam texture (terrain-textures.js)
  * @param {THREE.Texture} o.noise tileable fbm noise texture (terrain-textures.js)
  * @param {{ value: number }} [o.time] clock uniform (seconds), driven by the owner
  * @param {boolean} [o.hq] a second ripple layer and cloud reflections
+ * @param {import('./ground-field.js').GroundField} [o.field] the ground field (default: the map's)
  * @returns {THREE.Mesh|null}
  */
-export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true } = {}) {
-  const W = map.width;
-  const H = map.height;
-  const VW = W + 1;
-  const hs = map.heights;
-  if (!hs) return null;
+export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true, field = groundField(map) } = {}) {
+  if (!field) return null;
+  const nx = field.nx;
+  const ny = field.ny;
+  const R = FIELD_RES;
+  const cw = nx - 1;
+  const ch = ny - 1;
+  const hgt = field.hgt;
+  const margin = WATER_LEVEL + 0.06;
+  const vertOf = new Int32Array(nx * ny).fill(-1);
   const pos = [];
   const depth = [];
   const idx = [];
-  const cornerOf = new Int32Array(VW * (H + 1)).fill(-1);
-  const hEdgeOf = new Int32Array(W * (H + 1)).fill(-1);
-  const vEdgeOf = new Int32Array(VW * H).fill(-1);
-  const add = (x, z, h) => {
-    const n = pos.length / 3;
-    pos.push(x, WATER_LEVEL, z);
-    depth.push(WATER_LEVEL - h);
-    return n;
+  const vert = (i, j) => {
+    const k = j * nx + i;
+    if (vertOf[k] < 0) {
+      vertOf[k] = pos.length / 3;
+      pos.push(i / R, WATER_LEVEL, j / R);
+      depth.push(WATER_LEVEL - hgt[k]);
+    }
+    return vertOf[k];
   };
-  const hAt = (vx, vy) => hs[vy * VW + vx];
-  const corner = (vx, vy) => {
-    const i = vy * VW + vx;
-    if (cornerOf[i] < 0) cornerOf[i] = add(vx, vy, hAt(vx, vy));
-    return cornerOf[i];
-  };
-  const hEdge = (tx, vy) => {
-    const i = vy * W + tx;
-    if (hEdgeOf[i] < 0) hEdgeOf[i] = add(tx + 0.5, vy, (hAt(tx, vy) + hAt(tx + 1, vy)) / 2);
-    return hEdgeOf[i];
-  };
-  const vEdge = (vx, ty) => {
-    const i = ty * VW + vx;
-    if (vEdgeOf[i] < 0) vEdgeOf[i] = add(vx, ty + 0.5, (hAt(vx, ty) + hAt(vx, ty + 1)) / 2);
-    return vEdgeOf[i];
-  };
-  for (let ty = 0; ty < H; ty++) {
-    for (let tx = 0; tx < W; tx++) {
-      const a = ty * VW + tx;
-      const lo = Math.min(hs[a], hs[a + 1], hs[a + VW], hs[a + VW + 1]);
-      if (lo > WATER_LEVEL - 0.01 && map.terrain[ty * W + tx] !== TERRAIN.WATER) continue;
-      const c = add(tx + 0.5, ty + 0.5, (hs[a] + hs[a + 1] + hs[a + VW] + hs[a + VW + 1]) / 4);
-      const tl = corner(tx, ty);
-      const tr = corner(tx + 1, ty);
-      const bl = corner(tx, ty + 1);
-      const br = corner(tx + 1, ty + 1);
-      const top = hEdge(tx, ty);
-      const bottom = hEdge(tx, ty + 1);
-      const left = vEdge(tx, ty);
-      const right = vEdge(tx + 1, ty);
-      // the terrain's fan, counter-clockwise from above
-      idx.push(c, tr, top, c, top, tl, c, br, right, c, right, tr, c, bl, bottom, c, bottom, br, c, tl, left, c, left, bl);
+  for (let j = 0; j < ch; j++) {
+    for (let i = 0; i < cw; i++) {
+      const k = j * nx + i;
+      if (Math.min(hgt[k], hgt[k + 1], hgt[k + nx], hgt[k + nx + 1]) > margin) continue;
+      const tl = vert(i, j);
+      const tr = vert(i + 1, j);
+      const bl = vert(i, j + 1);
+      const br = vert(i + 1, j + 1);
+      // counter-clockwise from above
+      if ((i + j) & 1) idx.push(tl, bl, br, tl, br, tr);
+      else idx.push(tl, bl, tr, tr, bl, br);
     }
   }
   if (!idx.length) return null;
@@ -229,19 +254,22 @@ export function buildWater(map, { fx, noise, time = { value: 0 }, hq = true } = 
   geo.setIndex(idx);
   geo.computeBoundingSphere();
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-    uShallow: { value: lin('#3d8f8a') },
-    uDeep: { value: lin('#123f5c') },
-    uFoam: { value: lin('#e4eeea') },
-    // the sky gradient createEnvironment() lights the world with
-    uZenith: { value: lin('#5d8fd0') },
-    uHorizon: { value: lin('#cfdbe6') },
-    uSunColor: { value: lin('#fff1dc') },
+    uShallow: { value: lin('#4ccbb6') },
+    uMid: { value: lin('#1f9aa3') },
+    uDeep: { value: lin('#0c4f74') },
+    uFoam: { value: lin('#f1f9f6') },
+    uGlow: { value: lin('#1ec8e0') },
   }]);
   // shared uniforms by reference: no per-material updates
   uniforms.uTime = time;
   uniforms.uCloudTex = WORLD_UNIFORMS.uCloudTex;
   uniforms.uCloud = WORLD_UNIFORMS.uCloud;
-  uniforms.uSunDir = { value: SUN_DIR.clone() };
+  uniforms.uSunDirW = WORLD_UNIFORMS.uSunDirW;
+  uniforms.uSunColor = shared('uSunColor', () => new THREE.Color(0xffe4bd).multiplyScalar(3));
+  uniforms.uSkyZenith = shared('uSkyZenith', () => lin('#5d8fd0'));
+  uniforms.uSkyHorizon = shared('uSkyHorizon', () => lin('#cfdbe6'));
+  uniforms.uSkyAmbient = shared('uSkyAmbient', () => new THREE.Color(0xbccff2).multiplyScalar(0.68));
+  uniforms.uNight = shared('uNight', () => 0);
   uniforms.uFx = { value: fx };
   uniforms.uNoise = { value: noise };
   uniforms.uFowTex = FOW_UNIFORMS.uFowTex;
