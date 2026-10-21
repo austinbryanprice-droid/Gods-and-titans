@@ -176,13 +176,14 @@ test('projectile flight time and homing', () => {
   vfx.dispose();
 });
 
-test('unit event effects (hit, death, level up, summon, dust) run and clean up', () => {
+test('unit event effects (hit, death, level up, rank up, summon, dust) run and clean up', () => {
   const { vfx } = make();
   for (const el of ELEMENTS) vfx.spawnHit({ x: 5, y: 5, h: 0.7, el });
   vfx.spawnHit({ x: 5, y: 5 });
   for (const scale of [0.6, 1, 2, 4, 6]) vfx.spawnDeath({ x: 8, y: 8, scale });
   vfx.spawnDeath({ x: 8, y: 8 });
   vfx.spawnLevelUp({ x: 3, y: 9 });
+  vfx.spawnRankUp({ x: 6, y: 9 });
   for (const scale of [1, 1.7, 4]) for (const el of ['lightning', 'fire', 'nature', 'shadow']) vfx.spawnSummon({ x: 12, y: 4, scale, el });
   vfx.spawnSummon({ x: 12, y: 4 });
   for (const size of [0.5, 1, 3, 5]) vfx.spawnDust({ x: 2, y: 2, size });
@@ -209,6 +210,7 @@ test('bad input is ignored or falls back instead of throwing', () => {
   vfx.spawnDeath();
   vfx.spawnSummon();
   vfx.spawnLevelUp();
+  vfx.spawnRankUp();
   vfx.spawnDust();
   vfx.update(NaN);
   vfx.update(-1);

@@ -1,4 +1,5 @@
 // ViewSnapshot builder (DESIGN 6.3): compact, rounded views of the world.
+import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
 
@@ -47,6 +48,10 @@ function unitView(u) {
   if (u.def.class === 'god') {
     v.lv = u.level;
     v.xp = Math.floor(u.xp);
+  } else if (u.xp >= 1 && canRank(u.def)) {
+    // soldiers: omitted until they have earned something
+    v.xp = Math.floor(u.xp);
+    if (u.rank > 0) v.rk = u.rank;
   }
   const cd = {};
   for (const k in u.cooldowns) cd[k] = r1(u.cooldowns[k]);

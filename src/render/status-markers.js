@@ -4,11 +4,17 @@
 // and a translucent bubble around shielded units. Both are single
 // InstancedMeshes refilled every frame (two draw calls in all), the glyphs
 // drawn procedurally in the fragment shader; nothing is allocated per frame.
+// A ranked soldier (EntityView `rk`) also wears one to three small diamonds in a row, in
+// bronze / silver / gold (addRank, colours from data/ranks.js). Diamonds, not chevrons: a buff
+// is already a pair of gold chevrons and must not read as a rank.
 // Stun stars and the slow / invulnerable ground rings live in overlays.js.
 import * as THREE from 'three';
+import { RANK_COLORS } from '../data/ranks.js';
 
 /** Icon kinds, in the order they are laid out left to right. */
 export const STATUS_ICONS = Object.freeze({ buff: 0, debuff: 1, slow: 2, dot: 3 });
+/** Rank pips (diamonds) are icon kinds RANK_ICON + rank (4, 5, 6). */
+export const RANK_ICON = 3;
 const ICON_ORDER = ['buff', 'debuff', 'slow', 'dot'];
 // Buffs come mostly from god / hero auras and sit over much of an army in a
 // fight: drawn a little lighter so debuffs, slows and damage over time stand out.
@@ -29,6 +35,7 @@ void main() {
 
 const ICON_FS = `
 uniform float uTime;
+uniform vec3 uRank[ 3 ]; // display (sRGB) colours of rank 1, 2, 3
 varying vec2 vUv;
 varying vec4 vIcon;
 float sdSeg( vec2 p, vec2 a, vec2 b ) {
@@ -60,6 +67,7 @@ void main() {
   float d;
   vec3 col;
   vec3 col2;
+  float shade = clamp( 0.55 + 0.6 * vUv.y, 0.0, 1.0 );
   if ( kind < 0.5 ) {
     // buff: two golden chevrons drifting up
     float b = 0.06 * sin( t * 4.0 );
@@ -85,7 +93,7 @@ void main() {
     d -= 0.1;
     col = vec3( 0.88, 0.97, 1.0 );
     col2 = vec3( 0.42, 0.78, 1.0 );
-  } else {
+  } else if ( kind < 3.5 ) {
     // damage over time: a venom drop, with a small drop falling from it
     float f = fract( t * 0.9 );
     d = drop( p * 1.12 + vec2( 0.0, -0.12 ) );
@@ -93,6 +101,20 @@ void main() {
     d = min( d, small );
     col = vec3( 0.5, 1.0, 0.22 );
     col2 = vec3( 0.62, 0.25, 0.9 );
+  } else {
+    // rank: kind 4 / 5 / 6 = one / two / three diamonds side by side, bronze / silver / gold
+    float n = kind - 3.0;
+    d = 1e3;
+    for ( int i = 0; i < 3; i++ ) {
+      if ( float( i ) < n - 0.5 ) {
+        vec2 q = p - vec2( ( float( i ) - ( n - 1.0 ) * 0.5 ) * 0.64, 0.0 );
+        d = min( d, ( abs( q.x ) + abs( q.y ) - 0.27 ) * 0.7071 );
+      }
+    }
+    shade = clamp( 0.5 + 2.0 * p.y, 0.0, 1.0 ); // lit from above: a faceted gem
+    vec3 rc = kind < 4.5 ? uRank[ 0 ] : kind < 5.5 ? uRank[ 1 ] : uRank[ 2 ];
+    col = min( rc * 1.12 + 0.06, vec3( 1.0 ) );
+    col2 = rc * 0.72;
   }
   float aa = fwidth( d ) * 1.2 + 1e-4;
   float fill = 1.0 - smoothstep( -aa, aa, d );
@@ -100,7 +122,7 @@ void main() {
   float a = max( fill, outline * 0.88 ) * vIcon.y;
   if ( a < 0.01 ) discard;
   // colors above are display (sRGB) values; the output is converted from linear
-  vec3 c = mix( col2, col, clamp( 0.55 + 0.6 * vUv.y, 0.0, 1.0 ) );
+  vec3 c = mix( col2, col, shade );
   c = mix( vec3( 0.04, 0.025, 0.03 ), c, fill );
   gl_FragColor = vec4( pow( c, vec3( 2.2 ) ), a );
   #include <colorspace_fragment>
@@ -156,8 +178,10 @@ export class StatusLayer {
     this.aIcon = new THREE.InstancedBufferAttribute(new Float32Array(maxIcons * 4), 4);
     this.aIcon.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('aIcon', this.aIcon);
+    // The shader works in display colours; RANK_COLORS[0] is the Recruit, who wears nothing.
+    const rankRgb = RANK_COLORS.slice(1).map((hex) => new THREE.Vector3(...[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)));
     this.iconMaterial = new THREE.ShaderMaterial({
-      uniforms: this.uniforms,
+      uniforms: { ...this.uniforms, uRank: { value: rankRgb } },
       vertexShader: ICON_VS,
       fragmentShader: ICON_FS,
       transparent: true,
@@ -251,6 +275,29 @@ export class StatusLayer {
       k++;
     }
     return k;
+  }
+
+  /**
+   * A soldier's rank pips (1..3 diamonds, bronze / silver / gold) centered on (x, y, z).
+   * @param {number} size icon size, world units
+   * @returns {boolean} added (false for a Recruit or when the cap is reached)
+   */
+  addRank(x, y, z, rank, size, alpha) {
+    const r = Math.min(3, rank | 0);
+    if (r < 1 || this.nIcons >= this.maxIcons) return false;
+    const i = this.nIcons++;
+    const e = this._m.elements;
+    e[0] = size; e[1] = 0; e[2] = 0; e[3] = 0;
+    e[4] = 0; e[5] = size; e[6] = 0; e[7] = 0;
+    e[8] = 0; e[9] = 0; e[10] = 1; e[11] = 0;
+    e[12] = x; e[13] = y; e[14] = z; e[15] = 1;
+    this.icons.setMatrixAt(i, this._m);
+    const a = this.aIcon.array;
+    a[i * 4] = RANK_ICON + r;
+    a[i * 4 + 1] = alpha;
+    a[i * 4 + 2] = 0;
+    a[i * 4 + 3] = 0;
+    return true;
   }
 
   /** A shield bubble of radius r centered on (x, y, z). */

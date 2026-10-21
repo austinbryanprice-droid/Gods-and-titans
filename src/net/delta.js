@@ -90,6 +90,7 @@ export const EVENT_SHAPES = [
   ['gameOver', 'winningTeam'],
   ['researched', 'player', 'up'],
   ['trade', 'from', 'to', 'res', 'amt', 'got'],
+  ['rankUp', 'id', 'rank'],
 ].map(([type, ...keys]) => ({ type, keys }));
 const SHAPES_BY_TYPE = new Map();
 EVENT_SHAPES.forEach((s, code) => {

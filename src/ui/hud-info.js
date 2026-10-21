@@ -1,13 +1,17 @@
 // Selection panel (bottom centre): a portrait and full stats for a single
 // selection, or a grid of icons with health bars for a group. Building queues
 // (click an item to cancel it), construction progress, prayer counts, god
-// level / xp, status effects, carried resources, the worshippers working at a
+// level / xp, soldier rank / xp, status effects, carried resources, the worshippers working at a
 // building, and stats with the owner's researched upgrades.
-import { GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE, MINE_SLOTS } from '../config.js';
+import {
+  GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_DAMAGE, GOD_LEVEL_ARMOR, MAX_QUEUE, MINE_SLOTS,
+  RANK_XP, RANK_HP, RANK_DAMAGE, RANK_ARMOR,
+} from '../config.js';
 import { UNITS, BUILDINGS, GOLD_MINE, UPGRADES } from '../data/index.js';
 import { buildingMods, unitMods, upgradesFor } from '../data/upgrades.js';
+import { canRank, rankBonus, rankName, nextRankXp, RANK_NUMERALS, RANK_COLORS } from '../data/ranks.js';
 import { sanitizeName } from '../net/protocol.js';
-import { el, setText, setStyle, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
+import { el, setText, setStyle, setHidden, setClass, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import {
   defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName, workersAt, workerTasks, modsOf, upgradesOf, WORKER_TASKS,
   workText, mineTripText,
@@ -54,6 +58,17 @@ function ownerName(vs, owner) {
 export function rangeText(attack) {
   if (!attack) return '';
   return attack.projectile ? String(attack.range) : 'Melee';
+}
+
+/** What each rank adds, for the experience bar's tooltip: "+5% damage, +10% health, +0.5 armor per rank". */
+export function rankBonusText() {
+  return `Each rank: +${Math.round(RANK_DAMAGE * 100)}% damage, +${Math.round(RANK_HP * 100)}% health, +${RANK_ARMOR} armor.`;
+}
+
+/** The experience line of a soldier: "Veteran · XP 75 / 150", or "Champion · Max rank". */
+export function rankProgressText(rank, xp) {
+  const next = nextRankXp(rank);
+  return next === null ? `${rankName(rank)} · Max rank` : `${rankName(rank)} · XP ${fmt(xp)} / ${fmt(next)}`;
 }
 
 /** Own workers gathering at a gold mine (walking to it, waiting their turn or mining). */
@@ -235,10 +250,13 @@ export class InfoView {
 
   buildUnitExtra(s) {
     const { e, def, extra } = s;
-    if (def && def.class === 'god') {
-      const xpBar = el('div', 'hi-bar is-xp', el('i', 'hi-bar-fill'));
+    const soldier = canRank(def);
+    if (def && (def.class === 'god' || soldier)) {
+      const xpBar = el('div', soldier ? 'hi-bar is-xp is-rank' : 'hi-bar is-xp', el('i', 'hi-bar-fill'));
       const xpText = el('div', 'hi-xp-text');
-      extra.appendChild(el('div', 'hi-xp', xpBar, xpText));
+      const xp = el('div', 'hi-xp', xpBar, xpText);
+      if (soldier) xp.title = rankBonusText();
+      extra.appendChild(xp);
       s.parts.xpFill = xpBar.children[0];
       s.parts.xpText = xpText;
     }
@@ -334,22 +352,29 @@ export class InfoView {
       setText(s.hpText, '');
     }
     const lv = e.lv || 1;
-    setText(s.lvl, def && def.class === 'god' ? String(lv) : '');
-    setHidden(s.lvl, !(def && def.class === 'god'));
+    const rk = e.rk || 0;
+    // portrait badge: a god's level, or a ranked soldier's numeral in its rank colour
+    const god = !!def && def.class === 'god';
+    const badge = god ? String(lv) : RANK_NUMERALS[rk] || '';
+    setText(s.lvl, badge);
+    setHidden(s.lvl, !badge);
+    setClass(s.lvl, 'is-rank', !god && rk > 0);
+    setStyle(s.lvl, '--rank', !god && rk > 0 ? RANK_COLORS[rk] : '');
     const p = s.parts;
     if (e.k === 'u' && def) {
       const isGod = def.class === 'god';
       const um = unitMods(modsOf(vs, e.o), def);
+      const rb = rankBonus(rk);
       if (p.dmg) {
-        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage);
+        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage) * (1 + rb.damage);
         setText(p.dmg, `${Math.round(dmg)}${def.attack.splash ? ' (splash)' : ''}`);
         setText(p.range, rangeText(def.attack));
       }
-      const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0) + um.armor;
+      const armor = def.armor + (isGod ? GOD_LEVEL_ARMOR * (lv - 1) : 0) + um.armor + rb.armor;
       setText(p.armor, String(Math.round(armor * 10) / 10));
       setText(p.speed, String(def.speed));
       if (p.work) setText(p.work, workText(modsOf(vs, e.o)));
-      if (p.xpFill) {
+      if (p.xpFill && isGod) {
         const lo = GOD_XP_LEVELS[lv - 1] || 0;
         const hi = GOD_XP_LEVELS[lv];
         if (lv >= GOD_MAX_LEVEL || hi === undefined) {
@@ -359,6 +384,10 @@ export class InfoView {
           setStyle(p.xpFill, 'width', pct(((e.xp || 0) - lo) / (hi - lo)));
           setText(p.xpText, `Level ${lv} · XP ${fmt(e.xp || 0)} / ${fmt(hi)}`);
         }
+      } else if (p.xpFill) {
+        const next = nextRankXp(rk);
+        setStyle(p.xpFill, 'width', next === null ? '100%' : pct(((e.xp || 0) - RANK_XP[rk]) / (next - RANK_XP[rk])));
+        setText(p.xpText, rankProgressText(rk, e.xp || 0));
       }
       setText(p.state, unitStateText(e, def, vs.myIndex));
       const fx = e.fx || [];
@@ -427,7 +456,10 @@ export class InfoView {
       setStyle(c, '--team', teamColor(vs, e.o));
       const bar = el('div', 'hi-cell-bar', el('i', 'hi-bar-fill'));
       c.append(el('span', 'hi-cell-icon', iconOf(e)), bar);
+      // a soldier's rank numeral (filled in by updateMulti, which follows promotions)
+      const rankBadge = !e.lv && e.k === 'u' && canRank(UNITS[e.t]) ? el('span', 'hi-cell-lv is-rank') : null;
       if (e.lv) c.appendChild(el('span', 'hi-cell-lv', String(e.lv)));
+      else if (rankBadge) c.appendChild(rankBadge);
       if (active && e.t === active.type) c.classList.add('is-active');
       c.addEventListener('click', (ev) => {
         if (ev.shiftKey) this.o.onRemove(e.id);
@@ -435,7 +467,7 @@ export class InfoView {
         else this.o.onSelectOnly(e.id);
       });
       grid.appendChild(c);
-      cells.push({ id: e.id, fill: bar.children[0] });
+      cells.push({ id: e.id, fill: bar.children[0], rankBadge });
     }
     const label = el('div', 'hi-grid-label');
     let tasks = null;
@@ -461,6 +493,12 @@ export class InfoView {
       const f = e.mhp > 0 ? e.hp / e.mhp : 0;
       setStyle(c.fill, 'width', pct(f));
       setStyle(c.fill, 'background', hpColor(f));
+      if (c.rankBadge) {
+        const rk = e.rk || 0;
+        setText(c.rankBadge, RANK_NUMERALS[rk] || '');
+        setHidden(c.rankBadge, rk === 0);
+        setStyle(c.rankBadge, '--rank', RANK_COLORS[rk]);
+      }
     }
   }
 }

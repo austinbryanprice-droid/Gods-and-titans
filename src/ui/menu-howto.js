@@ -1,9 +1,10 @@
 // How to Play: the rules (DESIGN 5) and controls (DESIGN 9) in friendly words.
 import { h } from './menu-dom.js';
 import { BUILDINGS } from '../data/index.js';
+import { RANK_NAMES } from '../data/ranks.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
-  GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING,
+  GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR,
 } from '../config.js';
 
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
@@ -73,6 +74,12 @@ const TOWN_CENTER_NAMES = (() => {
 const TIER_WORDS = ['the Village', 'a Town', 'a City'];
 const NTH = ['first', 'second', 'third', 'fourth'];
 
+/** "Veteran, Elite and Champion" from the rank table. */
+function rankLadder() {
+  const [, ...ranks] = RANK_NAMES;
+  return `${ranks.slice(0, -1).join(', ')} and ${ranks[ranks.length - 1]}`;
+}
+
 /** "the first in the Village, the second once you are a Town, …" from GOD_SLOT_TIER. */
 function godSlots() {
   return GOD_SLOT_TIER.slice(0, MAX_GODS).map((t, i) => (t <= 1 ? `the ${NTH[i]} in the Village` : `the ${NTH[i]} once you are ${TIER_WORDS[t - 1]}`)).join(', ');
@@ -105,7 +112,8 @@ export function renderHowToContent() {
     step(5, '⚡', 'Level up your gods',
       `Gods gain experience when enemies fall nearby and rise to level ${GOD_MAX_LEVEL}. Their first ability (Q) is ready at once, the second (W) at level 2 and the ultimate (R) at level 4. A fallen god can be revived at the Temple for ${REVIVE_COST_MULT === 0.5 ? 'half' : `${Math.round(REVIVE_COST_MULT * 100)}% of`} the price and time, keeping its level.`),
     step(6, '⚔️', 'Wage war',
-      `Armor softens blows; arrows and spells never miss. Spells ignore armor but deal only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.`),
+      `Armor softens blows; arrows and spells never miss. Spells ignore armor but deal only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.`,
+      `Soldiers from the Barracks earn experience for the enemies and buildings they destroy (Priests for the wounds they mend) and rise from ${RANK_NAMES[0]} to ${rankLadder()}. Each rank adds ${Math.round(RANK_DAMAGE * 100)}% damage, ${Math.round(RANK_HP * 100)}% health and ${RANK_ARMOR} armor, and small bronze, silver and gold diamonds over a soldier show its rank.`),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
   );
   const controls = h('div.mw-howto-controls',

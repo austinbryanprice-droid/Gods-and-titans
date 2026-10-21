@@ -2,7 +2,7 @@
 // type from DESIGN 4.4 (with delays and god level scaling), ground fields,
 // reveals, and autocast: every fighting unit's abilities cast themselves by
 // default; a player can set any ability to manual per unit.
-import { DT, ABILITY_LEVEL_SCALE, TICK_RATE } from '../config.js';
+import { DT, ABILITY_LEVEL_SCALE, TICK_RATE, HEAL_XP } from '../config.js';
 import { getUnitType } from '../data/index.js';
 import { dealDamage, heal, acquisitionRange } from './combat.js';
 import { addStatus } from './status.js';
@@ -321,7 +321,9 @@ export function applyEffect(world, ctx, eff, index) {
       break;
     }
     case 'heal': {
-      for (const e of collect(world, ctx, eff, c, false, false)) heal(e, eff.amount * scale);
+      let healed = 0;
+      for (const e of collect(world, ctx, eff, c, false, false)) healed += heal(e, eff.amount * scale);
+      world.gainRankXp(caster, healed * HEAL_XP); // soldier healers (Priests) earn rank from the health they restore
       break;
     }
     case 'stun': {

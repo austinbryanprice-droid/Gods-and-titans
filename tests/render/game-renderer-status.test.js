@@ -18,7 +18,8 @@ export async function resolve(spec, ctx, next) {
 const THREE = await import('three');
 const { GameRenderer } = await import('../../src/render/game-renderer.js');
 const { FadeMaterials, UnitFader, fadeLevel, FADE_LEVELS, FADE_SECONDS } = await import('../../src/render/unit-fade.js');
-const { StatusLayer, STATUS_ICONS } = await import('../../src/render/status-markers.js');
+const { StatusLayer, STATUS_ICONS, RANK_ICON } = await import('../../src/render/status-markers.js');
+const { RANK_COLORS, rankName } = await import('../../src/data/ranks.js');
 const { AIR_HOVER_HEIGHT } = await import('../../src/render/models/unit-models.js');
 const { createWorld } = await import('../../src/sim/world.js');
 const { ViewState } = await import('../../src/game/view-state.js');
@@ -191,6 +192,38 @@ test('status layer: icons in a fixed order centered over the unit, bubbles, caps
   assert.equal(root.children.length, 0);
 });
 
+test('status layer: rank pips are icons of kind RANK_ICON + rank, in the rank colours, and share the cap', () => {
+  const root = new THREE.Group();
+  const s = new StatusLayer(root, 4, 2);
+  s.begin(0);
+  assert.equal(s.addRank(0, 0, 0, 0, 0.4, 1), false, 'a Recruit wears nothing');
+  assert.equal(s.addRank(1, 2, 3, 1, 0.4, 0.5), true);
+  assert.equal(s.addRank(0, 0, 0, 2, 0.4, 1), true);
+  assert.equal(s.addRank(0, 0, 0, 3, 0.4, 1), true);
+  assert.equal(s.addRank(0, 0, 0, 9, 0.4, 1), true, 'beyond the top clamps to the top');
+  assert.equal(s.addRank(0, 0, 0, 1, 0.4, 1), false, 'icon cap');
+  s.end();
+  assert.equal(s.icons.count, 4);
+  const a = s.aIcon.array;
+  assert.deepEqual([a[0], a[4], a[8], a[12]], [RANK_ICON + 1, RANK_ICON + 2, RANK_ICON + 3, RANK_ICON + 3]);
+  assert.ok(RANK_ICON >= Math.max(...Object.values(STATUS_ICONS)), 'rank kinds follow the status kinds');
+  assert.equal(a[1], 0.5, 'alpha');
+  const m = new THREE.Matrix4();
+  s.icons.getMatrixAt(0, m);
+  assert.ok(Math.abs(m.elements[0] - 0.4) < 1e-6, 'size (float32)');
+  assert.deepEqual([m.elements[12], m.elements[13], m.elements[14]], [1, 2, 3]);
+  // the fragment shader gets the same colours as the HUD badges (display values)
+  const u = s.iconMaterial.uniforms.uRank.value;
+  assert.equal(u.length, RANK_COLORS.length - 1);
+  RANK_COLORS.slice(1).forEach((hex, i) => {
+    const want = [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16) / 255);
+    assert.deepEqual([u[i].x, u[i].y, u[i].z], want, hex);
+  });
+  assert.equal(s.iconMaterial.uniforms.uTime, s.uniforms.uTime, 'one clock for every icon');
+  assert.match(s.iconMaterial.fragmentShader, /uRank\[ 0 \]/);
+  s.dispose();
+});
+
 // ------------------------------------------------------------------ integration
 
 test('GameRenderer: an enemy walking into sight fades in, and out again when it leaves', () => {
@@ -310,6 +343,98 @@ test('GameRenderer: statuses show icons, shield bubbles and rings; flyers ring a
   step(0.1, 30, null, apply);
   assert.equal(r.status.icons.count, 0);
   assert.equal(r.status.bubbles.count, 0);
+  r.dispose();
+});
+
+test('GameRenderer: ranked soldiers wear pips over their health bar, above which the status row moves', () => {
+  const { world, vs, r, step } = makeMatch({ myIndex: -1 });
+  step(0.2);
+  const tc = tcOf(vs, 0);
+  const a = world.spawnUnit(0, 'warrior', tc.x + 3, tc.y + 5, { silent: true });
+  const b = world.spawnUnit(0, 'archer', tc.x + 5, tc.y + 5, { silent: true });
+  r.camera.centerOn(tc.x + 4, tc.y + 5);
+  step(0.3);
+  assert.equal(r.status.icons.count, 0, 'Recruits wear nothing');
+  world.gainRankXp(a, 60);
+  world.gainRankXp(b, 300);
+  assert.deepEqual([a.rank, b.rank], [1, 3]);
+  step(0.3);
+  assert.equal(r.status.icons.count, 2);
+  const m = new THREE.Matrix4();
+  const iconsOf = (unit) => {
+    const v = r.units.get(unit.id);
+    const out = [];
+    for (let i = 0; i < r.status.icons.count; i++) {
+      r.status.icons.getMatrixAt(i, m);
+      if (Math.abs(m.elements[12] - v.x) < 1e-6 && Math.abs(m.elements[14] - v.y) < 1e-6) out.push({ kind: r.status.aIcon.array[i * 4], y: m.elements[13] - v.gh - v.height });
+    }
+    return out;
+  };
+  const ra = iconsOf(a);
+  assert.deepEqual(ra.map((i) => i.kind), [RANK_ICON + 1]);
+  assert.deepEqual(iconsOf(b).map((i) => i.kind), [RANK_ICON + 3]);
+  assert.ok(ra[0].y > 0.22 && ra[0].y < 1, `over the head and the bar: ${ra[0].y}`);
+  // a buff icon moves up one slot so the two never overlap
+  const plain = world.spawnUnit(0, 'warrior', tc.x + 3, tc.y + 7, { silent: true });
+  step(0.2);
+  const force = { [a.id]: ['buff'], [plain.id]: ['buff'] };
+  const apply = () => {
+    for (const [id, fx] of Object.entries(force)) {
+      const e = vs.entities.get(Number(id));
+      if (e) e.fx = fx;
+    }
+  };
+  step(0.3, 30, null, apply);
+  const buffY = (unit) => iconsOf(unit).find((i) => i.kind === STATUS_ICONS.buff).y;
+  assert.ok(buffY(a) > buffY(plain) + 0.2 * r.zoomK(), `the row moves up a slot: ${buffY(a)} vs ${buffY(plain)}`);
+  assert.ok(buffY(a) > iconsOf(a).find((i) => i.kind === RANK_ICON + 1).y + 0.2 * r.zoomK(), 'clear of the pips');
+  r.dispose();
+});
+
+test('GameRenderer: a promotion shows the rank name over the unit with a small effect', () => {
+  const { world, vs, r, step } = makeMatch({ myIndex: -1 });
+  step(0.2);
+  const tc = tcOf(vs, 0);
+  const a = world.spawnUnit(0, 'warrior', tc.x + 3, tc.y + 5, { silent: true });
+  const foe = (n) => world.spawnUnit(1, 'warrior', tc.x + 3 + n * 0.01, tc.y + 6, { silent: true });
+  step(0.2);
+  const texts = [];
+  r.showFloatingText = (x, y, text, color) => texts.push({ text, color });
+  let rings = 0;
+  const spawnRankUp = r.vfx.spawnRankUp.bind(r.vfx);
+  r.vfx.spawnRankUp = (o) => {
+    rings++;
+    spawnRankUp(o);
+  };
+  world.killEntity(foe(0), a);
+  step(0.2);
+  assert.deepEqual(texts, [], 'a kill that does not promote shows nothing');
+  world.killEntity(foe(1), a);
+  step(0.2);
+  assert.deepEqual(texts, [{ text: rankName(1), color: RANK_COLORS[1] }]);
+  assert.equal(rings, 1);
+  r.dispose();
+});
+
+test('GameRenderer: a promotion in the fog is not drawn', () => {
+  const { world, vs, r, step } = makeMatch();
+  step(0.2);
+  const far = world.spawnUnit(1, 'warrior', world.mapData.width - 6, world.mapData.height - 6, { silent: true });
+  step(0.2);
+  assert.ok(!vs.isEntityVisible(vs.entities.get(far.id)), 'the enemy is out of sight');
+  const texts = [];
+  r.showFloatingText = (x, y, text) => texts.push(text);
+  let rings = 0;
+  const spawnRankUp = r.vfx.spawnRankUp.bind(r.vfx);
+  r.vfx.spawnRankUp = (o) => {
+    rings++;
+    spawnRankUp(o);
+  };
+  world.gainRankXp(far, 60);
+  assert.equal(far.rank, 1);
+  step(0.2);
+  assert.deepEqual(texts, []);
+  assert.equal(rings, 0);
   r.dispose();
 });
 

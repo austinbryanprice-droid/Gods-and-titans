@@ -650,6 +650,12 @@ export class Game {
         sfx.play('tier_up', { volume: 0.55 });
         break;
       }
+      case 'rankUp': {
+        // Soldiers are promoted all through a fight: a soft chime (no message line), the rank shows over the unit.
+        const e = vs.entities.get(ev.id);
+        if (e && e.o === me) sfx.play('tier_up', { volume: 0.3 });
+        break;
+      }
       case 'spawn': {
         if (ev.o !== me) {
           const t = UNITS[ev.t];

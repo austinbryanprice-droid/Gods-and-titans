@@ -62,6 +62,16 @@ export const REVIVE_COST_MULT = 0.5; // reviving a fallen god costs 50% faith/go
 // Third god requires City tier; second requires Town tier.
 export const GOD_SLOT_TIER = [1, 2, 3];
 
+// ---- Soldier ranks ----
+// Mortal soldiers (everything the Barracks trains) earn experience and rise in rank: Recruit,
+// Veteran, Elite, Champion (names in data/ranks.js). Gods keep their levels; Worshippers do not rank.
+export const RANK_XP = [0, 60, 150, 300]; // cumulative xp needed for rank 0..3
+export const RANK_HP = 0.1; // +10% max hp per rank
+export const RANK_DAMAGE = 0.05; // +5% attack damage per rank
+export const RANK_ARMOR = 0.5; // +0.5 armor per rank
+export const HEAL_XP = 0.1; // xp a priest earns for each hit point it restores
+export const BUILDING_XP_HP = 50; // razing a completed building is worth its hp / 50 xp
+
 // ---- Combat ----
 export const MELEE_RANGE = 0.5; // edge-to-edge distance in tiles
 export const PROJECTILE_SPEED = 12; // tiles per second

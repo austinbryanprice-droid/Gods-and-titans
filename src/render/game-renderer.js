@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import { NEUTRAL_COLOR, PLAYER_COLORS, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT, TERRAIN } from '../config.js';
 import { UNITS, BUILDINGS, PANTHEONS } from '../data/index.js';
+import { rankName, RANK_COLORS } from '../data/ranks.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
 import { createForest, createDecor } from './models/props.js';
@@ -758,6 +759,7 @@ export class GameRenderer {
       case 'effect':
       case 'spawn':
       case 'levelUp':
+      case 'rankUp':
       case 'construction':
       case 'buildingComplete':
       case 'tierUp':
@@ -954,6 +956,16 @@ export class GameRenderer {
         vfx.spawnLevelUp({ x, y });
         const u = this.units.get(ev.id);
         this.showFloatingText(x, y, `Level ${ev.level}`, '#ffe27a', (u ? u.height : 2) + 0.5);
+        break;
+      }
+      case 'rankUp': {
+        const e = vs.entities.get(ev.id);
+        if (!e || !vs.isEntityVisible(e)) break;
+        const x = e.ix ?? e.x;
+        const y = e.iy ?? e.y;
+        vfx.spawnRankUp({ x, y });
+        const u = this.units.get(ev.id);
+        this.showFloatingText(x, y, rankName(ev.rank), RANK_COLORS[ev.rank] || '#ffe27a', (u ? u.height : 1.4) + 0.7);
         break;
       }
       case 'construction':
@@ -1562,6 +1574,8 @@ export class GameRenderer {
       }
       const fx = e.fx;
       if (fx && fx.length) this.statusOverlay(v, fx, fade, zk, n);
+      // a ranked soldier's pips sit just over its health bar
+      if (e.rk > 0) this.status.addRank(v.x, v.gh + v.height + 0.48 * zk, v.y, e.rk, 0.7 * zk, fade);
       if (selected || hovered) {
         const col = RELATION_COLORS[v.relation] || RELATION_COLORS.neutral;
         const r = v.radius * 1.22 + 0.14;
@@ -1705,7 +1719,8 @@ export class GameRenderer {
           break;
       }
     }
-    this.status.addIcons(v.x, v.gh + v.height + 0.6 * zk, v.y, fx, 0.42 * zk, fade, v.id * 0.37);
+    // (a ranked soldier's pips take the slot under the row)
+    this.status.addIcons(v.x, v.gh + v.height + (v.e.rk > 0 ? 0.88 : 0.6) * zk, v.y, fx, 0.42 * zk, fade, v.id * 0.37);
   }
 
   updateShadowCamera() {
