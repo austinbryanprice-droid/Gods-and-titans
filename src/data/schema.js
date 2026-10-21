@@ -156,6 +156,7 @@ export const UPGRADE_EFFECTS = {
   unit: ['damage', 'hp', 'armor', 'regen'],
   carry: null,
   chop: null,
+  work: null,
   godLevel: null,
 };
 
@@ -168,6 +169,8 @@ export function validateUpgrade(up, buildingId, errors, unitIds) {
   if (!up.cost || ['gold', 'wood', 'faith'].some((k) => !isNum(up.cost[k]) || up.cost[k] < 0)) errors.push(`${w}: bad cost`);
   if (!isNum(up.time) || up.time <= 0) errors.push(`${w}: bad time`);
   if (![1, 2, 3].includes(up.tier)) errors.push(`${w}: bad tier`);
+  if (up.line !== undefined && (typeof up.line !== 'string' || !up.line)) errors.push(`${w}: bad line`);
+  if (up.after !== undefined && (typeof up.after !== 'string' || !up.line)) errors.push(`${w}: after needs a line and an upgrade id`);
   if (!Array.isArray(up.effects) || up.effects.length === 0) errors.push(`${w}: needs effects`);
   for (const e of up.effects || []) {
     if (!e || !Object.hasOwn(UPGRADE_EFFECTS, e.type)) {
@@ -184,5 +187,44 @@ export function validateUpgrade(up, buildingId, errors, unitIds) {
       for (const id of e.units || []) if (!unitIds.has(id)) errors.push(`${w}: unknown unit ${id}`);
       for (const c of e.classes || []) if (!UNIT_CLASSES.includes(c)) errors.push(`${w}: unknown class ${c}`);
     }
+  }
+}
+
+/**
+ * Validate the upgrade lines of one building: the levels of a line stand in order
+ * in `upgrades`, the first has no `after`, every later level follows the one before
+ * it, and a line's levels share one hotkey (they share one card slot) and never
+ * ask for a lower settlement tier than the level before.
+ */
+export function validateUpgradeLines(building, errors) {
+  const lines = new Map();
+  for (const up of building.upgrades || []) {
+    if (!up.line) continue;
+    if (!lines.has(up.line)) lines.set(up.line, []);
+    lines.get(up.line).push(up);
+  }
+  const keys = new Map();
+  for (const [line, levels] of lines) {
+    const w = `building(${building.id}).line(${line})`;
+    levels.forEach((up, i) => {
+      const prev = levels[i - 1];
+      if (!prev && up.after !== undefined) errors.push(`${w}: first level ${up.id} must not have an after`);
+      if (prev && up.after !== prev.id) errors.push(`${w}: ${up.id} must follow ${prev.id}`);
+      if (prev && up.hotkey !== prev.hotkey) errors.push(`${w}: ${up.id} must share the hotkey of ${prev.id}`);
+      if (prev && up.tier < prev.tier) errors.push(`${w}: ${up.id} asks for a lower tier than ${prev.id}`);
+    });
+    if (levels.length < 2) errors.push(`${w}: a line needs at least two levels`);
+    // The levels of a line stand next to each other, so a card slot belongs to one line.
+    const first = building.upgrades.indexOf(levels[0]);
+    levels.forEach((up, i) => {
+      if (building.upgrades[first + i] !== up) errors.push(`${w}: ${up.id} must stand next to the other levels`);
+    });
+  }
+  // One hotkey per card slot: a line counts once, every single upgrade on its own.
+  for (const up of building.upgrades || []) {
+    const owner = up.line ? `line:${up.line}` : up.id;
+    const seen = keys.get(up.hotkey);
+    if (seen !== undefined && seen !== owner) errors.push(`building(${building.id}): hotkey ${up.hotkey} is used by ${seen} and ${owner}`);
+    keys.set(up.hotkey, owner);
   }
 }

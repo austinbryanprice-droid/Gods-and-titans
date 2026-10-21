@@ -124,6 +124,8 @@ pantheon by `producibleAt()`), `popProvided`, `dropOff`, `prayerSlots`, `faithRa
 (faith/s per praying worshipper), `attack` (towers), `tierUpgrades` (town center only),
 `upgrades` (one-time researches made at that building type; every building has its own list,
 see `src/data/upgrades.js` for the effect types and the shared stat helpers the sim and HUD use).
+Levels of one upgrade line (the Town Center's Worshipper work speed and health) share a `line` id
+and one hotkey, stand side by side in the list, and each names the level before it in `after`.
 Gold mines are 3×3 resource entities placed by the map.
 
 ### 4.4 Ability
@@ -259,12 +261,18 @@ Pop used = pop of living units + pop of everything queued in production.
   Storehouse), repeats. At most `MINE_SLOTS` (2) workers mine a mine at once (any owner);
   the others wait at their spot (state `gather`, view key `mw: 1`) and take a freed slot
   first come, first served. One mine therefore yields at most
-  `MINE_SLOTS × 10 / MINE_TIME` ≈ 13.3 gold/s:
+  `MINE_SLOTS × 10 / MINE_TIME` ≈ 13.3 gold/s (before upgrades):
   about 3 gold/s per worker at a start mine, saturated by 5–6 workers. A mine at 0 is
   removed (`resourceDepleted` event); its workers move to the nearest mine within 16 tiles.
 - **Wood:** each forest tile holds `TREE_WOOD` (50). A worker stands next to a tree and chops
   1 wood per `CHOP_INTERVAL` (0.6 s) up to 10, returns it, comes back to the same tree or the
   nearest other tree. A depleted tree tile becomes grass (`treeFelled` event) and is passable.
+- **Work speed:** the Town Center's Work Songs line (`work` effects, +15% / +15% / +20%, added
+  up) makes the owner's Worshippers work faster at everything but praying: the mining timer runs
+  down `1 + work` times as fast, chopping divides `CHOP_INTERVAL` by `(1 + chop) × (1 + work)`
+  (Sharpened Axes is the `chop` part), and construction and repair progress is multiplied by
+  `1 + work` (`workSpeed`, `chopSpeed` in src/data/upgrades.js; `workSpeedOf` in sim/economy.js).
+  Walking, praying and training are unchanged.
 - **Faith:** a worshipper ordered to pray at a completed Shrine/Temple (smart-click or Pray)
   walks to it and kneels next to it while slots are free (`prayerSlots`), generating
   `faithRate` faith/s (Shrine 0.5, Temple 0.7). If full → error `This Shrine is full.` /
@@ -277,7 +285,7 @@ Pop used = pop of living units + pop of everything queued in production.
   immediately**. The worker walks to the site. On arrival, if the site is still valid, the
   building entity is created (hp = 10% max, `bp` 0) and the worker builds it; otherwise
   refund + error. A different order before arrival refunds the cost.
-- Progress per second = `(1 + BUILD_HELPER_BONUS × (builders − 1)) / buildTime`; hp grows
+- Progress per second = `(1 + BUILD_HELPER_BONUS × (builders − 1)) × workSpeed / buildTime`; hp grows
   proportionally to max hp. Leaving pauses construction; a worker smart-clicking an
   unfinished own building resumes/helps.
 - Placement: all footprint tiles in bounds, ground-passable (not forest/water/rock), no
@@ -294,7 +302,7 @@ Pop used = pop of living units + pop of everything queued in production.
 - `cancelBuild` on an unfinished building: removes it, refunds `CANCEL_BUILD_REFUND` (75%).
 - **Repair:** worshippers ordered to `repair` an own completed, damaged building walk to it and
   mend it (state `build`, view task `tk: 'repair'`). One worshipper restores the full health bar
-  in `REPAIR_TIME` (75%) of the build time; each extra adds `BUILD_HELPER_BONUS`. A full bar
+  in `REPAIR_TIME` (75%) of the build time (shorter with work speed); each extra adds `BUILD_HELPER_BONUS`. A full bar
   costs `REPAIR_COST` (35%) of the build cost, paid each tick as it heals; when the owner cannot
   pay, the repairers give up and `Not enough gold to repair.` (wood / faith) is shown (at most
   every 3 s per building). `autoRepair { on }` toggles Auto-Repair for the player: idle
@@ -332,7 +340,15 @@ Pop used = pop of living units + pop of everything queued in production.
   researched once per player, needs its `tier`, and on completion (`researched` event) applies to
   everything the player owns now and later: building hp / armor / pop / tower damage and range,
   faith per prayer, training speed, unit damage / hp / armor / regen, carry amounts, chopping
-  speed, and the starting level of summoned gods. The list per building is in buildings.js.
+  speed, Worshipper work speed, and the starting level of summoned gods. The list per building
+  is in buildings.js.
+- **Upgrade lines:** a line is a chain of levels researched one after the other (`line`, `after`):
+  a level needs the one before it (`Requires <Name>.`) and its own settlement `tier`. The Town
+  Center has two, three levels each. *Work Songs → Master Craftsmen → Tireless Devotion* (hotkey
+  K; tiers 1 / 2 / 3; +15% / +15% / +20% work speed) and *Hearty Meals → Healing Herbs → Blessed
+  Vigor* (H; tiers 1 / 2 / 3; +20% health each, a share of the base 220, so 264 / 308 / 352).
+  Health goes through the `unit` effect (`classes: ['worker']`), so every living Worshipper gains
+  the new health at once (added to what it has) and every later one arrives with it.
 
 ### 5.5 Combat
 - Damage after armor (WC3): armor ≥ 0 → `× (1 − 0.06·a / (1 + 0.06·a))`; armor < 0 → `× (2 − 0.94^(−a))`.
@@ -456,7 +472,7 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
 `That building is not damaged.` `Not enough gold to repair.` (wood / faith) `Already researched.`
-`Already being researched.` Trades: `Choose a teammate to send to.` `You can only send resources
+`Already being researched.` `Requires <Upgrade name>.` (a line's earlier level, e.g. `Requires Work Songs.`) Trades: `Choose a teammate to send to.` `You can only send resources
 to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
 `Choose gold, wood or faith to send.` `You cannot trade now.`
 
@@ -791,7 +807,10 @@ per-frame budget, so a revealed army appears over a few frames.
   2-at-once rule. A worker's state line reads "Gathering gold", "Chopping wood", "Repairing", or
   "Waiting its turn at the gold mine" (view key `mw`). An own building lists the Worshippers
   building, repairing or praying there and the upgrades researched for its type; armor, tower
-  damage / range, housing and faith rates include the owner's upgrades (`players[i].up`).
+  damage / range, housing and faith rates include the owner's upgrades (`players[i].up`); a
+  Town Center lists only the highest level of each upgrade line. A Worshipper also shows a "Work"
+  stat (Normal, or +N% from the work upgrades), and the gold mine's rule line and the Gather
+  tooltip quote the viewer's own trip ("1.3 s per 12 gold").
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
@@ -812,7 +831,11 @@ per-frame budget, so a revealed army appears over a few frames.
   Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R; Shrine: creatures Q W E;
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
   Each building's upgrades fill the free middle / bottom slots with their data hotkey (no two
-  buttons of a card share a key); researched ones stay as dim "(researched)" buttons.
+  buttons of a card share a key); researched ones stay as dim "(researched)" buttons. An upgrade
+  line takes one slot and shows its next level to research ("Level 2 of 3."), keeping the line's
+  hotkey; the last level stays as the dim button when the line is done (`offeredUpgrades`).
+  The Town Center card therefore reads Worshipper W, Grow U / Iron Picks I, Palisade L, Work
+  K, Health H / Rally Y.
 - `minimap.js`: 2D canvas: terrain colors, mines, trees, units/buildings as team-colored dots
   (visible only), fog, camera quad; click/drag moves camera, right-click issues smart move.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with

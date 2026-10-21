@@ -2,7 +2,8 @@
 // entity definitions, names, icons, subgroup ordering and small helpers that
 // read a ViewState. Pure (no DOM), so Node tests can use it.
 import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES } from '../data/index.js';
-import { NO_MODS, computeMods } from '../data/upgrades.js';
+import { MINE_TIME, CARRY_AMOUNT } from '../config.js';
+import { NO_MODS, computeMods, workSpeed } from '../data/upgrades.js';
 
 /** Subgroup order (WC3 sorts heroes first): lower comes first. */
 const CLASS_ORDER = { god: 0, titan: 1, creature: 2, infantry: 3, ranged: 4, siege: 5, support: 6, minion: 7, worker: 8 };
@@ -214,4 +215,16 @@ export function modsOf(vs, owner) {
     modsCache.set(key, m);
   }
   return m;
+}
+
+/** "Normal" or "+30%": how much faster a player's Worshippers work (Work Songs and its later levels). */
+export function workText(mods) {
+  const pct = Math.round((workSpeed(mods) - 1) * 100);
+  return pct > 0 ? `+${pct}%` : 'Normal';
+}
+
+/** "1.3 s per 12 gold": one mining trip with the player's work speed and Iron Picks. */
+export function mineTripText(mods) {
+  const secs = Math.round((MINE_TIME / workSpeed(mods)) * 10) / 10;
+  return `${secs} s per ${CARRY_AMOUNT + mods.carry.g} gold`;
 }

@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
-import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, CARD_SLOTS } from '../../src/ui/command-card.js';
+import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, researchCheck, CARD_SLOTS } from '../../src/ui/command-card.js';
 import { subgroups } from '../../src/ui/hud-data.js';
 import { POP_MAX } from '../../src/config.js';
+import { UPGRADES } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
 
 let clock = 0;
@@ -117,7 +118,10 @@ test('Town Center: Worshipper, Grow (with requirement), Rally, queue count, grow
   const world = makeWorld();
   const tc = tcOf(world);
   let card = getCommandCard([tc.id], viewOf(world));
-  assert.deepEqual(slotsOf(card), ['0:train:worshipper', '1:tier', '4:research:tc_iron_picks', '5:research:tc_palisade', '11:rally']);
+  assert.deepEqual(slotsOf(card), [
+    '0:train:worshipper', '1:tier', '4:research:tc_iron_picks', '5:research:tc_palisade',
+    '6:research:tc_work_songs', '7:research:tc_hearty_meals', '11:rally',
+  ]);
   const w = card[0];
   assert.equal(w.key, 'W');
   assert.equal(w.state, 'ready');
@@ -168,6 +172,75 @@ test('at the population limit more Houses cannot help, and the card says so', ()
   assert.equal(card[0].reason, `Population limit reached (${POP_MAX}).`);
   world.players[0].popUsed = POP_MAX - 1;
   assert.equal(getCommandCard([tc.id], viewOf(world))[0].state, 'ready', 'one free pop fits a worshipper');
+});
+
+test('Town Center upgrade lines: one button each that moves on to the next level', () => {
+  const world = makeWorld();
+  const tc = tcOf(world);
+  rich(world);
+  let card = getCommandCard([tc.id], viewOf(world));
+  const work = byId(card, 'research:tc_work_songs');
+  assert.equal(work.slot, 6);
+  assert.equal(work.key, 'K');
+  assert.equal(work.state, 'ready');
+  assert.deepEqual(work.cost, { gold: 100, wood: 50, faith: 0, pop: 0, time: 35 });
+  assert.match(work.description, /mine, chop, build and repair 15% faster\. Level 1 of 3\.$/);
+  assert.deepEqual(work.action, { kind: 'research', upgrade: 'tc_work_songs' });
+  const health = byId(card, 'research:tc_hearty_meals');
+  assert.equal(health.slot, 7);
+  assert.equal(health.key, 'H');
+  assert.match(health.description, /20% more health\. Level 1 of 3\.$/);
+
+  // Queued: the level stays on its button, busy.
+  world.issueCommand(0, { type: 'research', building: tc.id, upgrade: 'tc_work_songs' });
+  run(world, 0.1);
+  card = getCommandCard([tc.id], viewOf(world));
+  assert.equal(byId(card, 'research:tc_work_songs').reason, 'Already being researched.');
+  assert.equal(byId(card, 'research:tc_work_songs').queued, 1);
+
+  // Done: the same slot and key now offer level 2, which waits for a Town.
+  run(world, 36);
+  card = getCommandCard([tc.id], viewOf(world));
+  assert.equal(byId(card, 'research:tc_work_songs'), null);
+  const l2 = byId(card, 'research:tc_master_craftsmen');
+  assert.equal(l2.slot, 6);
+  assert.equal(l2.key, 'K');
+  assert.equal(l2.state, 'locked');
+  assert.equal(l2.reason, 'Requires Town.');
+  assert.match(l2.description, /another 15% faster \(30% in all\)\. Level 2 of 3\./);
+  tc.tier = 2;
+  world.recomputeTier(0);
+  card = getCommandCard([tc.id], viewOf(world));
+  assert.equal(byId(card, 'research:tc_master_craftsmen').state, 'ready');
+  assert.equal(byId(card, 'research:tc_hearty_meals').state, 'ready', 'the other line is independent');
+
+  // A level asked for out of order is locked behind the one before it.
+  const vs = viewOf(world);
+  const out = researchCheck(vs, UPGRADES.tc_blessed_vigor, [vs.entities.get(tc.id)]);
+  assert.deepEqual([out.state, out.reason], ['locked', 'Requires Healing Herbs.']);
+
+  // Whole line researched: its last level stays as a dim button, the rest of the card is unchanged.
+  for (const id of ['tc_master_craftsmen', 'tc_tireless_devotion', 'tc_hearty_meals', 'tc_healing_herbs', 'tc_blessed_vigor']) world.completeResearch(0, id);
+  card = getCommandCard([tc.id], viewOf(world));
+  const last = byId(card, 'research:tc_tireless_devotion');
+  assert.equal(last.slot, 6);
+  assert.equal(last.state, 'passive');
+  assert.equal(last.title, 'Tireless Devotion (researched)');
+  assert.equal(last.key, null);
+  assert.equal(last.cost, null);
+  assert.equal(byId(card, 'research:tc_blessed_vigor').slot, 7);
+  assert.deepEqual(slotsOf(card).filter((x) => x.includes('research')), [
+    '4:research:tc_iron_picks', '5:research:tc_palisade', '6:research:tc_tireless_devotion', '7:research:tc_blessed_vigor',
+  ]);
+});
+
+test('Gather and the Gold Mine panel quote the mining trip with work speed and Iron Picks', () => {
+  const world = makeWorld();
+  const ws = workersOf(world);
+  const gather = () => byId(getCommandCard({ ids: ids(ws) }, viewOf(world)), 'gather').description;
+  assert.match(gather(), /\(1\.5 s per 10 gold\)/);
+  for (const id of ['tc_work_songs', 'tc_master_craftsmen', 'tc_tireless_devotion', 'tc_iron_picks']) world.completeResearch(0, id);
+  assert.match(gather(), /\(1 s per 12 gold\)/);
 });
 
 test('population cap and queue limit make training unavailable', () => {
