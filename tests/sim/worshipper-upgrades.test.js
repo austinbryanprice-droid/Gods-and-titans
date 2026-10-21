@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { BUILDINGS, MORTALS } from '../../src/data/index.js';
 import { UPGRADES, computeMods, workSpeed, chopSpeed, offeredUpgrades, lineOf } from '../../src/data/upgrades.js';
 import { CARRY_AMOUNT } from '../../src/config.js';
-import { makeWorld, run, runUntil, runCollect, place, spawn, errorsOf, eventsOf } from './helpers.js';
+import { makeWorld, run, runUntil, runCollect, place, spawn, errorsOf, eventsOf, PLAIN_PANTHEONS } from './helpers.js';
 
 const WORK = ['tc_work_songs', 'tc_master_craftsmen', 'tc_tireless_devotion'];
 const HEALTH = ['tc_hearty_meals', 'tc_healing_herbs', 'tc_blessed_vigor'];
@@ -235,7 +235,7 @@ test('Worshippers trained or spawned later arrive with the boosted health', () =
 });
 
 test('health levels leave soldiers and the other player\'s Worshippers alone', () => {
-  const w = makeWorld();
+  const w = makeWorld({ pantheons: PLAIN_PANTHEONS });
   const warrior = spawn(w, 0, 'warrior', 20, 20);
   const foe = spawn(w, 1, 'warrior', 30, 30);
   own(w, HEALTH);

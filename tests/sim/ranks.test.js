@@ -9,12 +9,12 @@ import { RANK_XP, RANK_HP, RANK_DAMAGE, RANK_ARMOR, HEAL_XP, BUILDING_XP_HP } fr
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { encode, apply, EVENT_SHAPES } from '../../src/net/delta.js';
 import { liveCombat } from '../../src/ai/unit-info.js';
-import { makeWorld, run, runUntil, place, spawn, clearUnits, eventsOf } from './helpers.js';
+import { makeWorld, run, runUntil, place, spawn, clearUnits, eventsOf, PLAIN_PANTHEONS } from './helpers.js';
 
 const json = (v) => JSON.parse(JSON.stringify(v));
 
 function arena() {
-  const w = makeWorld();
+  const w = makeWorld({ pantheons: PLAIN_PANTHEONS });
   clearUnits(w, 0);
   clearUnits(w, 1);
   w.events.length = 0;
@@ -333,7 +333,7 @@ test('rank and xp survive the delta codec, and rankUp is a packed event', () => 
 });
 
 test('a Recruit starts every match with no experience and the unit type\'s own stats', () => {
-  const w = makeWorld();
+  const w = makeWorld({ pantheons: PLAIN_PANTHEONS });
   for (const u of w.unitList) {
     assert.equal(u.rank, 0);
     assert.equal(u.xp, 0);

@@ -46,6 +46,9 @@ export function makeMap(opts = {}) {
 
 const PANTHEONS = ['greek', 'norse', 'egyptian', 'hindu'];
 
+/** Two pantheons whose blessings leave soldier and god stats alone: for tests of the plain numbers (Greek blessings add armor, health and god levels). */
+export const PLAIN_PANTHEONS = ['norse', 'hindu'];
+
 /** GameSetup with n players on teams [1, 2, ...] unless teams given. */
 export function makeSetup(n = 2, opts = {}) {
   const teams = opts.teams ?? Array.from({ length: n }, (_, i) => i + 1);

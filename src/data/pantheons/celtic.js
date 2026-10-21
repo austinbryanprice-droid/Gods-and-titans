@@ -702,6 +702,6 @@ export default {
       aura: null,
     },
     icon: '🐗',
-    description: 'Blue-painted raider who charges bare-chested into battle. The fastest soldier in the game, he hits hard but wears little armor. Requires Town.',
+    description: 'Blue-painted raider who charges bare-chested into battle. The fastest soldier on foot, he hits hard but wears little armor. Requires Town.',
   },
 };

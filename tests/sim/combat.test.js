@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { MORTALS, godsFor, xpValue, getUnitType } from '../../src/data/index.js';
 import { PROJECTILE_SPEED, CREEP_LEASH_RANGE, GOD_XP_LEVELS } from '../../src/config.js';
 import { armorMultiplier, damageAfterArmor } from '../../src/sim/combat.js';
-import { makeWorld, run, runCollect, runUntil, place, spawn, clearUnits, defineUnit, eventsOf } from './helpers.js';
+import { makeWorld, run, runCollect, runUntil, place, spawn, clearUnits, defineUnit, eventsOf, PLAIN_PANTHEONS } from './helpers.js';
 
 function arena(opts = {}) {
   const w = makeWorld(opts);
@@ -225,7 +225,7 @@ test('towers shoot the closest enemy unit in range', () => {
 });
 
 test('passives: lifesteal, critical, evasion, thorns, cleave, onHit slow/dot, regen, aura', () => {
-  const w = arena();
+  const w = arena({ pantheons: PLAIN_PANTHEONS });
   const thief = defineUnit({ passives: [{ type: 'lifesteal', pct: 0.5 }] });
   const crit = defineUnit({ passives: [{ type: 'critical', chance: 1, mult: 2 }] });
   const dodger = defineUnit({ passives: [{ type: 'evasion', pct: 1 }] });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { BUILDINGS, MORTALS, godsFor } from '../../src/data/index.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { REPAIR_COST, CARRY_AMOUNT } from '../../src/config.js';
-import { makeWorld, run, runCollect, runUntil, place, spawn, errorsOf, eventsOf, clearUnits } from './helpers.js';
+import { makeWorld, run, runCollect, runUntil, place, spawn, errorsOf, eventsOf, clearUnits, PLAIN_PANTHEONS } from './helpers.js';
 
 const workers = (w, p = 0) => w.unitsOf(p).filter((u) => u.type === 'worshipper');
 const rich = (w, p = 0) => Object.assign(w.players[p], { gold: 5000, wood: 5000, faith: 5000 });
@@ -189,7 +189,7 @@ test('research needs its tier, refunds on cancel and finishes with a researched 
 });
 
 test('Bronze Weapons and Hoplite Shields change Barracks soldiers only, alive and new', () => {
-  const w = makeWorld();
+  const w = makeWorld({ pantheons: PLAIN_PANTHEONS });
   rich(w);
   w.players[0].tier = 2;
   const barracks = place(w, 0, 'barracks', 20, 14);
@@ -283,7 +283,7 @@ test('tower upgrades: damage, range, health', () => {
 });
 
 test('Rite of Ascension summons gods at level 2', () => {
-  const w = makeWorld();
+  const w = makeWorld({ pantheons: PLAIN_PANTHEONS });
   rich(w);
   w.players[0].tier = 3;
   const temple = place(w, 0, 'temple', 18, 10);
