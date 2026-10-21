@@ -7,6 +7,7 @@ import { PANTHEONS } from '../data/index.js';
 import { sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { el, fmt, safeColor } from './hud-dom.js';
 import { formatClock } from './hud-data.js';
+import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -32,6 +33,27 @@ function toggleRow(label, hint, value, onChange) {
   input.addEventListener('change', () => onChange(input.checked));
   const row = el('label', 'hud-toggle', input, el('span', 'hud-toggle-track', el('i', 'hud-toggle-knob')), el('span', 'hud-toggle-text', el('b', null, label), el('small', null, hint)));
   return { row, input };
+}
+
+/** A row of exclusive choices (the settings' segmented control): options are [id, label, note]. */
+function choiceRow(label, options, value, onChange) {
+  const noteOf = (id) => (options.find((o) => o[0] === id) || [])[2] || '';
+  const note = el('small', 'hud-choice-note', noteOf(value));
+  const buttons = options.map(([id, text]) => {
+    const b = el('button', `mw-seg${id === value ? ' is-active' : ''}`, text);
+    b.type = 'button';
+    b.dataset.id = id;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.play('click');
+      buttons.forEach((x) => x.classList.toggle('is-active', x === b));
+      note.textContent = noteOf(id);
+      onChange(id);
+    });
+    return b;
+  });
+  const row = el('div', 'hud-choice', el('b', 'hud-choice-label', label), el('div', 'mw-segmented', ...buttons), note);
+  return { row, buttons };
 }
 
 export class Overlays {
@@ -114,6 +136,7 @@ export class Overlays {
     const bars = toggleRow('Always show health bars', 'Otherwise hold Alt to see them all.', s.showAllBars, (v) => saveSettings({ showAllBars: v }));
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
+    const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
     const vol = el('input', 'hud-range');
     vol.type = 'range';
     vol.min = '0';
@@ -154,6 +177,7 @@ export class Overlays {
       el('div', 'hud-obtns is-col', ...buttons),
       el('div', 'hud-options',
         el('div', 'mw-label', 'Options'),
+        sky.row,
         bars.row,
         edge.row,
         tips.row,

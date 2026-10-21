@@ -10,6 +10,7 @@
 import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
+import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
 import { sfx } from '../audio/sfx.js';
 import { h, setChildren, copyText } from './menu-dom.js';
 import { createMenuBackdrop } from './menu-fx.js';
@@ -994,6 +995,18 @@ export function createMenu({ root, onStart }) {
     };
     renderQ();
 
+    const tDesc = h('div.mw-field-note');
+    const tBtns = TIME_OF_DAY_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { t: id }, onclick: () => {
+      saveSettings({ timeOfDay: id });
+      renderT();
+    } }, label));
+    const renderT = () => {
+      const t = getSettings().timeOfDay;
+      tBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.t === t));
+      tDesc.textContent = timeOfDayNote(t);
+    };
+    renderT();
+
     const toggle = (key, label, note, invert = false) => {
       const input = h('input', { type: 'checkbox', checked: invert ? !getSettings()[key] : !!getSettings()[key], onchange: () => saveSettings({ [key]: invert ? !input.checked : input.checked }) });
       return h('label.mw-toggle', input, h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')), h('span.mw-toggle-text', h('span', label), note ? h('small', note) : null));
@@ -1006,6 +1019,7 @@ export function createMenu({ root, onStart }) {
         h('div.mw-field', h('span.mw-label', 'Volume'),
           h('div.mw-range-row', volume, volValue, testBtn)),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
+        h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),

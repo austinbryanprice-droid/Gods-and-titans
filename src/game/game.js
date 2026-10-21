@@ -30,6 +30,20 @@ const SPELL_SOUNDS = { lightning: 'lightning', fire: 'fire', sun: 'fire' };
 const PROJECTILE_SOUNDS = { arrow: 'attack_ranged', spear: 'attack_ranged', rock: 'attack_ranged', feather: 'attack_ranged', leaf: 'attack_ranged', ice: 'attack_ranged', bolt: 'lightning', fireball: 'fire', sunray: 'fire' };
 
 /**
+ * `?tod=night` (or golden, day, dusk, dawn, cycle, or an hour such as 18.5) on the page's
+ * address holds that time of day for this page load, whatever the setting says: for screenshots
+ * and for looking at one light on purpose. Null when absent.
+ */
+export function queryTimeOfDay() {
+  try {
+    const v = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('tod') : null;
+    return v ? v.trim().toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Each match draws on a new copy of the page's canvas, so it starts with a fresh
  * WebGL context (the old one is freed when its renderer is disposed).
  */
@@ -241,7 +255,7 @@ export class Game {
     if (this.loadingEl) await nextPaint();
     if (this.disposed) return;
     const tr = performance.now();
-    this.renderer = new RendererClass(this.canvas, { viewState: this.viewState, setup: session.setup, quality: this.settings.quality });
+    this.renderer = new RendererClass(this.canvas, { viewState: this.viewState, setup: session.setup, quality: this.settings.quality, timeOfDay: queryTimeOfDay() || this.settings.timeOfDay });
     this.stats.rendererInitMs = performance.now() - tr;
     this.setLoading(false);
     this.resize();
@@ -546,6 +560,10 @@ export class Game {
     if (changed.includes('showAllBars')) this.applyShowAllBars();
     if (changed.includes('quality') && this.renderer && typeof this.renderer.setQuality === 'function') {
       this.renderer.setQuality(s.quality);
+      this.needsRender = true;
+    }
+    if (changed.includes('timeOfDay') && this.renderer && typeof this.renderer.setTimeOfDay === 'function') {
+      this.renderer.setTimeOfDay(s.timeOfDay);
       this.needsRender = true;
     }
   }

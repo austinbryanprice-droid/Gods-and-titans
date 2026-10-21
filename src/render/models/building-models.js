@@ -30,7 +30,7 @@ import * as THREE from 'three';
 import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import { BUILDINGS, GOLD_MINE } from '../../data/buildings.js';
-import { patchWorldMaterial } from '../shading.js';
+import { patchWorldMaterial, WORLD_UNIFORMS } from '../shading.js';
 
 /** Height of the foundation top above the model origin (ground level). */
 export const PLINTH = 0.1;
@@ -745,6 +745,7 @@ varying vec3 vObjN;
 #define BLD_PLINTH ${PLINTH.toFixed(3)}
 #define BLD_CONTACT ${CONTACT_RANGE.toFixed(2)}
 #define BLD_INTERIOR ${CLS.INTERIOR.toFixed(1)}
+#define BLD_LAMP_LIGHT vec3( 1.5, 0.74, 0.26 )
 const vec3 BLD_IN_FLOOR = vec3( ${INTERIOR_FLOOR.toArray().map((v) => v.toFixed(4)).join(', ')} );
 const vec3 BLD_IN_DARK = vec3( ${INTERIOR_DARK.toArray().map((v) => v.toFixed(4)).join(', ')} );
 // Drawn straight to the canvas (low quality: tone mapped here) the surface
@@ -994,8 +995,13 @@ float bldLit = 1.0;
     #ifdef BLD_CLIP
     fl = 0.0; // nobody lives on a building site yet
     #endif
+    #ifndef BLD_CLIP
+    // after dusk the lamps are lit inside: the opening glows warm, brightest at the floor
+    // (uLamp is the time of day's lamp level, 0 by day)
+    bldEmit += BLD_LAMP_LIGHT * ( uLamp * ( 0.4 + 0.6 * fl ) );
+    #endif
     fl *= fl;
-    bldEmit = mix( BLD_IN_DARK, BLD_IN_FLOOR, fl * fl );
+    bldEmit += mix( BLD_IN_DARK, BLD_IN_FLOOR, fl * fl );
     bldLit = 0.0;
     diffuseColor.rgb = vec3( 0.0 );
   }
@@ -1080,13 +1086,17 @@ function glowMaterial() {
     const m = new THREE.MeshBasicMaterial({ vertexColors: true });
     m.onBeforeCompile = (sh) => {
       sh.uniforms.uBldTime = TIME;
+      sh.uniforms.uLamp = WORLD_UNIFORMS.uLamp;
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', `#include <common>${ANIM_PARS}`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>${FLICKER_GLSL}`)
         .replace('#include <color_vertex>', `#include <color_vertex>\n${TWINKLE_GLSL}`);
-      sh.fragmentShader = sh.fragmentShader.replace('#include <tonemapping_fragment>', `${GLOW_LOW_PATH}\n#include <tonemapping_fragment>`);
+      // lanterns, braziers and fires burn brighter into the dark: the glow follows the lamp level
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uLamp;')
+        .replace('#include <tonemapping_fragment>', `gl_FragColor.rgb *= mix( 0.7, 1.35, uLamp );\n${GLOW_LOW_PATH}\n#include <tonemapping_fragment>`);
     };
-    m.customProgramCacheKey = () => 'mythicwar-bld3-glow';
+    m.customProgramCacheKey = () => 'mythicwar-bld4-glow';
     m.name = 'building-glow';
     MATS.glow = m;
   }
