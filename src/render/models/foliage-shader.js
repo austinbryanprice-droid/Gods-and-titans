@@ -341,7 +341,7 @@ ${FOLIAGE_COVERAGE}`;
 const FOLIAGE_GRADE = /* glsl */ `
 if ( vLeaf > 0.5 && uFolNight > 0.0 ) {
   float folLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
-  diffuseColor.rgb = mix( diffuseColor.rgb, folLuma * vec3( 0.8, 1.0, 1.18 ), 0.4 * uFolNight );
+  diffuseColor.rgb = mix( diffuseColor.rgb, folLuma * vec3( 0.8, 1.0, 1.18 ), 0.2 * uFolNight );
 }`;
 
 // The light that fills the shade (sky and ground ambient) is tinted: cool, blue-green shadows.
