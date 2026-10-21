@@ -103,6 +103,16 @@ test('matchup summary groups filled slots by team', () => {
   assert.equal(sum[1].colors[1], PLAYER_COLORS[1]);
 });
 
+test('the lobby game mode reads Standard or the Decade of Peace length, whatever else arrives', () => {
+  assert.equal(M.peaceMinutes({ peace: 45 }), 45);
+  for (const bad of [undefined, null, 0, 10, '30', NaN, {}]) assert.equal(M.peaceMinutes({ peace: bad }), 0, String(bad));
+  assert.equal(M.peaceMinutes(null), 0);
+  assert.equal(M.peaceMinutes({}), 0);
+  assert.match(M.gameModeLabel({ peace: 0 }), /^Standard/);
+  assert.match(M.gameModeLabel({}), /^Standard/);
+  for (const m of [30, 45, 60]) assert.equal(M.gameModeLabel({ peace: m }), `Decade of Peace: no combat for ${m} minutes`);
+});
+
 test('normalizeChat understands the lobby line shape and plain arguments', () => {
   assert.deepEqual(M.normalizeChat({ from: 0, name: 'Austin', text: 'hi', system: false }), { from: 'Austin', text: 'hi', system: false });
   assert.deepEqual(M.normalizeChat({ from: -1, name: '', text: 'Bob joined the lobby.', system: true }), { from: null, text: 'Bob joined the lobby.', system: true });

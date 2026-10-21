@@ -81,6 +81,10 @@ export const UNDER_ATTACK_COOLDOWN = 10; // seconds between "under attack" alert
 export const CREEP_AGGRO_RANGE = 5;
 export const CREEP_LEASH_RANGE = 10;
 
+// ---- Decade of Peace (game mode) ----
+export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can choose; a setup without one is a normal game
+export const PEACE_NAME = 'Decade of Peace';
+
 // ---- Map ----
 export const MAP_SIZES = { small: 96, medium: 128 };
 export const TERRAIN = { GRASS: 0, DIRT: 1, WATER: 2, FOREST: 3, ROCK: 4, SAND: 5 };

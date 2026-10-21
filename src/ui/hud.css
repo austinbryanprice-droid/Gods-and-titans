@@ -999,6 +999,10 @@
   box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.65), inset 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 .hud-time .hud-res-i { width: auto; height: auto; background: none; box-shadow: none; font-size: 1em; }
+/* Decade of Peace countdown: a pale dove-blue clock that turns amber and pulses for its last minute */
+.hud-time.hud-peace { color: #d4ecff; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(150, 205, 255, 0.4); cursor: help; }
+.hud-time.hud-peace.is-ending { color: #ffc46a; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 180, 74, 0.7); animation: hud-peace-pulse 1.1s ease-in-out infinite; }
+@keyframes hud-peace-pulse { 50% { opacity: 0.55; } }
 .hud-res-v { font-size: 1em; letter-spacing: 0.02em; text-shadow: 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8); }
 .hud-res.is-tier { padding-right: 0.8em; }
 

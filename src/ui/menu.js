@@ -7,7 +7,7 @@
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
-import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.js';
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
@@ -285,7 +285,7 @@ export function createMenu({ root, onStart }) {
     let leaving = false;
     let leaveArmed = false; // host: first Leave / Esc asks, the second one closes the room
     let leaveTimer = 0;
-    const st = () => lobby.state || { slots: [], mapSize: 'small' };
+    const st = () => lobby.state || { slots: [], mapSize: 'small', peace: 0 };
     const myIndex = () => {
       if (!isHost) return Number.isInteger(lobby.mySlot) ? lobby.mySlot : -1;
       const i = st().slots.findIndex((s) => s && s.kind === 'host');
@@ -476,6 +476,33 @@ export function createMenu({ root, onStart }) {
       },
     }, h('span', id === 'small' ? 'Small' : 'Medium'), h('small', `${n}×${n}`)));
     const mapStatic = h('div.mw-map-static');
+    // Game mode: a standard game, or the Decade of Peace with the host's pick of 30 / 45 / 60 minutes.
+    let lastPeace = PEACE_LENGTHS[0]; // the length the mode comes back with when it is switched on again
+    const setPeace = (minutes) => {
+      try {
+        lobby.setPeace(minutes);
+      } catch (err) {
+        toast(err?.message || 'Could not change the game mode.');
+      }
+    };
+    const modeBtns = [
+      ['standard', 'Standard', 'Fight from the first minute.', () => setPeace(0)],
+      ['peace', PEACE_NAME, `No player can harm another for the first ${PEACE_LENGTHS.join(', ')} minutes: time to build and mass armies for one great battle.`, () => setPeace(lastPeace)],
+    ].map(([id, label, title, pick]) => h('button.mw-seg', { type: 'button', title, dataset: { mode: id }, onclick: pick }, h('span', label)));
+    const peaceBtns = PEACE_LENGTHS.map((m) => h('button.mw-seg', {
+      type: 'button',
+      dataset: { peace: String(m) },
+      onclick: () => {
+        lastPeace = m;
+        setPeace(m);
+      },
+    }, h('span', `${m} min`)));
+    const peaceRow = h('div.mw-peace-row',
+      h('span.mw-peace-label', 'Peace lasts'),
+      h('div.mw-segmented', peaceBtns),
+      h('div.mw-hint.mw-peace-hint', 'Creatures still fight. A horn sounds when the peace ends.'),
+    );
+    const modeStatic = h('div.mw-map-static');
     const options = h('div.mw-lobby-options',
       isHost ? h('div.mw-opt-group',
         h('div.mw-label', 'Presets'),
@@ -484,6 +511,10 @@ export function createMenu({ root, onStart }) {
       h('div.mw-opt-group',
         h('div.mw-label', 'Map'),
         isHost ? h('div.mw-segmented', mapBtns) : mapStatic,
+      ),
+      h('div.mw-opt-group.mw-mode-group',
+        h('div.mw-label', 'Game mode'),
+        isHost ? [h('div.mw-segmented', modeBtns), peaceRow] : modeStatic,
       ),
     );
 
@@ -625,6 +656,12 @@ export function createMenu({ root, onStart }) {
       mapBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.size === size));
       presetBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.preset === st().preset));
       mapStatic.textContent = `${size === 'medium' ? 'Medium' : 'Small'} (${MAP_SIZES[size] || '?'}×${MAP_SIZES[size] || '?'})`;
+      const peace = M.peaceMinutes(st());
+      if (peace) lastPeace = peace;
+      modeBtns.forEach((b) => b.classList.toggle('is-active', (b.dataset.mode === 'peace') === (peace > 0)));
+      peaceBtns.forEach((b) => b.classList.toggle('is-active', Number(b.dataset.peace) === peace));
+      peaceRow.hidden = peace === 0;
+      modeStatic.textContent = M.gameModeLabel(st());
     }
 
     function renderAll() {

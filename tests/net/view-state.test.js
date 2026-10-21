@@ -178,3 +178,33 @@ test('event bus: per type, wildcard, snapshot, unsubscribe; defeat reveals the m
   assert.deepEqual(vs.gameOver, { winningTeam: 2 });
   assert.ok(vs.revealAll);
 });
+
+test('Decade of Peace: the clock follows the snapshots, and only creatures and (after it) rivals may be hurt', () => {
+  const peaceful = { ...setup, peaceMinutes: 30 };
+  const vs = makeVS({ setup: peaceful });
+  assert.equal(vs.peaceLeft(), 1800);
+  assert.equal(vs.peaceActive(), true);
+  assert.equal(vs.canHarm(1), false, 'a rival is protected');
+  assert.equal(vs.canHarm(-1), true, 'creatures are not');
+  assert.equal(vs.canHarm(0), false, 'my own units are not a target');
+  assert.equal(vs.canHarm(2), false, 'nor are my allies');
+  assert.equal(vs.canHarm(undefined), false);
+  vs.pushSnapshot(snap([unit(1, 0, 10.5, 10.5)], { time: 1799.95 }), 0);
+  assert.ok(Math.abs(vs.peaceLeft() - 0.05) < 1e-9);
+  assert.equal(vs.peaceActive(), true);
+  vs.pushSnapshot(snap([unit(1, 0, 10.5, 10.5)], { time: 1800 }), 50);
+  assert.equal(vs.peaceLeft(), 0);
+  assert.equal(vs.peaceActive(), false);
+  assert.equal(vs.canHarm(1), true, 'the peace is over');
+  assert.equal(vs.canHarm(2), false);
+  vs.pushSnapshot(snap([unit(1, 0, 10.5, 10.5)], { time: 5000 }), 100);
+  assert.equal(vs.peaceLeft(), 0, 'never negative');
+
+  const normal = makeVS();
+  assert.equal(normal.peaceLeft(), 0);
+  assert.equal(normal.peaceActive(), false);
+  assert.equal(normal.canHarm(1), true);
+  assert.equal(normal.canHarm(-1), true);
+  const odd = makeVS({ setup: { ...setup, peaceMinutes: 31 } });
+  assert.equal(odd.peaceActive(), false, 'only a length the lobby offers counts, as in the sim');
+});

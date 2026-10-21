@@ -29,9 +29,9 @@ export function canAttackTarget(u, t) {
   return true;
 }
 
-/** Valid hostile target for u. */
+/** Valid hostile target for u (not another player's during the Decade of Peace). */
 export function canTarget(world, u, t) {
-  return canAttackTarget(u, t) && world.areEnemies(u.owner, t.owner);
+  return canAttackTarget(u, t) && world.canHarm(u.owner, t.owner);
 }
 
 /** Auto-acquisition range: max(sight × 0.75, range + 1). */
@@ -217,6 +217,8 @@ export function heal(u, amount) {
 export function dealDamage(world, t, amount, src, opts = {}) {
   if (!t || t.dead || !(amount > 0) || t.kind === 'mine') return 0;
   if (t.kind === 'unit' && t.invuln) return 0;
+  // Decade of Peace: whatever got this far (a spell, a damage-over-time), one player never hurts another.
+  if (src && world.peace && world.peaceBlocks(src.owner, t.owner)) return 0;
   let a = amount;
   if (opts.attack) a *= armorMultiplier(t.kind === 'unit' ? t.armorNow : t.armor);
   if (opts.spell && t.kind === 'building') a *= SPELL_VS_BUILDING;
@@ -233,7 +235,7 @@ export function dealDamage(world, t, amount, src, opts = {}) {
 }
 
 function hostileTo(world, owner, e) {
-  return world.areEnemies(owner, e.owner);
+  return world.canHarm(owner, e.owner);
 }
 
 /** Resolve an attack landing on t (melee at the swing, ranged on arrival). */

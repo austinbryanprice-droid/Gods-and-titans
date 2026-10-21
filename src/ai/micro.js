@@ -126,7 +126,7 @@ function focusFire(ai, s) {
     let best = null;
     let bestV = 0;
     for (const e of tmp) {
-      if (e.dead || e === cur || e.kind !== 'unit' || e.invuln || !world.areEnemies(u.owner, e.owner)) continue;
+      if (e.dead || e === cur || e.kind !== 'unit' || e.invuln || !world.canHarm(u.owner, e.owner)) continue;
       if (e.air && !atk.canHitAir) continue;
       if (!reach(e)) continue;
       let v = 0;

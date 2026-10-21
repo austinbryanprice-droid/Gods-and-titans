@@ -3,7 +3,7 @@
 // types and typed fields before they reach World.issueCommand. Clients check
 // what a (possibly buggy) host sends before it reaches the ViewState: the
 // GameSetup from `start` and every snapshot. Pure: runs in Node too.
-import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS } from '../config.js';
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { sanitizeName } from './protocol.js';
 
@@ -133,6 +133,7 @@ export function validateSetup(setup, myIndex) {
   }
   const clean = { version: typeof setup.version === 'string' ? setup.version.slice(0, 32) : '', seed, mapSize, players };
   if (typeof setup.mapHash === 'string' && setup.mapHash.length <= 64) clean.mapHash = setup.mapHash;
+  if (PEACE_LENGTHS.includes(setup.peaceMinutes)) clean.peaceMinutes = setup.peaceMinutes; // Decade of Peace
   return { setup: clean, myIndex };
 }
 

@@ -50,6 +50,18 @@ test('an enemy Titan being summoned has its own sound, not the horn of the under
   assert.deepEqual(calls.map((c) => c[0]), ['summon_titan']);
 });
 
+test('the end of the Decade of Peace is announced to everyone with a banner and the horn', () => {
+  const banners = [];
+  const game = {
+    disposed: false,
+    viewState: { myIndex: 0 },
+    hud: { showBanner: (text, kind) => banners.push([text, kind]) },
+  };
+  const calls = recordSounds(() => Game.prototype.onEvent.call(game, { type: 'peaceEnd' }));
+  assert.deepEqual(banners, [['The Decade of Peace is over: war begins!', 'danger']]);
+  assert.deepEqual(calls.map((c) => c[0]), ['horn']);
+});
+
 test('hearing range follows the zoom: wider zoomed out, narrower zoomed in, never extreme', () => {
   const cam = (distance) => ({ distance, opts: { defaultDistance: 25 } });
   assert.equal(hearingScale(cam(25)), 1);

@@ -220,6 +220,8 @@ test('validateSetup / isValidSnapshot / sanitizeFelled reject what a client cann
     [{ ...setup, players: [players[1], players[0]] }, 0], // indices out of order
     [null, 0], ['setup', 0],
   ]) assert.equal(validateSetup(bad, you), null, JSON.stringify(bad && bad.players && bad.players[0]));
+  for (const m of [30, 45, 60]) assert.equal(validateSetup(json({ ...setup, peaceMinutes: m }), 0).setup.peaceMinutes, m, 'a Decade of Peace length is kept');
+  for (const bad of [0, 10, 31, '30', null, NaN, [30], {}]) assert.equal('peaceMinutes' in validateSetup(json({ ...setup, peaceMinutes: bad }), 0).setup, false, `dropped ${JSON.stringify(bad)}`);
   const dirty = validateSetup({ ...setup, players: [{ ...players[0], name: '‮evil'.repeat(9), color: 'url(x)' }, players[1]], extra: 1 }, 0);
   assert.ok(dirty.setup.players[0].name.length <= MAX_NAME_LENGTH && !UNSAFE.test(dirty.setup.players[0].name));
   assert.equal(dirty.setup.players[0].color, PLAYER_COLORS[0]);

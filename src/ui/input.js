@@ -12,6 +12,7 @@ import { checkPlacement, footprintAt } from '../game/placement.js';
 import { getCommandCard, buttonForKey, buildCheck, trainCheck } from './command-card.js';
 import { isComplete } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
+import { peaceNotice } from '../sim/peace.js';
 
 const DRAG_THRESHOLD = 5; // px before a left press becomes a box
 const DOUBLE_MS = 350;
@@ -496,7 +497,7 @@ export class InputController {
       if (target && !(target.k === 'u' && units.includes(target.id))) {
         cmd.target = target.id;
         if (target.k === 'm') kind = 'gather';
-        else if (vs.isEnemy(target.o) || target.o < 0) kind = 'attack';
+        else if (vs.isEnemy(target.o) || target.o < 0) kind = vs.canHarm(target.o) ? 'attack' : 'move'; // (Decade of Peace: a walk)
       } else if (p) {
         const tx = Math.floor(p.x);
         const ty = Math.floor(p.y);
@@ -584,7 +585,7 @@ export class InputController {
           this.marker(target.x, target.y, 'attack');
         } else if (target && (target.k === 'u' || target.k === 'b') && (vs.isEnemy(target.o) || target.o < 0)) {
           this.command({ type: 'attack', units, target: target.id, queue: !!shift });
-          this.marker(target.ix ?? target.x, target.iy ?? target.y, 'attack');
+          this.marker(target.ix ?? target.x, target.iy ?? target.y, vs.canHarm(target.o) ? 'attack' : 'move');
         } else {
           this.command({ type: 'attackMove', units, x: p.x, y: p.y, queue: !!shift });
           this.marker(p.x, p.y, 'attack');
@@ -687,6 +688,7 @@ export class InputController {
       tgt = target;
     } else if (m.target === 'enemy') {
       if (!target || target.k === 'm' || !(vs.isEnemy(target.o) || target.o < 0)) return this.castError('Must target an enemy.');
+      if (!vs.canHarm(target.o)) return this.castError(peaceNotice(vs.peaceLeft()));
       tgt = target;
     }
     const tx = tgt ? tgt.x : p.x;
@@ -1177,11 +1179,11 @@ export class InputController {
     const h = this.hoverId !== null ? vs.knownEntity(this.hoverId) : null;
     if (this.mode.kind === 'place') return this.setCursor('place');
     if (this.mode.kind === 'target') {
-      if (h && (vs.isEnemy(h.o) || (h.o < 0 && h.k === 'u'))) return this.setCursor('target-enemy');
+      if (h && vs.canHarm(h.o) && (h.o >= 0 || h.k === 'u')) return this.setCursor('target-enemy');
       if (h && h.k !== 'm' && vs.isAlly(h.o)) return this.setCursor('target-ally');
       return this.setCursor('target');
     }
-    if (h && this.sel.ownUnitIds().length && (vs.isEnemy(h.o) || (h.o < 0 && h.k === 'u'))) return this.setCursor('enemy');
+    if (h && this.sel.ownUnitIds().length && vs.canHarm(h.o) && (h.o >= 0 || h.k === 'u')) return this.setCursor('enemy');
     if (h) return this.setCursor('select');
     return this.setCursor('');
   }

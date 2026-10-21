@@ -108,6 +108,7 @@ export function scanWorld(world, me) {
     tcs: [],
     tierUp: false,
     queuedGods: 0,
+    peace: !!world.peace, // Decade of Peace: no fighting between players yet
     enemies: [],
     enemyUnits: [],
     allyBuildings: [],
