@@ -51,6 +51,10 @@ test('every building has its own upgrades: at least two each, no effect shared w
   const seen = new Map();
   for (const b of Object.values(BUILDINGS)) {
     const ups = b.upgrades || [];
+    if (b.wall) {
+      assert.equal(ups.length, 0, `${b.id}: wall segments come by the hundred and take the one upgrade of their own (wallUpgrade), no research`);
+      continue;
+    }
     assert.ok(ups.length >= 2, `${b.id} has ${ups.length} upgrades`);
     for (const up of ups) {
       assert.equal(UPGRADES[up.id].building, b.id);

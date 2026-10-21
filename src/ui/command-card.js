@@ -22,7 +22,7 @@
 // }
 import {
   MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
-  MINE_SLOTS, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE, POP_MAX,
+  MINE_SLOTS, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE, POP_MAX, WALL_REMOVE_REFUND,
 } from '../config.js';
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt, eliteFor } from '../data/index.js';
 import { offeredUpgrades, lineOf, getUpgrade, reviveMult } from '../data/upgrades.js';
@@ -379,7 +379,7 @@ function unitCard(card, vs, group, ownIds, mode) {
   if (mode === 'build' && isWorker) {
     BUILD_MENU.forEach((typeId, i) => {
       const b = BUILDINGS[typeId];
-      if (!b || i >= 8) return;
+      if (!b || i >= 11) return; // slot 11 is Back
       const chk = buildCheck(vs, typeId);
       card[i] = button(i, {
         id: `build:${typeId}`,
@@ -527,11 +527,80 @@ function researchText(vs, up) {
   return `${up.description} Your ${elite.plural || `${elite.name}s`} count too.`;
 }
 
+/** "20 gold and 10 wood" for a cost. */
+function costText(c) {
+  return ['gold', 'wood', 'faith'].filter((k) => c && c[k] > 0).map((k) => `${c[k]} ${k}`).join(' and ');
+}
+
+/**
+ * Wall segments (DESIGN 4.3): upgrade wood to stone, take down finished segments, cancel unfinished
+ * segments and upgrades in progress. Every button acts on the segments of the active subgroup,
+ * which may be dozens.
+ */
+function wallCard(card, vs, group, buildings) {
+  const def = BUILDINGS[group.type];
+  const me = vs.me;
+  const done = buildings.filter(isComplete);
+  const idle = done.filter((b) => !(b.q || []).length);
+  const upgrading = done.length - idle.length;
+  const unfinished = buildings.length - done.length;
+  const up = def.wallUpgrade;
+  if (up && done.length) {
+    const to = BUILDINGS[up.to];
+    const n = idle.length;
+    // The sim pays segment by segment until the purse runs short.
+    let afford = n;
+    for (const k of ['gold', 'wood', 'faith']) if (up.cost[k] > 0) afford = Math.min(afford, Math.floor(((me && me[k]) || 0) / up.cost[k]));
+    let state = 'ready';
+    let reason = null;
+    if (!n) {
+      state = 'disabled';
+      reason = 'Already being upgraded.';
+    } else if (afford < 1) {
+      state = 'unaffordable';
+      reason = affordReason(me, up.cost);
+    }
+    let description = `Rebuild in stone while it stands: ${to.hp} health and ${to.armor} armor instead of ${def.hp} and ${def.armor}. ${costText(up.cost)} and ${up.time} seconds for each segment.`;
+    if (afford > 0 && afford < n) description += ` You can pay for ${afford} of the ${n} right now.`;
+    card[0] = button(0, {
+      id: 'wall-upgrade',
+      key: 'U',
+      icon: to.icon,
+      title: n > 1 ? `Upgrade ${n} Segments to ${to.name}` : `Upgrade to ${to.name}`,
+      description,
+      state,
+      reason,
+      cost: { gold: (up.cost.gold || 0) * n, wood: (up.cost.wood || 0) * n, faith: (up.cost.faith || 0) * n, pop: 0, time: up.time },
+      queued: upgrading,
+      action: { kind: 'upgradeWall' },
+    });
+  }
+  if (done.length) {
+    card[1] = button(1, {
+      id: 'wall-dismantle',
+      key: 'D',
+      icon: '⛏️',
+      title: done.length > 1 ? `Dismantle ${done.length} Segments` : 'Dismantle',
+      description: `Take the finished segments down and get back ${Math.round(WALL_REMOVE_REFUND * 100)}% of their cost. Opens a gap in your own wall.`,
+      action: { kind: 'dismantleWall' },
+    });
+  }
+  if (unfinished || upgrading) {
+    const what = unfinished && upgrading ? 'Construction and Upgrades' : unfinished ? 'Construction' : 'Upgrade';
+    const parts = [];
+    if (unfinished) parts.push(`Tear down the unfinished segments and get back ${Math.round(CANCEL_BUILD_REFUND * 100)}% of their cost.`);
+    if (upgrading) parts.push('Stop the upgrades and get back everything they cost.');
+    card[2] = button(2, { id: 'wall-cancel', key: 'C', icon: '✖', title: `Cancel ${what}`, description: parts.join(' '), action: { kind: 'cancelWall' } });
+  }
+  return card;
+}
+
 function buildingCard(card, vs, group) {
   const buildings = group.ids.map((id) => vs.entities.get(id)).filter((e) => e && e.k === 'b');
   if (!buildings.length) return card;
   const def = BUILDINGS[group.type];
   const first = buildings[0];
+  if (def && def.wall) return wallCard(card, vs, group, buildings);
   if (!buildings.some(isComplete)) {
     card[11] = button(11, {
       id: 'cancel-build', key: 'Escape', icon: '✖', title: 'Cancel Construction',

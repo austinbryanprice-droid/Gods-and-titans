@@ -71,16 +71,19 @@ test('worker card: WC3 layout, hotkeys and states', () => {
   assert.equal(byId(card2, 'pray').state, 'ready');
 });
 
-test('build submenu: 8 buildings with costs, tier and requirement locks, Back', () => {
+test('build submenu: the buildings and the wall with costs, tier and requirement locks, Back', () => {
   const world = makeWorld();
   const vs = viewOf(world);
   const sel = { ids: ids(workersOf(world)) };
   const card = getCommandCard(sel, vs, 'build');
   assert.deepEqual(slotsOf(card), [
     '0:build:house', '1:build:barracks', '2:build:shrine', '3:build:storehouse',
-    '4:build:tower', '5:build:temple', '6:build:titan_gate', '7:build:town_center', '11:back',
+    '4:build:tower', '5:build:temple', '6:build:titan_gate', '7:build:town_center', '8:build:wooden_wall', '11:back',
   ]);
-  assert.deepEqual(card.slice(0, 8).map((b) => b.key), ['H', 'B', 'S', 'O', 'T', 'E', 'G', 'C']);
+  assert.deepEqual(card.slice(0, 9).map((b) => b.key), ['H', 'B', 'S', 'O', 'T', 'E', 'G', 'C', 'W']);
+  assert.deepEqual(byId(card, 'build:wooden_wall').cost, { gold: 0, wood: 12, faith: 0, pop: 0, time: 6 });
+  assert.deepEqual(byId(card, 'build:wooden_wall').action, { kind: 'place', building: 'wooden_wall' });
+  assert.equal(byId(card, 'build:wooden_wall').state, 'ready', 'a wall is open from the start');
   const house = byId(card, 'build:house');
   assert.equal(house.state, 'ready');
   assert.deepEqual(house.cost, { gold: 80, wood: 30, faith: 0, pop: 0, time: 25 });

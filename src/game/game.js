@@ -22,6 +22,7 @@ import { tierName } from '../ui/hud-data.js';
 import { MSG, REASONS, sanitizeName, sanitizeReason } from '../net/protocol.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
+const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
 const AMBIENT_REACH = 16; // tiles from the camera target at the default zoom
 const MAX_DT = 0.1;
 const MAX_ERRORS = 20; // frame faults kept in game.errors (a fault that repeats every frame must not pile up)
@@ -167,6 +168,7 @@ export class Game {
     this.bareHud = false;
     this.offs = [];
     this.lastAmbient = 0;
+    this.lastBreach = -BREACH_MESSAGE_MS;
     this.stats = { frames: 0, cpuMs: 0, maxMs: 0, renderMs: 0, hudMs: 0, last: [] };
     this.errors = [];
     if (typeof window !== 'undefined') window.__game = this;
@@ -721,11 +723,13 @@ export class Game {
         // Once defeated, the whole army dies at once: no list of losses under the defeat screen.
         if (ev.o === me && !(vs.me && vs.me.defeated)) {
           const t = ev.k === 'b' ? BUILDINGS[ev.t] : UNITS[ev.t];
-          if (ev.k === 'b' && t) hud.message(`Your ${t.name} was destroyed.`, 'alert');
+          // A wall falls piece by piece: one message for the breach, not one per segment.
+          if (ev.k === 'b' && t && t.wall) this.noteBreach(hud);
+          else if (ev.k === 'b' && t) hud.message(`Your ${t.name} was destroyed.`, 'alert');
           else if (t && t.class === 'god') hud.message(`${t.name} has fallen! Revive them at a Temple.`, 'alert');
           else if (t && t.class === 'titan') hud.message(`${t.name} has fallen!`, 'alert');
         }
-        this.worldSound('death', ev.x, ev.y, ev.k === 'b' ? 1 : 0.8);
+        this.worldSound('death', ev.x, ev.y, ev.k === 'b' ? (BUILDINGS[ev.t] && BUILDINGS[ev.t].wall ? 0.5 : 1) : 0.8);
         break;
       }
       case 'attack':
@@ -752,6 +756,14 @@ export class Game {
       default:
         break;
     }
+  }
+
+  /** "Your wall was breached!" at most once every few seconds while segments fall. */
+  noteBreach(hud) {
+    const now = performance.now();
+    if (now - this.lastBreach < BREACH_MESSAGE_MS) return;
+    this.lastBreach = now;
+    hud.message('Your wall was breached!', 'alert');
   }
 
   worldSoundAt(id, name, volume = 1) {

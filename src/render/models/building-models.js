@@ -4,6 +4,7 @@
 //   scene.add(m.root);   // origin = footprint center at ground level, +X east, +Z south
 //   m.setProgress(bp);   // 0..1 construction: foundation + scaffolding, walls rising; 1 = complete
 //   m.setTier(2);        // town centers: 1 Village, 2 Town, 3 City
+//   m.setConnections(m); // wall segments: which neighbours the wall runs on to (data/walls.js wallConnections)
 //   m.animate(timeSec);  // flames, waving flags, the titan gate vortex
 //   m.height             // top of the model (health bar placement)
 //   m.dispose();         // detaches; cached geometry and shared materials stay
@@ -3037,6 +3038,76 @@ function buildTower(k, P, st) {
   return top;
 }
 
+// ---- walls ----
+
+// N, E, S, W as (x, z) steps: the order of the connection bits (data/walls.js WALL_N..WALL_W).
+const ARM_DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const WALL_REACH = 0.5; // an arm to the next segment runs to the tile edge
+const TOWER_REACH = 1.1; // an arm to a tower runs on into its footprint: the tower stands well inside it
+
+/** The arms of a segment from its connection mask: [{ dx, dz, reach }]. */
+function wallArms(mask) {
+  const arms = [];
+  for (let d = 0; d < 4; d++) {
+    if (mask & (1 << d)) arms.push({ dx: ARM_DIRS[d][0], dz: ARM_DIRS[d][1], reach: mask & (16 << d) ? TOWER_REACH : WALL_REACH });
+  }
+  return arms;
+}
+
+/** A box along an arm from distance a to b from the tile center, `w` wide across it and `h` tall from y, `off` to one side. */
+function armBox(arm, a, b, w, y, h, off = 0) {
+  const mid = (a + b) / 2;
+  return box(arm.dx ? b - a : w, h, arm.dz ? b - a : w, arm.dx ? arm.dx * mid : off, y, arm.dz ? arm.dz * mid : off);
+}
+
+/**
+ * Wooden wall: a palisade of sharpened stakes round a stouter post at the tile center, two rails
+ * lashed along each face (the upper one in the team's color). Arms reach the next segment or tower.
+ */
+function buildWoodenWall(k, P, mask) {
+  const arms = wallArms(mask);
+  const H = 0.9;
+  const sunk = 0.35;
+  const stake = (x, z, h, r, color) => {
+    k.b(cyl(r * 0.9, r, h + sunk, 5, x, -sunk, z, true), color, 0.06);
+    k.b(cone(r * 0.9, 0.2, 5, x, h, z, true), P.woodL, 0.05);
+  };
+  stake(0, 0, H + 0.15, 0.1, P.woodD);
+  k.t(box(0.23, 0.07, 0.23, 0, H * 0.62, 0), 1);
+  if (!arms.length) for (const sx of [-1, 1]) for (const sz of [-1, 1]) stake(sx * 0.16, sz * 0.16, H - 0.08 + k.rand(-0.06, 0.04), 0.07, P.wood);
+  for (const a of arms) {
+    let i = 0;
+    for (let t = 0.17; t <= a.reach - 0.03; t += 0.145) stake(a.dx * t, a.dz * t, H + k.rand(-0.09, 0.05), 0.07, i++ % 2 ? P.woodD : P.wood);
+    for (const side of [-1, 1]) {
+      k.b(armBox(a, 0, a.reach, 0.035, 0.26, 0.055, side * 0.085), P.woodD, 0.04);
+      k.t(armBox(a, 0, a.reach, 0.035, 0.62, 0.055, side * 0.085), 1);
+    }
+  }
+  return H + 0.35;
+}
+
+/**
+ * Stone wall: a pier with a cap at the tile center and a coped wall with a merlon every so often
+ * along each arm, a band in the team's color on both faces. A footing sunk below ground hides slopes
+ * (in the body mesh: a segment is two draw calls, a long wall is hundreds of them).
+ */
+function buildStoneWall(k, P, mask) {
+  const arms = wallArms(mask);
+  const H = 0.9;
+  k.b(box(0.5, 0.5, 0.5, 0, -0.5, 0), P.stoneD, 0.06);
+  k.b(box(0.46, H + 0.18, 0.46, 0, 0, 0), P.stone, 0.08);
+  k.b(box(0.56, 0.07, 0.56, 0, H + 0.18, 0), P.stoneL, 0.05);
+  k.t(box(0.48, 0.07, 0.48, 0, H * 0.58, 0), 1);
+  for (const a of arms) {
+    k.b(armBox(a, 0.2, a.reach, 0.36, -0.5, 0.5), P.stoneD, 0.06);
+    k.b(armBox(a, 0.2, a.reach, 0.32, 0, H), P.stone, 0.08);
+    k.b(armBox(a, 0.2, a.reach, 0.38, H, 0.07), P.stoneL, 0.04);
+    for (let t = 0.42; t <= a.reach - 0.1; t += 0.4) k.b(armBox(a, t - 0.07, t + 0.07, 0.3, H + 0.07, 0.13), P.stone, 0.06);
+    for (const side of [-1, 1]) k.t(armBox(a, 0.2, a.reach, 0.02, H * 0.58, 0.07, side * 0.165), 1);
+  }
+  return H + 0.25;
+}
+
 // ---- titan gate ----
 
 const GATE = { px: 1.22, pw: 0.66, pd: 0.72, open: 2.9 };
@@ -3524,20 +3595,26 @@ function styleKey(type, st, colors, tier) {
   return `${type}|${tier}|${st.roof}|${st.wall}|${st.ornament}|${colors.wall}|${colors.roof}|${colors.trim}|${colors.accent}`;
 }
 
-/** Build (or fetch from the cache) the merged geometry set for a building look. */
-function getBuildingGeometry(type, pantheon, tier) {
+/**
+ * Build (or fetch from the cache) the merged geometry set for a building look. `mask` is a wall
+ * segment's connection mask (data/walls.js wallConnections); every mask is a geometry of its own.
+ */
+function getBuildingGeometry(type, pantheon, tier, mask = 0) {
   const { st, colors } = resolveStyle(pantheon);
   const size = BUILDINGS[type] ? BUILDINGS[type].size : 2;
+  const wall = !!(BUILDINGS[type] && BUILDINGS[type].wall);
   const t = type === 'town_center' ? Math.max(1, Math.min(3, tier | 0 || 1)) : 1;
-  const key = styleKey(type, st, colors, t);
+  const key = wall ? `${styleKey(type, st, colors, 1)}|${mask & 255}` : styleKey(type, st, colors, t);
   let entry = GEO_CACHE.get(key);
   if (entry) return entry;
   const P = makePalette(colors, st);
   const k = new Kit(hashSeed(key));
-  // the city's walls and towers carry the corners; its triangle budget goes there
-  buildFoundation(k, P, st, size, !(type === 'town_center' && t === 3));
+  // the city's walls and towers carry the corners; its triangle budget goes there. Wall segments stand on no foundation.
+  if (!wall) buildFoundation(k, P, st, size, !(type === 'town_center' && t === 3));
   let top;
   switch (type) {
+    case 'wooden_wall': top = buildWoodenWall(k, P, mask & 255); break;
+    case 'stone_wall': top = buildStoneWall(k, P, mask & 255); break;
     case 'town_center': top = buildTownCenter(k, P, st, t); break;
     case 'house': top = buildHouse(k, P, st); break;
     case 'barracks': top = buildBarracks(k, P, st); break;
@@ -3549,7 +3626,7 @@ function getBuildingGeometry(type, pantheon, tier) {
     default: top = hall(k, P, st, { x: 0, z: 0, w: size - 0.6, d: size - 0.6, h: 0.7 }); break;
   }
   // Dev aid: set globalThis.__BLD_DEBUG = [] to collect the parts that reach past the footprint.
-  if (globalThis.__BLD_DEBUG) {
+  if (globalThis.__BLD_DEBUG && !wall) {
     const lim = size / 2 - MARGIN;
     for (const name of BUCKETS) for (const g of k.parts[name]) {
       g.computeBoundingBox();
@@ -3559,8 +3636,9 @@ function getBuildingGeometry(type, pantheon, tier) {
     }
   }
   const geos = finishKit(k);
-  // Safety net: scale any model that overhangs its footprint back inside it.
-  const limit = size / 2 - MARGIN + 0.005;
+  // Safety net: scale any model that overhangs its footprint back inside it (a wall segment's arms
+  // run on to the next tile on purpose).
+  const limit = wall ? Infinity : size / 2 - MARGIN + 0.005;
   let ext = 0;
   let maxY = 0;
   for (const name of BUCKETS) {
@@ -3588,6 +3666,7 @@ function getBuildingGeometry(type, pantheon, tier) {
     vortex: type === 'titan_gate' && { cx: 0, cy: (PLINTH + 0.27 + 0.05 + GATE.open * 0.5) * fit, rx: 0.84 * fit, ry: (GATE.open * 0.5 - 0.02) * fit },
     vortexColors: [tint(P.accent, 0.55), P.accent, mix(P.trim, '#5a2a9a', 0.5)],
     scaffoldH: Math.max(0.9, Math.min(height * 0.72, 2.6)),
+    wall,
   };
   GEO_CACHE.set(key, entry);
   return entry;
@@ -3643,8 +3722,9 @@ export function buildBuildingModel(buildingTypeId, pantheon, teamColor, tier = 1
   let scaffold = null;
   let vortex = null;
   let curTier = tier;
+  let curMask = 0;
 
-  const model = { root, height: 1, setProgress, setTier, animate, dispose, type: buildingTypeId };
+  const model = { root, height: 1, setProgress, setTier, setConnections, animate, dispose, type: buildingTypeId };
 
   function apply(e) {
     entry = e;
@@ -3704,13 +3784,16 @@ export function buildBuildingModel(buildingTypeId, pantheon, teamColor, tier = 1
       }
       if (meshes.glow) meshes.glow.visible = false;
       if (vortex) vortex.visible = false;
-      if (!scaffold) {
-        scaffold = makeMesh(getScaffold(entry.size, entry.scaffoldH), bodyMaterial(), 'building-scaffold', true, false);
-        scaffold.matrixAutoUpdate = true;
-        root.add(scaffold);
-      } else scaffold.geometry = getScaffold(entry.size, entry.scaffoldH);
-      scaffold.visible = true;
-      scaffold.scale.y = Math.min(1, 0.45 + 0.6 * progress);
+      // (a one-tile wall segment simply rises out of the ground)
+      if (!entry.wall) {
+        if (!scaffold) {
+          scaffold = makeMesh(getScaffold(entry.size, entry.scaffoldH), bodyMaterial(), 'building-scaffold', true, false);
+          scaffold.matrixAutoUpdate = true;
+          root.add(scaffold);
+        } else scaffold.geometry = getScaffold(entry.size, entry.scaffoldH);
+        scaffold.visible = true;
+        scaffold.scale.y = Math.min(1, 0.45 + 0.6 * progress);
+      }
     } else {
       if (meshes.body) {
         meshes.body.material = bodyMaterial();
@@ -3741,6 +3824,15 @@ export function buildBuildingModel(buildingTypeId, pantheon, teamColor, tier = 1
     if (nt === curTier && entry) return;
     curTier = nt;
     apply(getBuildingGeometry(buildingTypeId, pantheon, curTier));
+  }
+
+  /** Wall segments: the neighbours the wall runs on to (a no-op for other buildings). */
+  function setConnections(mask) {
+    if (!entry || !entry.wall) return;
+    const m = (mask | 0) & 255;
+    if (m === curMask) return;
+    curMask = m;
+    apply(getBuildingGeometry(buildingTypeId, pantheon, curTier, curMask));
   }
 
   function animate(timeSec) {
@@ -3810,21 +3902,23 @@ export function setBuildingTime(timeSec) {
 
 /**
  * Stats for tests and the gallery: triangles, mesh count, height and how far the
- * model reaches from its center (must be ≤ size/2 − 0.1).
+ * model reaches from its center (must be ≤ `limit`: size/2 − 0.1, or for a wall segment how far
+ * its arms may run into a tower).
  */
-export function getBuildingModelInfo(buildingTypeId, pantheon, tier = 1) {
-  const e = getBuildingGeometry(buildingTypeId, pantheon, tier);
+export function getBuildingModelInfo(buildingTypeId, pantheon, tier = 1, mask = 0) {
+  const e = getBuildingGeometry(buildingTypeId, pantheon, tier, mask);
   let meshes = 0;
   for (const n of BUCKETS) if (e[n]) meshes++;
   if (e.vortex) meshes++;
   const mounted = buildBuildingModel(buildingTypeId, pantheon, '#ffffff', tier);
+  mounted.setConnections(mask);
   mounted.setProgress(0.5);
   let constructionMeshes = 0;
   mounted.root.traverse((o) => { if (o.isMesh) constructionMeshes++; });
   mounted.dispose();
   return {
     triangles: e.triangles, meshes, constructionMeshes, height: e.height, extent: e.extent, fit: e.fit,
-    size: e.size, limit: e.size / 2 - MARGIN,
+    size: e.size, limit: e.wall ? TOWER_REACH + 0.05 : e.size / 2 - MARGIN,
   };
 }
 

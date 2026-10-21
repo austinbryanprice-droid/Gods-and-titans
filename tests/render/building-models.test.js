@@ -22,6 +22,7 @@ const {
 } = await import('../../src/render/models/building-models.js');
 const { BUILDINGS, PANTHEON_LIST, GOLD_MINE } = await import('../../src/data/index.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
+const { WALL_N, WALL_E, WALL_S, WALL_W, WALL_TOWER_SHIFT } = await import('../../src/data/walls.js');
 
 const TRI_BUDGET = 3000;
 const MESH_BUDGET = 6;
@@ -70,12 +71,13 @@ test('every type × pantheon × tier fits its footprint and the budgets', () => 
       const label = `${p.id}/${type}${tier}`;
       const info = getBuildingModelInfo(type, p, tier);
       const size = BUILDINGS[type].size;
+      const wall = BUILDINGS[type].wall === true; // a lone post: the arms come with the connections (below)
       assert.equal(info.size, size, `${label}: size`);
-      assert.ok(info.triangles > 50 && info.triangles <= TRI_BUDGET, `${label}: ${info.triangles} triangles`);
+      assert.ok(info.triangles > (wall ? 30 : 50) && info.triangles <= TRI_BUDGET, `${label}: ${info.triangles} triangles`);
       assert.ok(info.meshes >= 2 && info.meshes <= MESH_BUDGET, `${label}: ${info.meshes} meshes`);
       assert.ok(info.constructionMeshes <= MESH_BUDGET, `${label}: ${info.constructionMeshes} meshes while building`);
       assert.ok(info.fit === 1, `${label}: model had to be shrunk to ${info.fit.toFixed(3)} to fit`);
-      assert.ok(info.extent <= size / 2 - 0.1 + 0.006, `${label}: reaches ${info.extent.toFixed(3)} from center`);
+      assert.ok(info.extent <= (wall ? info.limit : size / 2 - 0.1 + 0.006), `${label}: reaches ${info.extent.toFixed(3)} from center`);
       assert.ok(info.height > 1 && info.height < 6, `${label}: height ${info.height}`);
     }
   }
@@ -117,7 +119,7 @@ test('missing or partial pantheon styles fall back to a neutral look', () => {
     for (const [type, tier] of VARIANTS) {
       const m = buildBuildingModel(type, p, 0xff0000, tier);
       assert.ok(m.root.isObject3D);
-      assert.ok(trianglesOf(m.root) > 50);
+      assert.ok(trianglesOf(m.root) > (BUILDINGS[type].wall ? 30 : 50));
       m.dispose();
     }
   }
@@ -167,7 +169,8 @@ test('construction: progress clips the structure, shows a scaffold and restores 
       m.setProgress(0);
       let meshes = meshesOf(m.root);
       const scaffold = meshes.find((o) => o.name === 'building-scaffold');
-      assert.ok(scaffold && scaffold.visible, `${type}: scaffold while building`);
+      if (BUILDINGS[type].wall) assert.ok(!scaffold, `${type}: a one-tile segment simply rises out of the ground`);
+      else assert.ok(scaffold && scaffold.visible, `${type}: scaffold while building`);
       assert.ok(meshes.length <= MESH_BUDGET, `${type}: ${meshes.length} meshes while building`);
       const body = meshes.find((o) => o.name === 'building-body');
       const cut0 = body.material.userData.uCut.value;
@@ -213,6 +216,112 @@ test('setTier swaps the town center model in place', () => {
   house.setTier(3);
   assert.equal(trianglesOf(house.root), th, 'setTier is a no-op for other buildings');
   m.dispose();
+  house.dispose();
+});
+
+// ---- wall segments: one tile, arms to the neighbours that the connection mask names ----
+
+/** Every connection mask a segment can have: neighbours N E S W (low bits), and which of them are towers. */
+function* wallMasks() {
+  for (let low = 0; low < 16; low++) {
+    for (let towers = 0; towers < 16; towers++) {
+      if (towers & ~low) continue;
+      yield low | (towers << WALL_TOWER_SHIFT);
+    }
+  }
+}
+
+test('wall segments: every neighbour combination builds in budget, with arms that stay within their reach', () => {
+  for (const p of PANTHEON_LIST.slice(0, 3)) {
+    for (const type of ['wooden_wall', 'stone_wall']) {
+      for (const mask of wallMasks()) {
+        const label = `${p.id}/${type}/${mask.toString(2)}`;
+        const info = getBuildingModelInfo(type, p, 1, mask);
+        assert.equal(info.meshes, 2, `${label}: body and team color, two draws a segment`);
+        assert.ok(info.triangles > 30 && info.triangles <= 700, `${label}: ${info.triangles} triangles`);
+        assert.equal(info.fit, 1, `${label}: never shrunk`);
+        assert.ok(info.extent <= info.limit, `${label}: reaches ${info.extent.toFixed(3)}`);
+        assert.ok(info.height > 1 && info.height < 1.6, `${label}: height ${info.height}`);
+        const reach = mask >> WALL_TOWER_SHIFT ? 1.05 : mask & 15 ? 0.45 : 0;
+        assert.ok(info.extent >= reach, `${label}: the arms reach out (${info.extent.toFixed(3)})`);
+      }
+    }
+  }
+  // the rest of the pantheons: the most and the least connected
+  for (const p of PANTHEON_LIST) {
+    for (const type of ['wooden_wall', 'stone_wall']) {
+      for (const mask of [0, WALL_E, WALL_N | WALL_S, 15, 15 | (15 << WALL_TOWER_SHIFT)]) {
+        const info = getBuildingModelInfo(type, p, 1, mask);
+        assert.ok(info.triangles <= 700 && info.extent <= info.limit && info.fit === 1, `${p.id}/${type}/${mask}`);
+      }
+    }
+  }
+});
+
+test('wall segments: arms point to the neighbours the mask names, and run further into a tower', () => {
+  const p = PANTHEON_LIST[0];
+  for (const type of ['wooden_wall', 'stone_wall']) {
+    const box = (mask) => {
+      const m = buildBuildingModel(type, p, '#ffffff');
+      m.setConnections(mask);
+      const b = new THREE.Box3().setFromObject(m.root);
+      m.dispose();
+      return b;
+    };
+    const lone = box(0);
+    assert.ok(lone.max.x < 0.4 && lone.min.x > -0.4 && lone.max.z < 0.4 && lone.min.z > -0.4, `${type}: a post inside its tile`);
+    const e = box(WALL_E);
+    assert.ok(e.max.x > 0.45 && e.min.x > -0.4 && e.max.z < 0.4 && e.min.z > -0.4, `${type}: east`);
+    const w = box(WALL_W);
+    assert.ok(w.min.x < -0.45 && w.max.x < 0.4, `${type}: west`);
+    const n = box(WALL_N);
+    assert.ok(n.min.z < -0.45 && n.max.z < 0.4 && n.max.x < 0.4, `${type}: north is −z`);
+    const s = box(WALL_S);
+    assert.ok(s.max.z > 0.45 && s.min.z > -0.4, `${type}: south is +z`);
+    const tower = box(WALL_E | (WALL_E << WALL_TOWER_SHIFT));
+    assert.ok(tower.max.x > 1.0 && tower.max.x <= 1.11, `${type}: runs on into the tower (${tower.max.x})`);
+    // a bend and a cross are the arms together
+    const bend = box(WALL_N | WALL_E);
+    assert.ok(bend.min.z < -0.45 && bend.max.x > 0.45);
+    const cross = box(15);
+    assert.ok(cross.min.z < -0.45 && cross.max.z > 0.45 && cross.min.x < -0.45 && cross.max.x > 0.45);
+  }
+});
+
+test('wall segments: connections swap the geometry in place, cached per mask, and keep a site clipped', () => {
+  const p = PANTHEON_LIST[1];
+  for (const type of ['wooden_wall', 'stone_wall']) {
+    const a = buildBuildingModel(type, p, '#ff0000');
+    const b = buildBuildingModel(type, p, '#0000ff');
+    const lone = trianglesOf(a.root);
+    a.setConnections(WALL_E | WALL_W);
+    b.setConnections(WALL_E | WALL_W);
+    assert.ok(trianglesOf(a.root) > lone, `${type}: arms add geometry`);
+    assert.deepEqual(meshesOf(a.root).map((o) => o.geometry), meshesOf(b.root).map((o) => o.geometry), `${type}: one geometry per mask, shared`);
+    const same = trianglesOf(a.root);
+    a.setConnections(WALL_E | WALL_W);
+    assert.equal(trianglesOf(a.root), same, 'the same mask again changes nothing');
+    a.setConnections(WALL_N | WALL_S);
+    const ns = meshesOf(a.root).map((o) => o.geometry);
+    a.setConnections(WALL_N | WALL_S | 0xff00); // bits beyond the mask are ignored
+    assert.deepEqual(meshesOf(a.root).map((o) => o.geometry), ns);
+    // a segment under construction stays clipped as its arms change
+    a.setProgress(0.4);
+    a.setConnections(WALL_E);
+    const body = meshesOf(a.root).find((o) => o.name === 'building-body');
+    assert.ok(body.material.userData.uCut, `${type}: still clipped while it rises`);
+    assert.ok(!meshesOf(a.root).some((o) => o.name === 'building-scaffold'), `${type}: and no scaffold around a one-tile wall`);
+    a.setProgress(1);
+    assert.ok(!meshesOf(a.root).find((o) => o.name === 'building-body').material.userData.uCut, 'finished: the plain material is back');
+    a.setConnections(NaN);
+    a.setConnections(undefined);
+    for (const m of [a, b]) m.dispose();
+  }
+  // every other building ignores connections
+  const house = buildBuildingModel('house', p, '#40a0e0');
+  const th = trianglesOf(house.root);
+  house.setConnections(255);
+  assert.equal(trianglesOf(house.root), th);
   house.dispose();
 });
 

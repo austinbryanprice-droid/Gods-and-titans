@@ -42,6 +42,12 @@ export const CANCEL_BUILD_REFUND = 0.75;
 export const REPAIR_COST = 0.35; // repairing a building from 0 to full health costs this share of its build cost
 export const REPAIR_TIME = 0.75; // ... and takes this share of its build time with one worshipper (helpers add BUILD_HELPER_BONUS each)
 export const AUTO_REPAIR_RANGE = 10; // idle worshippers with Auto-Repair on look this far for a damaged building
+// Walls (data/walls.js, DESIGN 4.3 and 5.3): worshippers drag out a line of one-tile segments.
+export const MAX_WALL_LINE = 48; // tiles in one dragged line (one build command)
+export const WALL_HELP_RANGE = 14; // a worshipper that finished a wall segment walks on to an unfinished one this near
+export const WALL_REMOVE_REFUND = 0.5; // share of a completed wall segment's cost back when its owner takes it down
+export const MAX_WALL_SELECTION = 160; // segments a wall-only selection holds (any other selection holds MAX_SELECTION)
+export const BREACH_RANGE = 4; // a blocked attacker breaks an enemy wall segment this close to it
 // Team market: teammates send each other gold, wood or faith; the market keeps a cut.
 export const TRADE_RESOURCES = ['gold', 'wood', 'faith'];
 export const TRADE_TAX_PCT = 10; // percent of every transfer the market keeps (rounded up)

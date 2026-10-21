@@ -332,7 +332,7 @@ export class AIPlayer {
       if (this.pairs.some((p) => p.mine === m)) continue;
       let blocked = false;
       for (const b of world.buildingList) {
-        if (b.dead || b.owner === this.me || b.owner < 0) continue;
+        if (b.dead || b.owner === this.me || b.owner < 0 || b.def.wall) continue;
         if (Math.hypot(b.x - m.x, b.y - m.y) < 12) {
           blocked = true;
           break;

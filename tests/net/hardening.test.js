@@ -174,6 +174,11 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     assert.equal(sanitizeCommand({ type: 'build', units: [1], building, tx: 1, ty: 1 }, b), null, String(building));
   }
   assert.deepEqual(sanitizeCommand({ type: 'build', units: [4], building: 'house', tx: 10.7, ty: 500 }, b), { type: 'build', units: [4], building: 'house', tx: 10, ty: 95 });
+  // A dragged wall carries its far end; a bad far end is dropped, not trusted.
+  assert.deepEqual(sanitizeCommand({ type: 'build', units: [4], building: 'wooden_wall', tx: 10, ty: 10, tx2: 30.9, ty2: -3 }, b), { type: 'build', units: [4], building: 'wooden_wall', tx: 10, ty: 10, tx2: 30, ty2: 0 });
+  assert.deepEqual(sanitizeCommand({ type: 'build', units: [4], building: 'wooden_wall', tx: 10, ty: 10, tx2: 'far', ty2: NaN }, b), { type: 'build', units: [4], building: 'wooden_wall', tx: 10, ty: 10 });
+  assert.deepEqual(sanitizeCommand({ type: 'upgradeWall', walls: [3, 3, -1, '7', 8] }, b), { type: 'upgradeWall', walls: [3, 8] });
+  assert.equal(sanitizeCommand({ type: 'upgradeWall', walls: 'all' }, b), null);
   for (const unit of ['__proto__', 'constructor', 'dragon_of_doom', 3]) assert.equal(sanitizeCommand({ type: 'train', building: 5, unit }, b), null);
   assert.deepEqual(sanitizeCommand({ type: 'train', building: 5, unit: 'worshipper' }, b), { type: 'train', building: 5, unit: 'worshipper' });
   assert.equal(sanitizeCommand({ type: 'train', building: '5', unit: 'worshipper' }, b), null);
@@ -203,6 +208,7 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     repair: { units: [1], target: 2 }, research: { building: 2, upgrade: 'house_stone_walls' }, autoRepair: { on: true },
     trade: { to: 1, res: 'gold', amount: 100 },
     autocast: { units: [1], ability: 'greek_zeus_thunderbolt', on: true },
+    upgradeWall: { walls: [4, 5, 6] },
   };
   assert.deepEqual(Object.keys(good).sort(), [...COMMAND_TYPES].sort());
   for (const [type, f] of Object.entries(good)) assert.deepEqual(sanitizeCommand({ type, ...f }, b), { type, ...f }, type);

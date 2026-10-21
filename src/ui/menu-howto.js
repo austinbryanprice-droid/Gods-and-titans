@@ -5,6 +5,7 @@ import { RANK_NAMES } from '../data/ranks.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME,
+  MAX_WALL_LINE,
 } from '../config.js';
 
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
@@ -30,7 +31,8 @@ const HOTKEYS = [
   ]],
   ['Worshippers', [
     [kbd('G'), 'Gather gold or wood'],
-    [kbd('B'), 'Build menu: H House · B Barracks · S Shrine · O Storehouse · T Tower · E Temple · G Titan Gate · C Town Center'],
+    [kbd('B'), 'Build menu: H House · B Barracks · S Shrine · O Storehouse · T Tower · E Temple · G Titan Gate · C Town Center · W Wooden Wall'],
+    [kbd('Drag'), 'While placing a Wooden Wall: press on a tile and drag to lay a whole line of wall'],
     [kbd('P'), 'Pray at a Shrine or Temple'],
     [kbd('C'), 'Return carried gold or wood'],
     [kbd('R'), 'Repair a damaged building (costs a share of its price)'],
@@ -41,6 +43,7 @@ const HOTKEYS = [
     [kbd('W'), 'Town Center: Worshipper · Barracks: Warrior'],
     [kbd('Shift', 'W'), 'Shift with any train hotkey or button queues up to 5 at once'],
     [kbd('U'), 'Town Center: grow to Town, then City'],
+    [keys('U', 'D'), 'Wall segments: upgrade to stone (U) or dismantle (D), the whole selection at once'],
     [keys('K', 'H'), 'Town Center: Worshippers work faster (K) · have more health (H), three levels each'],
     [keys('A', 'P', 'R', 'E'), 'Barracks: Archer · Priest · Battering Ram · your pantheon\'s own soldier (Hoplite, Berserker ...)'],
     [keys('Q', 'W', 'E'), 'Shrine: creatures · Temple: gods (R for the fourth)'],
@@ -73,6 +76,13 @@ const TOWN_CENTER_NAMES = (() => {
 
 // "30, 45 or 60 minutes": the lengths the lobby offers for the Decade of Peace.
 const PEACE_MINUTES_TEXT = `${PEACE_LENGTHS.slice(0, -1).join(', ')} or ${PEACE_LENGTHS[PEACE_LENGTHS.length - 1]} minutes`;
+
+// "1000 health and 6 armor instead of 350 and 1": what upgrading a wooden wall to stone brings.
+const WALL_UPGRADE_TEXT = (() => {
+  const wood = BUILDINGS.wooden_wall;
+  const stone = BUILDINGS.stone_wall;
+  return `${stone.hp} health and ${stone.armor} armor instead of ${wood.hp} and ${wood.armor}`;
+})();
 
 const TIER_WORDS = ['the Village', 'a Town', 'a City'];
 const NTH = ['first', 'second', 'third', 'fourth'];
@@ -117,6 +127,7 @@ export function renderHowToContent() {
     step(6, '⚔️', 'Wage war',
       `Armor softens blows; arrows and spells never miss. Spells ignore armor but deal only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.`,
       `Soldiers from the Barracks earn experience for the enemies and buildings they destroy (Priests for the wounds they mend) and rise from ${RANK_NAMES[0]} to ${rankLadder()}. Each rank adds ${Math.round(RANK_DAMAGE * 100)}% damage, ${Math.round(RANK_HP * 100)}% health and ${RANK_ARMOR} armor, and small bronze, silver and gold diamonds over a soldier show its rank.`,
+      `Worshippers can lay walls too: choose Wooden Wall in the build menu (W), then press on a tile and drag to lay a line of up to ${MAX_WALL_LINE} segments, which your Worshippers build one by one. Walls block every ground unit, yours too, so enemy soldiers have to break through them while ranged units shoot over. Select a wall and press U to upgrade it to stone (${WALL_UPGRADE_TEXT}). A Tower raised on a wall, or in line with one, becomes part of the wall, and you can dismantle a segment (D) to open a gap of your own.`,
       `The host can pick the ${PEACE_NAME} game mode in the lobby: for ${PEACE_MINUTES_TEXT} no player can harm another with weapons or spells, so everyone has time to build up and mass armies for one great battle. A countdown beside the game clock shows what is left, creatures still fight, and a horn sounds when the peace ends.`),
     step(7, '🔱', 'Know your pantheon',
       'Every pantheon plays its own way. Each has two blessings that work from the first second, an elite soldier trained at the Barracks, its own look, and its own creatures, gods and Titan. Hover the pantheon chip at the top left of the battlefield, or open Pantheons on the menu, to read yours.'),

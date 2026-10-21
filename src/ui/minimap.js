@@ -204,6 +204,15 @@ export class Minimap {
       ctx.fillStyle = fill;
       ctx.fillRect(x, y, s, s);
     };
+    // A wall segment is a thin line of its owner's colour, not a boxed block (a wall is dozens of them).
+    const drawBuilding = (typeId, tx, ty, owner) => {
+      const def = BUILDINGS[typeId];
+      if (def && def.wall) {
+        const s = Math.max(1.6, k);
+        ctx.fillStyle = this.colorOf(owner);
+        ctx.fillRect(tx * k, ty * k, s, s);
+      } else drawRect(tx, ty, (def && def.size) || 2, this.colorOf(owner), 'rgba(0,0,0,0.85)');
+    };
     for (const e of vs.entities.values()) {
       if (e.k === 'm') {
         if (vs.isEntityVisible(e)) drawRect(e.tx, e.ty, 3, '#ffd34a', '#3a2a00');
@@ -211,16 +220,14 @@ export class Minimap {
       }
       if (e.k !== 'b') continue;
       if (!vs.isAlly(e.o) && !vs.isEntityVisible(e)) continue;
-      const size = (BUILDINGS[e.t] && BUILDINGS[e.t].size) || 2;
-      drawRect(e.tx, e.ty, size, this.colorOf(e.o), 'rgba(0,0,0,0.85)');
+      drawBuilding(e.t, e.tx, e.ty, e.o);
     }
     // Remembered enemy buildings under fog.
     if (vs.lastSeen) {
       for (const [id, ls] of vs.lastSeen) {
         const cur = vs.entities.get(id);
         if (cur && vs.isEntityVisible(cur)) continue;
-        const size = (BUILDINGS[ls.t] && BUILDINGS[ls.t].size) || 2;
-        drawRect(ls.tx, ls.ty, size, this.colorOf(ls.o), 'rgba(0,0,0,0.85)');
+        drawBuilding(ls.t, ls.tx, ls.ty, ls.o);
       }
     }
     // Fog over terrain and remembered things, under live units.

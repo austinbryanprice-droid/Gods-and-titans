@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { NEUTRAL_COLOR, PLAYER_COLORS, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT, TERRAIN } from '../config.js';
 import { UNITS, BUILDINGS, PANTHEONS } from '../data/index.js';
 import { rankName, RANK_COLORS } from '../data/ranks.js';
+import { wallConnections } from '../data/walls.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { unitLook } from './models/unit-looks.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
@@ -95,6 +96,11 @@ const _vp = new THREE.Matrix4();
 const _box = new THREE.Box3();
 const _hit = new THREE.Vector3();
 const _rayObj = new THREE.Ray();
+
+/** Key of a tile of one owner's wall in GameRenderer.wallTiles (maps stay under 1024 tiles a side, owners under 15). */
+function wallKey(owner, tx, ty) {
+  return ((ty * 1024 + tx) << 4) | (owner + 1);
+}
 
 function clamp(v, a, b) {
   return v < a ? a : v > b ? b : v;
@@ -269,6 +275,7 @@ export class GameRenderer {
     // ---- entity views
     this.units = new Map(); // id → UnitView
     this.buildings = new Map(); // id → BuildingView
+    this.wallTiles = new Map(); // wallKey(owner, tx, ty) → 1 a wall segment stands there, 2 a tower that joined the wall
     this.mines = new Map(); // id → MineView
     this.dying = []; // UnitViews playing their death
     this.fadeMats = new FadeMaterials(); // see-through variants for units fading at the vision edge
@@ -720,8 +727,24 @@ export class GameRenderer {
     this.placement.show(buildingTypeId, tx | 0, ty | 0, valid, tiles || null);
   }
 
+  /**
+   * Ghost of a wall line being dragged: one segment per tile (checkWallLine's tiles), joined to the
+   * local player's walls and towers that stand.
+   * @param {string} typeId wall segment type
+   * @param {Array<{tx: number, ty: number, state: string}>} tiles
+   */
+  showWallLine(typeId, tiles) {
+    const me = this.vs.myIndex;
+    this.placement.showLine(typeId, tiles, (tx, ty) => this.wallKindAt(me, tx, ty));
+  }
+
   hidePlacement() {
     this.placement.hide();
+  }
+
+  /** What one owner has on a tile for the wall's sake: 0 nothing, 1 a wall segment, 2 a tower that joined the wall. */
+  wallKindAt(owner, tx, ty) {
+    return this.wallTiles.get(wallKey(owner, tx, ty)) || 0;
   }
 
   /** Animated ground marker: 'move' (green), 'attack' (red), 'gather' (yellow). */
@@ -1402,20 +1425,74 @@ export class GameRenderer {
         this.collapsing.push(b);
       } else b.dispose();
     }
+    this.syncWallJoins();
+  }
+
+  /**
+   * Wall segments run on to the segments of the same owner beside them and to the towers that joined
+   * the wall (data/walls.js wallConnections): each takes its model's connection mask from the tiles
+   * around it. After the views of a snapshot are in place, so a segment that fell stops being
+   * reached for at once.
+   */
+  syncWallJoins() {
+    const tiles = this.wallTiles;
+    tiles.clear();
+    let walls = 0;
+    for (const b of this.buildings.values()) {
+      const def = b.def;
+      if (!def.wall && !def.joinsWalls) continue;
+      const kind = def.wall ? 1 : 2;
+      for (let j = 0; j < def.size; j++) for (let i = 0; i < def.size; i++) tiles.set(wallKey(b.e.o, b.tx + i, b.ty + j), kind);
+      if (def.wall) walls++;
+    }
+    if (!walls) return;
+    for (const b of this.buildings.values()) {
+      if (!b.def.wall) continue;
+      const owner = b.e.o;
+      const mask = wallConnections(b.tx, b.ty, (x, y) => tiles.get(wallKey(owner, x, y)) || 0);
+      if (mask === b.mask) continue;
+      b.mask = mask;
+      b.model.setConnections(mask);
+      patchFowObject(b.model.root);
+    }
+  }
+
+  /** A building's model in its owner's look, or null when it could not be built. */
+  makeBuildingModel(e) {
+    try {
+      return buildBuildingModel(e.t, PANTHEONS[this.pantheonOf(e.o)] || null, this.colorOf(e.o), e.tr || 1);
+    } catch (err) {
+      console.error('[render] building model failed', e.t, err);
+      return null;
+    }
   }
 
   touchBuilding(e, src, tag) {
     let b = this.buildings.get(e.id);
     const def = BUILDINGS[e.t];
     if (!def) return;
-    if (!b) {
-      let model;
-      try {
-        model = buildBuildingModel(e.t, PANTHEONS[this.pantheonOf(e.o)] || null, this.colorOf(e.o), e.tr || 1);
-      } catch (err) {
-        console.error('[render] building model failed', e.t, err);
-        return;
+    if (b && b.def !== def) {
+      // the same building as another type: a wooden wall upgraded to stone
+      const model = this.makeBuildingModel(e);
+      if (model) {
+        const old = b.model;
+        model.root.position.copy(old.root.position);
+        model.root.traverse((o) => {
+          if (o.isMesh) o.receiveShadow = true;
+        });
+        this.entityRoot.add(model.root);
+        old.dispose();
+        b.model = model;
+        b.def = def;
+        b.height = model.height || 1.5;
+        b.bp = -1;
+        b.tr = e.tr || 1;
+        b.mask = 0;
       }
+    }
+    if (!b) {
+      const model = this.makeBuildingModel(e);
+      if (!model) return;
       b = new BuildingView(e, def, model, this.vs.relation(e.o));
       const tx = e.tx ?? Math.floor(e.x - def.size / 2);
       const ty = e.ty ?? Math.floor(e.y - def.size / 2);
@@ -1428,7 +1505,7 @@ export class GameRenderer {
       this.entityRoot.add(model.root);
       this.decor.hideInRect(tx - 0.2, ty - 0.2, tx + def.size + 0.2, ty + def.size + 0.2);
       this.groundCover.hideInRect(tx - 0.1, ty - 0.1, tx + def.size + 0.1, ty + def.size + 0.1);
-      if (this.terrain.paintYard) this.terrain.paintYard(tx, ty, def.size);
+      if (this.terrain.paintYard && !def.wall) this.terrain.paintYard(tx, ty, def.size); // a fence does not wear the grass bare
       this.buildings.set(e.id, b);
       b.bp = -1;
       b.tr = e.tr || 1;
@@ -1614,27 +1691,30 @@ export class GameRenderer {
       const by = b.y;
       _v.set(bx, b.baseY + b.height * 0.5, by).applyMatrix4(_vp);
       if (_v.z > 1 || _v.x < -1.4 || _v.x > 1.4 || _v.y < -1.5 || _v.y > 1.6) continue;
+      // a wall is a run of one-tile segments, up to hundreds on screen: slim rings and bars, and a bar
+      // only where it says something (hurt, hovered, upgrading), never fires or a bar per site
+      const wall = b.def.wall === true;
       if (selected || hovered) {
         const col = RELATION_COLORS[b.relation] || RELATION_COLORS.neutral;
-        const r = b.size * 0.66;
-        if (selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.95, 0.1);
-        if (hovered && !selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.55, 0.07, 0.6);
+        const r = wall ? 0.6 : b.size * 0.66;
+        if (selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.95, wall ? 0.07 : 0.1);
+        if (hovered && !selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.55, wall ? 0.05 : 0.07, 0.6);
       }
       const mhp = e.mhp || 1;
       const unfinished = (e.bp ?? 1) < 1;
       const own = b.relation === 'own' || b.relation === 'ally';
-      if (!unfinished && e.hp < mhp * 0.66 && (own || this.visibleAt(bx, by))) {
+      if (!wall && !unfinished && e.hp < mhp * 0.66 && (own || this.visibleAt(bx, by))) {
         fires.addBuilding(e.id, bx, b.baseY, by, b.size, b.height, e.hp / mhp);
       }
-      const w = clamp(b.size * 0.62, 1.3, 2.8) * zk;
-      const h = 0.13 * zk;
-      let y = b.baseY + b.height + 0.6 + 0.3 * zk;
-      if (all || selected || hovered || e.hp < mhp) {
+      const w = wall ? 0.9 * zk : clamp(b.size * 0.62, 1.3, 2.8) * zk;
+      const h = (wall ? 0.1 : 0.13) * zk;
+      let y = b.baseY + b.height + (wall ? 0.2 : 0.6) + 0.3 * zk;
+      if (all || hovered || e.hp < mhp || (selected && !wall)) {
         const frac = e.hp / mhp;
         bars.add(bx, y, by, w, h, frac, 0, healthColor(frac, _c), 0, 1);
         y -= h * 1.25;
       }
-      if (unfinished && (own || selected || hovered)) {
+      if (unfinished && (wall ? hovered : own || selected || hovered)) {
         bars.add(bx, y, by, w, h * 0.8, e.bp || 0, 0, PROGRESS_COLOR, 1, 1);
         y -= h * 1.05;
       }
@@ -2086,6 +2166,7 @@ class BuildingView {
     this.ty = 0;
     this.tag = 0;
     this.collapseT = 0;
+    this.mask = 0; // wall segments: the connection mask the model shows (syncWallJoins)
   }
 
   get baseY() {

@@ -3,12 +3,13 @@
 import { formationSlots } from './movement.js';
 import { canAttackTarget } from './combat.js';
 import { reservePrayerSlot } from './economy.js';
-import { issueBuild, cancelBuild, issueRepair, needsRepair } from './construction.js';
-import { issueTrain, cancelTrain, issueTierUp, issueResearch, setRally } from './production.js';
+import { issueBuild, issueBuildLine, cancelBuild, issueRepair, needsRepair } from './construction.js';
+import { issueTrain, cancelTrain, issueTierUp, issueResearch, issueWallUpgrade, setRally } from './production.js';
 import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility, setAutocast } from './abilities.js';
 import { issueTrade } from './trade.js';
 import { peaceNotice } from './peace.js';
 import { hyp } from './common.js';
+import { isWallType } from '../data/walls.js';
 
 // ---- Input normalization (commands are untrusted: network, AI, HUD) ----
 
@@ -17,7 +18,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -54,11 +55,14 @@ export function normalizeCommand(cmd, map) {
     return {
       type,
       units: unitIds(cmd.units),
+      walls: unitIds(cmd.walls),
       target: idOf(cmd.target),
       x: clampTo(num(cmd.x), map.width),
       y: clampTo(num(cmd.y), map.height),
       tx: num(cmd.tx),
       ty: num(cmd.ty),
+      tx2: num(cmd.tx2),
+      ty2: num(cmd.ty2),
       building: nameOrId(cmd.building),
       unit: nameOrId(cmd.unit),
       ability: typeof ability === 'string' && ability.length <= MAX_NAME ? ability : undefined,
@@ -334,9 +338,15 @@ export function applyCommand(world, player, cmd) {
       break;
     case 'build': {
       const workers = ownUnits(world, player, cmd.units).filter((u) => u.def.class === 'worker');
-      if (workers.length && Number.isFinite(cmd.tx) && Number.isFinite(cmd.ty)) issueBuild(world, player, workers, cmd.building, cmd.tx, cmd.ty, queue);
+      if (!workers.length || !Number.isFinite(cmd.tx) || !Number.isFinite(cmd.ty)) break;
+      // A wall comes as a line: from (tx, ty) towards (tx2, ty2).
+      if (Number.isFinite(cmd.tx2) && Number.isFinite(cmd.ty2) && isWallType(cmd.building)) issueBuildLine(world, player, workers, cmd.building, cmd.tx, cmd.ty, cmd.tx2, cmd.ty2, queue);
+      else issueBuild(world, player, workers, cmd.building, cmd.tx, cmd.ty, queue);
       break;
     }
+    case 'upgradeWall':
+      issueWallUpgrade(world, player, cmd.walls);
+      break;
     case 'train':
       issueTrain(world, player, ownBuilding(world, player, cmd.building), cmd.unit);
       break;

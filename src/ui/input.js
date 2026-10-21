@@ -4,13 +4,14 @@
 // queueing, command-card hotkeys, targeting modes (attack-move, abilities,
 // gather, pray, rally), building placement with the ghost, and the camera
 // (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3).
-import { TERRAIN, MAX_QUEUE } from '../config.js';
+import { TERRAIN, MAX_QUEUE, MAX_WALL_SELECTION } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { isWallType } from '../data/walls.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { checkPlacement, footprintAt } from '../game/placement.js';
-import { getCommandCard, buttonForKey, buildCheck, trainCheck } from './command-card.js';
-import { isComplete } from './hud-data.js';
+import { checkPlacement, checkWallLine, footprintAt } from '../game/placement.js';
+import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
+import { isComplete, isWallEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 import { peaceNotice } from '../sim/peace.js';
 
@@ -78,6 +79,11 @@ export class InputController {
     this.box.className = 'hud-dragbox';
     this.box.hidden = true;
     (overlayRoot || canvas.parentNode).appendChild(this.box);
+    // Next to the cursor while a wall is dragged out: how many segments and what they cost.
+    this.wallTip = document.createElement('div');
+    this.wallTip.className = 'hud-walltip';
+    this.wallTip.hidden = true;
+    (overlayRoot || canvas.parentNode).appendChild(this.wallTip);
 
     this.offs = [];
     const on = (el, type, fn, opts) => {
@@ -192,6 +198,7 @@ export class InputController {
   setMode(mode) {
     this.mode = mode;
     if (mode.kind !== 'place' && this.renderer) this.renderer.hidePlacement();
+    this.wallTip.hidden = true;
     this.placeSig = '';
     if (this.queuedBuilds.length) {
       this.queuedBuilds = [];
@@ -217,6 +224,10 @@ export class InputController {
   }
 
   cancelMode() {
+    if (this.mode.kind === 'place' && this.mode.anchor) {
+      this.dropWallAnchor(); // first Esc / right-click: just the wall being dragged
+      return true;
+    }
     if (this.mode.kind !== 'normal') {
       this.setMode({ kind: 'normal' });
       return true;
@@ -256,7 +267,8 @@ export class InputController {
       return;
     }
     if (this.mode.kind === 'place') {
-      this.confirmPlace(p.x, p.y, e.shiftKey);
+      if (isWallType(this.mode.building)) this.startWallLine(p.x, p.y);
+      else this.confirmPlace(p.x, p.y, e.shiftKey);
       return;
     }
     this.leftDown = { x: e.clientX, y: e.clientY, cx: p.x, cy: p.y, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, box: false };
@@ -293,6 +305,15 @@ export class InputController {
     if (e.button === 1 && this.midDown) {
       this.midDown = null;
       this.setCursor('');
+      return;
+    }
+    if (e.button === 0 && this.mode.kind === 'place' && this.mode.anchor) {
+      // The wall being dragged out is ordered where the button is released (over the map).
+      if (this.disposed || !this.overCanvas) this.dropWallAnchor();
+      else {
+        const p = this.canvasPoint(e.clientX, e.clientY);
+        this.confirmWallLine(p.x, p.y, e.shiftKey);
+      }
       return;
     }
     if (e.button !== 0 || !this.leftDown) return;
@@ -381,19 +402,26 @@ export class InputController {
       const e = vs.entities.get(id);
       return e && e.k === 'u' && e.o === vs.myIndex;
     });
+    let wallsOnly = false;
     if (!ids.length) {
-      // No units: own buildings whose centre is inside the box.
+      // No units: own buildings whose centre is inside the box. A box over a walled base takes
+      // its buildings and leaves the wall; a box over nothing but wall takes the segments.
+      const walls = [];
       for (const e of vs.entities.values()) {
         if (e.k !== 'b' || e.o !== vs.myIndex) continue;
         const p = r.worldToScreen(e.x, e.y, 0);
-        if (p && p.sx >= x0 && p.sx <= x1 && p.sy >= y0 && p.sy <= y1) ids.push(e.id);
+        if (p && p.sx >= x0 && p.sx <= x1 && p.sy >= y0 && p.sy <= y1) (isWallEntity(e) ? walls : ids).push(e.id);
+      }
+      if (!ids.length) {
+        ids = walls;
+        wallsOnly = true;
       }
     }
     if (!ids.length) {
       if (!shift) this.sel.clear();
       return;
     }
-    ids = ids.slice(0, MAX_SELECTION * 2);
+    ids = ids.slice(0, wallsOnly ? MAX_WALL_SELECTION : MAX_SELECTION * 2);
     if (shift && this.sel.isOwn()) this.sel.add(ids);
     else this.sel.set(ids);
     this.afterSelect();
@@ -771,6 +799,92 @@ export class InputController {
     }
   }
 
+  // ---------------------------------------------------------------- wall lines
+
+  /** Left press while placing a wall: the line starts on this tile and ends where the button is released. */
+  startWallLine(x, y) {
+    const p = this.ground(x, y);
+    if (!p) return;
+    const { tx, ty } = footprintAt(this.mode.building, p.x, p.y);
+    this.mode.anchor = { tx, ty };
+    this.placeSig = '';
+  }
+
+  /** Give up the line being dragged (Esc, right-click, focus lost) but stay in wall placement. */
+  dropWallAnchor() {
+    this.mode.anchor = null;
+    this.placeSig = '';
+    this.wallTip.hidden = true;
+    if (this.renderer) this.renderer.hidePlacement();
+  }
+
+  /** Button released: order the line when any of it can be built and paid for. */
+  confirmWallLine(x, y, shift) {
+    const m = this.mode;
+    const a = m.anchor;
+    if (!a) return;
+    m.anchor = null;
+    this.wallTip.hidden = true;
+    this.placeSig = '';
+    const p = this.ground(x, y);
+    const end = p ? footprintAt(m.building, p.x, p.y) : a;
+    const line = checkWallLine(this.vs, this.vs.myIndex, m.building, a.tx, a.ty, end.tx, end.ty);
+    if (!line.build) {
+      this.error(line.message);
+      return;
+    }
+    const bc = buildCheck(this.vs, m.building);
+    if (bc.state === 'locked') {
+      this.error(bc.reason);
+      this.setMode({ kind: 'normal' });
+      return;
+    }
+    const short = affordReason(this.vs.me, line.cost);
+    if (short) {
+      this.error(short); // stay in the mode: a shorter line may be affordable
+      return;
+    }
+    const workers = this.ownWorkers();
+    if (!workers.length) {
+      this.setMode({ kind: 'normal' });
+      return;
+    }
+    this.command({ type: 'build', units: workers, building: m.building, tx: a.tx, ty: a.ty, tx2: end.tx, ty2: end.ty, queue: !!shift });
+    const mid = line.tiles[Math.floor(line.tiles.length / 2)];
+    this.marker(mid.tx + 0.5, mid.ty + 0.5, 'move');
+    sfx.play('move');
+    if (!shift) {
+      this.menu = 'root';
+      this.setMode({ kind: 'normal' });
+    } else {
+      m.shiftUsed = true; // keep laying walls while Shift is held
+    }
+  }
+
+  /** The dragged line's ghost, and the tip beside the cursor with what it would build and cost. */
+  previewWallLine(tx, ty) {
+    const m = this.mode;
+    const a = m.anchor || { tx, ty };
+    const line = checkWallLine(this.vs, this.vs.myIndex, m.building, a.tx, a.ty, tx, ty);
+    const sig = `w|${m.building}|${line.tiles.map((t) => `${t.tx},${t.ty},${t.state[0]}`).join(';')}`;
+    if (sig !== this.placeSig) {
+      this.placeSig = sig;
+      this.renderer.showWallLine(m.building, line.tiles);
+    }
+    const tip = this.wallTip;
+    if (!m.anchor) {
+      tip.hidden = true;
+      return;
+    }
+    const short = line.build ? affordReason(this.vs.me, line.cost) : null;
+    const cost = [line.cost.gold ? `💰 ${line.cost.gold}` : '', line.cost.wood ? `🌲 ${line.cost.wood}` : '', line.cost.faith ? `✨ ${line.cost.faith}` : ''].filter(Boolean).join(' ');
+    tip.textContent = line.build ? `${line.build} × ${BUILDINGS[m.building].name}  ${cost}${short ? `  ${short}` : ''}` : line.message;
+    tip.classList.toggle('is-bad', !line.build || !!short);
+    tip.style.left = `${this.mx + 18}px`;
+    tip.style.top = `${this.my + 18}px`;
+    tip.hidden = false;
+  }
+
   /** Minimap pointer events (from minimap.js). */
   onMinimap({ button, phase, x, y, shift }) {
     if (this.hud.overlays.open) return;
@@ -875,6 +989,21 @@ export class InputController {
       case 'cancelBuild':
         for (const e of this.sel.ownBuildings()) if (!isComplete(e)) this.command({ type: 'cancelBuild', building: e.id });
         break;
+      case 'upgradeWall': {
+        // Every finished segment of the active type that is not upgrading already (the sim pays one by one).
+        const walls = this.activeWalls().filter((e) => isComplete(e) && !(e.q || []).length).map((e) => e.id);
+        if (walls.length) this.command({ type: 'upgradeWall', walls });
+        break;
+      }
+      case 'dismantleWall':
+        for (const e of this.activeWalls()) if (isComplete(e)) this.command({ type: 'cancelBuild', building: e.id });
+        break;
+      case 'cancelWall':
+        for (const e of this.activeWalls()) {
+          if (!isComplete(e)) this.command({ type: 'cancelBuild', building: e.id });
+          else if ((e.q || []).length) this.command({ type: 'cancelTrain', building: e.id, index: 0 });
+        }
+        break;
       case 'research': {
         // The least busy finished building of the active group researches it.
         const group = this.sel.activeGroup();
@@ -894,6 +1023,12 @@ export class InputController {
       default:
         break;
     }
+  }
+
+  /** Own wall segments of the active subgroup (the command card's wall buttons act on these). */
+  activeWalls() {
+    const group = this.sel.activeGroup();
+    return this.sel.ownBuildings().filter((e) => group && e.t === group.type && isWallEntity(e));
   }
 
   /** Right-click on an ability button: autocast on / manual for the selected units of that type. */
@@ -1041,8 +1176,8 @@ export class InputController {
         return;
       }
       if (this.cancelMode()) return;
-      // A building with a queue: cancel the last item (WC3).
-      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length);
+      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade: Esc by habit would take it back.)
+      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x));
       if (blds.length) {
         const bq = blds[0];
         this.command({ type: 'cancelTrain', building: bq.id, index: bq.q.length - 1 });
@@ -1080,7 +1215,7 @@ export class InputController {
 
   /** After Shift-queued targets or placements, letting go of Shift finishes the mode. */
   endShiftMode() {
-    if (!this.mode.shiftUsed) return;
+    if (!this.mode.shiftUsed || this.mode.anchor) return; // a wall still being dragged ends the mode when ordered
     if (this.mode.kind === 'place') this.menu = 'root';
     this.setMode({ kind: 'normal' });
   }
@@ -1098,6 +1233,7 @@ export class InputController {
       this.leftDown = null;
       this.box.hidden = true;
     }
+    if (this.mode.kind === 'place' && this.mode.anchor) this.dropWallAnchor();
     this.midDown = null;
   }
 
@@ -1156,16 +1292,20 @@ export class InputController {
         if (this.placeSig) {
           r.hidePlacement();
           this.placeSig = '';
+          this.wallTip.hidden = true;
         }
       } else if (now - this.placeAt > PLACE_CHECK_MS || this.hoverMoved) {
         const w = this.ground(p.x, p.y);
         if (w) {
           const { tx, ty } = footprintAt(this.mode.building, w.x, w.y);
-          const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty, this.plannedBuilds(this.shiftHeld));
-          const sig = `${this.mode.building}|${tx}|${ty}|${chk.tiles.map((t) => (t ? 1 : 0)).join('')}`;
-          if (sig !== this.placeSig || now - this.placeAt > 400) {
-            this.placeSig = sig;
-            r.showPlacement(this.mode.building, tx, ty, chk.valid, chk.tiles);
+          if (isWallType(this.mode.building)) this.previewWallLine(tx, ty);
+          else {
+            const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty, this.plannedBuilds(this.shiftHeld));
+            const sig = `${this.mode.building}|${tx}|${ty}|${chk.tiles.map((t) => (t ? 1 : 0)).join('')}`;
+            if (sig !== this.placeSig || now - this.placeAt > 400) {
+              this.placeSig = sig;
+              r.showPlacement(this.mode.building, tx, ty, chk.valid, chk.tiles);
+            }
           }
           this.placeAt = now;
         }
@@ -1193,6 +1333,7 @@ export class InputController {
     for (const off of this.offs.splice(0)) off();
     if (this.resizeObs) this.resizeObs.disconnect();
     this.box.remove();
+    this.wallTip.remove();
     this.keys.clear();
   }
 }

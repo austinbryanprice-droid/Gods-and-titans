@@ -1,7 +1,10 @@
 // Building placement ghost (translucent model + per-tile green/red footprint
-// grid) and ghost outlines of own workers' pending build orders.
+// grid), the ghost of a dragged wall line, and ghost outlines of own workers'
+// pending build orders.
 import * as THREE from 'three';
 import { BUILDINGS } from '../data/buildings.js';
+import { wallConnections } from '../data/walls.js';
+import { MAX_WALL_LINE } from '../config.js';
 import { buildBuildingModel } from './models/building-models.js';
 import { footprintHeight, heightAt } from './height.js';
 
@@ -34,9 +37,10 @@ const MAX_TILES = 36; // up to 6×6
 
 /** Footprint tile grid draped on the terrain. */
 class FootprintGrid {
-  constructor(parent, map) {
+  constructor(parent, map, capacity = MAX_TILES) {
     this.map = map;
-    const n = MAX_TILES;
+    const n = (this.capacity = capacity);
+    this.n = 0;
     this.pos = new Float32Array(n * 4 * 3);
     this.col = new Float32Array(n * 4 * 3);
     const uv = new Float32Array(n * 4 * 2);
@@ -81,37 +85,57 @@ class FootprintGrid {
     this.mesh.visible = true;
     if (key === this.key) return;
     this.key = key;
-    const map = this.map;
-    const lift = 0.05;
-    let n = 0;
-    const inset = 0.03;
+    this.n = 0;
     for (let j = 0; j < size; j++) {
       for (let i = 0; i < size; i++) {
-        if (n >= MAX_TILES) break;
         const k = j * size + i;
         const ok = tiles && tiles.length === size * size ? !!tiles[k] && valid !== false : !!valid;
-        const c = ok ? OK_COLOR : BAD_COLOR;
-        const x0 = tx + i + inset;
-        const x1 = tx + i + 1 - inset;
-        const z0 = ty + j + inset;
-        const z1 = ty + j + 1 - inset;
-        const corners = [[x0, z0], [x1, z0], [x0, z1], [x1, z1]];
-        for (let v = 0; v < 4; v++) {
-          const [x, z] = corners[v];
-          const o = (n * 4 + v) * 3;
-          this.pos[o] = x;
-          this.pos[o + 1] = Math.max(heightAt(map, x, z), -0.2) + lift;
-          this.pos[o + 2] = z;
-          this.col[o] = c.r;
-          this.col[o + 1] = c.g;
-          this.col[o + 2] = c.b;
-        }
-        n++;
+        this.cell(tx + i, ty + j, ok);
       }
     }
+    this.flush();
+  }
+
+  /** Single tiles, each green (ok) or red: [{ tx, ty, ok }] (a dragged wall line). */
+  setCells(cells) {
+    let key = 'c';
+    for (const c of cells) key += `${c.tx},${c.ty},${c.ok ? 1 : 0};`;
+    this.mesh.visible = cells.length > 0;
+    if (key === this.key) return;
+    this.key = key;
+    this.n = 0;
+    for (const c of cells) this.cell(c.tx, c.ty, c.ok);
+    this.flush();
+  }
+
+  /** The next tile's quad, draped on the terrain. */
+  cell(tx, ty, ok) {
+    if (this.n >= this.capacity) return;
+    const map = this.map;
+    const inset = 0.03;
+    const c = ok ? OK_COLOR : BAD_COLOR;
+    const x0 = tx + inset;
+    const x1 = tx + 1 - inset;
+    const z0 = ty + inset;
+    const z1 = ty + 1 - inset;
+    const corners = [[x0, z0], [x1, z0], [x0, z1], [x1, z1]];
+    for (let v = 0; v < 4; v++) {
+      const [x, z] = corners[v];
+      const o = (this.n * 4 + v) * 3;
+      this.pos[o] = x;
+      this.pos[o + 1] = Math.max(heightAt(map, x, z), -0.2) + 0.05;
+      this.pos[o + 2] = z;
+      this.col[o] = c.r;
+      this.col[o + 1] = c.g;
+      this.col[o + 2] = c.b;
+    }
+    this.n++;
+  }
+
+  flush() {
     this.posAttr.needsUpdate = true;
     this.colAttr.needsUpdate = true;
-    this.mesh.geometry.setDrawRange(0, n * 6);
+    this.mesh.geometry.setDrawRange(0, this.n * 6);
     this.mesh.geometry.computeBoundingSphere();
   }
 
@@ -188,7 +212,9 @@ export class PlacementLayer {
     this.map = map;
     this.getStyle = getStyle;
     this.grid = new FootprintGrid(parent, map);
+    this.lineGrid = new FootprintGrid(parent, map, MAX_WALL_LINE);
     this.ghost = null; // { type, model, mats }
+    this.line = { type: null, ghosts: [] }; // the segments of a dragged wall line: { model, valid, mask }
     this.valid = true;
     this.matsOk = null;
     this.matsBad = null;
@@ -235,6 +261,7 @@ export class PlacementLayer {
       this.hide();
       return;
     }
+    this.hideLine();
     this.ensureMats();
     if (!this.ghost || this.ghost.type !== typeId) {
       if (this.ghost) this.ghost.model.dispose();
@@ -259,6 +286,73 @@ export class PlacementLayer {
   hide() {
     if (this.ghost) this.ghost.model.root.visible = false;
     this.grid.hide();
+    this.hideLine();
+  }
+
+  /**
+   * Ghost of a dragged wall line: a translucent segment on every tile that would be built (red
+   * where it cannot be), running on to its neighbours and to the walls and towers already standing.
+   * Tiles that already hold a wall are left as they are.
+   * @param {string} typeId wall segment type
+   * @param {Array<{tx: number, ty: number, state: 'build'|'held'|'blocked'}>} tiles the line (game/placement.js checkWallLine)
+   * @param {(tx: number, ty: number) => number} [kindAt] 1 where a segment of the same wall stands, 2 a tower that joined it
+   */
+  showLine(typeId, tiles, kindAt) {
+    const def = BUILDINGS[typeId];
+    if (!def || !def.wall) {
+      this.hide();
+      return;
+    }
+    if (this.ghost) this.ghost.model.root.visible = false;
+    this.grid.hide();
+    this.ensureMats();
+    const line = this.line;
+    if (line.type !== typeId) {
+      this.clearLine();
+      line.type = typeId;
+    }
+    const planned = new Set();
+    for (const t of tiles) if (t.state !== 'blocked') planned.add(t.ty * 4096 + t.tx);
+    const kind = (x, y) => (kindAt && kindAt(x, y)) || (planned.has(y * 4096 + x) ? 1 : 0);
+    const cells = [];
+    let n = 0;
+    for (const t of tiles) {
+      if (t.state === 'held') continue;
+      const ok = t.state === 'build';
+      cells.push({ tx: t.tx, ty: t.ty, ok });
+      let g = line.ghosts[n];
+      if (!g) {
+        const { pantheon, color } = this.getStyle();
+        g = { model: buildBuildingModel(typeId, pantheon, color, 1), valid: null, mask: 0 };
+        this.parent.add(g.model.root);
+        line.ghosts[n] = g;
+      }
+      n++;
+      const mask = wallConnections(t.tx, t.ty, kind);
+      if (mask !== g.mask) {
+        g.mask = mask;
+        g.model.setConnections(mask);
+        g.valid = null; // the new geometry may have brought meshes of its own
+      }
+      if (g.valid !== ok) {
+        applyGhost(g.model, ok ? this.matsOk : this.matsBad);
+        g.valid = ok;
+      }
+      g.model.root.position.set(t.tx + 0.5, footprintHeight(this.map, t.tx, t.ty, 1), t.ty + 0.5);
+      g.model.root.visible = true;
+    }
+    for (let i = n; i < line.ghosts.length; i++) line.ghosts[i].model.root.visible = false;
+    this.lineGrid.setCells(cells);
+  }
+
+  hideLine() {
+    for (const g of this.line.ghosts) g.model.root.visible = false;
+    this.lineGrid.hide();
+  }
+
+  clearLine() {
+    for (const g of this.line.ghosts) g.model.dispose();
+    this.line.ghosts.length = 0;
   }
 
   /**
@@ -301,6 +395,7 @@ export class PlacementLayer {
   update(dt) {
     this.time += dt;
     this.grid.uniforms.uTime.value = this.time;
+    this.lineGrid.uniforms.uTime.value = this.time;
     if (this.orderMats) {
       const k = 0.3 + 0.08 * Math.sin(this.time * 3);
       this.orderMats.body.opacity = k;
@@ -311,6 +406,8 @@ export class PlacementLayer {
 
   dispose() {
     this.grid.dispose();
+    this.lineGrid.dispose();
+    this.clearLine();
     if (this.ghost) this.ghost.model.dispose();
     this.ghost = null;
     for (const o of this.orders.values()) o.model.dispose();

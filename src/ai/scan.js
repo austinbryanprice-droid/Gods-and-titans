@@ -47,7 +47,7 @@ export function worldDigest(world) {
     }
   }
   for (const b of world.buildingList) {
-    if (b.dead || b.owner < 0) continue;
+    if (b.dead || b.owner < 0 || b.def.wall) continue; // wall segments are not targets for the AI (its armies break through them when blocked)
     const rec = per[b.owner];
     if (!rec) continue;
     rec.buildings.push(b);
@@ -158,7 +158,7 @@ export function scanWorld(world, me) {
   }
 
   for (const b of world.buildingList) {
-    if (b.dead || b.owner !== me) continue;
+    if (b.dead || b.owner !== me || b.def.wall) continue;
     s.buildings.push(b);
     s.have.set(b.type, (s.have.get(b.type) || 0) + 1);
     if (b.constructed) {
