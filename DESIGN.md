@@ -1000,6 +1000,22 @@ per-frame budget, so a revealed army appears over a few frames.
   drawn but cannot be picked. Fading meshes swap to cached material variants quantized to 8
   levels (`alphaHash` for opaque materials, scaled opacity for transparent ones); shadows are
   off while a unit is see-through.
+- Foliage (`src/render/models/props.js`, `foliage-shader.js`, `leaf-texture.js`): broadleaf, birch and
+  bushes are built of *leaf puffs*. A puff is one quad of six vertices at a point (corners and radius in
+  `aBb`) that the vertex shader spreads along the camera's right and up axes, so it reads as a sphere:
+  a smooth round normal, a procedural leaf texture (`leafTexture()`, seeded, mipmapped), an outline cut
+  into leaf tips (alpha to coverage on the multisampled target, a hard cut on low) and, on medium and
+  up, the sphere's own depth (`sphereDepth`), so crowns meet buildings, the ground and each other
+  round. Shadows come from the back of the crown (`foliageDepthMaterial({ puff: true })`). Spruces keep
+  their layered skirts (reshaped per tree, six presets) and take the needle texture (sprays, drooping
+  hem); ferns and palm fronds are ribbons cut by the same texture (`needles` option of
+  `patchFoliageMaterial`). Leaves get wrapped light, light through them, a sun-side rim, a cool tint in
+  the shade and a night grade that follows `WORLD_UNIFORMS.uNight`. `createForest` / `createDecor`
+  take `{ quality }` and return `setQuality` (low draws the puffs as flat discs and keeps the early
+  depth test). Triangle budgets: a tree up to 160, decor up to 200 (tests/render/props.test.js,
+  foliage.test.js). Decor (map decor, undergrowth, boulders) keeps off the terrain's sandstone
+  outcrops (`decorOffOutcrops`: plants not at all, boulders only at the foot, read from the ground
+  field's rise). Look at them with `tools/gallery-foliage.html` and `tools/shot-foliage.mjs`.
 - Status markers (`src/render/status-markers.js`, `StatusLayer`: instanced, procedural
   glyphs): icons above the health bar in the order buff, debuff, slow, dot; a rimmed bubble
   around shielded units; slow keeps a frosty ground ring, invulnerability a double gold ring,
