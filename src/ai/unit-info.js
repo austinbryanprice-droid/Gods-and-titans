@@ -2,6 +2,7 @@
 // profiles, derived once per type from the pantheon data (works for every
 // pantheon without per-pantheon code).
 import { getUnitType, godsFor, creaturesFor, titanFor } from '../data/index.js';
+import { rankBonus } from '../data/ranks.js';
 import { GOD_LEVEL_HP, GOD_LEVEL_DAMAGE } from '../config.js';
 
 const infoCache = new Map();
@@ -76,7 +77,7 @@ export function liveCombat(u, out) {
     return out;
   }
   const lvlMult = inf.cls === 'god' ? 1 + GOD_LEVEL_DAMAGE * ((u.level || 1) - 1) : 1;
-  const dps = inf.dps * lvlMult * (u.dmgMult || 1) * (u.atkSpeedMult || 1) * inf.abilityMult;
+  const dps = inf.dps * lvlMult * (1 + rankBonus(u.rank).damage) * (u.dmgMult || 1) * (u.atkSpeedMult || 1) * inf.abilityMult;
   out.hp = (u.hp + (u.shield || 0)) * armorFactor(u.armorNow ?? inf.armor);
   if (inf.buildingsOnly) {
     out.dpsG = 0;

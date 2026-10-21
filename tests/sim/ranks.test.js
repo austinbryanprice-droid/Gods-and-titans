@@ -8,6 +8,7 @@ import { canRank, rankForXp, rankBonus, killXp, nextRankXp, RANK_NAMES, RANK_MAX
 import { RANK_XP, RANK_HP, RANK_DAMAGE, RANK_ARMOR, HEAL_XP, BUILDING_XP_HP } from '../../src/config.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { encode, apply, EVENT_SHAPES } from '../../src/net/delta.js';
+import { liveCombat } from '../../src/ai/unit-info.js';
 import { makeWorld, run, runUntil, place, spawn, clearUnits, eventsOf } from './helpers.js';
 
 const json = (v) => JSON.parse(JSON.stringify(v));
@@ -144,6 +145,18 @@ test('rank bonuses stack with building upgrades', () => {
   w.completeResearch(0, 'house_stone_walls');
   assert.equal(a.rank, 1);
   assert.ok(Math.abs(a.baseDamage - MORTALS.warrior.attack.damage * (1 + up) * (1 + RANK_DAMAGE)) < 1e-9);
+});
+
+test('the AI\'s force estimate counts a soldier\'s rank damage', () => {
+  const w = arena();
+  const a = spawn(w, 0, 'warrior', 20, 20);
+  const fresh = liveCombat(a, {});
+  slay(w, a, 10); // 310 xp, Champion
+  assert.equal(a.rank, 3);
+  w.tick();
+  const champion = liveCombat(a, {});
+  assert.ok(Math.abs(champion.dpsG / fresh.dpsG - (1 + 3 * RANK_DAMAGE)) < 1e-9, `${champion.dpsG} vs ${fresh.dpsG}`);
+  assert.ok(champion.hp > fresh.hp, 'health and armor were already counted');
 });
 
 test('only soldiers that kill an enemy earn: workers, gods, allies and the dead earn nothing', () => {
