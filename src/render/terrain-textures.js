@@ -429,12 +429,12 @@ function paintRock(cv, seed) {
   const n3 = fbm(S, 24, 2, seed + 5);
   const slabs = worley(S, 3, seed + 3);
   const pits = worley(S, 18, seed + 4);
-  const cream = C(0xe8d3a6);
-  const tan = C(0xd3b27c);
-  const ochre = C(0xc4986a);
-  const rose = C(0xba937b);
-  const crackC = C(0x7b5d48);
-  const lichen = C(0xa3a862);
+  const cream = C(0xdcc08e);
+  const tan = C(0xc9a068);
+  const ochre = C(0xb88556);
+  const rose = C(0xa98068);
+  const crackC = C(0x6e4f3b);
+  const lichen = C(0x9aa05a);
   for (let i = 0; i < S * S; i++) {
     const t = clamp01((n1[i] - 0.5) * 1.7 + 0.5);
     cv.set(i, cream);
@@ -448,7 +448,7 @@ function paintRock(cv, seed) {
     // hairline fractures where the slabs meet (a bevel for the bump only)
     const e = slabs.f2[i] - slabs.f1[i];
     const crack = 1 - smooth(0.3, 1.6, e);
-    cv.mix(i, crackC, crack * 0.4);
+    cv.mix(i, crackC, crack * 0.26);
     const l = smooth(0.7, 0.84, n2[i] * 0.6 + n1[i] * 0.4);
     if (l > 0) cv.mix(i, lichen, l * 0.35);
     cv.h[i] = 0.5 + 0.3 * n1[i] + 0.15 * n2[i] + 0.1 * smooth(0, 6, e) - 0.3 * pit - 0.25 * crack;
@@ -456,9 +456,10 @@ function paintRock(cv, seed) {
 }
 
 /**
- * Sandstone seen from the side (v runs up the wall): wind-scoured beds in cream, tan, ochre
- * and rose, a pitted groove between some of them, rain-washed streaks running down, a few
- * hairline cracks.
+ * Sandstone seen from the side (v runs up the wall): level, wind-scoured beds in cream, tan and
+ * ochre (a little rose and umber in the deepest ones), a pitted groove between some of them,
+ * rain-washed streaks running down, a few hairline cracks. The beds only wander a little: they
+ * should read as layers of rock, not as grain.
  */
 function paintFace(cv, seed) {
   const S = cv.S;
@@ -467,36 +468,36 @@ function paintFace(cv, seed) {
   const cells = worley(S, 7, seed + 3);
   const pits = worley(S, 22, seed + 4);
   const TAU = Math.PI * 2;
-  const cream = C(0xe9d4a8);
-  const tan = C(0xd6b47e);
-  const ochre = C(0xc99d6c);
-  const rose = C(0xb98f78);
-  const umber = C(0x8e6a52);
-  const crackC = C(0x5a4034);
+  const cream = C(0xdcbf8c);
+  const tan = C(0xc79b62);
+  const ochre = C(0xb27c4c);
+  const rose = C(0x9f7561);
+  const umber = C(0x7a523d);
+  const crackC = C(0x4f3629);
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       const i = y * S + x;
       const v = y / S;
-      // beds: integer frequencies along v tile; the warp keeps them from running straight
-      const b1 = Math.sin(TAU * 4 * v + warp[i] * 5.5);
-      const b2 = Math.sin(TAU * 11 * v + n2[i] * 7);
-      const b3 = Math.sin(TAU * 29 * v + warp[i] * 3 + n2[i] * 2);
-      const t = clamp01(0.5 + 0.28 * b1 + 0.14 * b2 + 0.05 * b3 + (n2[i] - 0.5) * 0.3);
-      cv.set(i, ochre);
-      cv.mix(i, cream, smooth(0.5, 0.82, t));
-      cv.mix(i, tan, smooth(0.35, 0.5, t) * (1 - smooth(0.5, 0.65, t)) * 0.7);
-      cv.mix(i, rose, smooth(0.38, 0.14, t) * 0.55);
-      cv.mix(i, umber, smooth(0.2, 0.04, t) * 0.3);
+      // beds: integer frequencies along v tile; a small warp keeps them from running dead straight
+      const b1 = Math.sin(TAU * 4 * v + (warp[i] - 0.5) * 2.2);
+      const b2 = Math.sin(TAU * 11 * v + (n2[i] - 0.5) * 2.6);
+      const b3 = Math.sin(TAU * 29 * v + (warp[i] - 0.5) * 1.4 + n2[i] * 0.8);
+      const t = clamp01(0.5 + 0.2 * b1 + 0.12 * b2 + 0.04 * b3 + (n2[i] - 0.5) * 0.2);
+      cv.set(i, tan);
+      cv.mix(i, cream, smooth(0.5, 0.85, t) * 0.8);
+      cv.mix(i, ochre, smooth(0.5, 0.2, t) * 0.7);
+      cv.mix(i, rose, smooth(0.3, 0.1, t) * 0.4);
+      cv.mix(i, umber, smooth(0.2, 0.04, t) * 0.22);
       // grooves where the soft beds are scoured out, with a few pits in them
       const groove = smooth(-0.5, -0.9, b2);
       const pit = (1 - smooth(0.1, 0.5, pits.f1[i] / pits.cs)) * (0.3 + 0.7 * groove);
       // rain-washed streaks running down the face
       const st = Math.sin(TAU * 9 * (x / S) + 2.2 * Math.sin(TAU * 3 * (x / S) + warp[i] * 4)) * 0.5 + 0.5;
-      cv.scale(i, 0.95 + 0.12 * t - 0.1 * groove - 0.16 * pit + 0.07 * (st - 0.5) + 0.04 * (hash(i, 11, seed) - 0.5));
+      cv.scale(i, 0.95 + 0.08 * t - 0.1 * groove - 0.14 * pit + 0.07 * (st - 0.5) + 0.04 * (hash(i, 11, seed) - 0.5));
       // a few hairline vertical cracks: the borders of tall, narrow cells
       const e = (cells.f2[i] - cells.f1[i]) / cells.cs;
       const crack = (1 - smooth(0.015, 0.06, e)) * smooth(0.55, 0.7, n2[i]);
-      cv.mix(i, crackC, crack * 0.35);
+      cv.mix(i, crackC, crack * 0.3);
       cv.h[i] = 0.55 + 0.22 * (t - 0.5) - 0.3 * groove - 0.2 * pit - 0.25 * crack;
     }
   }

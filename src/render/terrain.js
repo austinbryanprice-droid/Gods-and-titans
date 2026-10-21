@@ -328,8 +328,8 @@ vec4 rockTex( vec2 p, vec2 dx, vec2 dy, float sel, vec3 w, vec3 wdx, vec3 wdy, v
   #ifdef TERRAIN_FACE
     if ( wall < 0.003 ) return top;
     vec2 fs = vec2( uLayer[ ${LAYER.FACE} ].x, ${FACE_V.toFixed(4)} );
-    // the beds wander up and down along the wall (a slow noise on the height), so they do not
-    // trace perfect contour lines around the rock
+    // the beds wander up and down a little along the wall (a slow noise on the height), so they
+    // do not trace perfect contour lines around the rock
     float wy = w.y + warp;
     vec4 fx = textureGrad( uGround, vec3( vec2( w.z, wy ) * fs + 0.37, ${LAYER.FACE}.0 ), vec2( wdx.z, wdx.y ) * fs, vec2( wdy.z, wdy.y ) * fs );
     vec4 fz = textureGrad( uGround, vec3( vec2( w.x, wy ) * fs, ${LAYER.FACE}.0 ), vec2( wdx.x, wdx.y ) * fs, vec2( wdy.x, wdy.y ) * fs );
@@ -413,8 +413,8 @@ if ( c0 == c3 && c1 == c2 && c0 != c1 ) {
 vec3 wn = normalize( vTerrainN );
 vec3 wdx = dFdx( vTerrainW );
 vec3 wdy = dFdy( vTerrainW );
-float tWall = smoothstep( 0.88, 0.62, wn.y );
-float tSlopeRock = max( smoothstep( 0.9, 0.78, wn.y ), smoothstep( 0.03, 0.16, gRise ) );
+float tWall = smoothstep( 0.72, 0.45, wn.y );
+float tSlopeRock = max( smoothstep( 0.9, 0.78, wn.y ), smoothstep( 0.06, 0.3, gRise ) );
 tw *= 1.0 - tSlopeRock;
 float tSel = tnB.z;
 vec4 s0 = vec4( 0.0 );
@@ -426,7 +426,7 @@ if ( tw.x > 0.003 ) s0 = layerTex( c0, tp, tdx, tdy, tSel, tDry );
 if ( tw.y > 0.003 ) s1 = layerTex( c1, tp, tdx, tdy, tSel, tDry );
 if ( tw.z > 0.003 ) s2 = layerTex( c2, tp, tdx, tdy, tSel, tDry );
 if ( tw.w > 0.003 ) s3 = layerTex( c3, tp, tdx, tdy, tSel, tDry );
-if ( tSlopeRock > 0.003 ) sR = rockTex( tp, tdx, tdy, tSel, vTerrainW, wdx, wdy, wn, tWall, ( tnB.x - 0.5 ) * 0.5 + ( tnC.w - 0.5 ) * 0.3 );
+if ( tSlopeRock > 0.003 ) sR = rockTex( tp, tdx, tdy, tSel, vTerrainW, wdx, wdy, wn, tWall, ( tnB.x - 0.5 ) * 0.14 + ( tnC.w - 0.5 ) * 0.08 );
 vec4 L0 = layerParams( c0, tDry );
 vec4 L1 = layerParams( c1, tDry );
 vec4 L2 = layerParams( c2, tDry );
@@ -446,7 +446,7 @@ float tbs = 1.0 / max( tb.x + tb.y + tb.z + tb.w + tbR, 1e-4 );
 tb *= tbs;
 tbR *= tbs;
 vec3 tAlbedo = s0.rgb * tb.x + s1.rgb * tb.y + s2.rgb * tb.z + s3.rgb * tb.w + sR.rgb * tbR;
-float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z * ( 1.0 - 0.7 * tWall );
+float tBump = dot( tb, vec4( s0.a * L0.z, s1.a * L1.z, s2.a * L2.z, s3.a * L3.z ) ) + tbR * sR.a * LR.z * ( 1.0 - 0.96 * tWall );
 float tRough = dot( tb, vec4( L0.w, L1.w, L2.w, L3.w ) ) + tbR * LR.w;
 // share of the pixel that is soil / meadow (by layer), and of the border band
 // between them (from the plain weights, before the texel heights roughen it)
@@ -469,9 +469,9 @@ tRough = mix( tRough, 0.8, tWear * 0.6 );
 tBump *= 1.0 - 0.35 * tWear;
 // sandstone beds on the walls: layers about a hand high, each one a shade of its own, lighter
 // at its top lip and darker where the soft rock has weathered back under the bed above
-float tBedY = ( vTerrainW.y + ( tnB.x - 0.5 ) * 0.5 + ( tnC.w - 0.5 ) * 0.3 ) * 7.0 + tnC.y * 1.5;
+float tBedY = ( vTerrainW.y + ( tnB.x - 0.5 ) * 0.14 + ( tnC.w - 0.5 ) * 0.08 ) * 7.0 + tnC.y * 0.6;
 float tBedH = fract( sin( floor( tBedY ) * 12.9898 + 4.1 ) * 43758.5453 );
-vec3 tBed = mix( vec3( 1.0 ), vec3( 1.09, 0.96, 0.82 ), tBedH ) * ( 0.88 + 0.22 * fract( tBedY ) );
+vec3 tBed = mix( vec3( 1.0 ), vec3( 1.06, 0.97, 0.87 ), tBedH ) * ( 0.92 + 0.14 * fract( tBedY ) );
 tAlbedo *= mix( vec3( 1.0 ), tBed, tbR * tWall );
 // the foot of a cliff sits in its own shade
 tAlbedo *= 1.0 - 0.4 * tbR * smoothstep( 0.0, 0.05, gRise ) * ( 1.0 - smoothstep( 0.06, 0.34, gRise ) );
