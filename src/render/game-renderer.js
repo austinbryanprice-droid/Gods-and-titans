@@ -16,7 +16,7 @@ import { wallConnections } from '../data/walls.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { unitLook } from './models/unit-looks.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
-import { createForest, createDecor } from './models/props.js';
+import { createForest, createDecor, decorOffOutcrops } from './models/props.js';
 import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
@@ -233,7 +233,7 @@ export class GameRenderer {
     scene.add(this.terrain.group);
     this.heightFn = (x, y) => heightAt(this.map, x, y);
     this.buildForest();
-    this.decor = createDecor(this.map, this.heightFn);
+    this.decor = createDecor({ ...this.map, decor: decorOffOutcrops(this.map, this.map.decor || []) }, this.heightFn, { quality: this.quality });
     this.decor.object3d.traverse((o) => {
       if (o.isMesh) o.receiveShadow = true;
     });
@@ -357,7 +357,7 @@ export class GameRenderer {
     // Build from the original forest (felled trees restored) so felled tiles get stumps.
     const terrain = Uint8Array.from(this.map.terrain);
     for (const [tx, ty] of this.vs.felledAll || []) terrain[ty * this.width + tx] = TERRAIN.FOREST;
-    this.forest = createForest({ ...this.map, terrain }, this.heightFn);
+    this.forest = createForest({ ...this.map, terrain }, this.heightFn, { quality: this.quality });
     this.scene.add(this.forest.object3d);
     patchFowObject(this.forest.object3d);
     // Undergrowth and shore stones (render only): bushes, ferns and boulders
@@ -411,12 +411,16 @@ export class GameRenderer {
             const sx = -oy / len;
             const sy = ox / len;
             decor.push({ x: ex + sx * (r1 - 0.5) * 0.7, y: ey + sy * (r1 - 0.5) * 0.7, kind: 'bush', rot: r2 * 6.28, scale: 1.7 + r3 * 0.9 });
-            if (rich && r2 > 0.35) decor.push({ x: ex - sx * (r3 - 0.2) * 0.6, y: ey - sy * (r3 - 0.2) * 0.6, kind: r1 > 0.55 ? 'bush' : 'grass', rot: r3 * 6.28, scale: 1.2 + r1 * 0.8 });
+            if (rich && r2 > 0.35) {
+              const kind = r1 > 0.62 ? 'bush' : r1 > 0.28 ? 'fern' : 'grass';
+              decor.push({ x: ex - sx * (r3 - 0.2) * 0.6, y: ey - sy * (r3 - 0.2) * 0.6, kind, rot: r3 * 6.28, scale: kind === 'fern' ? 0.85 + r3 * 0.6 : 1.2 + r1 * 0.8 });
+            }
             if (r3 > 0.9) decor.push({ x: ex + sx * 0.25, y: ey + sy * 0.25, kind: 'rock', rot: r1 * 6.28, scale: 1.1 + r2 * 0.9 });
             else if (rich && r3 < 0.12) decor.push({ x: ex, y: ey, kind: 'flowers', rot: r2 * 6.28, scale: 1 });
           } else if (rich && r1 < 0.16) {
             // interior: fill some gaps under the canopy
-            decor.push({ x: tx + 0.2 + r2 * 0.6, y: ty + 0.2 + r3 * 0.6, kind: r2 < 0.85 ? 'bush' : 'rock', rot: r3 * 6.28, scale: 1.3 + r1 * 2 });
+            const kind = r2 < 0.5 ? 'bush' : r2 < 0.85 ? 'fern' : 'rock';
+            decor.push({ x: tx + 0.2 + r2 * 0.6, y: ty + 0.2 + r3 * 0.6, kind, rot: r3 * 6.28, scale: kind === 'fern' ? 0.9 + r1 * 3 : 1.3 + r1 * 2 });
           }
         } else if (t === WATER) {
           // shore stones, half in the water on the land side of an edge tile
@@ -436,13 +440,14 @@ export class GameRenderer {
         }
       }
     }
-    if (!decor.length) return null;
-    const d = createDecor({ ...this.map, decor }, this.heightFn);
+    const kept = decorOffOutcrops(this.map, decor);
+    if (!kept.length) return null;
+    const d = createDecor({ ...this.map, decor: kept }, this.heightFn, { quality: this.quality });
     d.object3d.name = 'undergrowth';
     return d;
   }
 
-  /** A few boulders on every impassable rock tile so cliffs read as rock. */
+  /** A few boulders on the impassable rock tiles (only where the sandstone outcrop is low, see decorOffOutcrops). */
   buildRockDecor() {
     const decor = [];
     const W = this.width;
@@ -456,8 +461,9 @@ export class GameRenderer {
         if (r > 0.45) decor.push({ x: tx + 0.75 - r * 0.3, y: ty + 0.7, kind: 'rock', rot: r * 3.1, scale: 0.9 + r * 0.5 });
       }
     }
-    if (!decor.length) return null;
-    const d = createDecor({ ...this.map, decor }, this.heightFn);
+    const kept = decorOffOutcrops(this.map, decor);
+    if (!kept.length) return null;
+    const d = createDecor({ ...this.map, decor: kept }, this.heightFn);
     d.object3d.name = 'rock-decor';
     return d;
   }
@@ -630,6 +636,13 @@ export class GameRenderer {
     });
     setCloudShadows(Q.clouds);
     this.terrain.setQuality(q);
+    this.forest.setQuality(q);
+    this.decor.setQuality(q);
+    if (this.undergrowth) this.undergrowth.setQuality(q);
+    // crowns and bushes swap to the other puff material, which the fog of war has not patched yet
+    patchFowObject(this.forest.object3d);
+    patchFowObject(this.decor.object3d);
+    if (this.undergrowth) patchFowObject(this.undergrowth.object3d);
     this.groundCover.setQuality(q);
     patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
     this.vfx.setQuality(Q.vfx);

@@ -13,6 +13,7 @@
 // units (0 at the roots, growing with height), z = flutter amplitude.
 import * as THREE from 'three';
 import { WORLD_UNIFORMS } from '../shading.js';
+import { leafTexture, needleTexture, NEEDLE_SPRAYS } from './leaf-texture.js';
 
 /** Wind shared by every plant: xy = direction (x east, y south; unit), z = strength, w = unused. */
 export const WIND_UNIFORMS = {
@@ -173,100 +174,190 @@ const INSTANCED_WIND = /* glsl */ `
 
 const FOLIAGE_VERTEX_PARS = `attribute vec3 aFol;\nvarying float vLeaf;\nvarying vec3 vFolP;\nuniform vec3 uSunDirW;\n${WIND_GLSL}`;
 
-// Leaf detail coordinates: the plant's own local position (before wind, so the
-// pattern does not swim), shifted per instance so neighbours differ.
+// ---------------------------------------------------------------------------
+// Leaf puffs: the round clumps that make up broadleaf crowns and bushes. A puff is
+// one quad (two triangles, six vertices) whose vertices all sit at the puff's center and
+// carry aBb = (corner x, corner y, radius in local units, 1). The vertex shader spreads
+// the corners over a quad facing the camera (the shadow camera in the shadow pass, so a
+// shadow is a disc across the light) and pushes it toward the viewer by about half a
+// radius; the fragment shader shades it as a sphere (a smooth round normal, bent a
+// little toward the crown's outward direction in the vertex normal), cuts the disc
+// with an anti-aliased edge and a leafy, ragged one, and lays the leaf texture over it
+// (each puff turned and shifted differently). Parts that are not puffs (trunks,
+// branches) carry aBb.w = 0.
+// ---------------------------------------------------------------------------
+
+// A puff's own random numbers: from its center and the position of its tree (the same in the
+// color and the shadow pass, so a puff's shadow is where the puff is).
+const PUFF_HASH = /* glsl */ `
+attribute vec4 aBb;
+vec4 puffHash( vec3 center, vec2 tree ) {
+  vec3 s = center * 17.3 + vec3( tree.x * 0.61, tree.y * 0.37, tree.x * 0.23 + tree.y * 0.47 );
+  return fract( sin( vec4( dot( s, vec3( 12.9898, 78.233, 37.719 ) ), dot( s, vec3( 39.346, 11.135, 83.155 ) ),
+    dot( s, vec3( 73.156, 52.235, 9.151 ) ), dot( s, vec3( 27.917, 61.402, 45.288 ) ) ) ) * 43758.5453 );
+}`;
+
+const PUFF_VERTEX_PARS = /* glsl */ `${PUFF_HASH}
+varying vec4 vBb;
+varying vec4 vBbSeed;
+varying float vPuffK;`;
+
+// The shadow pass cuts the same disc as the color pass (without the leaf tips): vBbD = the corner,
+// so the quad's corners cast nothing and a bush's shadow is round, not a square.
+const PUFF_DEPTH_PARS = `${PUFF_HASH}\nvarying vec2 vBbD;`;
+const PUFF_DEPTH_VERTEX = 'vBbD = aBb.w > 0.5 ? aBb.xy : vec2( 0.0 );';
+const PUFF_DEPTH_FRAGMENT = 'if ( dot( vBbD, vBbD ) > 1.0 ) discard;';
+
+// Per puff: where its leaf texture starts and how it is turned (the same for all six vertices:
+// they sit at the puff's center).
+const PUFF_SEED_VERTEX = /* glsl */ `
+{
+  float bbH1 = fract( sin( dot( vFolP, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
+  float bbH2 = fract( sin( dot( vFolP, vec3( 39.346, 11.135, 83.155 ) ) ) * 24634.6345 );
+  float bbA = bbH2 * 6.2832;
+  vBbSeed = vec4( bbH1, fract( bbH1 * 7.31 + bbH2 * 3.17 ), cos( bbA ), sin( bbA ) );
+}`;
+
+// Before the wind: each tree arranges its puffs a little differently (center and size jittered).
+const PUFF_JITTER = /* glsl */ `
+#ifdef USE_INSTANCING
+float puffSize = 1.0;
+if ( aBb.w > 0.5 ) {
+  vec4 ph = puffHash( position, instanceMatrix[ 3 ].xz );
+  transformed += ( ph.xyz - 0.5 ) * vec3( 0.14, 0.1, 0.14 ) * min( aBb.z * 3.0, 1.0 );
+  puffSize = 0.86 + 0.28 * ph.w;
+}
+#endif`;
+
+// After the wind: the corners of a puff, in world space along the camera's right and up
+// axes, brought back into the instance's local frame (as the wind is). `push` moves the
+// quad along the view axis in radii: toward the viewer in the color pass, away from the
+// light in the shadow pass (the back of the crown casts, as the back faces of the old meshes
+// did, so a lit puff never shadows itself). Zero-scale (hidden) instances stay collapsed.
+const puffExpand = (push, radiusVarying) => /* glsl */ `
+#ifdef USE_INSTANCING
+${radiusVarying ? 'vPuffK = 0.0;' : ''}
+if ( aBb.w > 0.5 ) {
+  mat3 pim = mat3( instanceMatrix );
+  vec3 ps2 = vec3( dot( pim[ 0 ], pim[ 0 ] ), dot( pim[ 1 ], pim[ 1 ] ), dot( pim[ 2 ], pim[ 2 ] ) );
+  float pk = aBb.z * puffSize * ( sqrt( ps2.x ) + sqrt( ps2.y ) + sqrt( ps2.z ) ) * ( 1.0 / 3.0 );
+  vec3 pr = vec3( viewMatrix[ 0 ][ 0 ], viewMatrix[ 1 ][ 0 ], viewMatrix[ 2 ][ 0 ] );
+  vec3 pu = vec3( viewMatrix[ 0 ][ 1 ], viewMatrix[ 1 ][ 1 ], viewMatrix[ 2 ][ 1 ] );
+  vec3 pb = vec3( viewMatrix[ 0 ][ 2 ], viewMatrix[ 1 ][ 2 ], viewMatrix[ 2 ][ 2 ] );
+  ${radiusVarying ? 'vPuffK = pk;' : ''}
+  vec3 pw = ( pr * aBb.x + pu * aBb.y + pb * ${push} ) * pk;
+  transformed += ( transpose( pim ) * pw ) / max( ps2, vec3( 1e-6 ) );
+}
+#endif`;
+const PUFF_EXPAND = puffExpand('0.55', true);
+const PUFF_EXPAND_DEPTH = puffExpand('- 0.55', false);
+
+// Leaf detail coordinates: the plant's own local position (before wind, so the pattern does
+// not swim), shifted per instance so neighbours differ. Puffs derive their texture offset from it.
 const FOLIAGE_DETAIL_VERTEX = /* glsl */ `
 vFolP = position;
 #ifdef USE_INSTANCING
   vFolP += vec3( instanceMatrix[ 3 ].x * 0.37, 0.0, instanceMatrix[ 3 ].z * 0.29 );
 #endif`;
 
-/**
- * Leaf detail (fragment): a 3D value-noise canopy texture in place of flat
- * facets. Clumps of leaves (or, with uFolDetail.w = 1, radial needle sprays)
- * lighten and darken the albedo with a little hue shift, bend the normal by
- * the noise slope (bump through screen derivatives, faded out where the
- * pattern gets finer than a pixel), and the crown's silhouette is cut ragged:
- * fragments seen edge-on are discarded where the clump noise is low, so a
- * faceted lobe outline breaks up into leafy tufts. Bark (vLeaf = 0) is left as is.
- * uFolDetail: x = clump frequency (per local unit), y = albedo contrast,
- * z = edge cut strength, w = needle style (0 / 1).
- */
 const FOLIAGE_DETAIL_PARS = /* glsl */ `
 uniform vec4 uFolDetail;
-varying vec3 vFolP;
-float folHash( vec3 p ) {
-  p = fract( p * 0.3183099 + 0.1 );
-  p *= 17.0;
-  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
-}
-float folNoise( vec3 x ) {
-  vec3 i = floor( x );
-  vec3 f = fract( x );
-  f = f * f * ( 3.0 - 2.0 * f );
-  return mix( mix( mix( folHash( i ), folHash( i + vec3( 1, 0, 0 ) ), f.x ),
-                   mix( folHash( i + vec3( 0, 1, 0 ) ), folHash( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
-              mix( mix( folHash( i + vec3( 0, 0, 1 ) ), folHash( i + vec3( 1, 0, 1 ) ), f.x ),
-                   mix( folHash( i + vec3( 0, 1, 1 ) ), folHash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
-}
-float folCoarse = 0.5; // the smooth first octave: drives the bump (finer ones show the pixel quads)
-float folLeaves( vec3 p ) {
-  vec3 q = p * uFolDetail.x;
-  if ( uFolDetail.w > 0.5 ) {
-    // needles: fine sprays running out from the trunk, broken up along their length
-    float r = length( p.xz );
-    vec3 s = vec3( atan( p.z, p.x ) * 13.0, p.y * uFolDetail.x * 1.4, r * uFolDetail.x * 0.9 );
-    // the finer octave fades to its mean where it would get smaller than a pixel
-    float fs = 1.0 - smoothstep( 0.3, 0.7, length( fwidth( s ) ) * 2.1 );
-    folCoarse = folNoise( s );
-    return folCoarse * 0.45 + mix( 0.5, folNoise( s * vec3( 2.1, 1.7, 2.3 ) + 3.1 ), fs ) * 0.3 + folNoise( q * 2.6 ) * 0.25;
-  }
-  // leaf clumps: rounded blobs (squared noise) with leaf-sized grain on top
-  float c = folNoise( q );
-  c = smoothstep( 0.2, 0.85, c );
-  folCoarse = c;
-  float fq = 1.0 - smoothstep( 0.3, 0.7, length( fwidth( q ) ) * 5.1 );
-  return c * 0.55 + folNoise( q * 2.3 + 4.7 ) * 0.27 + mix( 0.5, folNoise( q * 5.1 + 1.3 ), fq ) * 0.18;
-}`;
+varying vec3 vFolP;`;
 
-const FOLIAGE_DETAIL_FRAGMENT = /* glsl */ `
-float folN = 0.5;
-float folFade = 0.0; // 1 = full leaf detail, 0 = averaged (noise cells smaller than ~2 pixels)
-if ( vLeaf > 0.5 && uFolDetail.y > 0.0 ) {
-  // how many noise cells one pixel spans: past ~0.5 the pattern would only shimmer, so
-  // the albedo detail and the ragged cut fade into their average (no popping, no sparkle)
-  folFade = 1.0 - smoothstep( 0.2, 0.55, length( fwidth( vFolP * uFolDetail.x ) ) );
-  folN = folLeaves( vFolP );
-  // ragged silhouette: cut away low-noise texels where the surface turns edge-on, with a
-  // one-pixel soft edge (alpha to coverage on the multisampled target, a plain cut elsewhere)
-  vec3 folV = normalize( vViewPosition );
-  float folEdge = 1.0 - abs( dot( normalize( vNormal ), folV ) );
-  float folM = folN - ( uFolDetail.z * pow( folEdge, 1.5 ) * 1.4 - 0.08 ) * folFade;
-  float folCov = clamp( folM / max( fwidth( folM ) * 1.25, 0.02 ) + 0.5, 0.0, 1.0 );
-  if ( uFolMS > 0.5 ) {
-    if ( folCov <= 0.0 ) discard;
-    diffuseColor.a = folCov;
-  } else if ( folCov < 0.5 ) discard;
-  float folC = ( folN - 0.5 ) * uFolDetail.y * folFade;
-  diffuseColor.rgb *= 1.0 + folC * 2.0;
-  // lit clumps lean yellow, the gaps between them blue-green
-  diffuseColor.rgb += vec3( 0.05, 0.035, -0.04 ) * folC * diffuseColor.g * 4.0;
+// Needle sprays (spruce tiers, fern fronds): the geometry carries aUv = (along the texture's width,
+// out along the spray, 1; 0 for trunk and leader). Each spruce and each of its tiers starts its
+// texture somewhere else; a fern shifts by whole sprays, so every frond keeps one spray's outline.
+const NEEDLE_PARS_VERTEX = /* glsl */ `
+attribute vec3 aUv;
+varying vec3 vNeedle;`;
+const needleVertex = (pine) => /* glsl */ `
+vNeedle = aUv;
+#ifdef USE_INSTANCING
+  ${pine
+    ? 'vNeedle.x += fract( instanceMatrix[ 3 ].x * 0.173 + instanceMatrix[ 3 ].z * 0.291 ) * 8.0 + aPine.x * 0.37;'
+    : `vNeedle.x += floor( fract( instanceMatrix[ 3 ].x * 0.173 + instanceMatrix[ 3 ].z * 0.291 ) * ${NEEDLE_SPRAYS.toFixed(1)} ) * ${(1 / NEEDLE_SPRAYS).toFixed(4)};`}
+#endif`;
+
+// The end of every detail block: coverage becomes alpha to coverage on the multisampled target
+// (soft one-pixel edges), a plain cut elsewhere.
+const FOLIAGE_COVERAGE = /* glsl */ `
+if ( uFolMS > 0.5 ) {
+  if ( folCov <= 0.0 ) discard;
+  diffuseColor.a = folCov;
+} else if ( folCov < 0.5 ) discard;`;
+
+/**
+ * Leaf puffs (fragment): the disc of the puff with its sphere normal, the leaf texture laid over
+ * it (brightness and warmth per leaf, turned and shifted per puff), the outline broken up into
+ * leaf tips toward the rim, tops lighter and undersides darker, and optionally the depth of the
+ * sphere. uFolDetail: x = texture repeats across one radius, y = albedo contrast,
+ * z = how much of the outline is cut into leaves (0..1).
+ */
+const puffDetailFragment = (sphereDepth) => /* glsl */ `
+float folCov = 1.0; // coverage of this fragment: the disc of a puff cut into leaves
+${sphereDepth ? 'gl_FragDepth = gl_FragCoord.z;' : ''}
+vec3 bbN = vec3( 0.0, 0.0, 1.0 ); // a puff's sphere normal (view space: x right, y up, z toward the viewer)
+if ( vBb.w > 0.5 ) {
+  float bbR = length( vBb.xy );
+  bbN = vec3( vBb.xy, sqrt( max( 1.0 - bbR * bbR, 0.0 ) ) );
+  vec2 bbQ = vBb.xy * uFolDetail.x;
+  vec4 lf = texture2D( uLeafTex, vec2( bbQ.x * vBbSeed.z - bbQ.y * vBbSeed.w, bbQ.x * vBbSeed.w + bbQ.y * vBbSeed.z ) + vBbSeed.xy );
+  float bbCov = clamp( ( 1.0 - bbR ) / max( fwidth( bbR ), 1e-4 ) + 0.5, 0.0, 1.0 );
+  // inside the disc every texel stays; toward the rim only the leaves do
+  float bbKeep = mix( 1.0, lf.a, uFolDetail.z * vLeaf * smoothstep( 0.5, 0.95, bbR ) ) - 0.5;
+  folCov = min( bbCov, clamp( bbKeep / max( fwidth( bbKeep ) * 1.25, 0.02 ) + 0.5, 0.0, 1.0 ) );
+  // round volume: tops catch the sky, undersides turn dark
+  float bbUp = dot( bbN, ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz );
+  diffuseColor.rgb *= mix( 0.55, 1.12, smoothstep( -0.75, 0.9, bbUp ) );
+  // each leaf its own brightness, lighter at the tip, dark where they overlap; some lean warm
+  diffuseColor.rgb *= mix( 1.0, lf.r * 1.5, uFolDetail.y * vLeaf );
+  diffuseColor.rgb += vec3( 0.05, 0.035, -0.04 ) * ( lf.g - 0.45 ) * diffuseColor.g * 3.0 * uFolDetail.y * vLeaf;
   diffuseColor.rgb = max( diffuseColor.rgb, vec3( 0.0 ) );
+  ${sphereDepth ? `
+  // the sphere's own depth (the quad stands 0.55 radii in front of the center): crowns meet
+  // buildings, the ground and each other along round intersections, and AO sees spheres
+  float bbZ = - vViewPosition.z + ( bbN.z - 0.55 ) * vPuffK;
+  float bbD = projectionMatrix[ 2 ][ 2 ] * bbZ + projectionMatrix[ 3 ][ 2 ];
+  gl_FragDepth = ( isOrthographic ? bbD : bbD / - bbZ ) * 0.5 + 0.5;` : ''}
+}
+${FOLIAGE_COVERAGE}`;
+
+/**
+ * Needle sprays (fragment): the needle texture on a spruce skirt (sprays running out from the
+ * trunk, fresher at their tips) or a fern frond, the outline cut into sprays from where the
+ * hem starts, a skirt closed toward the trunk. uFolDetail: y = albedo contrast, z = how much of
+ * the outline is cut (0..1), w = where along the spray the cut starts (a fern's whole frond is
+ * cut: below 0).
+ */
+const NEEDLE_DETAIL_FRAGMENT = /* glsl */ `
+float folCov = 1.0; // coverage of this fragment: the skirt cut into sprays
+if ( vLeaf > 0.5 && vNeedle.z > 0.5 ) {
+  vec4 nt = texture2D( uNeedleTex, vNeedle.xy );
+  float nKeep = mix( 1.0, nt.a, uFolDetail.z * smoothstep( uFolDetail.w, uFolDetail.w + 0.25, vNeedle.y ) ) - 0.5;
+  folCov = clamp( nKeep / max( fwidth( nKeep ) * 1.25, 0.02 ) + 0.5, 0.0, 1.0 );
+  diffuseColor.rgb *= mix( 1.0, nt.r * 1.5, uFolDetail.y );
+  // fresh growth at the tips leans yellow
+  diffuseColor.rgb += vec3( 0.06, 0.05, -0.04 ) * ( nt.g - 0.3 ) * diffuseColor.g * 3.0 * uFolDetail.y;
+  diffuseColor.rgb = max( diffuseColor.rgb, vec3( 0.0 ) );
+}
+${FOLIAGE_COVERAGE}`;
+
+// At night leaves lose their saturation and lean blue-green (moonlight).
+const FOLIAGE_GRADE = /* glsl */ `
+if ( vLeaf > 0.5 && uFolNight > 0.0 ) {
+  float folLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
+  diffuseColor.rgb = mix( diffuseColor.rgb, folLuma * vec3( 0.8, 1.0, 1.18 ), 0.2 * uFolNight );
 }`;
 
-const FOLIAGE_BUMP_FRAGMENT = /* glsl */ `
-if ( vLeaf > 0.5 && uFolDetail.y > 0.0 ) {
-  vec3 folDpx = dFdx( - vViewPosition );
-  vec3 folDpy = dFdy( - vViewPosition );
-  float folHx = dFdx( folCoarse );
-  float folHy = dFdy( folCoarse );
-  // fade the bump where one noise cell spans less than a couple of pixels
-  float folBF = folFade * ( 1.0 - smoothstep( 0.18, 0.45, abs( folHx ) + abs( folHy ) ) );
-  vec3 folR1 = cross( folDpy, normal );
-  vec3 folR2 = cross( normal, folDpx );
-  float folDet = dot( folDpx, folR1 );
-  vec3 folGrad = sign( folDet ) * ( folHx * folR1 + folHy * folR2 );
-  normal = normalize( abs( folDet ) * normal - folGrad * 1.6 * folBF );
+// The light that fills the shade (sky and ground ambient) is tinted: cool, blue-green shadows.
+const FOLIAGE_SHADE = /* glsl */ `
+reflectedLight.indirectDiffuse *= mix( vec3( 1.0 ), uFolShade, vLeaf );`;
+
+// A puff's normal: the sphere's, bent a little toward the crown's outward direction (vNormal)
+const PUFF_NORMAL_FRAGMENT = /* glsl */ `
+if ( vBb.w > 0.5 ) {
+  normal = normalize( mix( bbN, normalize( vNormal ), 0.3 ) );
+  nonPerturbedNormal = normal;
 }`;
 
 // Leaves on the far side of a crown look their sun shadow up on the crown's
@@ -325,7 +416,10 @@ const FOLIAGE_LIGHTS = THREE.ShaderChunk.lights_lambert_pars_fragment.replace(
   // back-lit crowns: looking toward the sun, the thin outer leaves glow a little (view dependent)
   float backLit = saturate( - dot( geometryViewDir, directLight.direction ) );
   float thinLeaf = 1.0 - saturate( dot( geometryNormal, geometryViewDir ) );
-  irradiance += lightColor * vec3( 1.0, 0.92, 0.5 ) * ( uFoliage.y * vLeaf * 0.8 * backLit * backLit * ( 0.3 + 0.7 * thinLeaf ) );`,
+  irradiance += lightColor * vec3( 1.0, 0.92, 0.5 ) * ( uFoliage.y * vLeaf * 0.8 * backLit * backLit * ( 0.3 + 0.7 * thinLeaf ) );
+  // rim light: the edge of a crown on the sun's side glows with the light's own color
+  float rimEdge = pow( thinLeaf, 2.2 ) * saturate( rawNL * 0.6 + 0.55 );
+  irradiance += lightColor * vec3( 1.0, 0.9, 0.55 ) * ( uFoliage.w * vLeaf * rimEdge );`,
 );
 
 // The light loop, remembering each light's color before its shadow is applied.
@@ -339,26 +433,38 @@ const FOLIAGE_LIGHTS_BEGIN = THREE.ShaderChunk.lights_fragment_begin.replace(
  * used by instanced plants (geometry with an `aFol` attribute). Call before
  * patchWorldMaterial / patchFowMaterial (they keep this hook). Idempotent.
  * @param {THREE.MeshLambertMaterial} mat
- * @param {{ wrap?: number, translucency?: number, filter?: number, detail?: number[], pine?: boolean }} [o]
+ * @param {{ wrap?: number, translucency?: number, filter?: number, rim?: number, shade?: number[], detail?: number[], pine?: boolean, needles?: boolean, puff?: boolean, sphereDepth?: boolean }} [o]
+ *   rim: strength of the sun-side edge light of crowns; shade: tint of the light that fills the shade (cool: blue-green shadows);
+ *   detail: [texture repeats (puffs: across one radius), albedo contrast, how much of the outline is cut
+ *   into leaves / sprays, where along a spray the cut starts (needles)] for puffs and needle sprays;
+ *   leaf and needle textures (leaf-texture.js);
  *   filter: share of the light that still reaches leaves in shadow (0 = hard shadows);
- *   pine: reshape the shared spruce geometry per instance (aPine / aShape attributes, PINE_PRESETS)
+ *   pine: reshape the shared spruce geometry per instance (aPine / aShape attributes, PINE_PRESETS); also needles
+ *   needles: the geometry carries aUv: the needle texture cuts its surfaces into sprays (a spruce, a fern);
+ *   puff: the geometry carries leaf puffs (aBb attribute): quads turned toward the camera and shaded as spheres;
+ *   sphereDepth: puffs also write the depth of the sphere (round intersections; the fragment shader
+ *   loses early depth testing, so only where the crowns are worth it)
  */
-export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, detail = null, pine = false } = {}) {
+export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, filter = 0.4, rim = 0.3, shade = [1, 1, 1], detail = null, pine = false, needles = false, puff = false, sphereDepth = false } = {}) {
   if (!mat || mat.userData.__foliage) return mat;
   if (!FOLIAGE_LIGHTS.includes('uFoliage') || !FOLIAGE_LIGHTS_BEGIN.includes('folLightColor = directLight.color')) {
     throw new Error('foliage lighting patch did not apply');
   }
   mat.userData.__foliage = true;
-  const uFoliage = { value: new THREE.Vector3(wrap, translucency, filter) };
+  const uFoliage = { value: new THREE.Vector4(wrap, translucency, filter, rim) };
   mat.userData.uFoliage = uFoliage;
-  // leaf detail: [clump frequency, contrast, edge cut, needles]; null = flat (flowers, grass)
+  // texture detail of puffs and needle sprays: [texture repeats, contrast, outline cut, hem start]; null = flat
+  needles = needles || pine;
+  const textured = !!detail && (puff || needles);
   const d = detail || [1, 0, 0, 0];
   const uFolDetail = { value: new THREE.Vector4(d[0], d[1], d[2], d[3]) };
   mat.userData.uFolDetail = uFolDetail;
   // Cut leaf edges ride on alpha to coverage where the target is multisampled (post.js
   // MSAA); on the plain canvas (low) the shader falls back to a hard cut.
   const uFolMS = { value: 0 };
-  if (detail) {
+  const uFolShade = { value: new THREE.Vector3(shade[0], shade[1], shade[2]) };
+  mat.userData.uFolShade = uFolShade;
+  if (textured) {
     mat.alphaToCoverage = true;
     const prevBefore = mat.onBeforeRender;
     mat.onBeforeRender = function foliageBeforeRender(renderer, ...rest) {
@@ -377,46 +483,66 @@ export function patchFoliageMaterial(mat, { wrap = 0.45, translucency = 0.35, fi
     shader.uniforms.uFoliage = uFoliage;
     shader.uniforms.uFolDetail = uFolDetail;
     shader.uniforms.uFolMS = uFolMS;
+    shader.uniforms.uFolShade = uFolShade;
+    // the time of day (the Lighting thread's shared uniforms); day where it is not there yet
+    shader.uniforms.uFolNight = WORLD_UNIFORMS.uNight || NIGHT_DAY;
+    if (puff) shader.uniforms.uLeafTex = { value: leafTexture() };
     if (pine) shader.uniforms.uPine = PINE_UNIFORMS.uPine;
+    if (needles) shader.uniforms.uNeedleTex = { value: needleTexture() };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}${pine ? PINE_VERTEX_PARS : ''}`)
-      .replace('#include <color_vertex>', `${FOLIAGE_COLOR_VERTEX}\n${FOLIAGE_DETAIL_VERTEX}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_MORPH : ''}${INSTANCED_WIND}`)
+      .replace('#include <common>', `#include <common>\n${FOLIAGE_VERTEX_PARS}${pine ? PINE_VERTEX_PARS : ''}${needles ? NEEDLE_PARS_VERTEX : ''}${puff ? PUFF_VERTEX_PARS : ''}`)
+      .replace('#include <color_vertex>', `${FOLIAGE_COLOR_VERTEX}\n${FOLIAGE_DETAIL_VERTEX}${puff ? `\nvBb = aBb;${PUFF_SEED_VERTEX}` : ''}${needles ? needleVertex(pine) : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_MORPH : ''}${puff ? PUFF_JITTER : ''}${INSTANCED_WIND}${puff ? PUFF_EXPAND : ''}`)
       .replace('#include <shadowmap_vertex>', FOLIAGE_SHADOW_VERTEX);
+    const fragmentPars = [
+      'varying float vLeaf;', 'uniform vec4 uFoliage;', 'uniform float uFolMS;', 'uniform vec3 uFolShade;', 'uniform float uFolNight;', 'vec3 folLightColor = vec3( 0.0 );',
+      puff && 'varying vec4 vBb;\nvarying vec4 vBbSeed;\nvarying float vPuffK;\nuniform sampler2D uLeafTex;',
+      puff && sphereDepth && 'uniform mat4 projectionMatrix;',
+      needles && 'varying vec3 vNeedle;\nuniform sampler2D uNeedleTex;',
+      FOLIAGE_DETAIL_PARS,
+    ].filter(Boolean).join('\n');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying float vLeaf;\nuniform vec3 uFoliage;\nuniform float uFolMS;\nvec3 folLightColor = vec3( 0.0 );\n${FOLIAGE_DETAIL_PARS}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${FOLIAGE_DETAIL_FRAGMENT}`)
-      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${FOLIAGE_BUMP_FRAGMENT}`)
+      .replace('#include <common>', `#include <common>\n${fragmentPars}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${!textured ? '' : puff ? puffDetailFragment(sphereDepth) : NEEDLE_DETAIL_FRAGMENT}${FOLIAGE_GRADE}`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${FOLIAGE_SHADE}`)
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>\n${puff ? PUFF_NORMAL_FRAGMENT : ''}`)
       .replace('#include <lights_lambert_pars_fragment>', FOLIAGE_LIGHTS)
       .replace('#include <lights_fragment_begin>', FOLIAGE_LIGHTS_BEGIN);
   };
-  mat.customProgramCacheKey = () => `${prevKey}|foliage5${pine ? 'p' : ''}`;
+  mat.customProgramCacheKey = () => `${prevKey}|foliage8${pine ? 'p' : needles ? 'n' : ''}${puff ? 'b' : ''}${puff && sphereDepth ? 'd' : ''}${textured ? 't' : ''}`;
   mat.needsUpdate = true;
   return mat;
 }
+
+const NIGHT_DAY = { value: 0 };
 
 const DEPTH = {};
 /**
  * Shadow-map material that sways like the foliage (shared; set it as
  * `customDepthMaterial` on every casting instanced plant mesh). `pine` reshapes
- * the spruce geometry like its colour pass does.
- * @param {{ pine?: boolean }} [o]
+ * the spruce geometry like its colour pass does, `puff` turns leaf puffs toward the light.
+ * @param {{ pine?: boolean, puff?: boolean }} [o]
  * @returns {THREE.MeshDepthMaterial}
  */
-export function foliageDepthMaterial({ pine = false } = {}) {
-  const key = pine ? 'pine' : 'plain';
+export function foliageDepthMaterial({ pine = false, puff = false } = {}) {
+  const key = pine ? 'pine' : puff ? 'puff' : 'plain';
   if (DEPTH[key]) return DEPTH[key];
   const mat = new THREE.MeshDepthMaterial();
-  mat.name = pine ? 'foliage-depth-pine' : 'foliage-depth';
+  mat.name = pine ? 'foliage-depth-pine' : puff ? 'foliage-depth-puff' : 'foliage-depth';
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = WORLD_UNIFORMS.uTime;
     shader.uniforms.uWind = WIND_UNIFORMS.uWind;
     if (pine) shader.uniforms.uPine = PINE_UNIFORMS.uPine;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute vec3 aFol;\n${WIND_GLSL}${pine ? PINE_VERTEX_PARS : ''}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_DEPTH_MORPH : ''}${INSTANCED_WIND}`);
+      .replace('#include <common>', `#include <common>\nattribute vec3 aFol;\n${WIND_GLSL}${pine ? PINE_VERTEX_PARS : ''}${puff ? PUFF_DEPTH_PARS : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_DEPTH_MORPH : ''}${puff ? `${PUFF_DEPTH_VERTEX}\n${PUFF_JITTER}` : ''}${INSTANCED_WIND}${puff ? PUFF_EXPAND_DEPTH : ''}`);
+    if (puff) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vBbD;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${PUFF_DEPTH_FRAGMENT}`);
+    }
   };
-  mat.customProgramCacheKey = () => (pine ? 'foliage-depth1p' : 'foliage-depth1');
+  mat.customProgramCacheKey = () => (pine ? 'foliage-depth1p' : puff ? 'foliage-depth2b' : 'foliage-depth1');
   DEPTH[key] = mat;
   return mat;
 }
