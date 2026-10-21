@@ -13,9 +13,10 @@ import { canRank, rankBonus, rankName, nextRankXp, RANK_NUMERALS, RANK_COLORS } 
 import { sanitizeName } from '../net/protocol.js';
 import { el, setText, setStyle, setHidden, setClass, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import {
-  defOf, nameOf, iconOf, typeIcon, typeName, isComplete, tierName, workersAt, workerTasks, modsOf, upgradesOf, WORKER_TASKS,
+  defOf, nameOf, iconOf, typeIcon, typeName, isComplete, isWallEntity, tierName, workersAt, workerTasks, modsOf, upgradesOf, WORKER_TASKS,
   workText, mineTripText,
 } from './hud-data.js';
+import { MAX_SELECTION } from './hud-selection.js';
 
 const STATUS = {
   stun: ['💫', 'Stunned'],
@@ -203,7 +204,7 @@ export class InfoView {
       else bits.push(el('span', 'hi-class', CLASS_TEXT[def.class] || ''));
       sub.append(...bits);
     } else if (e.k === 'b' && def) {
-      sub.appendChild(el('span', 'hi-class', e.t === 'town_center' ? `${tierName(e.tr)} · Drop-off point` : def.dropOff ? 'Drop-off point' : 'Building'));
+      sub.appendChild(el('span', 'hi-class', e.t === 'town_center' ? `${tierName(e.tr)} · Drop-off point` : def.dropOff ? 'Drop-off point' : def.wall ? 'Wall' : 'Building'));
     } else if (e.k === 'm') {
       sub.appendChild(el('span', 'hi-class', 'Resource'));
     }
@@ -292,7 +293,7 @@ export class InfoView {
       big.addEventListener('click', () => this.o.onCancelQueue(e.id, 0));
       const bar = el('div', 'hi-bar is-train', el('i', 'hi-bar-fill'));
       const cls = UNITS[first.u] ? UNITS[first.u].class : '';
-      const verb = UPGRADES[first.u] ? 'Researching' : cls === 'god' || cls === 'titan' || cls === 'creature' ? 'Summoning' : 'Training';
+      const verb = BUILDINGS[first.u] ? 'Upgrading to' : UPGRADES[first.u] ? 'Researching' : cls === 'god' || cls === 'titan' || cls === 'creature' ? 'Summoning' : 'Training';
       const label = first.u === 'tier_up' ? `Growing into a ${tierName((e.tr || 1) + 1)}` : `${verb} ${typeName(first.u)}`;
       big.append(el('span', 'hi-q-icon', typeIcon(first.u)));
       const info = el('div', 'hi-q-info', el('div', 'hi-q-label', label), bar);
@@ -330,6 +331,8 @@ export class InfoView {
       extra.appendChild(el('div', 'hi-note is-dim', 'Gold and wood can be delivered here.'));
     } else if (e.t === 'house' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', `Provides housing for ${def.popProvided} population.`));
+    } else if (def && def.wall && e.o === vs.myIndex) {
+      extra.appendChild(el('div', 'hi-note is-dim', def.wallUpgrade ? 'Blocks the way. Upgrade it to stone for more health and armor.' : 'Blocks the way until enemies break through. A Tower built on it joins the wall.'));
     }
   }
 
@@ -445,6 +448,7 @@ export class InfoView {
   // ---------------------------------------------------------------- multi
 
   buildMulti(ents, active) {
+    if (ents.length > MAX_SELECTION) return this.buildCrowd(ents, active);
     const vs = this.o.viewState;
     const grid = el('div', 'hi-grid');
     const cells = [];
@@ -484,8 +488,75 @@ export class InfoView {
     this.multi = { cells, tasks, ids: ents.map((e) => e.id) };
   }
 
+  /**
+   * More than MAX_SELECTION selected (only wall segments can be): one cell per type with its count
+   * and combined health, and a line for the whole group, instead of a button for every segment.
+   */
+  buildCrowd(ents, active) {
+    const vs = this.o.viewState;
+    const byType = new Map();
+    for (const e of ents) {
+      if (!byType.has(e.t)) byType.set(e.t, []);
+      byType.get(e.t).push(e.id);
+    }
+    const grid = el('div', 'hi-grid');
+    const stacks = [];
+    for (const [type, ids] of byType) {
+      const def = BUILDINGS[type];
+      const c = el('button', 'hi-cell hi-cell-stack');
+      c.type = 'button';
+      c.tabIndex = -1;
+      c.title = `${def.name} × ${ids.length} — click: select only these`;
+      setStyle(c, '--team', teamColor(vs, vs.myIndex));
+      const bar = el('div', 'hi-cell-bar', el('i', 'hi-bar-fill'));
+      c.append(el('span', 'hi-cell-icon', def.icon), bar, el('span', 'hi-cell-count', String(ids.length)));
+      if (active && type === active.type) c.classList.add('is-active');
+      c.addEventListener('click', () => this.o.onSelectType(type));
+      grid.appendChild(c);
+      stacks.push({ ids, fill: bar.children[0] });
+    }
+    const label = el('div', 'hi-grid-label');
+    label.append(el('b', null, byType.size === 1 ? BUILDINGS[[...byType.keys()][0]].name : 'Walls'), ` × ${ents.length}`);
+    const note = el('div', 'hi-note');
+    this.root.appendChild(el('div', 'hi-multi', label, grid, note));
+    this.multi = { crowd: true, stacks, note, ids: ents.map((e) => e.id) };
+  }
+
+  updateCrowd() {
+    const vs = this.o.viewState;
+    let hp = 0;
+    let max = 0;
+    let building = 0;
+    let upgrading = 0;
+    let hurt = 0;
+    for (const s of this.multi.stacks) {
+      let sh = 0;
+      let sm = 0;
+      for (const id of s.ids) {
+        const e = vs.entities.get(id);
+        if (!e || !isWallEntity(e)) continue;
+        sh += e.hp;
+        sm += e.mhp;
+        if (!isComplete(e)) building++;
+        else if (e.q && e.q.length) upgrading++;
+        if (e.hp < e.mhp) hurt++;
+      }
+      hp += sh;
+      max += sm;
+      const f = sm > 0 ? sh / sm : 0;
+      setStyle(s.fill, 'width', pct(f));
+      setStyle(s.fill, 'background', hpColor(f));
+    }
+    const parts = [`Health ${fmt(hp)} / ${fmt(max)}`];
+    if (hurt) parts.push(`${hurt} damaged`);
+    if (building) parts.push(`${building} being built`);
+    if (upgrading) parts.push(`${upgrading} upgrading`);
+    setText(this.multi.note, parts.join(' · '));
+  }
+
   updateMulti() {
     const vs = this.o.viewState;
+    if (this.multi.crowd) return this.updateCrowd();
     if (this.multi.tasks) setText(this.multi.tasks, taskSummaryText(workerTasks(vs, this.multi.ids).counts));
     for (const c of this.multi.cells) {
       const e = vs.entities.get(c.id);

@@ -58,6 +58,11 @@ export function isComplete(e) {
   return !!e && e.k === 'b' && (e.bp === undefined || e.bp >= 1) && e.st !== 'build';
 }
 
+/** Is this view entity a wall segment (wooden or stone)? */
+export function isWallEntity(e) {
+  return !!e && e.k === 'b' && !!BUILDINGS[e.t] && BUILDINGS[e.t].wall === true;
+}
+
 /**
  * Ids of a selection given as an array or as { ids }.
  * @returns {number[]}

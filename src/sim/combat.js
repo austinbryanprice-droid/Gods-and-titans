@@ -1,7 +1,7 @@
 // Combat: WC3 armor formula, attacks (melee swings and homing projectiles),
 // splash/cleave/thorns/lifesteal/critical/evasion passives, target
 // acquisition priorities, chasing, and tower fire.
-import { ARMOR_FACTOR, PROJECTILE_SPEED, SPELL_VS_BUILDING, DT } from '../config.js';
+import { ARMOR_FACTOR, PROJECTILE_SPEED, SPELL_VS_BUILDING, BREACH_RANGE, DT } from '../config.js';
 import { hyp, edgeDist, distToEntity } from './common.js';
 import { absorbShield, addStatus } from './status.js';
 import { moveToEntity, stopMove } from './movement.js';
@@ -48,7 +48,8 @@ export function targetCategory(t) {
 
 /**
  * Best target for u within range (edge distance). Priority: closest enemy unit
- * that can attack, then other units, then buildings.
+ * that can attack, then other units, then buildings. Wall segments are never picked
+ * up (units break one only when it shuts them out, see findBreach, or when ordered to).
  * @param {object} [opts] { unitsOnly, fromX, fromY (measure from another point),
  *   exclude (entity id to skip), maxCat (skip categories above this),
  *   spots (melee: the target with the shortest walk to a free attack spot,
@@ -84,7 +85,7 @@ export function findTarget(world, u, range, opts = {}) {
   const bl = world.buildingList;
   for (let i = 0; i < bl.length; i++) {
     const b = bl[i];
-    if (b.dead || b.id === exclude || !canTarget(world, u, b)) continue;
+    if (b.dead || b.def.wall || b.id === exclude || !canTarget(world, u, b)) continue;
     const d = distToEntity(px, py, b) - self;
     if (d > range) continue;
     if (d < bestD) {
@@ -127,7 +128,7 @@ function findTargetWithRoom(world, u, range, tmp, px, py, self, exclude, maxCat,
     const bl = world.buildingList;
     for (let i = 0; i < bl.length; i++) {
       const b = bl[i];
-      if (b.dead || b.id === exclude || !canTarget(world, u, b)) continue;
+      if (b.dead || b.def.wall || b.id === exclude || !canTarget(world, u, b)) continue;
       const d = distToEntity(px, py, b) - self;
       if (d > range) continue;
       roomT[n] = b;
@@ -187,7 +188,7 @@ const reachCand = [];
 export function findReachableTarget(world, u, range, exclude) {
   const atk = u.def.attack;
   if (!atk) return null;
-  const list = world.queryRadius(u.x, u.y, range + u.radius, (e) => e !== exclude && e !== u && canTarget(world, u, e));
+  const list = world.queryRadius(u.x, u.y, range + u.radius, (e) => e !== exclude && e !== u && !(e.kind === 'building' && e.def.wall) && canTarget(world, u, e));
   reachCand.length = 0;
   for (const e of list) {
     const d = edgeDist(u, e);
@@ -201,6 +202,31 @@ export function findReachableTarget(world, u, range, exclude) {
     if (c.d <= atk.range + 0.25 || !melee || hasFreeSpot(world, u, c.e)) return c.e;
   }
   return null;
+}
+
+/**
+ * The enemy wall segment shutting u out, or null. Called when u's way to its target is cut off
+ * (no path, or only to a point short of it), so a unit stopped against an enemy wall breaks
+ * through instead of standing there. Among the segments within BREACH_RANGE it picks the one
+ * with the least health left (so a crowd works on one segment, and a wooden stretch in a
+ * stone wall is where it breaks in), the nearest on a tie. `skip`: segment ids to leave out.
+ */
+export function findBreach(world, u, skip = null) {
+  if (!u.def.attack) return null;
+  let best = null;
+  let bestD = Infinity;
+  const bl = world.buildingList;
+  for (let i = 0; i < bl.length; i++) {
+    const b = bl[i];
+    if (b.dead || !b.def.wall || !canTarget(world, u, b) || (skip && skip.includes(b.id))) continue;
+    const d = distToEntity(u.x, u.y, b) - u.radius;
+    if (d > BREACH_RANGE) continue;
+    if (!best || b.hp < best.hp - 0.5 || (Math.abs(b.hp - best.hp) <= 0.5 && d < bestD)) {
+      best = b;
+      bestD = d;
+    }
+  }
+  return best;
 }
 
 export function heal(u, amount) {
@@ -330,7 +356,8 @@ const PROGRESS_TICKS = 10;
  * surround.js). Tracks u.engT (ticks spent approaching this target) and
  * u.blockedT (ticks without a free spot or without getting closer).
  * @returns {'hit'|'approach'|'blocked'|'lost'|'unreachable'} 'blocked': still
- *   trying (no free spot / no progress); callers keep the target or re-target
+ *   trying (no free spot / no progress); callers keep the target or re-target;
+ *   'unreachable': there is no way to it (shut in, say behind an enemy wall)
  */
 export function engage(world, u, t, chase = true) {
   if (!canTarget(world, u, t)) return 'lost';
@@ -359,7 +386,7 @@ export function engage(world, u, t, chase = true) {
   u.state = 'move';
   u.target = t.id;
   u.engT++;
-  if (d < SURROUND_DIST && isMelee(u)) {
+  if (d < SURROUND_DIST && isMelee(u) && !(t.kind === 'building' && t.def.wall)) {
     const r = approachSpot(world, u, t);
     if (r) return r;
   }

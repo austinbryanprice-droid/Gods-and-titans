@@ -3,8 +3,10 @@
 // cancelling unfinished buildings, and repairing damaged ones.
 import {
   BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT, TERRAIN, REPAIR_COST, REPAIR_TIME,
+  WALL_HELP_RANGE, WALL_REMOVE_REFUND,
 } from '../config.js';
 import { BUILDINGS } from '../data/index.js';
+import { wallLine } from '../data/walls.js';
 import { moveToRect, stopMove } from './movement.js';
 import { workSpeedOf } from './economy.js';
 import { hyp, distPointRect } from './common.js';
@@ -29,6 +31,12 @@ export const TREES_IN_WAY = 'Trees in the way.';
 export const BUILDING_IN_WAY = 'Another building is in the way.';
 export const MINE_IN_WAY = 'A gold mine is in the way.';
 export const UNIT_IN_WAY = 'Something is in the way.';
+export const WALL_THERE = 'The wall is already there.';
+
+/** Is e a wall segment (any state) of this player? */
+export function isOwnWall(e, player) {
+  return !!e && e.kind === 'building' && !e.dead && e.owner === player && e.def.wall === true;
+}
 
 /** Own building type ids only (no prototype keys such as 'constructor'). */
 export function buildingDef(typeId) {
@@ -63,6 +71,7 @@ export function placementError(world, player, typeId, tx, ty) {
       else {
         const occupant = world.entities.get(map.occ[i]);
         if (occupant && occupant.kind === 'mine') mine = true;
+        else if (def.joinsWalls && isOwnWall(occupant, player)) continue; // raised over your own wall: it takes the segments' place
         else building = true;
       }
     }
@@ -185,6 +194,141 @@ export function issueBuild(world, player, workers, typeId, tx, ty, queue) {
   }
 }
 
+/**
+ * A tower is raised where the player's own wall segments stand: the segments are taken down
+ * (their whole cost comes back) and the tower stands in their place, joined to the wall.
+ */
+function clearWallsUnder(world, player, def, tx, ty) {
+  if (!def.joinsWalls) return;
+  const map = world.map;
+  for (let y = ty; y < ty + def.size; y++) {
+    for (let x = tx; x < tx + def.size; x++) {
+      if (!map.inBounds(x, y)) continue;
+      const e = world.entities.get(map.occ[y * map.width + x]);
+      if (!isOwnWall(e, player)) continue;
+      refund(world, player, e.def.cost);
+      for (const q of e.queue) refund(world, player, q.cost);
+      world.removeBuilding(e);
+    }
+  }
+}
+
+/** Does the wall already hold this tile (one of the player's segments, or a tower that joined it)? */
+function wallHolds(world, player, x, y) {
+  const map = world.map;
+  if (!map.inBounds(x, y)) return false;
+  const e = world.entities.get(map.occ[y * map.width + x]);
+  return !!e && e.kind === 'building' && !e.dead && e.owner === player && (e.def.wall === true || e.def.joinsWalls === true);
+}
+
+/**
+ * build command for a wall: the segments along a line from tile (tx, ty) towards (tx2, ty2),
+ * see data/walls.js wallLine. Every segment is paid for and placed at once (an unfinished
+ * segment already blocks the way and can be attacked); the worshippers then share the line,
+ * each taking a stretch, and help each other when done. Tiles the wall already holds are
+ * skipped; tiles that cannot be built on are left out (the first reason is reported only
+ * when nothing at all can be built).
+ */
+export function issueBuildLine(world, player, workers, typeId, tx, ty, tx2, ty2, queue) {
+  const def = buildingDef(typeId);
+  if (!def || !def.wall || workers.length === 0) return;
+  if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tx2) || !Number.isFinite(ty2)) return;
+  const p = world.players[player];
+  if (def.tier > p.tier) return world.error(player, tierMessage(def.tier));
+  const todo = [];
+  let reason = null;
+  for (const [x, y] of wallLine(tx, ty, tx2, ty2)) {
+    if (wallHolds(world, player, x, y)) continue;
+    const err = placementError(world, player, typeId, x, y);
+    if (err) reason = reason || err;
+    else todo.push([x, y]);
+  }
+  if (!todo.length) return world.error(player, reason || WALL_THERE);
+  const cost = { gold: def.cost.gold * todo.length, wood: def.cost.wood * todo.length, faith: def.cost.faith * todo.length };
+  const msg = world.affordError(player, cost);
+  if (msg) return world.error(player, msg);
+  world.pay(player, cost);
+  const sites = todo.map(([x, y]) => world.createBuilding(player, typeId, x, y, false, true));
+  // Share the line: each worshipper takes a stretch, the one nearest the start the first stretch.
+  const ax = sites[0].x;
+  const ay = sites[0].y;
+  const bx = sites[sites.length - 1].x;
+  const by = sites[sites.length - 1].y;
+  const len = hyp(bx - ax, by - ay) || 1;
+  const along = (w) => ((w.x - ax) * (bx - ax) + (w.y - ay) * (by - ay)) / len;
+  const crew = workers.slice().sort((a, b) => along(a) - along(b) || a.id - b.id).slice(0, sites.length);
+  crew.forEach((w, k) => {
+    const from = Math.floor((k * sites.length) / crew.length);
+    const to = Math.floor(((k + 1) * sites.length) / crew.length);
+    const mine = sites.slice(from, to).map((b) => b.id);
+    const first = sites[from];
+    world.setOrder(w, { type: 'build', b: typeId, tx: first.tx, ty: first.ty, paid: null, site: first.id, helper: true, sites: mine, si: 0 }, queue);
+  });
+  // (More workers than segments: the rest help the nearest stretch.)
+  for (const w of workers) {
+    if (crew.includes(w)) continue;
+    let near = sites[0];
+    let bestD = Infinity;
+    for (const b of sites) {
+      const d = hyp(w.x - b.x, w.y - b.y);
+      if (d < bestD) {
+        bestD = d;
+        near = b;
+      }
+    }
+    world.setOrder(w, { type: 'build', b: typeId, tx: near.tx, ty: near.ty, paid: null, site: near.id, helper: true }, queue);
+  }
+}
+
+/**
+ * A worshipper's wall segment is done (or gone): the next one. First what is left of its own
+ * stretch, in order, then the nearest unfinished segment of the player's walls within
+ * WALL_HELP_RANGE that fewer worshippers are working on. Sets o.site and returns false, or
+ * returns true when there is nothing left to build.
+ */
+function nextWallSite(world, u, o) {
+  const def = BUILDINGS[o.b];
+  if (!def || !def.wall) return true;
+  const bad = o.bad || (o.bad = []);
+  const open = (id) => {
+    const b = world.entities.get(id);
+    return b && !b.dead && b.kind === 'building' && b.owner === u.owner && !b.constructed && !bad.includes(id) ? b : null;
+  };
+  const take = (b) => {
+    o.site = b.id;
+    o.tx = b.tx;
+    o.ty = b.ty;
+    return false;
+  };
+  if (o.sites) {
+    for (let i = (o.si || 0) + 1; i < o.sites.length; i++) {
+      const b = open(o.sites[i]);
+      if (b) {
+        o.si = i;
+        return take(b);
+      }
+    }
+  }
+  const claims = new Map();
+  for (const w of world.unitList) {
+    const q = w.order;
+    if (!w.dead && w !== u && q && q.type === 'build' && q.site) claims.set(q.site, (claims.get(q.site) || 0) + 1);
+  }
+  let best = null;
+  let bestScore = WALL_HELP_RANGE;
+  for (const b of world.buildingList) {
+    if (b.constructed || !b.def.wall || !open(b.id)) continue;
+    const score = hyp(b.x - u.x, b.y - u.y) + 3 * (claims.get(b.id) || 0);
+    if (score < bestScore) {
+      bestScore = score;
+      best = b;
+    }
+  }
+  if (!best) return true;
+  o.sites = null;
+  return take(best);
+}
+
 function primaryPending(world, owner, o) {
   for (const u of world.unitList) {
     if (u.dead || u.owner !== owner) continue;
@@ -202,7 +346,7 @@ function primaryPending(world, owner, o) {
 export function updateBuild(world, u, o) {
   if (o.site) {
     const b = world.entities.get(o.site);
-    if (!b || b.dead || b.constructed) return true;
+    if (!b || b.dead || b.constructed) return nextWallSite(world, u, o);
     if (distPointRect(u.x, u.y, b.tx, b.ty, b.tx + b.size, b.ty + b.size) - u.radius <= BUILD_REACH) {
       if (u.mv) stopMove(u);
       u.state = 'build';
@@ -216,7 +360,8 @@ export function updateBuild(world, u, o) {
     const mv = moveToRect(world, u, b.tx, b.ty, b.size, `e${b.id}`);
     if (mv.failed) {
       stopMove(u);
-      return true;
+      if (b.def.wall) (o.bad || (o.bad = [])).push(b.id); // cannot get at this segment: try another
+      return nextWallSite(world, u, o);
     }
     return false;
   }
@@ -246,6 +391,7 @@ export function updateBuild(world, u, o) {
     if (u.mv) stopMove(u);
     const err = placementError(world, u.owner, o.b, o.tx, o.ty);
     if (!err) {
+      clearWallsUnder(world, u.owner, def, o.tx, o.ty);
       const b = world.createBuilding(u.owner, o.b, o.tx, o.ty, false);
       o.site = b.id;
       o.paid = null;
@@ -288,9 +434,20 @@ export function updateConstruction(world, b) {
   if (b.buildProgress >= 1 - 1e-9) world.completeBuilding(b);
 }
 
-/** cancelBuild: remove an unfinished building and refund 75%. */
+/**
+ * cancelBuild: remove an unfinished building and refund 75%. A finished wall segment can be
+ * taken down too (so the owner can open a gap in their own wall): half its cost comes back,
+ * and an upgrade under way is refunded in full.
+ */
 export function cancelBuild(world, player, b) {
-  if (!b || b.dead || b.kind !== 'building' || b.owner !== player || b.constructed) return;
+  if (!b || b.dead || b.kind !== 'building' || b.owner !== player) return;
+  if (b.constructed) {
+    if (!b.def.wall) return;
+    refund(world, player, b.def.cost, WALL_REMOVE_REFUND);
+    for (const q of b.queue) refund(world, player, q.cost);
+    world.removeBuilding(b);
+    return;
+  }
   refund(world, player, b.def.cost, CANCEL_BUILD_REFUND);
   world.removeBuilding(b);
 }

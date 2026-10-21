@@ -6,6 +6,7 @@
 // visible enemy / neutral ground units. Pure: runs in Node tests.
 import { TERRAIN, DROPOFF_MINE_GAP } from '../config.js';
 import { BUILDINGS, UNITS, GOLD_MINE } from '../data/index.js';
+import { wallLine } from '../data/walls.js';
 
 /** Minimum Chebyshev gap (empty tiles) between a drop-off (Town Center, Storehouse) and a gold mine. */
 export const MINE_GAP = DROPOFF_MINE_GAP;
@@ -20,6 +21,7 @@ export const BUILDING_IN_WAY = 'Another building is in the way.';
 export const MINE_IN_WAY = 'A gold mine is in the way.';
 export const UNIT_IN_WAY = 'Something is in the way.';
 export const UNEXPLORED = 'Unexplored ground.';
+export const WALL_THERE = 'The wall is already there.';
 
 const WALKABLE = new Set([TERRAIN.GRASS, TERRAIN.DIRT, TERRAIN.SAND]);
 
@@ -29,12 +31,16 @@ function distPointRect(px, py, x0, y0, x1, y1) {
   return Math.hypot(dx, dy);
 }
 
-/** Footprints that block placement: [{ tx, ty, size, mine }]. */
+/**
+ * Footprints that block placement: [{ tx, ty, size, mine, wall, joins }]. wall: one of my own wall
+ * segments (a tower may be raised over it); joins: my own wall segment or a tower that joined
+ * the wall (a dragged wall skips the tile).
+ */
 function knownFootprints(vs, planned) {
   const out = [];
   for (const p of planned || []) {
     const def = p && BUILDINGS[p.b];
-    if (def) out.push({ tx: p.tx, ty: p.ty, size: def.size, mine: false });
+    if (def) out.push({ tx: p.tx, ty: p.ty, size: def.size, mine: false, wall: !!def.wall, joins: !!(def.wall || def.joinsWalls) });
   }
   for (const e of vs.entities.values()) {
     if (e.k === 'm') {
@@ -44,7 +50,9 @@ function knownFootprints(vs, planned) {
     if (e.k !== 'b') continue;
     // Enemy buildings only when seen (no information leak through the ghost).
     if (vs.isEnemy(e.o) && !(vs.lastSeen && vs.lastSeen.has(e.id)) && !vs.isEntityVisible(e)) continue;
-    out.push({ tx: e.tx, ty: e.ty, size: (BUILDINGS[e.t] && BUILDINGS[e.t].size) || 2, mine: false });
+    const d = BUILDINGS[e.t];
+    const mine = e.o === vs.myIndex;
+    out.push({ tx: e.tx, ty: e.ty, size: (d && d.size) || 2, mine: false, wall: mine && !!(d && d.wall), joins: mine && !!(d && (d.wall || d.joinsWalls)) });
   }
   if (vs.lastSeen) {
     for (const [id, ls] of vs.lastSeen) {
@@ -73,8 +81,11 @@ function knownFootprints(vs, planned) {
 export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned = null) {
   const def = typeof buildingTypeId === 'string' && Object.hasOwn(BUILDINGS, buildingTypeId) ? BUILDINGS[buildingTypeId] : null;
   if (!def || !Number.isFinite(tx) || !Number.isFinite(ty)) return { valid: false, tiles: [], size: 0, message: CANT_BUILD };
-  tx = Math.floor(tx);
-  ty = Math.floor(ty);
+  return checkFootprint(vs, def, Math.floor(tx), Math.floor(ty), knownFootprints(vs, planned));
+}
+
+/** checkPlacement for a known building def, with the blocking footprints worked out once. */
+function checkFootprint(vs, def, tx, ty, footprints) {
   const s = def.size;
   const tiles = new Array(s * s).fill(true);
   const map = vs.map;
@@ -113,7 +124,8 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
   let buildingBlock = false;
   let mineBlock = false;
   let unitBlock = false;
-  for (const f of knownFootprints(vs, planned)) {
+  for (const f of footprints) {
+    if (f.wall && def.joinsWalls) continue; // a tower is raised over my own wall segments
     const fx1 = f.tx + f.size;
     const fy1 = f.ty + f.size;
     const reach = gapped && f.mine ? MINE_GAP : 0;
@@ -166,6 +178,38 @@ export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned 
     else message = mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD;
   }
   return { valid, tiles, size: s, message };
+}
+
+/**
+ * What a wall dragged from tile (x0, y0) towards (x1, y1) would do (the sim's issueBuildLine):
+ * every tile of data/walls.js wallLine as 'build' (a segment will be raised there), 'held' (my
+ * wall, or a tower joined to it, already stands there: skipped and free) or 'blocked' (cannot be
+ * built on: left out, with the reason). The segments to build are paid for together.
+ * @returns {{ tiles: { tx: number, ty: number, state: string, message: string|null }[], build: number,
+ *   cost: { gold: number, wood: number, faith: number }, message: string|null }} message: null when at
+ *   least one segment can be raised, else why not
+ */
+export function checkWallLine(vs, playerIndex, typeId, x0, y0, x1, y1, planned = null) {
+  const def = typeof typeId === 'string' && Object.hasOwn(BUILDINGS, typeId) ? BUILDINGS[typeId] : null;
+  const none = { tiles: [], build: 0, cost: { gold: 0, wood: 0, faith: 0 }, message: CANT_BUILD };
+  if (!def || !def.wall || ![x0, y0, x1, y1].every(Number.isFinite)) return none;
+  const footprints = knownFootprints(vs, planned);
+  const held = (tx, ty) => footprints.some((f) => f.joins && tx >= f.tx && tx < f.tx + f.size && ty >= f.ty && ty < f.ty + f.size);
+  const tiles = [];
+  let build = 0;
+  let reason = null;
+  for (const [tx, ty] of wallLine(x0, y0, x1, y1)) {
+    if (held(tx, ty)) {
+      tiles.push({ tx, ty, state: 'held', message: null });
+      continue;
+    }
+    const chk = checkFootprint(vs, def, tx, ty, footprints);
+    if (chk.valid) build++;
+    else reason = reason || chk.message;
+    tiles.push({ tx, ty, state: chk.valid ? 'build' : 'blocked', message: chk.message });
+  }
+  const cost = { gold: def.cost.gold * build, wood: def.cost.wood * build, faith: def.cost.faith * build };
+  return { tiles, build, cost, message: build ? null : reason || WALL_THERE };
 }
 
 /**

@@ -1,7 +1,7 @@
 // Per-unit order state machines: move, attack-move, attack, follow, hold,
 // economy and construction orders, casts, idle auto-acquire and fight-back.
 import { moveToPoint, moveToUnit, stopMove } from './movement.js';
-import { engage, findTarget, findReachableTarget, targetCategory, acquisitionRange, canTarget } from './combat.js';
+import { engage, findTarget, findReachableTarget, findBreach, targetCategory, acquisitionRange, canTarget } from './combat.js';
 import { updateGather, updateReturn, updatePray, releasePrayerSlot } from './economy.js';
 import { updateBuild, updateRepair, findRepairTarget, refund } from './construction.js';
 import { updateCastOrder, tryAutocast } from './abilities.js';
@@ -101,6 +101,44 @@ function retarget(world, u, t) {
   return blocked ? findReachableTarget(world, u, acquisitionRange(u), t) : null;
 }
 
+/**
+ * u is shut out by an enemy wall (its target or its destination cannot be reached, and a wall
+ * segment is right there): start breaking through it. The wall is kept in o.breach and
+ * runBreach hits it until it falls, after which the order carries on and finds the way open.
+ */
+function startBreach(world, u, o) {
+  const w = findBreach(world, u, o.noBreach);
+  if (!w) return false;
+  o.breach = w.id;
+  u.mv = null;
+  return true;
+}
+
+/**
+ * Keep hitting the wall of o.breach. An attack-move drops it when an enemy unit comes into
+ * reach (fightBack), so soldiers do not stand sawing at a wall while archers pick them off.
+ * @returns {boolean} true while the breach goes on
+ */
+function runBreach(world, u, o, fightBack) {
+  const w = world.entities.get(o.breach);
+  if (!w || w.dead || !canTarget(world, u, w)) {
+    o.breach = 0;
+    return false;
+  }
+  if (fightBack && scanTick(world, u) && findTarget(world, u, u.def.attack.range + 0.02, { unitsOnly: true })) {
+    o.breach = 0;
+    return false;
+  }
+  const r = engage(world, u, w, true);
+  if (r === 'lost' || r === 'unreachable') {
+    if (r === 'unreachable') (o.noBreach || (o.noBreach = [])).push(w.id); // not this one (it is on the far side)
+    o.breach = 0;
+    u.mv = null;
+    return false;
+  }
+  return true;
+}
+
 function idle(world, u) {
   u.state = 'idle';
   u.target = 0;
@@ -127,6 +165,7 @@ function runAttackMove(world, u, o) {
     u.state = 'move';
     return moveToPoint(world, u, o.x, o.y, o.group).arrived;
   }
+  if (o.breach && runBreach(world, u, o, true)) return false;
   if (o.target) {
     const t = world.entities.get(o.target);
     if (t && !t.dead && canTarget(world, u, t)) {
@@ -146,6 +185,10 @@ function runAttackMove(world, u, o) {
         if (r === 'unreachable') {
           o.skip = t.id;
           o.skipUntil = world.tickCount + SKIP_TICKS;
+          if (startBreach(world, u, o)) {
+            o.target = 0;
+            return false;
+          }
         }
       }
     }
@@ -166,6 +209,8 @@ function runAttackMove(world, u, o) {
   u.state = 'move';
   u.target = 0;
   const mv = moveToPoint(world, u, o.x, o.y, o.group);
+  // Stopped short of the destination (no way through): an enemy wall right here is broken.
+  if ((mv.failed || (mv.arrived && !mv.complete)) && startBreach(world, u, o)) return false;
   return mv.arrived;
 }
 
@@ -191,6 +236,7 @@ function runAttack(world, u, o) {
       return false;
     }
   }
+  if (o.breach && runBreach(world, u, o, false)) return false;
   const r = engage(world, u, t, true);
   if (o.auto) {
     // Auto-acquired fights switch to an enemy in reach when this one is blocked or unreachable.
@@ -203,6 +249,8 @@ function runAttack(world, u, o) {
       return false;
     }
   }
+  // A target walled in is reached by breaking the wall; otherwise the order is over.
+  if (r === 'unreachable' && startBreach(world, u, o)) return false;
   // Explicit attack orders keep their target (engage keeps trying other attack spots).
   return r === 'lost' || r === 'unreachable';
 }

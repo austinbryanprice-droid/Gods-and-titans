@@ -246,7 +246,62 @@ export const BUILDINGS = {
     ],
     icon: '🗼',
     hotkey: 'T',
-    description: 'Defensive tower that shoots at nearby enemies, including flyers.',
+    joinsWalls: true, // may be raised on your own wall segments, and walls beside it join it
+    description: 'Defensive tower that shoots at nearby enemies, including flyers. Raise it on a wall or in line with one and it becomes part of the wall.',
+  },
+
+  // Wall segments: one tile each, dragged out in lines (data/walls.js). A wooden segment is
+  // built by Worshippers and upgraded in place to stone (`wallUpgrade`, researched per segment
+  // with no building needed). Walls block movement, have health, and do not count as buildings
+  // for defeat or for the AI's targets. The stone segment's `cost` is the whole price (wood
+  // plus the upgrade): it is what repairs and the refund for a tower raised over it go by.
+  wooden_wall: {
+    id: 'wooden_wall',
+    name: 'Wooden Wall',
+    wall: true,
+    size: 1,
+    hp: 350,
+    armor: 1,
+    cost: { gold: 0, wood: 12, faith: 0 },
+    buildTime: 6,
+    tier: 1,
+    requires: [],
+    produces: [],
+    popProvided: 0,
+    dropOff: false,
+    prayerSlots: 0,
+    faithRate: 0,
+    sight: 2,
+    attack: null,
+    upgrades: [],
+    wallUpgrade: { to: 'stone_wall', cost: { gold: 20, wood: 10, faith: 0 }, time: 12 },
+    icon: '🚧',
+    hotkey: 'W',
+    description: 'A line of sharpened stakes. Press and drag to lay out a wall; Worshippers build it segment by segment. Walls block the way, so enemies must break through them. Upgrade it to stone.',
+  },
+
+  stone_wall: {
+    id: 'stone_wall',
+    name: 'Stone Wall',
+    wall: true,
+    size: 1,
+    hp: 1000,
+    armor: 6,
+    cost: { gold: 20, wood: 22, faith: 0 },
+    buildTime: 6,
+    tier: 1,
+    requires: [],
+    produces: [],
+    popProvided: 0,
+    dropOff: false,
+    prayerSlots: 0,
+    faithRate: 0,
+    sight: 2,
+    attack: null,
+    upgrades: [],
+    icon: '🧱',
+    hotkey: 'W',
+    description: 'Masonry that shrugs off blades. Upgraded from a Wooden Wall; only siege engines and large armies bring it down quickly.',
   },
 
   titan_gate: {
@@ -293,4 +348,4 @@ export const GOLD_MINE = {
 };
 
 // Order of buttons in a Worshipper's build menu.
-export const BUILD_MENU = ['house', 'barracks', 'shrine', 'storehouse', 'tower', 'temple', 'titan_gate', 'town_center'];
+export const BUILD_MENU = ['house', 'barracks', 'shrine', 'storehouse', 'tower', 'temple', 'titan_gate', 'town_center', 'wooden_wall'];

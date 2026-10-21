@@ -180,7 +180,7 @@ export class World {
     this.buildingList.push(b);
     this.map.setOccupied(tx, ty, def.size, id);
     if (!silent) this.emit({ type: 'construction', id, t: typeId, o: owner });
-    if (constructed) {
+    if (constructed && !def.wall) {
       if (def.prayerSlots > 0) computePrayerSpots(this, b);
       this.recomputePopCap(owner);
     }
@@ -551,7 +551,7 @@ export class World {
     }
     b.queue = [];
     if (b.prayers) b.prayers.fill(0);
-    if (b.constructed) {
+    if (b.constructed && !b.def.wall) {
       this.recomputePopCap(b.owner);
       this.recomputeTier(b.owner);
     }
@@ -568,12 +568,25 @@ export class World {
     b.constructed = true;
     b.buildProgress = 1;
     b.hp = Math.min(b.maxHp, b.hp);
+    if (b.def.wall) return; // wall segments come by the dozen: no stats, no message, no population
     const p = this.players[b.owner];
     if (p) p.stats.buildings++;
     if (b.def.prayerSlots > 0) computePrayerSpots(this, b);
     this.emit({ type: 'buildingComplete', id: b.id, t: b.type, o: b.owner });
     this.recomputePopCap(b.owner);
     if (b.type === 'town_center') this.recomputeTier(b.owner);
+  }
+
+  /**
+   * A building becomes another type in place (a wooden wall upgraded to stone): same entity,
+   * same tile, new definition. Health keeps its missing part; armor follows the new type.
+   */
+  changeBuildingType(b, typeId) {
+    const def = BUILDINGS[typeId];
+    if (!def || b.dead || def.size !== b.size) return;
+    b.type = typeId;
+    b.def = def;
+    this.applyBuildingStats(b);
   }
 
   depleteMine(m) {
@@ -777,7 +790,8 @@ export class World {
   checkDefeats() {
     if (this.gameOver) return;
     const counts = new Array(this.players.length).fill(0);
-    for (const b of this.buildingList) if (!b.dead && b.owner >= 0) counts[b.owner]++;
+    // (Wall segments do not keep a player in the game.)
+    for (const b of this.buildingList) if (!b.dead && b.owner >= 0 && !b.def.wall) counts[b.owner]++;
     // Everyone left without a building falls on this tick, then the winner is
     // decided once: a mutual wipe-out is a draw, not a win for the higher index.
     let fell = false;

@@ -38,11 +38,11 @@ export function rankBonus(rank) {
 
 /**
  * Experience a soldier earns for destroying `victim`: a unit is worth what gods earn from its
- * death (xpValue), a completed building a share of its health.
+ * death (xpValue), a completed building a share of its health (a wall segment is worth nothing).
  * @param {object} victim sim entity (unit or building)
  */
 export function killXp(victim) {
   if (victim.kind === 'unit') return xpValue(victim.def, victim.level || 1);
-  if (victim.kind === 'building' && victim.constructed) return Math.round(victim.def.hp / BUILDING_XP_HP);
+  if (victim.kind === 'building' && victim.constructed && !victim.def.wall) return Math.round(victim.def.hp / BUILDING_XP_HP);
   return 0;
 }

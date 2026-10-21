@@ -13,6 +13,7 @@ export const SURROUND_DIST = 7; // edge distance from the target at which melee 
 const REPICK_TICKS = 12; // re-check the spot this often
 const PROGRESS_TICKS = 10; // progress check interval while walking to the spot
 const BAD_SPOT_TICKS = 60; // a spot we got stuck on is avoided this long
+const CUT_SPOTS = 2; // attack spots no path reaches before the target counts as shut in
 const AROUND = 0.6; // radians: circle the crowd until within this angle of the spot
 const TWO_PI = Math.PI * 2;
 
@@ -38,7 +39,7 @@ function spacingOf(u) {
 }
 
 function newState(t, now) {
-  return { tid: t.id, has: false, a: 0, R: 0, x: 0, y: 0, next: now, checkT: now, lastD: Infinity, badA: 0, badX: 0, badY: 0, badUntil: 0, chaseUntil: 0, isRect: t.kind !== 'unit' };
+  return { tid: t.id, has: false, a: 0, R: 0, x: 0, y: 0, next: now, checkT: now, lastD: Infinity, badA: 0, badX: 0, badY: 0, badUntil: 0, chaseUntil: 0, cut: 0, isRect: t.kind !== 'unit' };
 }
 
 function claimValid(c, t) {
@@ -363,7 +364,7 @@ function waitOutside(world, u, t) {
 /**
  * Walk a melee attacker to a free attack spot around t (u is not in range yet).
  * Updates u.blockedT (ticks without a spot or without progress).
- * @returns {'approach'|'blocked'|null} null: no spot logic now, chase normally
+ * @returns {'approach'|'blocked'|'unreachable'|null} null: no spot logic now, chase normally
  */
 export function approachSpot(world, u, t) {
   const now = world.tickCount;
@@ -398,6 +399,11 @@ export function approachSpot(world, u, t) {
       // Reached it without getting in range, or cannot get there: try another spot.
       markBad(s, p, now);
       u.blockedT += 2;
+      // Two spots in a row that no path reaches: the building is shut in (behind a wall, say).
+      if (!mv.complete && ++s.cut >= CUT_SPOTS) {
+        stopMove(u);
+        return 'unreachable';
+      }
       return 'blocked';
     }
   } else {

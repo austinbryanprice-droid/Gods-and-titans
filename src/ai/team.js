@@ -14,7 +14,7 @@ function teamCenter(world, team) {
   let y = 0;
   let n = 0;
   for (const b of world.buildingList) {
-    if (b.dead || b.owner < 0) continue;
+    if (b.dead || b.owner < 0 || b.def.wall) continue;
     const p = world.players[b.owner];
     if (!p || p.team !== team) continue;
     x += b.x;
@@ -38,7 +38,7 @@ export function teamTarget(world, team) {
   const counts = new Map();
   const near = new Map();
   for (const b of world.buildingList) {
-    if (b.dead || b.owner < 0 || !valid(b.owner)) continue;
+    if (b.dead || b.owner < 0 || b.def.wall || !valid(b.owner)) continue;
     counts.set(b.owner, (counts.get(b.owner) || 0) + 1);
     if (center) {
       const d = Math.hypot(b.x - center.x, b.y - center.y);

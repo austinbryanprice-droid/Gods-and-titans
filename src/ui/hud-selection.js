@@ -1,9 +1,17 @@
 // Selection state for the local player: the selected entity ids (WC3 rules:
 // up to 24 own units / buildings, or a single foreign entity for info), the
-// active subgroup (Tab), and control groups 1–9. Pure logic over a ViewState.
-import { subgroups, subgroupRank } from './hud-data.js';
+// active subgroup (Tab), and control groups 1–9. A selection of nothing but
+// wall segments may be longer (a wall is dozens of one-tile pieces). Pure
+// logic over a ViewState.
+import { MAX_WALL_SELECTION } from '../config.js';
+import { subgroups, subgroupRank, isWallEntity } from './hud-data.js';
 
 export const MAX_SELECTION = 24;
+
+/** How many of these (own) entities one selection may hold. */
+export function selectionLimit(entities) {
+  return entities.length && entities.every(isWallEntity) ? MAX_WALL_SELECTION : MAX_SELECTION;
+}
 
 export class Selection {
   /** @param {object} vs ViewState */
@@ -135,7 +143,7 @@ export class Selection {
     }
     let next;
     const own = list.filter((e) => this.selectableOwn(e));
-    if (own.length) next = this.sortIds(own.map((e) => e.id)).slice(0, MAX_SELECTION);
+    if (own.length) next = this.sortIds(own.map((e) => e.id)).slice(0, selectionLimit(own));
     else next = list.length ? [list[0].id] : [];
     const same = next.length === this.ids.length && next.every((id, i) => id === this.ids[i]);
     const prevActive = this.activeType;
@@ -230,7 +238,8 @@ export class Selection {
       const e = this.vs.entities.get(id);
       return e && e.o === this.vs.myIndex;
     });
-    const merged = this.sortIds([...new Set([...prev, ...own])]).slice(0, MAX_SELECTION);
+    const all = this.sortIds([...new Set([...prev, ...own])]);
+    const merged = all.slice(0, selectionLimit(all.map((id) => this.vs.entities.get(id))));
     if (!merged.length) return false;
     this.groups.set(n, merged);
     return true;

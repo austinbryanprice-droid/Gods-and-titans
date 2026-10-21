@@ -5,6 +5,7 @@
 import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, DT, POP_MAX } from '../config.js';
 import { getUnitType, producibleAt } from '../data/index.js';
 import { getUpgrade, buildingMods, reviveMult } from '../data/upgrades.js';
+import { wallUpgradeOf } from '../data/walls.js';
 import { refund, tierMessage, requiresMessage } from './construction.js';
 import { hyp } from './common.js';
 
@@ -138,6 +139,34 @@ export function issueResearch(world, player, b, upId) {
   b.queue.push({ u: upId, time: up.time, elapsed: 0, cost: { ...up.cost }, pop: 0, revive: null, research: true });
 }
 
+/**
+ * upgradeWall: queue the stone upgrade (a wall type's `wallUpgrade`) on finished wall segments of
+ * the player, in the order given, for as many as the purse allows. Every segment pays and builds
+ * its own upgrade (no worshipper needed); it stays a working wall meanwhile. Segments that are
+ * unfinished, already upgrading, or have no upgrade are left alone.
+ */
+export function issueWallUpgrade(world, player, ids) {
+  if (!Array.isArray(ids)) return;
+  const p = world.players[player];
+  let short = null;
+  let queued = 0;
+  for (const id of ids) {
+    const b = world.entities.get(id);
+    if (!b || b.dead || b.kind !== 'building' || b.owner !== player || !b.constructed) continue;
+    const up = wallUpgradeOf(b.type);
+    if (!up || b.queue.length) continue;
+    const msg = world.affordError(player, up.cost);
+    if (msg) {
+      short = msg;
+      break;
+    }
+    world.pay(player, up.cost);
+    b.queue.push({ u: up.to, time: up.time, elapsed: 0, cost: { ...up.cost }, pop: 0, revive: null, upgrade: true });
+    queued++;
+  }
+  if (short) world.error(player, queued ? `${short} Upgraded ${queued} wall segment${queued === 1 ? '' : 's'}.` : short);
+}
+
 /** rally: point, mine (workers gather) or tree tile (workers chop). */
 export function setRally(world, player, b, x, y, targetId) {
   if (!b || b.dead || b.kind !== 'building' || b.owner !== player) return;
@@ -204,8 +233,9 @@ export function updateProduction(world, b) {
   if (!b.constructed || b.queue.length === 0) return;
   const item = b.queue[0];
   const p = world.players[b.owner];
-  const unit = item.u !== 'tier_up' && !item.research;
-  // Drill Yard / Widened Rift: units of this building train faster; Imperial Bureaucracy speeds up research and growth.
+  const unit = item.u !== 'tier_up' && !item.research && !item.upgrade;
+  // Drill Yard / Widened Rift: units of this building train faster; Imperial Bureaucracy speeds up research and growth
+  // (a wall segment's upgrade to stone is growth).
   item.elapsed += p ? DT * (unit ? 1 + buildingMods(p.mods, b.type).train : 1 + p.mods.perks.techSpeed) : DT;
   if (item.elapsed < item.time - 1e-9) return;
   b.queue.shift();
@@ -216,6 +246,10 @@ export function updateProduction(world, b) {
   }
   if (item.research) {
     world.completeResearch(b.owner, item.u);
+    return;
+  }
+  if (item.upgrade) {
+    world.changeBuildingType(b, item.u); // a wooden wall segment becomes stone
     return;
   }
   p.popUsed = Math.max(0, p.popUsed - item.pop);
