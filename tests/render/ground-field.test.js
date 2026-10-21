@@ -163,6 +163,19 @@ test('ground field: built once per map, rebuilt when the map changes, the same e
   assert.notStrictEqual(groundField(m), f);
 });
 
+test('ground field: a map without heights is built once too, not again on every lookup', () => {
+  const standIn = { width: 24, height: 24, terrain: new Uint8Array(24 * 24).fill(TERRAIN.GRASS), seed: 5 };
+  const f = groundField(standIn);
+  assert.strictEqual(groundField(standIn), f); // the last-map shortcut
+  assert.equal(f.heightAt(10.4, 7.7), 0);
+  groundField(lakeMap()); // another map in between: the per-map cache has to answer
+  assert.strictEqual(groundField(standIn), f);
+  const bare = { width: 6, height: 6 };
+  assert.strictEqual(groundField(bare), groundField(bare));
+  // the heights it was built from, when there are none, stay a flat zero sheet
+  assert.ok(f.hgt.every((h) => h === 0));
+});
+
 test('ground field: a generated map has a sound field (sizes, ordering of land and water, cost)', async () => {
   const { generateMap } = await import('../../src/sim/mapgen.js');
   const map = generateMap({ seed: 4242, mapSize: 'small', playerCount: 2, teams: [1, 2] });

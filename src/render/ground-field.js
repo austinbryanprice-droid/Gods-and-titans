@@ -209,7 +209,7 @@ export class GroundField {
     const T = map.terrain;
     const seed = (Number(map.seed) | 0) || 7;
     this.map = map;
-    this.srcHeights = hs;
+    this.srcHeights = map.heights; // as given (undefined for a flat stand-in), so groundField() can tell it is the same map
     this.srcTerrain = T;
     this.width = W;
     this.height = H;
