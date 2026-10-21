@@ -1,18 +1,27 @@
-// Terrain for the game renderer (DESIGN 8): one smooth-shaded mesh built from
-// mapData.heights (8 triangles per tile) and textured per pixel from a
-// procedural texture array (terrain-textures.js: lush and dry grass, dirt,
-// sand, rock, forest floor, lake bed). A one-texel-per-tile map of ground
-// types is looked up through a noise-warped grid, so borders meander instead
-// of following tile edges, and neighboring types blend by their texture
-// heights (grass tufts poke through dirt, sand fills between pebbles); roads
-// stay connected across diagonal steps, and lush and dry grass cross-fade
-// along a smooth per-pixel dryness field. On
-// top: macro color variation and a repetition breaker against visible tiling,
-// rock on steep slopes, a darker, glossier wet band along the shore, per-pixel
-// bump lighting from the texture heights (screen-space derivatives, no
-// tangents), animated caustics on the lake bed; the water (terrain-water.js)
-// and a misty dark border beyond the map edge. Every material samples the fog
-// of war; the lit ones get the drifting cloud shadows (shading.js).
+// Terrain for the game renderer (DESIGN 8): one smooth-shaded surface over the
+// ground field (ground-field.js: the sim's cosmetic vertex heights as a smooth
+// Catmull-Rom surface, rounded organic shorelines, rock tiles raised into
+// sandstone outcrops), built as 16x16 tile chunks over shared vertices (FIELD_RES
+// samples a tile, so a tile edge is never a facet and the light flows over it) so
+// only the chunks in view are drawn. It is textured per pixel from a procedural
+// texture array (terrain-textures.js: lush and dry grass, dirt, sand, rock,
+// forest floor, lake bed, cliff face). A one-texel-per-tile map of ground types
+// is looked up through a noise-warped grid, so borders meander instead of
+// following tile edges, and neighboring types blend by their texture heights
+// (grass tufts poke through dirt, sand fills between pebbles); roads stay
+// connected across diagonal steps, and lush and dry grass cross-fade along a
+// smooth per-pixel dryness field. A small data texture carries what the field
+// knows per sample (distance to the shore, outcrop rise, forest share, cavity)
+// so the shader can put the shore where the field put it: the lake bed only
+// under the water, a pale sand band that darkens to damp sand at the waterline
+// and a sand shelf in the shallows, whatever the tile map says. On top: macro
+// color variation and a repetition breaker against visible tiling, sandstone on
+// steep slopes (the top texture on the flat, strata and grooves on the faces,
+// shaded dark at the foot and light on the crest), per-pixel bump lighting from
+// the texture heights (screen-space derivatives, no tangents), animated
+// caustics on the lake bed; the water (terrain-water.js) and a misty dark border
+// beyond the map edge. Every material samples the fog of war; the lit ones get
+// the drifting cloud shadows (shading.js).
 //
 //   const t = createTerrain(mapData, { quality: 'medium' });
 //   scene.add(t.group); t.update(timeSec); t.setQuality('high'); t.dispose();

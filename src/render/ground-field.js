@@ -12,9 +12,9 @@
 //     edge meanders by a third of a tile), with a gentle beach on the land side and
 //     a shallow shelf that deepens into the lake. Tiles stay what the sim says they
 //     are; the coast only moves by a fraction of a tile.
-//   - Impassable rock tiles rise into terraced sandstone outcrops (a ledge every
-//     STRATA_STEP, craggy tops, steep faces). Nothing walks there, so the sim never
-//     notices; boulders and the camera follow through heightAt.
+//   - Impassable rock tiles rise into sandstone outcrops: steep walls, a flat
+//     craggy top and a hint of a ledge every STRATA_STEP. Nothing walks there, so
+//     the sim never notices; boulders and the camera follow through heightAt.
 //
 // Besides the heights it keeps what the ground shader needs per sample: the signed
 // shore distance (tiles, + on land), the outcrop rise, a smoothed forest share and a

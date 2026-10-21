@@ -762,7 +762,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
 {
   width, height, seed,
   terrain: Uint8Array(w*h),        // TERRAIN codes from config
-  heights: Float32Array((w+1)*(h+1)), // cosmetic vertex heights, render only (water ≈ -0.6, land 0..0.8)
+  heights: Float32Array((w+1)*(h+1)), // cosmetic vertex heights, render only (water ≈ -0.6, land 0..0.8); the renderer turns them into a smooth ground field (section 8)
   wood: Uint16Array(w*h),          // TREE_WOOD on forest tiles, 0 elsewhere
   starts: [{ x, y }],              // town center footprint top-left per player (playerCount entries)
   mines: [{ tx, ty, amount }],     // 3×3 footprint top-left; first `playerCount` are the start mines (same order as starts)
@@ -936,8 +936,23 @@ per-frame budget, so a revealed army appears over a few frames.
   markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
   keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
   shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
-  Terrain: procedural texture array with height blending and bump; shader water with caustics;
-  misty map border.
+  Terrain (`terrain.js`, `ground-field.js`, `terrain-textures.js`, `terrain-water.js`): the sim's
+  vertex heights stay as they are, and the renderer builds one smooth ground field from them
+  (`groundField(mapData)`, 4 samples a tile: a Catmull-Rom surface through the vertices, so the
+  slope is continuous across tile edges). `heightAt` answers from that field, so trees, units,
+  effects, the camera, picking, the water and the mesh all agree on where the ground is. Shores
+  are rebuilt from a smoothed distance to the water tiles: the tile outline becomes a rounded,
+  wandering coast with a gentle beach and a shallow shelf (the coast moves by a fraction of a tile;
+  tiles stay what the sim says). Impassable rock tiles rise into sandstone outcrops about 0.7 tall,
+  which nothing walks on. The mesh is 16x16-tile chunks over shared vertices (culled per chunk);
+  a per-sample data texture (shore distance, outcrop rise, forest share, cavity) lets the shader
+  follow the field: procedural texture array with height blending and bump, pale sand rim with a
+  damp band and sand shelf, sandstone with strata on the faces, cliff-foot shade and sunlit tops.
+  Water: its own mesh over the lake field, depth-colored teal that turns see-through at the edge,
+  Fresnel sky reflection, sun glints, moving normals, white foam along the shore, caustics on the
+  bed and a cyan glow at night (it reads the shared `WORLD_UNIFORMS` of `shading.js`: sun, sky,
+  `uNight`; a fixed clear-noon stand-in covers any the build does not have); misty map border.
+  The sim, pathing, AI and snapshots never read these heights.
   Fog of war (`src/render/fog.js`, installed after the other material patches): remembered
   ground dimmed and desaturated toward a cool grey, unexplored land under a drifting dark mist;
   enemy units hidden when not visible; enemy buildings shown as last seen.
