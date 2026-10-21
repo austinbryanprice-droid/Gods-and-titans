@@ -37,6 +37,8 @@ import {
 // (a medium map still stays well under 200 forest + decor meshes).
 const CHUNK = 20;
 const PI = Math.PI;
+/** Needle texture widths around one spruce tier (leaf-texture.js: eight sprays per width). */
+const NEEDLE_REPEATS = 3;
 const VARIANTS = ['pine', 'broadleaf', 'birch', 'palm'];
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -110,14 +112,18 @@ function limb(a, b, r) {
 
 function triGeo(tris) {
   const arr = new Float32Array(tris.length * 9);
+  // vertices of 5 components (x, y, z, u, v) also give an aUv attribute: (u, v, 1)
+  const uv = tris.length && tris[0][0].length > 3 ? new Float32Array(tris.length * 9) : null;
   let o = 0;
   for (const t of tris) for (const v of t) {
+    if (uv) uv.set([v[3], v[4], 1], o);
     arr[o++] = v[0];
     arr[o++] = v[1];
     arr[o++] = v[2];
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  if (uv) g.setAttribute('aUv', new THREE.BufferAttribute(uv, 3));
   return g;
 }
 
@@ -261,6 +267,50 @@ function finishStone(parts) {
 const groundAO = (h) => (p) => 0.58 + 0.42 * smooth01(p.y / h);
 
 // ---------------------------------------------------------------------------
+// leaf puffs (foliage-shader.js "Leaf puffs"): one quad per round clump of leaves
+// ---------------------------------------------------------------------------
+
+const PUFF_CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+
+/**
+ * One leaf puff: six non-indexed vertices (two triangles) all at `c`, the corners and the
+ * radius in aBb, `out` (the crown's outward direction there) in the normal, a flat color
+ * with a little per-puff jitter. leaf = 0 for puffs that are not foliage (berries, buds):
+ * no leaf noise, no ragged edge, no flutter.
+ */
+function puff(c, radius, color, rng, { jit = 0.08, out = null, leaf = 1, ao = 1 } = {}) {
+  const n = PUFF_CORNERS.length;
+  const pos = new Float32Array(n * 3);
+  const nor = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  const fol = new Float32Array(n * 3);
+  const bb = new Float32Array(n * 4);
+  const k = (1 + (rng.next() * 2 - 1) * jit) * ao;
+  const base = _c2.set(color);
+  const o = out ? _d.copy(out).normalize() : _d.set(0, 1, 0);
+  for (let v = 0; v < n; v++) {
+    pos.set([c.x, c.y, c.z], v * 3);
+    nor.set([o.x, o.y, o.z], v * 3);
+    col.set([base.r * k, base.g * k, base.b * k], v * 3);
+    fol[v * 3] = leaf;
+    bb.set([PUFF_CORNERS[v][0], PUFF_CORNERS[v][1], radius, 1], v * 4);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setAttribute('aFol', new THREE.BufferAttribute(fol, 3));
+  g.setAttribute('aBb', new THREE.BufferAttribute(bb, 4));
+  return g;
+}
+
+/** Mark every vertex of a part as "not a puff" (trunks and branches of a crown of puffs). */
+function noPuff(g) {
+  g.setAttribute('aBb', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 4), 4));
+  return g;
+}
+
+// ---------------------------------------------------------------------------
 // trees (≤ 160 triangles each, built once, shared)
 // ---------------------------------------------------------------------------
 
@@ -271,18 +321,26 @@ const groundAO = (h) => (p) => 0.58 + 0.42 * smooth01(p.y / h);
 function pineTier(R, h, n, rot, rng, droop = 0.07) {
   const mid = [];
   const rim = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i <= n; i++) {
+    // u runs once around the tier per NEEDLE_REPEATS texture widths, v = how far out (1 = the full radius)
+    const u = (i / n) * NEEDLE_REPEATS;
+    // the closing vertex repeats the first, so the last triangle's u keeps counting up
+    if (i === n) {
+      mid.push([mid[0][0], mid[0][1], mid[0][2], u, mid[0][4]]);
+      rim.push([rim[0][0], rim[0][1], rim[0][2], u, rim[0][4]]);
+      continue;
+    }
     const a = rot + ((i + (rng.next() - 0.5) * 0.35) / n) * PI * 2;
     const long = i % 2 === 0;
     const rm = R * (0.46 + rng.next() * 0.1);
-    const rr = R * (long ? 1 : 0.74) * (0.9 + rng.next() * 0.2);
-    mid.push([Math.cos(a) * rm, h * (0.44 + rng.next() * 0.06), Math.sin(a) * rm]);
+    const rr = R * (long ? 1 : 0.8) * (0.92 + rng.next() * 0.16);
+    mid.push([Math.cos(a) * rm, h * (0.44 + rng.next() * 0.06), Math.sin(a) * rm, u, rm / R]);
     // branch tips droop below the tier's base, the short ones less
-    rim.push([Math.cos(a) * rr, long ? -droop * (0.8 + rng.next() * 0.4) : -droop * 0.15, Math.sin(a) * rr]);
+    rim.push([Math.cos(a) * rr, long ? -droop * (0.8 + rng.next() * 0.4) : -droop * 0.15, Math.sin(a) * rr, u, Math.min(1, rr / R)]);
   }
   const tris = [];
   for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
+    const j = i + 1;
     tris.push([mid[i], rim[i], rim[j]], [mid[i], rim[j], mid[j]]);
   }
   return triGeo(orient(tris, (m) => _d.set(m.x, R * 0.6, m.z)));
@@ -294,6 +352,12 @@ function pineTag(g, tier, y, R, h) {
   const a = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) a.set([tier, y, R, h], i * 4);
   g.setAttribute('aPine', new THREE.BufferAttribute(a, 4));
+  return g;
+}
+
+/** Mark a part of the spruce as having no needle texture (trunk, leader). */
+function noUv(g) {
+  g.setAttribute('aUv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
   return g;
 }
 
@@ -309,51 +373,64 @@ function pineTag(g, tier, y, R, h) {
 function pineGeo() {
   const r = new RNG(11);
   // a slim trunk running up into the crown: it shows between the lower tiers
-  const parts = [pineTag(shade(cyl(0.022, 0.085, 1.12, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.45) }), -1, 0, 1, 1)];
+  const parts = [noUv(pineTag(shade(cyl(0.022, 0.085, 1.12, 5), '#4a3323', r, { jit: 0.08, ao: trunkAO(0.45) }), -1, 0, 1, 1))];
   const layout = (i) => pineLayout(i, PINE_PRESETS[0]);
   const cols = ['#24492a', '#275029', '#2b572c', '#2f5e2f', '#336532', '#386c35', '#3d7338', '#427b3b'];
   for (let ti = 0; ti < PINE_TIERS; ti++) {
     const { y, R, h } = layout(Math.min(ti, PINE_PRESETS[0][0] - 1));
     const g = pineTier(R, h, 8, r.next() * PI, r, 0.05 + R * 0.12).translate(0, y, 0);
-    const c = new THREE.Vector3(0, y - h * 0.1, 0);
+    // rounded normals: a smooth gradient from the steep slope near the trunk to the shallow one at the rim
+    const c = new THREE.Vector3(0, y - R * 0.5, 0);
     // dark in the shade of the tier above and toward the trunk; the outer branches catch the light
     const ao = (p) => 0.36 + 0.7 * smooth01((Math.hypot(p.x, p.z) / R - 0.28) / 0.55);
     // branch tips catch the light: a fresher, yellower green
     const grad = { to: '#6a9446', t: (p) => 0.6 * smooth01(Math.hypot(p.x, p.z) / R * 1.4 - 0.55) };
-    // normals only a little rounded: the faceted tiers keep a crisp lit / shaded side
-    parts.push(pineTag(shade(g, cols[ti], r, { jit: 0.12, leaf: 1, center: c, soft: 0.2, ao, grad }), ti, y, R, h));
+    parts.push(pineTag(shade(g, cols[ti], r, { jit: 0.06, leaf: 1, center: c, soft: 0.7, ao, grad }), ti, y, R, h));
   }
-  // the leader: a slim spike wide enough at its base to close the top tier
-  const tip = cone(0.12, 0.46, 5).translate(0, PINE_TOP + 0.12, 0);
-  wobble(tip, 0.015, r);
-  parts.push(pineTag(shade(tip, '#467f3f', r, { jit: 0.08, leaf: 1, center: new THREE.Vector3(0, 1.8, 0), soft: 0.25 }), 99, 0, 1, 1));
+  // the leader: a slim spike wide enough at its base to close the top tier, in needles too
+  const lead = [];
+  const lb = PINE_TOP + 0.1;
+  for (let i = 0; i < 6; i++) {
+    const a0 = (i / 6) * PI * 2 + 0.3;
+    const a1 = ((i + 1) / 6) * PI * 2 + 0.3;
+    const apex = [0, lb + 0.5, 0, ((i + 0.5) / 6) * NEEDLE_REPEATS, 0.5];
+    lead.push([apex, [Math.cos(a0) * 0.12, lb, Math.sin(a0) * 0.12, (i / 6) * NEEDLE_REPEATS, 0.95], [Math.cos(a1) * 0.12, lb, Math.sin(a1) * 0.12, ((i + 1) / 6) * NEEDLE_REPEATS, 0.95]]);
+  }
+  const tip = triGeo(orient(lead, (m) => _d.set(m.x, 0.4, m.z)));
+  parts.push(pineTag(shade(tip, '#3f7a3a', r, { jit: 0.06, leaf: 1, center: new THREE.Vector3(0, lb - 0.1, 0), soft: 0.6, ao: (p) => 0.7 + 0.45 * smooth01((p.y - lb) / 0.4) }), 99, 0, 1, 1));
   return finish(parts, { height: 2.2, bend: 0.075, flutter: 0.008 });
 }
 
 /**
- * Oak-like broadleaf: a forked trunk carrying an irregular crown of six leaf
- * clusters at different heights (a broad, lumpy silhouette with gaps), lit
- * as one soft volume.
+ * Oak-like broadleaf: a forked trunk carrying a round crown of leaf puffs in layers (a dark
+ * skirt, two broad rings, a bright top, small puffs breaking up the outline), each a sphere
+ * lit on its own. Darker low down and in the middle, brighter up top.
  */
 function broadleafGeo() {
   const r = new RNG(12);
-  const C = new THREE.Vector3(0, 1.08, 0);
-  const parts = [shade(cyl(0.05, 0.11, 0.78, 5), '#523727', r, { jit: 0.08, ao: trunkAO(0.6) })];
+  const C = new THREE.Vector3(0, 1.2, 0);
+  const parts = [noPuff(shade(cyl(0.05, 0.11, 0.78, 5), '#523727', r, { jit: 0.08, ao: trunkAO(0.6) }))];
   for (const [a, b, rad] of [[[0, 0.5, 0], [0.32, 0.92, 0.12], 0.04], [[0, 0.58, 0], [-0.28, 0.96, -0.16], 0.035], [[0, 0.66, 0], [-0.05, 1.02, 0.3], 0.03]]) {
-    parts.push(shade(limb(a, b, rad), '#4a3122', r, { jit: 0.06, ao: () => 0.7 }));
+    parts.push(noPuff(shade(limb(a, b, rad), '#4a3122', r, { jit: 0.06, ao: () => 0.7 })));
   }
-  const lobes = [
-    [0.4, 0.02, 1.16, 0.0, '#4a8636'], [0.34, 0.36, 0.98, 0.14, '#538f3a'], [0.32, -0.33, 1.0, -0.17, '#447f32'],
-    [0.29, -0.06, 0.94, 0.38, '#4e8a37'], [0.27, 0.16, 0.92, -0.34, '#4b8735'], [0.27, 0.06, 1.46, 0.05, '#5c9a42'],
-  ];
-  for (const [rad, x, y, z, col] of lobes) {
-    const g = ico(rad);
-    squashBottom(g, 0.62);
-    wobble(g, rad * 0.28, r);
-    const grad = { to: '#78a64a', t: (p) => 0.45 * smooth01((p.y - 1.0) / 0.5) };
-    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.09, leaf: 1, center: C, soft: 0.62, ao: canopyAO(C, 0.72, 0.5), grad }));
-  }
-  return finish(parts, { height: 1.8, bend: 0.07, flutter: 0.014 });
+  const at = (a, d, y) => new THREE.Vector3(Math.cos(a) * d, y, Math.sin(a) * d);
+  // dark in the middle and low down, bright on top (the crown's own occlusion)
+  const shadeOf = (c) => 0.58 + 0.5 * smooth01((c.y - 0.95) / 0.75);
+  const add = (c, rad, col) => parts.push(puff(c, rad, col, r, { jit: 0.1, ao: shadeOf(c), out: _n.copy(c).sub(C).add(_up.clone().multiplyScalar(0.25)) }));
+  // skirt: six dark, low puffs
+  for (let i = 0; i < 6; i++) add(at(0.3 + (i / 6) * PI * 2 + (r.next() - 0.5) * 0.4, 0.44 + r.next() * 0.07, 0.96 + r.next() * 0.1), 0.28 + r.next() * 0.05, '#2f702b');
+  // lower ring
+  for (let i = 0; i < 6; i++) add(at(0.8 + (i / 6) * PI * 2 + (r.next() - 0.5) * 0.4, 0.4 + r.next() * 0.07, 1.16 + r.next() * 0.1), 0.3 + r.next() * 0.05, '#3d8530');
+  // upper ring
+  for (let i = 0; i < 5; i++) add(at(0.2 + (i / 5) * PI * 2 + (r.next() - 0.5) * 0.4, 0.27 + r.next() * 0.07, 1.4 + r.next() * 0.1), 0.29 + r.next() * 0.04, '#4a9534');
+  // top: a bright crown and three shoulders
+  add(new THREE.Vector3(0.02, 1.68, 0.02), 0.33, '#64aa3b');
+  for (let i = 0; i < 3; i++) add(at(0.5 + (i / 3) * PI * 2, 0.2, 1.58 + r.next() * 0.06), 0.24 + r.next() * 0.03, '#5ca43a');
+  // small puffs on the shell break up the outline
+  for (let i = 0; i < 7; i++) add(at(r.next() * PI * 2, 0.5 + r.next() * 0.1, 1.05 + r.next() * 0.5), 0.14 + r.next() * 0.05, i % 2 ? '#4a9534' : '#3d8530');
+  // core: hidden, fills the middle
+  add(new THREE.Vector3(0, 1.25, 0), 0.4, '#2a5f28');
+  return finish(parts, { height: 1.9, bend: 0.07, flutter: 0.014 });
 }
 
 function birchGeo() {
@@ -364,7 +441,7 @@ function birchGeo() {
   const markOf = [];
   const trunk = cyl(0.032, 0.056, 1.16, 5, true, 4);
   trunk.rotateZ(0.035);
-  const parts = [shade(trunk, '#e6e2d6', r, {
+  const parts = [noPuff(shade(trunk, '#e6e2d6', r, {
     jit: 0.06,
     ao: trunkAO(0.95),
     faceColor: (f) => {
@@ -372,17 +449,25 @@ function birchGeo() {
       if (markOf[q] === undefined) markOf[q] = marks.next();
       return markOf[q] < 0.3 ? '#35302b' : markOf[q] < 0.42 ? '#a9a59b' : null;
     },
-  })];
+  }))];
   for (const [a, b, rad] of [[[0.02, 0.8, 0], [0.2, 1.05, 0.08], 0.018], [[0.025, 0.88, 0], [-0.17, 1.1, -0.06], 0.016]]) {
-    parts.push(shade(limb(a, b, rad), '#d8d3c5', r, { jit: 0.05, ao: () => 0.72 }));
+    parts.push(noPuff(shade(limb(a, b, rad), '#d8d3c5', r, { jit: 0.05, ao: () => 0.72 })));
   }
-  const lobes = [[0.3, 0, 1.2, 0, '#8db544'], [0.25, 0.15, 0.98, 0.1, '#83aa3e'], [0.24, -0.13, 1.03, -0.08, '#8fb746'], [0.21, 0.01, 1.5, -0.03, '#9cc250']];
-  for (const [rad, x, y, z, col] of lobes) {
-    const g = ico(rad);
-    g.scale(0.88, 1.3, 0.88);
-    squashBottom(g, 0.75);
-    wobble(g, rad * 0.22, r);
-    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.08, leaf: 1, center: C, soft: 0.78, ao: canopyAO(C, 0.5, 0.5) }));
+  // a tall, narrow, airy crown: puffs stacked up the leader, lighter than the oak's
+  const list = [
+    [0.0, 0.98, 0.0, 0.25, '#7fa53b'], [0.17, 1.1, 0.08, 0.23, '#83aa3e'], [-0.15, 1.16, -0.07, 0.24, '#86ad40'],
+    [0.1, 1.3, -0.12, 0.22, '#8cb445'], [-0.12, 1.38, 0.1, 0.21, '#8cb445'], [0.04, 1.5, 0.04, 0.23, '#93ba4a'],
+    [0.0, 1.66, -0.02, 0.18, '#9cc250'], [0.0, 1.2, 0.0, 0.26, '#6f9835'],
+  ];
+  for (const [x, y, z, rad, col] of list) {
+    const c = new THREE.Vector3(x, y, z);
+    parts.push(puff(c, rad, col, r, { jit: 0.08, ao: 0.7 + 0.4 * smooth01((y - 0.95) / 0.7), out: _n.copy(c).sub(C).add(_up.clone().multiplyScalar(0.3)) }));
+  }
+  // a few small puffs on the outside
+  for (let i = 0; i < 4; i++) {
+    const a = r.next() * PI * 2;
+    const c = new THREE.Vector3(Math.cos(a) * 0.26, 1.05 + r.next() * 0.5, Math.sin(a) * 0.26);
+    parts.push(puff(c, 0.12 + r.next() * 0.04, '#8ab044', r, { jit: 0.08, ao: 0.85, out: _n.copy(c).sub(C).add(_up.clone().multiplyScalar(0.3)) }));
   }
   return finish(parts, { height: 1.75, bend: 0.08, flutter: 0.016 });
 }
@@ -496,15 +581,14 @@ function rockGeo(variant) {
 function bushGeo(variant) {
   const r = new RNG(30 + variant);
   const parts = [];
-  const C = new THREE.Vector3(0, 0.12, 0);
+  const C = new THREE.Vector3(0, 0.0, 0);
+  // a low mound of round leaf puffs: [x, y, z, radius, color]
   const lobes = variant === 0
-    ? [[0.18, 0, 0.13, 0, '#36692b'], [0.14, 0.15, 0.1, 0.06, '#3f7530'], [0.13, -0.13, 0.1, -0.05, '#315f27'], [0.11, 0.02, 0.25, -0.03, '#4a8437']]
-    : [[0.17, 0, 0.12, 0, '#3a6e2c'], [0.13, 0.13, 0.09, -0.07, '#427731'], [0.12, -0.11, 0.1, 0.08, '#356628']];
-  for (const [rad, x, y, z, col] of lobes) {
-    const g = ico(rad);
-    squashBottom(g, 0.6);
-    wobble(g, rad * 0.3, r);
-    parts.push(shade(g.translate(x, y, z), col, r, { jit: 0.12, leaf: 1, center: C, soft: 0.7, ao: canopyAO(C, 0.26, 0.45) }));
+    ? [[0, 0.11, 0, 0.2, '#36692b'], [0.16, 0.1, 0.07, 0.15, '#3f7530'], [-0.15, 0.1, -0.05, 0.14, '#315f27'], [0.02, 0.2, -0.02, 0.15, '#4a8437'], [-0.06, 0.09, 0.15, 0.12, '#3b7030']]
+    : [[0, 0.1, 0, 0.18, '#3a6e2c'], [0.14, 0.09, -0.06, 0.14, '#427731'], [-0.12, 0.09, 0.08, 0.13, '#356628'], [0.0, 0.18, 0.02, 0.12, '#47803a']];
+  for (const [x, y, z, rad, col] of lobes) {
+    const c = new THREE.Vector3(x, y, z);
+    parts.push(puff(c, rad, col, r, { jit: 0.1, out: _n.copy(c).sub(C).add(_up.clone().multiplyScalar(0.2)) }));
   }
   if (variant === 1) {
     // berries / blossoms peeking out of the leaves
@@ -513,8 +597,8 @@ function bushGeo(variant) {
       const a = (i / 6) * PI * 2 + r.next() * 0.5;
       const y = 0.12 + r.next() * 0.12;
       const d = 0.13 + (0.2 - Math.abs(y - 0.15)) * 0.25;
-      const b = octa(0.026).translate(Math.cos(a) * d, y, Math.sin(a) * d);
-      parts.push(shade(b, colors[i % 3], r, { jit: 0.05, leaf: 1 }));
+      const bp = new THREE.Vector3(Math.cos(a) * d, y, Math.sin(a) * d);
+      parts.push(puff(bp, 0.03, colors[i % 3], r, { jit: 0.05, leaf: 0, out: bp.clone().sub(C) }));
     }
   }
   return finish(parts, { height: 0.35, bend: 0.03, flutter: 0.008 });
@@ -629,21 +713,21 @@ function ruinGeo(variant) {
 let SHARED = null;
 function shared() {
   if (SHARED) return SHARED;
-  // Plants: Lambert (cheap; hemisphere ambient only) with wind and soft leaf
-  // light; the double-sided variant for flat leaves (palm fronds, flowers, grass).
-  // Closed crowns (broadleaf, birch, bushes) cast from their back faces, the default.
-  const plant = new THREE.MeshLambertMaterial({ vertexColors: true });
-  plant.name = 'props-plant';
-  // leafy crowns: clumped leaf texture with ragged edges (foliage-shader.js uFolDetail)
-  patchWorldMaterial(patchFoliageMaterial(plant, { detail: [9, 0.4, 0.85, 0] }), { cloud: true, rim: 0.12 });
-  // Pine tiers are open skirts flatter than the sun is high: with the default
-  // back-face shadow pass they would cast only thin rings, so both faces cast.
-  // Same program as `plant`; only the shadow pass differs.
+  // Plants: Lambert (cheap; hemisphere ambient only) with wind and soft leaf light, the leaf
+  // and needle textures of foliage-shader.js, and drifting cloud shadows.
+  // Spruce tiers are open skirts flatter than the sun is high: with the default back-face shadow
+  // pass they would cast only thin rings, so both faces cast.
   const plantOpen = new THREE.MeshLambertMaterial({ vertexColors: true });
   plantOpen.name = 'props-plant-open';
   plantOpen.shadowSide = THREE.DoubleSide;
   // less wrap than the round crowns: needles keep a crisp lit and shaded side
-  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, detail: [8, 0.34, 0.55, 1], pine: true }), { cloud: true, rim: 0.12 });
+  patchWorldMaterial(patchFoliageMaterial(plantOpen, { wrap: 0.15, translucency: 0.3, detail: [0, 0.45, 0.9, 0], pine: true }), { cloud: true, rim: 0.12 });
+  // Round crowns and bushes (leaf puffs: camera-facing quads shaded as spheres). The quads
+  // cast from the back of the crown (see PUFF_EXPAND), so both faces take part in the shadow pass.
+  const plantPuff = new THREE.MeshLambertMaterial({ vertexColors: true });
+  plantPuff.name = 'props-plant-puff';
+  plantPuff.shadowSide = THREE.DoubleSide;
+  patchWorldMaterial(patchFoliageMaterial(plantPuff, { detail: [0.85, 0.5, 0.9, 0], puff: true, sphereDepth: true }), { cloud: true, rim: 0.12 });
   const plant2 = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   plant2.name = 'props-plant-2s';
   patchWorldMaterial(patchFoliageMaterial(plant2, { wrap: 0.5, translucency: 0.45 }), { cloud: true, rim: 0.12 });
@@ -652,9 +736,10 @@ function shared() {
   stone.name = 'props-stone';
   patchWorldMaterial(patchStoneMaterial(stone), { cloud: true });
   SHARED = {
-    mat: { plant, plantOpen, plant2, stone },
+    mat: { plantOpen, plantPuff, plant2, stone },
     depth: foliageDepthMaterial(),
     depthPine: foliageDepthMaterial({ pine: true }),
+    depthPuff: foliageDepthMaterial({ puff: true }),
     trees: { pine: pineGeo(), broadleaf: broadleafGeo(), birch: birchGeo(), palm: palmGeo() },
     stump: stumpGeo(),
     decor: {
@@ -671,8 +756,10 @@ function shared() {
 }
 
 /** Material of a tree variant / decor kind, and whether it sways (needs the swaying shadow material). */
-const TREE_MAT = { pine: 'plantOpen', broadleaf: 'plant', birch: 'plant', palm: 'plant2' };
-const DECOR_MAT = { rock: 'stone', bush: 'plant', flowers: 'plant2', ruin: 'stone', stump: 'stone', grass: 'plant2' };
+const TREE_MAT = { pine: 'plantOpen', broadleaf: 'plantPuff', birch: 'plantPuff', palm: 'plant2' };
+const DECOR_MAT = { rock: 'stone', bush: 'plantPuff', flowers: 'plant2', ruin: 'stone', stump: 'stone', grass: 'plant2' };
+/** Shadow-map material of a color material (it must move the geometry the way the color pass does). */
+const DEPTH_OF = { plantOpen: 'depthPine', plantPuff: 'depthPuff' };
 
 /** Triangle counts of the shared prop geometries (for tests and budgets). */
 export function getPropInfo() {
@@ -755,11 +842,13 @@ function treeTint(variant, r1, r2, n, out) {
  * Instanced forest for every FOREST tile of mapData.
  * @param {{width:number, height:number, terrain:Uint8Array, heights?:Float32Array, seed?:number|string}} mapData
  * @param {(x:number, y:number)=>number} [heightFn] terrain height at sim (x, y); defaults to heightAt(mapData, x, y)
+ * @param {{ variants?: string[] }} [o] variants: grow only these tree variants (galleries and tests)
  * @returns {{object3d: THREE.Group, fell: (tx:number, ty:number)=>boolean, isStanding: (tx:number, ty:number)=>boolean,
  *   count: number, dispose: ()=>void}}
  */
-export function createForest(mapData, heightFn) {
+export function createForest(mapData, heightFn, { variants = null } = {}) {
   const S = shared();
+  const only = variants && variants.length ? variants : null;
   const hf = resolveHeightFn(mapData, heightFn);
   const W = mapData.width;
   const H = mapData.height ?? mapData.width;
@@ -818,7 +907,8 @@ export function createForest(mapData, heightFn) {
           ox += Math.cos(a) * 0.22;
           oy += Math.sin(a) * 0.22;
         }
-        const v = j === 1 && variant !== 'palm' && r3 < 0.25 ? (variant === 'pine' ? 'birch' : 'pine') : variant;
+        let v = j === 1 && variant !== 'palm' && r3 < 0.25 ? (variant === 'pine' ? 'birch' : 'pine') : variant;
+        if (only && !only.includes(v)) v = only[Math.floor(ihash(tx * 19 + j, ty * 23, seed + 27) * only.length)];
         const x = tx + 0.5 + ox;
         const y = ty + 0.5 + oy;
         const base = count === 2 ? 0.86 : 1.06;
@@ -865,7 +955,7 @@ export function createForest(mapData, heightFn) {
     mesh.name = `forest-${b.variant}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.customDepthMaterial = b.variant === 'pine' ? S.depthPine : S.depth;
+    mesh.customDepthMaterial = S[DEPTH_OF[TREE_MAT[b.variant]] || 'depth'];
     b.list.forEach((t, idx) => {
       _e.set(t.tilt, t.rot, t.tilt * 0.6);
       _q.setFromEuler(_e);
@@ -978,7 +1068,7 @@ export function createDecor(mapData, heightFn) {
     mesh.name = `decor-${l.kind}`;
     mesh.castShadow = l.kind === 'rock' || l.kind === 'ruin' || l.kind === 'bush';
     mesh.receiveShadow = true;
-    if (matKey !== 'stone') mesh.customDepthMaterial = S.depth;
+    if (matKey !== 'stone') mesh.customDepthMaterial = S[DEPTH_OF[matKey] || 'depth'];
     const jit = DECOR_JITTER[l.kind] ?? 0.1;
     const plant = matKey !== 'stone';
     l.items.forEach((d, idx) => {

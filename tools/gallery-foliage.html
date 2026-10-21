@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Foliage Gallery — Mythic War</title>
+  <!--
+    Visual check page for the trees, bushes and ground plants (src/render/models/props.js,
+    ground-cover.js, foliage-shader.js). Runs the real GameRenderer (lights, post, fog,
+    undergrowth, ground cover) on a generated map and stamps a forest stand into the open
+    meadow near the first start, plus a row of single-variant stands beside it.
+    URL params:
+      quality=low|medium|high|ultra      render tier (default high)
+      tod=golden|day|dusk|night|dawn|13.5   time of day, when the renderer supports setTimeOfDay
+      view=stand|lineup|single|far        camera framing (default stand)
+      zoom=25                            camera distance (tiles); stand 25, lineup 14, single 9, far 44
+      variants=pine,broadleaf,birch,palm  the lineup's single-variant stands (default: all four)
+      stand=14x6                          size of the mixed stand in tiles
+      seed=12345   manual=1               no animation loop; window.gallery.render() draws a frame
+      t=0                                 render clock (seconds) frozen at this value (manual mode)
+      px=0&py=0                           shift the camera target (tiles)
+    Keys (live mode): WASD / arrows pan, wheel zoom.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #050605; overflow: hidden; font-family: system-ui, sans-serif; }
+    canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+    #stats { position: absolute; top: 6px; right: 8px; color: #fff; font: 12px/1.35 monospace; text-shadow: 0 1px 2px #000; text-align: right; white-space: pre; z-index: 2; }
+    #lbl { position: absolute; left: 8px; bottom: 6px; color: #fff; font: 600 13px system-ui, sans-serif; text-shadow: 0 1px 3px #000; z-index: 2; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="stats"></div>
+  <div id="lbl"></div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { createWorld } from '../src/sim/world.js';
+    import { ViewState } from '../src/game/view-state.js';
+    import { GameRenderer } from '../src/render/game-renderer.js';
+    import { createForest } from '../src/render/models/props.js';
+    import { patchFowObject } from '../src/render/fog.js';
+    import { PLAYER_COLORS, TERRAIN } from '../src/config.js';
+    import { SUN_DIR, WORLD_UNIFORMS } from '../src/render/shading.js';
+
+    const Q = new URLSearchParams(location.search);
+
+    /**
+     * Stand-in for GameRenderer.setTimeOfDay until the renderer has its own: moves the key
+     * light, recolors it, the hemisphere light, the haze and the rim. Rough on purpose.
+     */
+    function mockTimeOfDay(r, name) {
+      const P = {
+        day: { dir: [-30, 60, 40], sun: 0xffe4bd, i: 3.0, sky: 0xbccff2, ground: 0x4c4230, h: 0.68, fog: 0xaebfcc, rim: [0.62, 0.74, 0.95] },
+        golden: { dir: [-70, 26, 30], sun: 0xffb26a, i: 3.4, sky: 0xd9b8a8, ground: 0x4a3826, h: 0.6, fog: 0xd9b48e, rim: [1.0, 0.66, 0.32] },
+        dusk: { dir: [-80, 12, 18], sun: 0xff7650, i: 1.7, sky: 0x9a78b4, ground: 0x3a2a3a, h: 0.5, fog: 0xa77a8e, rim: [1.0, 0.42, 0.4] },
+        night: { dir: [-20, 55, -30], sun: 0x7aa2ff, i: 0.55, sky: 0x3d5c9c, ground: 0x1c2640, h: 0.5, fog: 0x1c2a44, rim: [0.3, 0.55, 0.95] },
+        dawn: { dir: [60, 20, 30], sun: 0xffc59a, i: 2.4, sky: 0xc9b4d8, ground: 0x45384a, h: 0.58, fog: 0xcdb0b4, rim: [1.0, 0.7, 0.5] },
+      }[name] || null;
+      if (!P) return;
+      SUN_DIR.set(...P.dir).normalize();
+      WORLD_UNIFORMS.uSunDirW.value.copy(SUN_DIR);
+      r.sun.color.set(P.sun);
+      r.sun.intensity = P.i;
+      r.sun.position.copy(SUN_DIR).multiplyScalar(60);
+      r.hemi.color.set(P.sky);
+      r.hemi.groundColor.set(P.ground);
+      r.hemi.intensity = P.h;
+      r.scene.fog.color.set(P.fog);
+      WORLD_UNIFORMS.uRimColor.value.setRGB(...P.rim);
+      r.mockTod = name;
+    }
+    const quality = Q.get('quality') || 'high';
+    const view = Q.get('view') || 'stand';
+    const seed = Number(Q.get('seed') || 12345);
+    const manual = Q.get('manual') === '1';
+    const variants = (Q.get('variants') || 'pine,broadleaf,birch,palm').split(',').filter(Boolean);
+    const [standW, standH] = (Q.get('stand') || '14x6').split('x').map(Number);
+    const DEFAULT_ZOOM = { stand: 25, lineup: 14, single: 9, far: 44 };
+    const zoom = Number(Q.get('zoom') || DEFAULT_ZOOM[view] || 25);
+
+    // ---------------------------------------------------------------- world
+    const setup = {
+      version: '0.1.0', seed, mapSize: 'small',
+      players: [0, 1].map((i) => ({ index: i, name: `P${i + 1}`, team: i + 1, pantheon: i ? 'norse' : 'greek', color: PLAYER_COLORS[i], kind: i ? 'ai' : 'human', difficulty: 'normal' })),
+    };
+    const world = createWorld(setup);
+    const map = world.mapData;
+    const W = map.width;
+    const H = map.height;
+    const T = map.terrain;
+
+    /** Top-left tile of the free w × h block of plain grass nearest (x, y): no building, mine, forest or rock within a tile. */
+    function openArea(w, h, x, y, maxR = 40) {
+      const blocked = new Uint8Array(W * H);
+      for (let i = 0; i < W * H; i++) if (T[i] !== TERRAIN.GRASS) blocked[i] = 1;
+      const mark = (tx, ty, s) => { for (let j = -5; j <= s + 4; j++) for (let k = -5; k <= s + 4; k++) { const xx = tx + k; const yy = ty + j; if (xx >= 0 && yy >= 0 && xx < W && yy < H) blocked[yy * W + xx] = 1; } };
+      for (const e of world.entities.values()) if (e.kind !== 'unit') mark(e.tx, e.ty, e.size || 1);
+      for (const m of map.mines || []) mark(m.tx, m.ty, 3);
+      let best = null;
+      let bd = Infinity;
+      for (let ty = 2; ty < H - h - 2; ty++) {
+        for (let tx = 2; tx < W - w - 2; tx++) {
+          const d = Math.hypot(tx + w / 2 - x, ty + h / 2 - y);
+          if (d >= bd || d > maxR) continue;
+          let ok = true;
+          for (let j = 0; j < h && ok; j++) for (let k = 0; k < w; k++) if (blocked[(ty + j) * W + tx + k]) { ok = false; break; }
+          if (ok) { bd = d; best = { tx, ty }; }
+        }
+      }
+      return best;
+    }
+    const s0 = map.starts[0];
+    // one block for the mixed stand (real forest + undergrowth pipeline) and a row for the single-variant stands
+    const lineW = variants.length * 5;
+    const area = openArea(Math.max(standW, lineW) + 2, standH + 12, s0.x + 14, s0.y + 12, 60) || { tx: 10, ty: 10 };
+    const stand = { x0: area.tx + 1, y0: area.ty + 1 + 6 };
+    for (let j = 0; j < standH; j++) for (let k = 0; k < standW; k++) T[(stand.y0 + j) * W + stand.x0 + k] = TERRAIN.FOREST;
+
+    const vs = new ViewState({ setup, mapData: map, myIndex: -1, interpDelayMs: 50 });
+    vs.pushSnapshot(world.getSnapshot(), 1000);
+    const canvas = document.getElementById('c');
+    const renderer = new GameRenderer(canvas, { viewState: vs, setup, quality });
+    window.renderer = renderer;
+    const tod = Q.get('tod');
+    if (tod) {
+      if (typeof renderer.setTimeOfDay === 'function') renderer.setTimeOfDay(/^[\d.]+$/.test(tod) ? Number(tod) : tod);
+      else mockTimeOfDay(renderer, tod);
+    }
+
+    // ---------------------------------------------------------------- single-variant stands
+    const lineup = [];
+    const lineY0 = area.ty + 1;
+    variants.forEach((v, i) => {
+      const terrain = new Uint8Array(W * H).fill(TERRAIN.GRASS);
+      for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) terrain[(lineY0 + j) * W + area.tx + 1 + i * 5 + k] = TERRAIN.FOREST;
+      const f = createForest({ ...map, terrain }, renderer.heightFn, { quality, variants: [v] });
+      renderer.scene.add(f.object3d);
+      patchFowObject(f.object3d);
+      lineup.push(f);
+    });
+    renderer.forestLineup = lineup;
+
+    // ---------------------------------------------------------------- camera
+    const focus = {
+      stand: { x: stand.x0 + standW / 2, y: stand.y0 + standH / 2 + 1 },
+      lineup: { x: area.tx + 1 + lineW / 2, y: lineY0 + 2.6 },
+      single: { x: area.tx + 1 + 2, y: lineY0 + 2.2 },
+      far: { x: stand.x0 + standW / 2, y: stand.y0 + standH / 2 },
+    }[view] || { x: stand.x0, y: stand.y0 };
+    renderer.camera.centerOn(focus.x + Number(Q.get('px') || 0), focus.y + Number(Q.get('py') || 0));
+    renderer.camera.setDistance(zoom, true);
+    renderer.camera.update(0);
+
+    const statsEl = document.getElementById('stats');
+    function showStats() {
+      const s = renderer.getStats();
+      statsEl.textContent = `${quality}  ${view}  zoom ${renderer.camera.distance.toFixed(0)}\ndraw calls ${s.drawCalls}  tris ${(s.triangles / 1000).toFixed(0)}k`;
+    }
+    let vnow = 1000;
+    const clock = Q.has('t') ? Number(Q.get('t')) : null;
+    function frame(dtMs) {
+      vnow += dtMs;
+      vs.update(vnow);
+      renderer.update(dtMs / 1000);
+    }
+    window.gallery = {
+      renderer, vs, world, stand, area, view,
+      advance(sec, fps = 30) { const n = Math.max(1, Math.round(sec * fps)); for (let i = 0; i < n; i++) frame(1000 / fps); },
+      render() { renderer.render(); showStats(); },
+      setQuality(q) { renderer.setQuality(q); },
+      camera(x, y, d) { renderer.camera.centerOn(x, y); if (d) renderer.camera.setDistance(d, true); renderer.camera.update(0); },
+      ready: false,
+    };
+    // keys / wheel
+    const keys = new Set();
+    addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+    addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+    canvas.addEventListener('wheel', (e) => { renderer.camera.zoomBy(-Math.sign(e.deltaY)); e.preventDefault(); }, { passive: false });
+    addEventListener('resize', () => renderer.resize(innerWidth, innerHeight));
+
+    if (manual) {
+      // a frozen clock gives frames that are identical between runs (wind, foam, flames)
+      window.gallery.advance(clock == null ? 0.05 : 0.05);
+      if (clock != null) renderer.time = clock;
+      window.gallery.render();
+      window.gallery.ready = true;
+    } else {
+      let last = performance.now();
+      let fpsT = last;
+      let n = 0;
+      const loop = (now) => {
+        const dt = Math.min(100, now - last);
+        last = now;
+        const s = (28 * dt) / 1000;
+        if (keys.has('arrowleft') || keys.has('a')) renderer.camera.scroll(-s, 0);
+        if (keys.has('arrowright') || keys.has('d')) renderer.camera.scroll(s, 0);
+        if (keys.has('arrowup') || keys.has('w')) renderer.camera.scroll(0, -s);
+        if (keys.has('arrowdown') || keys.has('s')) renderer.camera.scroll(0, s);
+        frame(dt);
+        renderer.render(now);
+        n++;
+        if (now - fpsT > 500) { showStats(); n = 0; fpsT = now; }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+      window.gallery.ready = true;
+    }
+  </script>
+</body>
+</html>
