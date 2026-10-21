@@ -1,20 +1,36 @@
-// Shared lighting for the game view (DESIGN 8): the sun direction, a
+// Shared lighting for the game view (DESIGN 8): the key light's direction, a
 // procedural sky turned into an image-based-lighting environment (PMREM) so
 // physically based materials (metal, polished stone, lacquer) have something
 // to reflect, drifting cloud shadows and a rim light, plus the one shader
 // patch every lit world material uses to get them.
 //
-//   const env = createEnvironment(webglRenderer);   // { texture, dispose } or null in Node
+//   const env = createEnvironment(webglRenderer);   // { texture, update(state), dispose } or null in Node
 //   scene.environment = env.texture;
 //   patchWorldMaterial(material, { rim: 0.35, cloud: true });   // before patchFowMaterial
 //   WORLD_UNIFORMS.uTime.value = t;                              // once per frame
+//   applyAtmosphere(atmosphere.state);                           // once per frame: the time of day
 //
 // The uniforms are module-level (like the fog of war's) so cached materials
-// that outlive one match keep working in the next.
+// that outlive one match keep working in the next. They are shared objects
+// rewritten in place every frame: read them by reference (never clone them,
+// never replace `.value`).
+//
+// Time of day (atmosphere.js): the *key light* is the sun by day and the moon
+// at night. SUN_DIR / uSunDirW point toward it and uSunColor is its radiance
+// (hue × intensity, linear), so a shader that shades with those two follows the
+// sun, the golden hour and the moonlight without knowing which it is.
 import * as THREE from 'three';
+import { createState, resolveHour, START_HOUR } from './atmosphere.js';
 
-/** Direction the sunlight comes from (toward the sun), world space. */
-export const SUN_DIR = new THREE.Vector3(-30, 60, 40).normalize();
+const INITIAL = resolveHour(createState(), START_HOUR);
+
+/**
+ * Unit vector toward the key light (the sun by day, the moon at night), world
+ * space, never below MIN_KEY_ELEVATION. One live object: it is rewritten in place
+ * every frame (and is the very vector behind WORLD_UNIFORMS.uSunDirW), so a
+ * `.clone()` taken at construction goes stale.
+ */
+export const SUN_DIR = INITIAL.keyDir.clone();
 
 /** Tileable value-noise texture (R channel), shared by cloud shadows and the fog shroud. */
 function makeCloudTexture(size = 128) {
@@ -76,20 +92,60 @@ export const CLOUD_TEXTURE = makeCloudTexture();
 
 /**
  * Uniforms shared by every patched world material. uCloud: x = strength
- * (0 = off), y = 1 / scale (tiles), zw = drift (tiles / s). uRim: rgb color,
- * scaled per material by its own strength.
+ * (0 = off), y = 1 / scale (tiles), zw = drift (tiles / s).
+ *   uSunDirW / uSunColor    the key light: direction toward it, linear radiance (hue × intensity)
+ *   uMoonDirW / uMoonColor  the moon alone (color is black unless the moon is the key light)
+ *   uSkyZenith / uSkyHorizon  the sky overhead and at the horizon (the horizon color is the haze)
+ *   uSkyAmbient / uGroundAmbient  what the hemisphere light adds (color × intensity)
+ *   uRimColor               silhouette light, follows the time of day
+ *   uNight                  0 day .. 1 deep night; uLamp 0..1 how brightly lanterns and windows glow
  */
 export const WORLD_UNIFORMS = {
   uTime: { value: 0 },
   uCloudTex: { value: CLOUD_TEXTURE },
   uCloud: { value: new THREE.Vector4(0.34, 1 / 34, 0.55, 0.32) },
-  uSunDirW: { value: SUN_DIR.clone() },
-  uRimColor: { value: new THREE.Color(0.62, 0.74, 0.95) },
+  uSunDirW: { value: SUN_DIR },
+  uSunColor: { value: INITIAL.keyColor.clone() },
+  uMoonDirW: { value: INITIAL.moonDir.clone() },
+  uMoonColor: { value: INITIAL.moonColor.clone() },
+  uSkyZenith: { value: INITIAL.skyZenith.clone() },
+  uSkyHorizon: { value: INITIAL.skyHorizon.clone() },
+  uSkyAmbient: { value: INITIAL.ambientSky.clone() },
+  uGroundAmbient: { value: INITIAL.ambientGround.clone() },
+  uRimColor: { value: INITIAL.rimColor.clone() },
+  uNight: { value: INITIAL.night },
+  uLamp: { value: INITIAL.lamp },
 };
 
-/** Cloud shadows on or off (quality), strength 0..1. */
+let cloudBase = 0.34;
+let cloudScale = INITIAL.cloudScale;
+
+/** Cloud shadows on or off (quality), strength 0..1; the time of day scales it. */
 export function setCloudShadows(strength) {
-  WORLD_UNIFORMS.uCloud.value.x = strength;
+  cloudBase = strength;
+  WORLD_UNIFORMS.uCloud.value.x = strength * cloudScale;
+}
+
+/**
+ * Copy a resolved time of day (atmosphere.js) into the shared uniforms. Call once
+ * per frame, before drawing.
+ * @param {import('./atmosphere.js').AtmosphereState} s
+ */
+export function applyAtmosphere(s) {
+  const U = WORLD_UNIFORMS;
+  SUN_DIR.copy(s.keyDir);
+  U.uSunColor.value.copy(s.keyColor);
+  U.uMoonDirW.value.copy(s.moonDir);
+  U.uMoonColor.value.copy(s.moonColor);
+  U.uSkyZenith.value.copy(s.skyZenith);
+  U.uSkyHorizon.value.copy(s.skyHorizon);
+  U.uSkyAmbient.value.copy(s.ambientSky);
+  U.uGroundAmbient.value.copy(s.ambientGround);
+  U.uRimColor.value.copy(s.rimColor);
+  U.uNight.value = s.night;
+  U.uLamp.value = s.lamp;
+  cloudScale = s.cloudScale;
+  U.uCloud.value.x = cloudBase * cloudScale;
 }
 
 const DIR_LIGHT_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
@@ -213,6 +269,8 @@ uniform vec3 uGround;
 uniform vec3 uGroundFar;
 uniform vec3 uSun;
 uniform vec3 uSunDir;
+uniform vec3 uMoon;
+uniform vec3 uMoonDir;
 varying vec3 vDir;
 void main() {
   vec3 d = normalize( vDir );
@@ -228,22 +286,44 @@ void main() {
   }
   float s = max( dot( d, uSunDir ), 0.0 );
   col += uSun * ( pow( s, 900.0 ) * 40.0 + pow( s, 24.0 ) * 0.6 + pow( s, 4.0 ) * 0.12 );
+  float m = max( dot( d, uMoonDir ), 0.0 );
+  col += uMoon * ( pow( m, 1400.0 ) * 14.0 + pow( m, 40.0 ) * 0.2 + pow( m, 6.0 ) * 0.03 );
   gl_FragColor = vec4( col, 1.0 );
 }`;
 
+/** Size of the baked environment cube (per face): the reflections are soft, so small is plenty. */
+const ENV_SIZE = 128;
+/** The environment is baked again once the sky has drifted this far (linear color / direction components). */
+const ENV_DRIFT = 0.035;
+/** … and never more often than this (ms). */
+const ENV_MIN_INTERVAL = 1500;
+
+const _moonHue = new THREE.Color('#a9c9ff');
+
 /**
  * Build the scene environment from a procedural sky (needs a real WebGLRenderer).
+ * The sky follows the time of day: `update(state)` bakes it again when it has
+ * moved on (at most every 1.5 s), and returns true when `texture` changed (point
+ * `scene.environment` at it again).
  * @param {THREE.WebGLRenderer} renderer
- * @returns {{ texture: THREE.Texture, dispose: () => void } | null}
+ * @param {import('./atmosphere.js').AtmosphereState} [state] the look to start from
+ * @returns {{ texture: THREE.Texture, update: (state: object, force?: boolean) => boolean, dispose: () => void } | null}
  */
-export function createEnvironment(renderer) {
+export function createEnvironment(renderer, state = INITIAL) {
   if (!renderer || typeof renderer.setRenderTarget !== 'function' || typeof THREE.PMREMGenerator !== 'function') return null;
   // PMREM draws into half-float targets: without a float color buffer every draw
   // fails (GL errors, no exception) and the environment stays black
   const ext = renderer.extensions;
   if (!ext || !(ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float'))) return null;
+  // One generator for the renderer's life: disposing it would drop its compiled
+  // shaders, and a time-of-day bake every few seconds must not recompile them.
   let pmrem = null;
-  let rt = null;
+  try {
+    pmrem = new THREE.PMREMGenerator(renderer);
+  } catch (err) {
+    console.warn('[render] environment map unavailable', err);
+    return null;
+  }
   const geo = new THREE.SphereGeometry(10, 48, 24);
   const mat = new THREE.ShaderMaterial({
     vertexShader: SKY_VS,
@@ -251,33 +331,90 @@ export function createEnvironment(renderer) {
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      uZenith: { value: new THREE.Color('#5d8fd0') },
-      uHorizon: { value: new THREE.Color('#cfdbe6') },
-      uGround: { value: new THREE.Color('#4a4a32') },
-      uGroundFar: { value: new THREE.Color('#8c9174') },
-      uSun: { value: new THREE.Color('#fff2dc') },
-      uSunDir: { value: SUN_DIR.clone() },
+      uZenith: { value: new THREE.Color() },
+      uHorizon: { value: new THREE.Color() },
+      uGround: { value: new THREE.Color() },
+      uGroundFar: { value: new THREE.Color() },
+      uSun: { value: new THREE.Color() },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uMoon: { value: new THREE.Color() },
+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     },
   });
   const sky = new THREE.Scene();
   sky.add(new THREE.Mesh(geo, mat));
-  try {
-    pmrem = new THREE.PMREMGenerator(renderer);
-    rt = pmrem.fromScene(sky, 0, 0.1, 100);
-  } catch (err) {
-    console.warn('[render] environment map unavailable', err);
-    rt = null;
-  } finally {
-    if (pmrem) pmrem.dispose();
-    geo.dispose();
-    mat.dispose();
-  }
-  if (!rt) return null;
-  rt.texture.name = 'sky-environment';
-  return {
-    texture: rt.texture,
+  const baked = new Float32Array(18); // what the last bake looked like
+  const now = new Float32Array(18);
+  let rt = null;
+  let lastBake = -Infinity;
+
+  /** The sky's inputs as they are now. */
+  const read = (st, out) => {
+    const u = mat.uniforms;
+    u.uZenith.value.copy(st.skyZenith);
+    u.uHorizon.value.copy(st.skyHorizon);
+    u.uGround.value.copy(st.skyGround);
+    u.uGroundFar.value.copy(st.skyGround).lerp(st.skyHorizon, 0.55);
+    // the sun's disc and glow fade out as it drops below the horizon; the moon's rise with it
+    const sunUp = Math.min(1, Math.max(0, (st.sunElevation + 6) / 10));
+    const moonUp = Math.min(1, Math.max(0, (st.moonElevation + 4) / 10));
+    u.uSun.value.copy(st.keyHue).multiplyScalar(sunUp);
+    u.uSunDir.value.copy(st.sunDir);
+    u.uMoon.value.copy(_moonHue).multiplyScalar(moonUp * (0.35 + 0.65 * st.night));
+    u.uMoonDir.value.copy(st.moonDir);
+    let k = 0;
+    for (const c of [u.uZenith.value, u.uHorizon.value, u.uGround.value, u.uSun.value, u.uMoon.value]) {
+      out[k++] = c.r;
+      out[k++] = c.g;
+      out[k++] = c.b;
+    }
+    out[k++] = st.sunDir.x;
+    out[k++] = st.sunDir.y;
+    out[k++] = st.sunDir.z;
+  };
+
+  const env = {
+    texture: null,
+    update(st, force = false) {
+      if (!pmrem) return false;
+      read(st, now);
+      if (!force) {
+        const t = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        if (t - lastBake < ENV_MIN_INTERVAL) return false;
+        let drift = 0;
+        for (let i = 0; i < now.length; i++) drift = Math.max(drift, Math.abs(now[i] - baked[i]));
+        if (drift < ENV_DRIFT) return false;
+      }
+      let next = null;
+      try {
+        next = pmrem.fromScene(sky, 0, 0.1, 100, { size: ENV_SIZE });
+      } catch (err) {
+        console.warn('[render] environment map unavailable', err);
+        return false;
+      }
+      lastBake = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      baked.set(now);
+      const old = rt;
+      rt = next;
+      rt.texture.name = 'sky-environment';
+      env.texture = rt.texture;
+      if (old) old.dispose();
+      return true;
+    },
     dispose() {
-      rt.dispose();
+      if (rt) rt.dispose();
+      rt = null;
+      env.texture = null;
+      if (pmrem) pmrem.dispose();
+      pmrem = null;
+      geo.dispose();
+      mat.dispose();
     },
   };
+  env.update(state, true);
+  if (!rt) {
+    env.dispose();
+    return null;
+  }
+  return env;
 }

@@ -14,6 +14,7 @@
                     first pantheon; harness.focus.base / .army / .sites are camera spots
       seed=12345  size=small|medium  my=0 (-1 = spectator, sees all)
       pantheons=greek,norse,...  players=2      quality=low|medium|high|ultra
+      tod=cycle|golden|day|dusk|night|dawn|<hour 0..24>   time of day (default cycle: follows the sim clock from 08:00)
       t=20          simulate this many seconds before showing
       manual=1      no animation loop; window.harness.advance(sec) / render() drive it (screenshots)
       cam=x,y,dist  camera target and zoom distance
@@ -93,7 +94,7 @@
     vs.pushSnapshot(world.getSnapshot(), vnow);
 
     const canvas = document.getElementById('c');
-    const renderer = new GameRenderer(canvas, { viewState: vs, setup, quality });
+    const renderer = new GameRenderer(canvas, { viewState: vs, setup, quality, timeOfDay: Q.get('tod') || 'cycle' });
     window.renderer = renderer;
     window.world = world;
     window.vs = vs;

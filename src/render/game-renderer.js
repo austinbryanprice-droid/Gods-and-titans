@@ -29,7 +29,8 @@ import { FireLayer } from './fires.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
 import { PostFX, RESIZE_SETTLE_MS } from './post.js';
-import { createEnvironment, setCloudShadows, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
+import { createEnvironment, setCloudShadows, applyAtmosphere, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
+import { Atmosphere } from './atmosphere.js';
 
 // Low draws straight to the canvas; the others go through the post-processing
 // pipeline (post.js: MSAA, bloom, + ambient occlusion on high / ultra), which
@@ -43,14 +44,11 @@ const QUALITY = {
   ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 3, clouds: 0.34, minScale: 0.7, vfx: 'high' },
 };
 
-// Light rig (linear, tone-mapped by post.js / the low path's Neutral mapping)
+// The overlays' own fixed light rig (linear, drawn after post): their colors stay exact at any
+// time of day. The world's lights follow the time of day (atmosphere.js, updateLook).
 const SUN_COLOR = 0xffe4bd;
-const SUN_INTENSITY = 3.0;
 const SKY_COLOR = 0xbccff2;
 const GROUND_COLOR = 0x4c4230;
-const HEMI_INTENSITY = 0.68;
-const ENV_INTENSITY = 0.5;
-const EXPOSURE = 1.0;
 // Adaptive resolution (frame times in ms, smoothed): slower than SLOW_FRAME_MS (and
 // well past the display's own frame period) lowers the scene scale a step; frames
 // that keep up with the display, or run faster than FAST_FRAME_MS on a high-refresh
@@ -128,8 +126,9 @@ export class GameRenderer {
    * @param {object} [o.setup] GameSetup (defaults to viewState.setup)
    * @param {'low'|'medium'|'high'|'ultra'} [o.quality]
    * @param {THREE.WebGLRenderer} [o.webgl] an existing renderer to draw with (tests / tools)
+   * @param {string|number} [o.timeOfDay] 'cycle' (the default: follows the match clock), 'golden' | 'day' | 'dusk' | 'night' | 'dawn', or an hour 0..24
    */
-  constructor(canvas, { viewState, setup, quality = 'medium', webgl = null } = {}) {
+  constructor(canvas, { viewState, setup, quality = 'medium', webgl = null, timeOfDay = 'cycle' } = {}) {
     if (!viewState) throw new Error('GameRenderer needs a viewState.');
     this.vs = viewState;
     this.setup = setup || viewState.setup || { players: [] };
@@ -155,7 +154,6 @@ export class GameRenderer {
     this.renderer.shadowMap.enabled = Q.shadows;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // soft: vogel-disk taps scaled by shadow.radius
     this.renderer.shadowMap.autoUpdate = true;
-    this.renderer.toneMappingExposure = EXPOSURE;
     if (this.renderer.info) this.renderer.info.autoReset = false; // several render() calls per frame
     // the post pipeline needs a real WebGLRenderer (tests draw through a stub)
     this.post = typeof this.renderer.setRenderTarget === 'function' ? new PostFX(this.renderer, this.quality) : null;
@@ -171,12 +169,15 @@ export class GameRenderer {
     const scene = (this.scene = new THREE.Scene());
     scene.name = 'game';
     scene.background = new THREE.Color(0x050605);
-    // aerial haze: only the far edge of the view at the farthest zoom reaches it
+    // The time of day (atmosphere.js) sets every light, the haze and the grade each frame
+    // (updateLook); the values here are only what a frame before the first update would show.
+    this.atmo = new Atmosphere({ mode: timeOfDay });
     scene.fog = new THREE.Fog(0xaebfcc, 44, 170);
-    this.hemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, HEMI_INTENSITY);
+    this.hemi = new THREE.HemisphereLight(SKY_COLOR, GROUND_COLOR, 0.8);
     scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(SUN_COLOR, SUN_INTENSITY);
-    // along SUN_DIR on every quality (with shadows, updateShadowCamera re-centers it each frame)
+    this.sun = new THREE.DirectionalLight(SUN_COLOR, 3.0);
+    // the key light: the sun by day, the moon at night, along SUN_DIR on every quality
+    // (with shadows, updateShadowCamera re-centers it each frame)
     this.sun.position.copy(SUN_DIR).multiplyScalar(60);
     this.sun.castShadow = Q.shadows;
     this.sun.shadow.mapSize.set(Q.shadowSize || 1024, Q.shadowSize || 1024);
@@ -189,11 +190,8 @@ export class GameRenderer {
     scene.add(this.sun);
     scene.add(this.sun.target);
     // image-based lighting from a procedural sky (reflections on metal, stone, lacquer)
-    this.env = createEnvironment(this.ownsWebgl ? this.renderer : null);
-    if (this.env) {
-      scene.environment = this.env.texture;
-      scene.environmentIntensity = ENV_INTENSITY;
-    }
+    this.env = createEnvironment(this.ownsWebgl ? this.renderer : null, this.atmo.refresh());
+    if (this.env) scene.environment = this.env.texture;
     // After a lost context comes back (GPU reset, driver update, mobile tab eviction)
     // three re-uploads textures from their data, but the environment was rendered on
     // the GPU and has none: render it again. (The old one went with the old context;
@@ -201,12 +199,13 @@ export class GameRenderer {
     // own handler, so the GL state is already rebuilt when this runs.
     this.onContextRestored = () => {
       if (this.disposed || !this.env) return;
-      this.env = createEnvironment(this.renderer);
+      this.env = createEnvironment(this.renderer, this.atmo.state);
       scene.environment = this.env ? this.env.texture : null;
     };
     const dom = this.ownsWebgl ? this.renderer.domElement : null;
     if (dom && typeof dom.addEventListener === 'function') dom.addEventListener('webglcontextrestored', this.onContextRestored);
     setCloudShadows(Q.clouds);
+    this.updateLook(true);
 
     // Overlays that must keep their exact colors (health bars, selection rings,
     // markers, text, rally flags, placement ghosts, status icons) live in their
@@ -1147,6 +1146,7 @@ export class GameRenderer {
     setBuildingTime(this.time);
     this.vfx.update(dt);
     this.updateOverlays(dt);
+    this.updateLook();
     this.updateShadowCamera();
 
     this.lastUpdateMs = now() - t0;
@@ -1828,25 +1828,91 @@ export class GameRenderer {
     }
     r = Math.ceil(Math.min(r * 1.05 + 3, 70) / 4) * 4; // quantized: texel size changes only in steps
     const cam = this.sun.shadow.camera;
+    // A low sun lays the visible ground out along the light's axis (a 14° sun puts a view
+    // 70 tiles across about 70 tiles deep), so the light stands back and sees far with the view.
+    const back = r + 40;
     if (r !== this.shadowR) {
       this.shadowR = r;
       cam.left = -r;
       cam.right = r;
       cam.top = r;
       cam.bottom = -r;
+      cam.near = 1;
+      cam.far = back + r + 30;
       cam.updateProjectionMatrix();
+      this.sun.shadow.bias = -0.083 / (cam.far - cam.near); // the same ~0.08 world units whatever the depth range
     }
+    // grazing light needs a bigger push off the surface to keep the terrain from striping itself
+    this.sun.shadow.normalBias = 0.03 + 0.06 * clamp((0.65 - SUN_DIR.y) / 0.4, 0, 1);
     // snap the center to shadow texels so edges do not shimmer while panning
     const texel = (2 * r) / this.sun.shadow.mapSize.x;
-    const right = this._sr || (this._sr = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), SUN_DIR).normalize());
-    const up = this._su || (this._su = new THREE.Vector3().crossVectors(SUN_DIR, right).normalize());
+    const right = this._sr || (this._sr = new THREE.Vector3());
+    const up = this._su || (this._su = new THREE.Vector3());
+    right.set(0, 1, 0).cross(SUN_DIR).normalize(); // the key light moves through the day
+    up.crossVectors(SUN_DIR, right).normalize();
     _v.set(cx, this.camera.groundY, cy);
     const a = Math.round(_v.dot(right) / texel) * texel - _v.dot(right);
     const b = Math.round(_v.dot(up) / texel) * texel - _v.dot(up);
     _v.addScaledVector(right, a).addScaledVector(up, b);
     this.sun.target.position.copy(_v);
-    this.sun.position.copy(_v).addScaledVector(SUN_DIR, 60);
+    this.sun.position.copy(_v).addScaledVector(SUN_DIR, back);
     this.sun.target.updateMatrixWorld();
+  }
+
+  // ------------------------------------------------------------------ time of day
+
+  /**
+   * Follow the match clock ('cycle') or hold one time of day: 'golden', 'day', 'dusk',
+   * 'night', 'dawn', or an hour 0..24. Takes effect at once; unknown values are ignored.
+   * @param {string|number} mode
+   * @returns {boolean} whether the look changed
+   */
+  setTimeOfDay(mode) {
+    const changed = this.atmo.setMode(mode);
+    this.updateLook(true);
+    return changed;
+  }
+
+  /** The time of day now showing: { mode: 'cycle' | 'golden' | … | 'hour', hour: 0..24 }. */
+  get timeOfDay() {
+    return { mode: this.atmo.mode, hour: this.atmo.hour };
+  }
+
+  /**
+   * Resolve the time of day for this frame (the cycle follows the sim clock the view
+   * state interpolates, so every client agrees) and push it into the lights, the haze,
+   * the sky environment, the post-processing look and the shared shader uniforms.
+   */
+  updateLook(force = false) {
+    const vs = this.vs;
+    const s = this.atmo.update(Number.isFinite(vs.renderTime) ? vs.renderTime : vs.time);
+    applyAtmosphere(s);
+    this.sun.color.copy(s.keyHue);
+    this.sun.intensity = s.keyIntensity;
+    this.hemi.color.copy(s.hemiSky);
+    this.hemi.groundColor.copy(s.hemiGround);
+    this.hemi.intensity = s.hemiIntensity;
+    const fog = this.scene.fog;
+    fog.color.copy(s.haze);
+    fog.near = s.hazeNear;
+    fog.far = s.hazeFar;
+    this.scene.background.copy(s.background);
+    this.scene.environmentIntensity = s.envIntensity;
+    this.renderer.toneMappingExposure = s.exposure; // the low path's Neutral tone mapping
+    const look = this.post && this.post.look;
+    if (look) {
+      look.exposure = s.exposure;
+      look.bloomStrength = s.bloom;
+      look.bloomThreshold = s.bloomThreshold;
+      look.bloomKnee = s.bloomKnee;
+      look.bloomRadius = s.bloomRadius;
+      look.contrast = s.contrast;
+      look.saturation = s.saturation;
+      look.shadowTint = s.shadowTint;
+      look.highlightTint = s.highlightTint;
+      look.vignette = s.vignette;
+    }
+    if (this.env && this.env.update(s, force)) this.scene.environment = this.env.texture;
   }
 
   // ------------------------------------------------------------------ render
@@ -1863,7 +1929,6 @@ export class GameRenderer {
       // the grade darken the dimmed (remembered) ground further (1.4 keeps it at about
       // the ~50% brightness of low quality)
       FOW_UNIFORMS.uFowPow.value = 1.4;
-      this.post.look.exposure = EXPOSURE;
       this.post.render(this.scene, this.threeCamera, this.overlayScene, now());
       return;
     }
