@@ -429,8 +429,8 @@ function broadleafGeo() {
   for (let i = 0; i < 3; i++) add(at(0.5 + (i / 3) * PI * 2, 0.2, 1.58 + r.next() * 0.06), 0.24 + r.next() * 0.03, '#5ca43a');
   // small puffs on the shell break up the outline
   for (let i = 0; i < 7; i++) add(at(r.next() * PI * 2, 0.5 + r.next() * 0.1, 1.05 + r.next() * 0.5), 0.14 + r.next() * 0.05, i % 2 ? '#4a9534' : '#3d8530');
-  // core: hidden, fills the middle
-  add(new THREE.Vector3(0, 1.25, 0), 0.4, '#2a5f28');
+  // no hidden puff in the middle: the camera never looks into the crown (50 to 58 degrees down), and a
+  // big puff nobody sees is pure overdraw, the one real cost of puffs
   return finish(parts, { height: 1.9, bend: 0.07, flutter: 0.014 });
 }
 
