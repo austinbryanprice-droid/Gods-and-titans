@@ -639,6 +639,10 @@ export class GameRenderer {
     this.forest.setQuality(q);
     this.decor.setQuality(q);
     if (this.undergrowth) this.undergrowth.setQuality(q);
+    // crowns and bushes swap to the other puff material, which the fog of war has not patched yet
+    patchFowObject(this.forest.object3d);
+    patchFowObject(this.decor.object3d);
+    if (this.undergrowth) patchFowObject(this.undergrowth.object3d);
     this.groundCover.setQuality(q);
     patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
     this.vfx.setQuality(Q.vfx);

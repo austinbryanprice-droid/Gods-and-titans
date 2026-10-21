@@ -202,7 +202,11 @@ varying vec4 vBb;
 varying vec4 vBbSeed;
 varying float vPuffK;`;
 
-const PUFF_DEPTH_PARS = PUFF_HASH;
+// The shadow pass cuts the same disc as the color pass (without the leaf tips): vBbD = the corner,
+// so the quad's corners cast nothing and a bush's shadow is round, not a square.
+const PUFF_DEPTH_PARS = `${PUFF_HASH}\nvarying vec2 vBbD;`;
+const PUFF_DEPTH_VERTEX = 'vBbD = aBb.w > 0.5 ? aBb.xy : vec2( 0.0 );';
+const PUFF_DEPTH_FRAGMENT = 'if ( dot( vBbD, vBbD ) > 1.0 ) discard;';
 
 // Per puff: where its leaf texture starts and how it is turned (the same for all six vertices:
 // they sit at the puff's center).
@@ -531,9 +535,14 @@ export function foliageDepthMaterial({ pine = false, puff = false } = {}) {
     if (pine) shader.uniforms.uPine = PINE_UNIFORMS.uPine;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\nattribute vec3 aFol;\n${WIND_GLSL}${pine ? PINE_VERTEX_PARS : ''}${puff ? PUFF_DEPTH_PARS : ''}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_DEPTH_MORPH : ''}${puff ? PUFF_JITTER : ''}${INSTANCED_WIND}${puff ? PUFF_EXPAND_DEPTH : ''}`);
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${pine ? PINE_DEPTH_MORPH : ''}${puff ? `${PUFF_DEPTH_VERTEX}\n${PUFF_JITTER}` : ''}${INSTANCED_WIND}${puff ? PUFF_EXPAND_DEPTH : ''}`);
+    if (puff) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vBbD;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${PUFF_DEPTH_FRAGMENT}`);
+    }
   };
-  mat.customProgramCacheKey = () => (pine ? 'foliage-depth1p' : puff ? 'foliage-depth1b' : 'foliage-depth1');
+  mat.customProgramCacheKey = () => (pine ? 'foliage-depth1p' : puff ? 'foliage-depth2b' : 'foliage-depth1');
   DEPTH[key] = mat;
   return mat;
 }

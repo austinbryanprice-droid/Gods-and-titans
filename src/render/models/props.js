@@ -215,7 +215,29 @@ function finish(parts, { height = 1, bend = 0, flutter = 0 } = {}) {
   }
   g.computeBoundingBox();
   g.computeBoundingSphere();
+  growForPuffs(g);
   return g;
+}
+
+/** How far a puff's quad can reach from its center, in radii: a corner, sized up by the per-tree jitter, pushed toward the viewer. */
+const PUFF_REACH = 1.14 * Math.hypot(Math.SQRT2, 0.55);
+/** The per-tree jitter of a puff's center (foliage-shader.js PUFF_JITTER), at most. */
+const PUFF_SHIFT = 0.08;
+
+/**
+ * Puffs sit at their center in the position buffer and spread in the vertex shader, so the
+ * bounds computed from the positions are too small: an instance near the edge of the view
+ * would be culled while its outer puffs are still on screen. Grow them to hold the widest puff.
+ */
+function growForPuffs(g) {
+  const bb = g.attributes.aBb;
+  if (!bb) return;
+  let widest = 0;
+  for (let i = 0; i < bb.count; i++) if (bb.getW(i) > 0.5) widest = Math.max(widest, bb.getZ(i));
+  if (widest <= 0) return;
+  const pad = widest * PUFF_REACH + PUFF_SHIFT;
+  g.boundingBox.expandByScalar(pad);
+  g.boundingSphere.radius += pad;
 }
 
 /**

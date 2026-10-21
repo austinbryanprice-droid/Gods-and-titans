@@ -20,6 +20,7 @@ const THREE = await import('three');
 const { leafTexels, needleTexels, NEEDLE_SPRAYS } = await import('../../src/render/models/leaf-texture.js');
 const { createForest, createDecor, getPropInfo } = await import('../../src/render/models/props.js');
 const { WORLD_UNIFORMS } = await import('../../src/render/shading.js');
+const { foliageDepthMaterial } = await import('../../src/render/models/foliage-shader.js');
 const { TERRAIN } = await import('../../src/config.js');
 
 /** A forest block with a meadow around it, a few decor items of every plant kind. */
@@ -306,4 +307,56 @@ test('the budgets of the new plant shapes stay low', () => {
   for (const [k, list] of Object.entries(info.decor)) for (const t of list) assert.ok(t <= 200, `${k}: ${t} triangles`);
   // puffs are two triangles each: the crowns are cheaper than the meshes they replaced
   assert.ok(info.trees.broadleaf <= 100 && info.trees.birch <= 100, `${info.trees.broadleaf} / ${info.trees.birch}`);
+});
+
+test('a puff casts a round shadow: the shadow pass cuts the same disc as the color pass', () => {
+  const shaderOf = (mat) => {
+    const shader = { uniforms: {}, vertexShader: THREE.ShaderLib.depth.vertexShader, fragmentShader: THREE.ShaderLib.depth.fragmentShader };
+    mat.onBeforeCompile(shader, null);
+    return shader;
+  };
+  const puff = shaderOf(foliageDepthMaterial({ puff: true }));
+  assert.match(puff.vertexShader, /varying vec2 vBbD/);
+  assert.match(puff.vertexShader, /vBbD = aBb\.w > 0\.5 \? aBb\.xy : vec2\( 0\.0 \)/, 'bark and branches carry no corner');
+  assert.match(puff.fragmentShader, /varying vec2 vBbD/);
+  assert.match(puff.fragmentShader, /if \( dot\( vBbD, vBbD \) > 1\.0 \) discard;/, 'the quad corners cast nothing');
+  assert.ok(puff.fragmentShader.indexOf('discard') > puff.fragmentShader.indexOf('void main'), 'cut inside main');
+  for (const o of [{}, { pine: true }]) {
+    const plain = shaderOf(foliageDepthMaterial(o));
+    assert.doesNotMatch(plain.fragmentShader, /vBbD|discard/, 'spruces and plain plants cast their whole mesh');
+  }
+  assert.notEqual(foliageDepthMaterial({ puff: true }).customProgramCacheKey(), foliageDepthMaterial({}).customProgramCacheKey());
+});
+
+test('the bounds of a crown hold its widest puff, so an instance at the edge of the view is not culled early', () => {
+  const info = getPropInfo();
+  assert.ok(info.trees.broadleaf > 0);
+  const map = synthMap();
+  const f = createForest(map, null, { variants: ['broadleaf', 'birch'] });
+  const d = createDecor(map);
+  const meshes = [...instancedOf(f.object3d), ...instancedOf(d.object3d)].filter((m) => /^(forest-(broadleaf|birch)|decor-bush)$/.test(m.name));
+  assert.ok(meshes.length >= 3);
+  for (const m of meshes) {
+    const g = m.geometry;
+    const pos = g.attributes.position;
+    const bb = g.attributes.aBb;
+    const c = g.boundingSphere.center;
+    let checked = 0;
+    for (let i = 0; i < bb.count; i += 6) {
+      if (bb.getW(i) < 0.5) continue;
+      const r = bb.getZ(i);
+      // the corner of the quad at the largest per-tree size, pushed toward the viewer, and the center's own jitter
+      const reach = 1.14 * r * Math.hypot(Math.SQRT2, 0.55) + 0.08;
+      const dist = Math.hypot(pos.getX(i) - c.x, pos.getY(i) - c.y, pos.getZ(i) - c.z);
+      assert.ok(dist + reach <= g.boundingSphere.radius + 1e-6, `${m.name}: puff ${i / 6} of radius ${r} pokes out of the sphere`);
+      assert.ok(pos.getX(i) - reach >= g.boundingBox.min.x - 1e-6 && pos.getX(i) + reach <= g.boundingBox.max.x + 1e-6, `${m.name}: puff ${i / 6} pokes out of the box`);
+      checked++;
+    }
+    assert.ok(checked >= 4, `${m.name} has puffs`);
+  }
+  // geometry without puffs keeps its tight bounds
+  const pine = instancedOf(f.object3d, 'forest-pine')[0] || createForest(map, null, { variants: ['pine'] }).object3d.children.find((o) => o.isInstancedMesh);
+  assert.ok(pine.geometry.boundingSphere.radius < 2.5, 'a spruce is not padded');
+  f.dispose();
+  d.dispose();
 });
