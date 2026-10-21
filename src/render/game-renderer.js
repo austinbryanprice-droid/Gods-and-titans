@@ -15,7 +15,7 @@ import { rankName, RANK_COLORS } from '../data/ranks.js';
 import { wallConnections } from '../data/walls.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { unitLook } from './models/unit-looks.js';
-import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches } from './models/building-models.js';
+import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches, setBuildingDetail, pruneBuildingCaches } from './models/building-models.js';
 import { createForest, createDecor, decorOffOutcrops } from './models/props.js';
 import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
@@ -36,12 +36,13 @@ import { Atmosphere } from './atmosphere.js';
 // pipeline (post.js: MSAA, bloom, + ambient occlusion on high / ultra), which
 // also does the antialiasing, so the canvas itself never needs it.
 // `minScale` bounds adaptive resolution (scene drawn below the canvas size
-// while frames are slow); `vfx` is the VFX tier (it has no 'ultra').
+// while frames are slow); `vfx` is the VFX tier (it has no 'ultra'); `detail` is
+// the building models' detail level (building-core.js Kit: 0 essential forms only).
 const QUALITY = {
-  low: { pixelRatio: 1, shadows: false, shadowSize: 0, shadowRadius: 1, clouds: 0, minScale: 1, vfx: 'low' },
-  medium: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, shadowRadius: 2.2, clouds: 0.3, minScale: 0.6, vfx: 'medium' },
-  high: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 2.6, clouds: 0.34, minScale: 0.6, vfx: 'high' },
-  ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 3, clouds: 0.34, minScale: 0.7, vfx: 'high' },
+  low: { pixelRatio: 1, shadows: false, shadowSize: 0, shadowRadius: 1, clouds: 0, minScale: 1, vfx: 'low', detail: 0 },
+  medium: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, shadowRadius: 2.2, clouds: 0.3, minScale: 0.6, vfx: 'medium', detail: 1 },
+  high: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 2.6, clouds: 0.34, minScale: 0.6, vfx: 'high', detail: 1 },
+  ultra: { pixelRatio: 2, shadows: true, shadowSize: 4096, shadowRadius: 3, clouds: 0.34, minScale: 0.7, vfx: 'high', detail: 1 },
 };
 
 // The overlays' own fixed light rig (linear, drawn after post): their colors stay exact at any
@@ -142,6 +143,7 @@ export class GameRenderer {
     this.height = this.map.height;
     this.quality = QUALITY[quality] ? quality : 'medium';
     const Q = QUALITY[this.quality];
+    setBuildingDetail(Q.detail);
     this.canvas = canvas;
     this.disposed = false;
     this.time = 0;
@@ -646,8 +648,20 @@ export class GameRenderer {
     this.groundCover.setQuality(q);
     patchFowObject(this.groundCover.object3d); // meshes built on the first non-low quality
     this.vfx.setQuality(Q.vfx);
+    this.refreshBuildingDetail(Q.detail);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
+  }
+
+  /** Rebuild the standing buildings' models when the quality changes their detail level (building-core.js Kit). */
+  refreshBuildingDetail(detail) {
+    if (!setBuildingDetail(detail)) return;
+    for (const b of this.buildings.values()) {
+      b.model.refresh();
+      b.height = b.model.height;
+      patchFowObject(b.model.root);
+    }
+    pruneBuildingCaches();
   }
 
   /** Unit meshes cast real shadows on high and ultra; blob shadows ground them everywhere. */
