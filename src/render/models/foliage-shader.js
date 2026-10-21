@@ -176,14 +176,15 @@ const FOLIAGE_VERTEX_PARS = `attribute vec3 aFol;\nvarying float vLeaf;\nvarying
 
 // ---------------------------------------------------------------------------
 // Leaf puffs: the round clumps that make up broadleaf crowns and bushes. A puff is
-// one quad (two triangles) whose four vertices all sit at the puff's center and carry
-// aBb = (corner x, corner y, radius in local units, 1). The vertex shader spreads the
-// corners over a quad facing the camera (the shadow camera in the shadow pass, so a
-// shadow is a disc across the light) and pushes it toward the viewer by half a
+// one quad (two triangles, six vertices) whose vertices all sit at the puff's center and
+// carry aBb = (corner x, corner y, radius in local units, 1). The vertex shader spreads
+// the corners over a quad facing the camera (the shadow camera in the shadow pass, so a
+// shadow is a disc across the light) and pushes it toward the viewer by about half a
 // radius; the fragment shader shades it as a sphere (a smooth round normal, bent a
 // little toward the crown's outward direction in the vertex normal), cuts the disc
-// with an anti-aliased edge and a leafy, ragged one, and takes its leaf noise from
-// the sphere surface. Parts that are not puffs (trunks, branches) carry aBb.w = 0.
+// with an anti-aliased edge and a leafy, ragged one, and lays the leaf texture over it
+// (each puff turned and shifted differently). Parts that are not puffs (trunks,
+// branches) carry aBb.w = 0.
 // ---------------------------------------------------------------------------
 
 // A puff's own random numbers: from its center and the position of its tree (the same in the
