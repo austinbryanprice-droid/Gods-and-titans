@@ -5,7 +5,7 @@ import { RANK_NAMES } from '../data/ranks.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME,
-  MAX_WALL_LINE,
+  MAX_WALL_LINE, WALL_PLACE_RANGE,
 } from '../config.js';
 
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
@@ -127,7 +127,7 @@ export function renderHowToContent() {
     step(6, '⚔️', 'Wage war',
       `Armor softens blows; arrows and spells never miss. Spells ignore armor but deal only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.`,
       `Soldiers from the Barracks earn experience for the enemies and buildings they destroy (Priests for the wounds they mend) and rise from ${RANK_NAMES[0]} to ${rankLadder()}. Each rank adds ${Math.round(RANK_DAMAGE * 100)}% damage, ${Math.round(RANK_HP * 100)}% health and ${RANK_ARMOR} armor, and small bronze, silver and gold diamonds over a soldier show its rank.`,
-      `Worshippers can lay walls too: choose Wooden Wall in the build menu (W), then press on a tile and drag to lay a line of up to ${MAX_WALL_LINE} segments, which your Worshippers build one by one. Walls block every ground unit, yours too, so enemy soldiers have to break through them while ranged units shoot over. Select a wall and press U to upgrade it to stone (${WALL_UPGRADE_TEXT}). A Tower raised on a wall, or in line with one, becomes part of the wall, and you can dismantle a segment (D) to open a gap of your own.`,
+      `Worshippers can lay walls too: choose Wooden Wall in the build menu (W), then press on a tile and drag to lay a line of up to ${MAX_WALL_LINE} segments, which your Worshippers build one by one; a line goes up only within ${WALL_PLACE_RANGE} tiles of the Worshippers you order. Walls block every ground unit, yours too, so enemy armies have to break through them; ranged units can shoot over a wall at anything within range. Select a wall and press U to upgrade it to stone (${WALL_UPGRADE_TEXT}). A Tower raised on a wall, or in line with one, becomes part of the wall, and you can dismantle a segment (D) to open a gap of your own.`,
       `The host can pick the ${PEACE_NAME} game mode in the lobby: for ${PEACE_MINUTES_TEXT} no player can harm another with weapons or spells, so everyone has time to build up and mass armies for one great battle. A countdown beside the game clock shows what is left, creatures still fight, and a horn sounds when the peace ends.`),
     step(7, '🔱', 'Know your pantheon',
       'Every pantheon plays its own way. Each has two blessings that work from the first second, an elite soldier trained at the Barracks, its own look, and its own creatures, gods and Titan. Hover the pantheon chip at the top left of the battlefield, or open Pantheons on the menu, to read yours.'),

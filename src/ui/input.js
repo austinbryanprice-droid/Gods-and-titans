@@ -195,6 +195,12 @@ export class InputController {
     });
   }
 
+  /** Where the selected worshippers stand, which bounds how far away a dragged wall may be placed (null with none selected). */
+  workerSpots() {
+    const spots = this.ownWorkers().map((id) => this.vs.entities.get(id)).filter(Boolean);
+    return spots.length ? spots : null;
+  }
+
   setMode(mode) {
     this.mode = mode;
     if (mode.kind !== 'place' && this.renderer) this.renderer.hidePlacement();
@@ -827,8 +833,9 @@ export class InputController {
     this.wallTip.hidden = true;
     this.placeSig = '';
     const p = this.ground(x, y);
-    const end = p ? footprintAt(m.building, p.x, p.y) : a;
-    const line = checkWallLine(this.vs, this.vs.myIndex, m.building, a.tx, a.ty, end.tx, end.ty);
+    if (!p) return; // let go past the edge of the map, where no ground shows: nothing is ordered, the placement stays open
+    const end = footprintAt(m.building, p.x, p.y);
+    const line = checkWallLine(this.vs, this.vs.myIndex, m.building, a.tx, a.ty, end.tx, end.ty, null, this.workerSpots());
     if (!line.build) {
       this.error(line.message);
       return;
@@ -865,7 +872,7 @@ export class InputController {
   previewWallLine(tx, ty) {
     const m = this.mode;
     const a = m.anchor || { tx, ty };
-    const line = checkWallLine(this.vs, this.vs.myIndex, m.building, a.tx, a.ty, tx, ty);
+    const line = checkWallLine(this.vs, this.vs.myIndex, m.building, a.tx, a.ty, tx, ty, null, this.workerSpots());
     const sig = `w|${m.building}|${line.tiles.map((t) => `${t.tx},${t.ty},${t.state[0]}`).join(';')}`;
     if (sig !== this.placeSig) {
       this.placeSig = sig;

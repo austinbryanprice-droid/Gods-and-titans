@@ -4,14 +4,15 @@
 // and the selection panel's summary of a long wall. Real World + ViewState, a stub renderer, the fake DOM.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { BUILDINGS } from '../../src/data/index.js';
 import { ViewState } from '../../src/game/view-state.js';
-import { checkPlacement, checkWallLine, WALL_THERE, CANT_BUILD, BUILDING_IN_WAY } from '../../src/game/placement.js';
+import { checkPlacement, checkWallLine, WALL_THERE, WALL_TOO_FAR, CANT_BUILD, BUILDING_IN_WAY } from '../../src/game/placement.js';
 import { getCommandCard } from '../../src/ui/command-card.js';
 import { Selection, MAX_SELECTION } from '../../src/ui/hud-selection.js';
 import { InfoView } from '../../src/ui/hud-info.js';
 import { InputController } from '../../src/ui/input.js';
-import { MAX_WALL_SELECTION, MAX_WALL_LINE } from '../../src/config.js';
-import { makeWorld, place, run } from '../sim/helpers.js';
+import { MAX_WALL_SELECTION, MAX_WALL_LINE, WALL_PLACE_RANGE } from '../../src/config.js';
+import { makeWorld, place, run, clearUnits, spawn } from '../sim/helpers.js';
 import { installFakeDom } from './fake-dom.js';
 
 before(installFakeDom);
@@ -90,6 +91,35 @@ test('a wall line with nothing to build says why', () => {
   // Long drags stop at MAX_WALL_LINE tiles; a diagonal keeps its tiles touching.
   assert.equal(checkWallLine(vs, 0, 'wooden_wall', 0, 30, 47, 30).tiles.length, 48);
   assert.ok(MAX_WALL_LINE >= 48);
+});
+
+test('a wall line leaves out the tiles farther than WALL_PLACE_RANGE from every worshipper it is ordered to', () => {
+  const world = makeWorld();
+  const vs = viewOf(world);
+  const near = { x: 10, y: 12 };
+  const line = checkWallLine(vs, 0, 'wooden_wall', 4, 12, 47, 12, null, [near]);
+  assert.deepEqual(line.tiles.map((t) => t.state), line.tiles.map((t) => (t.tx <= 33 ? 'build' : 'blocked')));
+  assert.equal(line.build, 30);
+  assert.deepEqual(line.cost, { gold: 0, wood: 360, faith: 0 });
+  assert.equal(line.message, null);
+  assert.equal(line.tiles.at(-1).message, WALL_TOO_FAR);
+  assert.equal(line.tiles[0].message, null);
+  // Any worshipper in reach is enough, and with no worshippers given the range is left out.
+  assert.equal(checkWallLine(vs, 0, 'wooden_wall', 4, 12, 47, 12, null, [near, { x: 44, y: 12 }]).build, 44);
+  assert.equal(checkWallLine(vs, 0, 'wooden_wall', 4, 12, 47, 12).build, 44);
+  // A line wholly out of reach says why.
+  const far = checkWallLine(vs, 0, 'wooden_wall', 40, 12, 47, 12, null, [near]);
+  assert.equal(far.build, 0);
+  assert.equal(far.message, WALL_TOO_FAR);
+  // The sim raises exactly those tiles.
+  const sim = makeWorld();
+  clearUnits(sim, 0);
+  sim.players[0].wood = 1000;
+  const a = spawn(sim, 0, 'worshipper', near.x, near.y);
+  sim.issueCommand(0, { type: 'build', units: [a.id], building: 'wooden_wall', tx: 4, ty: 12, tx2: 47, ty2: 12 });
+  run(sim, 0.1);
+  const raised = sim.buildingList.filter((b) => b.type === 'wooden_wall' && !b.dead).map((b) => b.tx).sort((p, q) => p - q);
+  assert.deepEqual(raised, line.tiles.filter((t) => t.state === 'build').map((t) => t.tx));
 });
 
 // ---------------------------------------------------------------- command card
@@ -262,6 +292,36 @@ test('drag a wall: press on a tile, the ghost and the tip follow, release orders
   input.dispose();
 });
 
+test('drag a wall past the worshippers\' reach: the ghost and the tip leave that part out, and a line wholly out of reach is refused', () => {
+  const { world, workers, input, sent, errors, lines, move, down, up } = inputScene();
+  input.setMode({ kind: 'place', building: 'wooden_wall' });
+  const reach = (t) => workers.some((u) => Math.hypot(u.x - (t.tx + 0.5), u.y - (t.ty + 0.5)) <= WALL_PLACE_RANGE);
+  move(10.5, 30.5);
+  down(10.5, 30.5);
+  move(44.5, 30.5);
+  const tiles = lines.at(-1).tiles;
+  const inReach = tiles.filter(reach).length;
+  assert.ok(inReach > 0 && inReach < tiles.length, 'the near end of the line is in reach and the far end is not');
+  assert.deepEqual(tiles.map((t) => t.state), tiles.map((t) => (reach(t) ? 'build' : 'blocked')));
+  assert.ok(input.wallTip.textContent.startsWith(`${inReach} × Wooden Wall`), input.wallTip.textContent);
+  up(44.5, 30.5);
+  assert.equal(sent.length, 1);
+  run(world, 0.1);
+  assert.equal(world.buildingList.filter((b) => b.type === 'wooden_wall' && !b.dead).length, inReach, 'the sim raises what the ghost showed');
+  // Wholly out of reach: red tip, no order, the placement stays open.
+  input.setMode({ kind: 'place', building: 'wooden_wall' });
+  move(44.5, 40.5);
+  down(44.5, 40.5);
+  move(47.5, 40.5);
+  assert.equal(input.wallTip.textContent, WALL_TOO_FAR);
+  assert.equal(input.wallTip.classList.contains('is-bad'), true);
+  up(47.5, 40.5);
+  assert.deepEqual(errors, [WALL_TOO_FAR]);
+  assert.equal(sent.length, 1, 'nothing more was ordered');
+  assert.equal(input.mode.kind, 'place');
+  input.dispose();
+});
+
 test('a click without a drag lays one segment', () => {
   const { world, input, sent, move, down, up } = inputScene();
   input.setMode({ kind: 'place', building: 'wooden_wall' });
@@ -335,6 +395,19 @@ test('releasing the button off the map orders nothing', () => {
   input.onMouseUp({ button: 0, clientX: 14, clientY: 800, shiftKey: false });
   assert.equal(sent.length, 0);
   assert.equal(input.mode.kind, 'place');
+  assert.equal(input.mode.anchor, null);
+  input.dispose();
+});
+
+test('releasing the button where no ground shows orders nothing, not a one-segment wall at the start', () => {
+  const { input, sent, move, down, up } = inputScene();
+  input.setMode({ kind: 'place', building: 'wooden_wall' });
+  move(10.5, 16.5);
+  down(10.5, 16.5);
+  input.renderer.screenToWorld = () => null; // the pointer is past the edge of the map
+  up(14.5, 16.5);
+  assert.equal(sent.length, 0);
+  assert.equal(input.mode.kind, 'place', 'the placement stays open');
   assert.equal(input.mode.anchor, null);
   input.dispose();
 });
@@ -452,6 +525,29 @@ test('a long wall shows a cell per type with its count, and one line for the hea
   sel.set(ids(wooden.slice(0, 10)));
   info.update();
   assert.equal(root.findAll('hi-cell').length, 10);
+});
+
+test('walls that turn to stone while selected move to their own cell, in a long selection and in a short one', () => {
+  const { world, vs, sel, root, info } = panelScene();
+  rich(world);
+  const wooden = row(world, 'wooden_wall', 4, 30, 24);
+  push(world, vs);
+  sel.set(ids(wooden));
+  info.update();
+  assert.deepEqual(root.findAll('hi-cell-count').map((n) => n.textContent), ['30']);
+  for (const w of wooden.slice(0, 10)) world.changeBuildingType(w, 'stone_wall'); // part of the upgrade finishes
+  push(world, vs);
+  info.update();
+  assert.deepEqual(root.findAll('hi-cell-count').map((n) => n.textContent).sort(), ['10', '20'], 'a Stone Wall cell appears, the Wooden Wall one shrinks');
+  // The same in a selection of 24 or fewer: every cell shows the type it is now.
+  sel.set(ids(wooden.slice(8, 12)));
+  info.update();
+  const icons = () => root.findAll('hi-cell-icon').map((n) => n.textContent);
+  assert.deepEqual(icons(), [BUILDINGS.stone_wall.icon, BUILDINGS.stone_wall.icon, BUILDINGS.wooden_wall.icon, BUILDINGS.wooden_wall.icon]);
+  world.changeBuildingType(wooden[10], 'stone_wall');
+  push(world, vs);
+  info.update();
+  assert.deepEqual(icons(), [BUILDINGS.stone_wall.icon, BUILDINGS.stone_wall.icon, BUILDINGS.stone_wall.icon, BUILDINGS.wooden_wall.icon]);
 });
 
 test('a wall upgrading shows "Upgrading to Stone Wall" with its progress; a finished wall says what it is for', () => {

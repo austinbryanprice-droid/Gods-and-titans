@@ -40,15 +40,16 @@ test('an AI army breaks into a walled base and razes it, leaving most of the wal
   assert.ok(placed > 30, 'a real ring');
   const ai = createAI(world, 1, 'hard');
   const end = 25 * 60 * TICK_RATE;
+  let left = placed; // the ring as it stood while the Town Center did (a defeated player's walls come down with them)
   for (let t = 0; t < end && !world.gameOver; t++) {
     ai.tick();
     world.tick();
     world.events.length = 0;
     world.felled.length = 0;
+    if (!tc.dead) left = world.buildingList.filter((b) => !b.dead && b.def.wall).length;
   }
   assert.ok(world.gameOver && world.gameOver.winningTeam === 2, `the AI wins (${(world.time / 60).toFixed(1)} min)`);
   assert.ok(tc.dead);
-  const left = world.buildingList.filter((b) => !b.dead && b.def.wall).length;
   assert.ok(left >= placed - 8, `it broke in, it did not level the ring (${placed - left} of ${placed} segments lost)`);
   assert.equal(ai.ai.errors, 0);
 });

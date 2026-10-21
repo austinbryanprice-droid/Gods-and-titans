@@ -3,9 +3,9 @@
 // cancelling unfinished buildings, and repairing damaged ones.
 import {
   BUILD_HELPER_BONUS, CANCEL_BUILD_REFUND, DROPOFF_MINE_GAP, DT, TERRAIN, REPAIR_COST, REPAIR_TIME,
-  WALL_HELP_RANGE, WALL_REMOVE_REFUND,
+  WALL_HELP_RANGE, WALL_PLACE_RANGE, WALL_REMOVE_REFUND,
 } from '../config.js';
-import { BUILDINGS } from '../data/index.js';
+import { BUILDINGS, BUILD_MENU } from '../data/index.js';
 import { wallLine } from '../data/walls.js';
 import { moveToRect, stopMove } from './movement.js';
 import { workSpeedOf } from './economy.js';
@@ -32,6 +32,7 @@ export const BUILDING_IN_WAY = 'Another building is in the way.';
 export const MINE_IN_WAY = 'A gold mine is in the way.';
 export const UNIT_IN_WAY = 'Something is in the way.';
 export const WALL_THERE = 'The wall is already there.';
+export const WALL_TOO_FAR = 'Too far from your Worshippers.';
 
 /** Is e a wall segment (any state) of this player? */
 export function isOwnWall(e, player) {
@@ -41,6 +42,11 @@ export function isOwnWall(e, player) {
 /** Own building type ids only (no prototype keys such as 'constructor'). */
 export function buildingDef(typeId) {
   return typeof typeId === 'string' && Object.hasOwn(BUILDINGS, typeId) ? BUILDINGS[typeId] : null;
+}
+
+/** The def of a building a worker may be ordered to raise: what the build menu offers (a Stone Wall comes only from upgrading a wooden one). */
+function buildableDef(typeId) {
+  return BUILD_MENU.includes(typeId) ? buildingDef(typeId) : null;
 }
 
 /**
@@ -163,7 +169,7 @@ export function refund(world, player, cost, mult = 1) {
  * to build; other selected workers come along to help.
  */
 export function issueBuild(world, player, workers, typeId, tx, ty, queue) {
-  const def = buildingDef(typeId);
+  const def = buildableDef(typeId);
   if (!def || workers.length === 0 || !Number.isFinite(tx) || !Number.isFinite(ty)) return;
   const p = world.players[player];
   if (def.tier > p.tier) return world.error(player, tierMessage(def.tier));
@@ -221,16 +227,24 @@ function wallHolds(world, player, x, y) {
   return !!e && e.kind === 'building' && !e.dead && e.owner === player && (e.def.wall === true || e.def.joinsWalls === true);
 }
 
+/** Is the segment at tile (x, y) within WALL_PLACE_RANGE of one of these workers? */
+function wallInReach(workers, x, y) {
+  for (const w of workers) if (hyp(w.x - (x + 0.5), w.y - (y + 0.5)) <= WALL_PLACE_RANGE) return true;
+  return false;
+}
+
 /**
  * build command for a wall: the segments along a line from tile (tx, ty) towards (tx2, ty2),
  * see data/walls.js wallLine. Every segment is paid for and placed at once (an unfinished
  * segment already blocks the way and can be attacked); the worshippers then share the line,
  * each taking a stretch, and help each other when done. Tiles the wall already holds are
- * skipped; tiles that cannot be built on are left out (the first reason is reported only
- * when nothing at all can be built).
+ * skipped; tiles that cannot be built on, or are more than WALL_PLACE_RANGE from every
+ * ordered worshipper, are left out (the first reason is reported only when nothing at all
+ * can be built). A line is placed at once, with no worshipper on the spot, so it may only
+ * start where one stands near: nobody can wall off, or look at, a far-off place from home.
  */
 export function issueBuildLine(world, player, workers, typeId, tx, ty, tx2, ty2, queue) {
-  const def = buildingDef(typeId);
+  const def = buildableDef(typeId);
   if (!def || !def.wall || workers.length === 0) return;
   if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tx2) || !Number.isFinite(ty2)) return;
   const p = world.players[player];
@@ -239,6 +253,10 @@ export function issueBuildLine(world, player, workers, typeId, tx, ty, tx2, ty2,
   let reason = null;
   for (const [x, y] of wallLine(tx, ty, tx2, ty2)) {
     if (wallHolds(world, player, x, y)) continue;
+    if (!wallInReach(workers, x, y)) {
+      reason = reason || WALL_TOO_FAR;
+      continue;
+    }
     const err = placementError(world, player, typeId, x, y);
     if (err) reason = reason || err;
     else todo.push([x, y]);

@@ -60,6 +60,7 @@ test('walls are explained: the build key, dragging a line, the stone upgrade, to
   assert.match(text, /press on a tile and drag to lay a whole line of wall/);
   assert.match(text, /choose Wooden Wall in the build menu \(W\)/);
   assert.match(text, /a line of up to 48 segments/);
+  assert.match(text, /goes up only within 24 tiles of the Worshippers you order/);
   assert.match(text, /Walls block every ground unit, yours too/);
   assert.match(text, /upgrade it to stone \(1000 health and 6 armor instead of 350 and 1\)/);
   assert.match(text, /A Tower raised on a wall, or in line with one, becomes part of the wall/);
