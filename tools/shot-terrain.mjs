@@ -5,12 +5,13 @@
 //
 //   node tools/shot-terrain.mjs [--port 8321] [--out DIR] [--prefix before] [--quality medium]
 //        [--scenes lake,shore,...] [--width 1600] [--height 900] [--seed 4242]
-//        [--dist 8] [--tod golden] [--eval 'h.renderer.terrain.water.visible = false'] [--list]
+//        [--dist 8] [--tod golden] [--eval 'h.renderer.terrain.water.visible = false'] [--clean] [--list]
 //
 // Scenes: lake (default zoom on the lake nearest the base), shore (near shore, close), far (zoomed
 // out over the lake and its sand ring), rocks and rockup (an impassable rock cluster out in the
 // open, mid zoom and close), hills (the
 // highest meadow), base (home base on its ground), dock (lake edge by the base, mid zoom).
+// --clean hides the harness panel and stats so the stills are only the game view.
 // --tod picks the time of day the lighting has (golden, day, dusk, night, dawn or an hour such
 // as 18.5; it needs the lighting branch, plain main ignores it). High and ultra can take a
 // minute a frame under software GL: use a smaller --width / --height for those, or
@@ -35,6 +36,7 @@ const timeOfDay = opt('tod', '');
 const timeout = Number(opt('timeout', '300000'));
 const distance = Number(opt('dist', '0')); // camera distance for every scene (0: each scene's own)
 const evalCode = opt('eval', ''); // JavaScript run in the page before the shots, with the harness as `h`
+const clean = args.includes('--clean');
 const ALL = ['lake', 'shore', 'far', 'rocks', 'rockup', 'hills', 'base', 'dock'];
 const scenes = opt('scenes', '') ? opt('scenes', '').split(',') : ALL;
 if (args.includes('--list')) { console.log(ALL.join('\n')); process.exit(0); }
@@ -137,6 +139,7 @@ try {
     return { lake: { x: lake.cx, y: lake.cy }, south, rock, hill, base: { x: base.x, y: base.y }, lakeCount: lakes.length, big: { x: big.cx, y: big.cy } };
   });
   console.log('spots', JSON.stringify(spots));
+  if (clean) await page.addStyleTag({ content: '#panel, #stats, #box { display: none !important; }' });
   if (evalCode) await page.evaluate((code) => new Function('h', code)(window.harness), evalCode);
   const setups = {
     lake: [spots.lake.x, spots.lake.y + 3, 26],
