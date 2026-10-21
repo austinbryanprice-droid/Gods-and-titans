@@ -192,6 +192,34 @@ export function bevelBox(w, h, d, r, x = 0, y = 0, z = 0, ry = 0, bottom = false
   return g.translate(x, y, z);
 }
 
+/**
+ * A battered block (like `frustum`) with its edges rounded off like `bevelBox`: built straight, then every
+ * vertex is drawn in toward the axis in proportion to its height. The faces stay flat, so the normals follow
+ * the map (the inverse transpose of its Jacobian) and the rounded edges keep their soft highlight.
+ */
+export function bevelFrustum(w, h, d, kx, r, x = 0, y = 0, z = 0, kz = kx) {
+  const g = bevelBox(w, h, d, r);
+  const p = g.attributes.position;
+  const n = g.attributes.normal;
+  const ax = (1 - kx) / h;
+  const az = (1 - kz) / h;
+  for (let i = 0; i < p.count; i++) {
+    const vy = p.getY(i);
+    const sx = 1 - ax * vy;
+    const sz = 1 - az * vy;
+    const vx = p.getX(i);
+    const vz = p.getZ(i);
+    const nx = n.getX(i) / sx;
+    const ny = n.getY(i) + ((ax * vx) / sx) * n.getX(i) + ((az * vz) / sz) * n.getZ(i);
+    const nz = n.getZ(i) / sz;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    n.setXYZ(i, nx / l, ny / l, nz / l);
+    p.setX(i, vx * sx);
+    p.setZ(i, vz * sz);
+  }
+  return g.translate(x, y, z);
+}
+
 /** Box whose top face is scaled by kx/kz (battered walls, obelisks). */
 export function frustum(w, h, d, kx, x = 0, y = 0, z = 0, kz = kx) {
   const g = box(w, h, d);
@@ -516,6 +544,123 @@ export function courseSlope(a0, a1, b0, b1, n, lip, { shadow = 0.2, butt = 0.55,
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
   return g;
+}
+
+/**
+ * Rings (bottom to top, as for loft) laid in overlapping courses, like courseSlope: each ring pair is a
+ * course, a face shadowed toward the next course and a dark butt edge `lip` high. Columns come in groups
+ * of `group` that share one random tint per course (a roof's slope, or a whole round course); every
+ * other course is `alt` times as bright (banded towers). A top ring that closes to a ridge or a point
+ * leaves no sliver triangles; `cap` adds the flat top. Faces point up, butts away from the axis (cx, cz).
+ * Flat shaded unless `normal(x, y, z)` gives a smooth normal for the faces (round roofs), the butts stay
+ * crisp. One geometry with per-vertex shade multipliers (see Kit.add); 4 triangles a course per column.
+ */
+function courseRings(rings, group, { cx = 0, cz = 0, lip = 0.03, shadow = 0.2, butt = 0.55, tint = 0.06, alt = 1, rnd = Math.random, cap = false, normal = null }) {
+  const n = rings.length - 1;
+  const cols = rings[0].length;
+  const pos = [];
+  const col = [];
+  const nor = normal ? [] : null;
+  const tri = (a, b, c, sa, sb, sc, up) => {
+    const ux = b[0] - a[0];
+    const uy = b[1] - a[1];
+    const uz = b[2] - a[2];
+    const vx = c[0] - a[0];
+    const vy = c[1] - a[1];
+    const vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    const len2 = nx * nx + ny * ny + nz * nz;
+    if (len2 < 1e-6) return;
+    const dot = up ? ny : nx * ((a[0] + b[0] + c[0]) / 3 - cx) + nz * ((a[2] + b[2] + c[2]) / 3 - cz);
+    const flip = dot < 0;
+    if (flip) { [b, c] = [c, b]; [sb, sc] = [sc, sb]; }
+    const il = (flip ? -1 : 1) / Math.sqrt(len2);
+    for (const [v, sh] of [[a, sa], [b, sb], [c, sc]]) {
+      pos.push(v[0], v[1], v[2]);
+      col.push(sh, sh, sh);
+      if (nor) {
+        if (up) nor.push(...normal(v[0], v[1], v[2]));
+        else nor.push(nx * il, ny * il, nz * il);
+      }
+    }
+  };
+  for (let s = 0; s < n; s++) {
+    const A = rings[s];
+    const B = rings[s + 1];
+    let k = 1;
+    for (let j = 0; j < cols; j++) {
+      if (j % group === 0) k = (1 + (rnd() * 2 - 1) * tint) * (s % 2 ? alt : 1);
+      const j1 = (j + 1) % cols;
+      const kt = k * (1 - shadow);
+      const kb = k * butt;
+      const p0 = A[j];
+      const p1 = A[j1];
+      const q0 = [p0[0], p0[1] + lip, p0[2]];
+      const q1 = [p1[0], p1[1] + lip, p1[2]];
+      tri(q0, q1, B[j1], k, k, kt, true);
+      tri(q0, B[j1], B[j], k, kt, kt, true);
+      tri(p0, p1, q1, kb, kb, kb, false);
+      tri(p0, q1, q0, kb, kb, kb, false);
+    }
+  }
+  if (cap) {
+    const R = rings[n];
+    for (let j = 1; j < cols - 1; j++) tri(R[0], R[j], R[j + 1], 1, 1, 1, true);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  if (nor) g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nor), 3));
+  return g;
+}
+
+/**
+ * hipLoft's roof (the same rings and parameters, `n` courses instead of `steps`) with every slope laid
+ * in overlapping courses: swept eaves and curved profiles keep their shape, and a pagoda, a curved roof
+ * or a pyramid reads as tiles, thatch or layered stone. See courseRings.
+ */
+export function courseLoft({ cx = 0, cz = 0, y, hw, hd, tw = 0, td = 0, h, n = 5, pi = 1, py = 1, lift = 0, per = 1, lip = 0.03, shadow = 0.2, butt = 0.55, tint = 0.06, alt = 1, rnd = Math.random, cap = false }) {
+  const rings = [];
+  for (let s = 0; s <= n; s++) {
+    const u = s / n;
+    const f = Math.pow(u, pi);
+    rings.push(rectRing(hw + (tw - hw) * f, hd + (td - hd) * f, y + h * Math.pow(u, py), cx, cz, per, lift * Math.pow(1 - u, 1.6)));
+  }
+  return courseRings(rings, per, { cx, cz, lip, shadow, butt, tint, alt, rnd, cap });
+}
+
+/**
+ * A round roof laid in courses with smooth shading across the columns: a cone (radius r at y to tr at
+ * y + h, height following u^py), or with `dome` a half ellipsoid (radius r, height h) whose rings step
+ * through equal angles. See courseRings.
+ */
+export function courseCone({ cx = 0, cz = 0, y, r, h, tr = 0, seg = 10, n = 5, py = 1, dome = false, lip = 0.03, shadow = 0.2, butt = 0.55, tint = 0.06, alt = 1, rnd = Math.random }) {
+  const rings = [];
+  for (let s = 0; s <= n; s++) {
+    const u = s / n;
+    const t = u * PI / 2;
+    rings.push(dome ? circleRing(r * Math.cos(t), y + h * Math.sin(t), cx, cz, seg) : circleRing(r + (tr - r) * u, y + h * Math.pow(u, py), cx, cz, seg));
+  }
+  // outward and up: the gradient of the ellipsoid, or the slope of the cone
+  const normal = dome
+    ? (x, yy, z) => {
+      const nx = (x - cx) / (r * r);
+      const ny = (yy - y) / (h * h);
+      const nz = (z - cz) / (r * r);
+      const l = Math.hypot(nx, ny, nz) || 1;
+      return [nx / l, ny / l, nz / l];
+    }
+    : (x, yy, z) => {
+      const dx = x - cx;
+      const dz = z - cz;
+      const rho = Math.hypot(dx, dz);
+      if (rho < 1e-6) return [0, 1, 0]; // the apex
+      const l = Math.hypot(h, r - tr) || 1;
+      return [(dx / rho) * (h / l), (r - tr) / l, (dz / rho) * (h / l)];
+    };
+  return courseRings(rings, seg, { cx, cz, lip, shadow, butt, tint, alt, rnd, normal });
 }
 
 // ---------------------------------------------------------------------------

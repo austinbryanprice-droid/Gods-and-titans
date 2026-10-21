@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { RNG, hashSeed } from '../../sim/rng.js';
 import {
   PLINTH, PI, C, mix, shade, tint,
-  luma, clamp01, SURF, made, prep, box, bevelBox, courseSlope, shadedTris,
+  luma, clamp01, SURF, made, prep, box, bevelBox, bevelFrustum, courseSlope, courseLoft, courseCone, shadedTris,
   frustum, cyl, cone, ball, dome, octa,
   dodeca, torus, strut, pole, extrude, fromTris,
   soft, orient, rectRing, loft, hipLoft, GLOW,
@@ -56,7 +56,7 @@ function roofSurf(st) {
     case 'pyramid': return st.wall === 'sandstone' || st.wall === 'mudbrick' ? SURF.sandstone : SURF.stone;
     case 'shikhara': return SURF.sandstone;
     case 'dome': return SURF.plaster;
-    case 'stepped': return st.wall === 'mudbrick' || st.wall === 'brick' ? SURF.mudbrick : SURF.plaster; // painted stucco
+    case 'stepped': return st.wall === 'mudbrick' || st.wall === 'brick' ? SURF.mudbrick : SURF.brick; // a deck of fired clay
     default: return WALL_SURF[st.wall] || SURF.stone;
   }
 }
@@ -516,6 +516,11 @@ export function bx(k, r, w, h, d, x = 0, y = 0, z = 0, ry = 0) {
   return k.lod && r > 0 && Math.min(w, d) >= 0.2 ? bevelBox(w, h, d, r, x, y, z, ry) : box(w, h, d, x, y, z, ry);
 }
 
+/** A battered block (the top face drawn in by kx): rounded off at lod 1 like `bx`, a plain frustum at lod 0. */
+export function bfr(k, r, w, h, d, kx, x = 0, y = 0, z = 0, kz = kx) {
+  return k.lod && r > 0 && Math.min(w, d) >= 0.2 ? bevelFrustum(w, h, d, kx, r, x, y, z, kz) : frustum(w, h, d, kx, x, y, z, kz);
+}
+
 /** A lantern hung from a bracket on a south-facing wall: iron cage, glowing body (lod 1). */
 export function wallLantern(k, P, x, y, fz, s = 1) {
   if (!k.lod) return;
@@ -618,16 +623,16 @@ export function rectWalls(k, P, st, o) {
       k.b(bx(k, 0.012, w + 0.075, 0.035, d + 0.075, x, y + h - 0.07, z), P.trim, 0.02);
       break;
     case 'sandstone':
-      k.b(box(w + 0.06, 0.06, d + 0.06, x, y, z), P.wallD, 0.03);
-      k.b(frustum(w, h, d, 0.94, x, y, z), P.wall, 0.04);
-      k.b(box(w * 0.94 + 0.09, 0.08, d * 0.94 + 0.09, x, y + h - 0.06, z), P.trim, 0.02);
+      k.b(bx(k, 0.02, w + 0.06, 0.06, d + 0.06, x, y, z), P.wallD, 0.03);
+      k.b(bfr(k, 0.03, w, h, d, 0.94, x, y, z), P.wall, 0.04);
+      k.b(bx(k, 0.02, w * 0.94 + 0.09, 0.08, d * 0.94 + 0.09, x, y + h - 0.06, z), P.trim, 0.02);
       k.b(box(w * 0.94 + 0.03, 0.025, d * 0.94 + 0.03, x, y + h - 0.1, z), P.accent, 0.02);
       face = z + (d / 2) * 0.97;
       break;
     case 'mudbrick':
-      k.b(box(w + 0.12, 0.12, d + 0.12, x, y, z), P.wallD, 0.04);
-      k.b(frustum(w + 0.04, h, d + 0.04, 0.92, x, y, z), P.wall, 0.05);
-      k.b(frustum(w * 0.92 + 0.02, 0.07, d * 0.92 + 0.02, 0.9, x, y + h, z), P.wallL, 0.04);
+      k.b(bx(k, 0.03, w + 0.12, 0.12, d + 0.12, x, y, z), P.wallD, 0.04);
+      k.b(bfr(k, 0.045, w + 0.04, h, d + 0.04, 0.92, x, y, z), P.wall, 0.05);
+      k.b(bfr(k, 0.025, w * 0.92 + 0.02, 0.07, d * 0.92 + 0.02, 0.9, x, y + h, z), P.wallL, 0.04);
       face = z + (d / 2) * 0.97;
       break;
     case 'brick':
@@ -768,6 +773,23 @@ export function placer(k, x, y, z, ry) {
   };
 }
 
+/**
+ * Segments around and courses up a dome: a wide one gets more of both so its outline stays round; the
+ * plain level keeps few, and the tight City a course fewer on its small tower domes.
+ */
+function domeCuts(k, r) {
+  if (!k.lod) return { seg: 8, n: 3 };
+  return { seg: Math.max(10, Math.min(16, Math.round(8 + r * 8))), n: k.tight && r < 0.5 ? 4 : 5 };
+}
+
+/**
+ * Courses for a roof slope `len` long: detail level 1 lays a row every `rowH` (between lo and hi rows),
+ * level 0 and the tight City keep a few.
+ */
+function roofRows(k, len, rowH = 0.15, lo = 4, hi = 8, simple = false) {
+  return k.lod && !k.tight && !simple ? Math.max(lo, Math.min(hi, Math.round(len / rowH))) : Math.max(3, lo - 1);
+}
+
 export function roofGable(k, P, st, o) {
   const { x = 0, z = 0, w, d, y, h, grade = 'small', team = true } = o;
   const alongX = (o.ridge ?? (w >= d ? 'x' : 'z')) === 'x';
@@ -898,7 +920,11 @@ export function roofPyramid(k, P, st, o) {
   const hw = w / 2 + 0.07;
   const hd = d / 2 + 0.07;
   const capF = grade === 'small' ? 0.7 : 0.82;
-  k.b(hipLoft({ cx: x, cz: z, y: y - 0.02, hw, hd, tw: hw * (1 - capF), td: hd * (1 - capF), h: h * capF, steps: 1 }), P.roof, 0.04);
+  // the pyramid in courses of dressed stone, each set back from the one below
+  k.b(courseLoft({
+    cx: x, cz: z, y: y - 0.02, hw, hd, tw: hw * (1 - capF), td: hd * (1 - capF), h: h * capF,
+    n: roofRows(k, Math.hypot(Math.min(hw, hd) * capF, h * capF), 0.17, 4, 8, o.simple), lip: 0.034, shadow: 0.16, butt: 0.62, tint: 0.05, rnd: () => k.rng.next(),
+  }), P.roofC, 0.04);
   if (grade === 'small') {
     k.b(box(hw * 2 * (1 - capF), 0.03, hd * 2 * (1 - capF), x, y - 0.02 + h * capF, z), P.roofD, 0);
     k.b(hipLoft({ cx: x, cz: z, y: y - 0.02 + h * capF + 0.03, hw: hw * 0.2, hd: hd * 0.2, h: h * 0.3, steps: 1 }), P.accent, 0);
@@ -926,9 +952,13 @@ export function roofPagoda(k, P, st, o) {
     const hd = cd / 2 + over;
     const th = rh * (t === 0 ? 1 : 0.82);
     const ridge = last ? Math.max(0, (cw - cd) / 2) + cw * 0.06 : 0;
-    k.b(hipLoft({
-      cx: x, cz: z, y: yy - 0.04, hw, hd, tw: last ? ridge : cw * 0.3, td: last ? 0.001 : cd * 0.3, h: th, steps: 3, pi: 1, py: 1.7, lift: 0.1, per: 3, cap: !last,
-    }), P.roof, 0.025);
+    const tw = last ? ridge : cw * 0.3;
+    const td = last ? 0.001 : cd * 0.3;
+    // slate laid in thin courses, the eave corners swept up
+    k.b(courseLoft({
+      cx: x, cz: z, y: yy - 0.04, hw, hd, tw, td, h: th, n: roofRows(k, Math.hypot(Math.min(hw - tw, hd - td), th), 0.15, 4, 7, o.simple),
+      py: 1.7, lift: 0.1, per: o.simple ? 1 : k.tight || !k.lod ? 2 : 3, cap: !last, lip: 0.024, shadow: 0.24, butt: 0.5, tint: 0.07, rnd: () => k.rng.next(),
+    }), P.roofC, 0.025);
     // eave fascia in trim
     if (!o.simple) for (const sz of [-1, 1]) k.b(box(2 * hw * 0.8, 0.035, 0.035, x, yy - 0.06, z + sz * hd * 0.99), P.roofD, 0);
     if (last) {
@@ -968,7 +998,10 @@ export function roofCurved(k, P, st, o) {
     // lower skirt roof (double eave) around the walls
     const sh = Math.min(0.32, h * 0.45);
     const so = Math.min(0.22, 0.08 + 0.07 * w);
-    k.b(hipLoft({ cx: x, cz: z, y: y - 0.04, hw: w / 2 + so, hd: d / 2 + so, tw: w / 2 * 0.86, td: d / 2 * 0.8, h: sh * 0.55, steps: 2, py: 1.6, lift: 0.1, per: 3 }), P.roof, 0.025);
+    k.b(courseLoft({
+      cx: x, cz: z, y: y - 0.04, hw: w / 2 + so, hd: d / 2 + so, tw: w / 2 * 0.86, td: d / 2 * 0.8, h: sh * 0.55, n: roofRows(k, sh * 0.55 + 0.1, 0.13, 3, 3),
+      py: 1.6, lift: 0.1, per: k.tight || !k.lod ? 2 : 3, lip: 0.02, shadow: 0.22, butt: 0.5, tint: 0.07, rnd: () => k.rng.next(),
+    }), P.roofC, 0.025);
     const by = y - 0.04 + sh * 0.5;
     k.b(box(w * 0.84, sh * 0.75, d * 0.78, x, by, z), P.wall, 0.03);
     k.b(box(w * 0.84 + 0.05, 0.05, d * 0.78 + 0.05, x, by + sh * 0.75 - 0.05, z), P.beam, 0.02);
@@ -981,7 +1014,10 @@ export function roofCurved(k, P, st, o) {
   const hw = cw / 2 + ov;
   const hd = cd / 2 + ov;
   const rh = grade === 'small' ? h : h * 0.8;
-  k.b(hipLoft({ cx: x, cz: z, y: yy - 0.04, hw, hd, tw: ridge, td: 0.001, h: rh, steps: o.simple ? 3 : 4, pi: 1, py: 1.9, lift: 0.15, per: o.simple ? 2 : 3 }), P.roof, 0.025);
+  k.b(courseLoft({
+    cx: x, cz: z, y: yy - 0.04, hw, hd, tw: ridge, td: 0.001, h: rh, n: roofRows(k, Math.hypot(hd, rh), 0.15, 4, 8, o.simple),
+    py: 1.9, lift: 0.15, per: o.simple ? 1 : k.tight || !k.lod ? 2 : 3, lip: 0.026, shadow: 0.26, butt: 0.5, tint: 0.07, rnd: () => k.rng.next(),
+  }), P.roofC, 0.025);
   const top = yy - 0.04 + rh;
   const cap = box(ridge * 2 + 0.08, 0.07, 0.09, x, top - 0.03, z);
   if (team) k.t(cap, 1);
@@ -1005,14 +1041,12 @@ export function roofShikhara(k, P, st, o) {
   const hd = d / 2 + 0.03;
   const bands = o.simple ? 3 : grade === 'small' ? 4 : 7;
   const topK = 0.2;
-  let prev = null;
-  for (let i = 0; i <= bands; i++) {
-    const u = i / bands;
-    const f = Math.pow(u, 2.1) * (1 - topK);
-    const ring = rectRing(hw * (1 - f), hd * (1 - f), y + h * u, x, z, o.simple ? 1 : 2, 0);
-    if (prev) k.b(loft([prev, ring], i === bands), i % 2 ? P.roof : P.roofD, 0.03);
-    prev = ring;
-  }
+  const rnd = () => k.rng.next();
+  // the tower in courses of carved stone, every other one a shade darker, drawing in toward the top
+  k.b(courseLoft({
+    cx: x, cz: z, y, hw, hd, tw: hw * topK, td: hd * topK, h, n: bands, pi: 2.1, per: o.simple ? 1 : 2,
+    lip: 0.03, shadow: 0.18, butt: 0.58, tint: 0.06, alt: 0.82, rnd, cap: true,
+  }), P.roof, 0.03);
   const top = y + h;
   const ar = Math.min(hw, hd) * topK * 1.25;
   k.b(cyl(ar, ar, 0.07, 8, x, top, z), P.roofL, 0.08);
@@ -1023,14 +1057,10 @@ export function roofShikhara(k, P, st, o) {
     // miniature spires clustered on the shoulders
     for (const sx of [-1, 1]) {
       const mw = hw * 0.42;
-      let pr = null;
-      for (let i = 0; i <= 3; i++) {
-        const u = i / 3;
-        const f = Math.pow(u, 2) * 0.8;
-        const ring = rectRing(mw * (1 - f), mw * (1 - f), y + h * 0.42 * u, x + sx * hw * 0.62, z + hd * 0.25, 1, 0);
-        if (pr) k.b(loft([pr, ring], i === 3), i % 2 ? P.roof : P.roofD, 0.03);
-        pr = ring;
-      }
+      k.b(courseLoft({
+        cx: x + sx * hw * 0.62, cz: z + hd * 0.25, y, hw: mw, hd: mw, tw: mw * 0.2, td: mw * 0.2, h: h * 0.42, n: 3, pi: 2,
+        lip: 0.025, shadow: 0.18, butt: 0.58, tint: 0.06, alt: 0.82, rnd, cap: true,
+      }), P.roof, 0.03);
       k.b(ball(0.04, x + sx * hw * 0.62, y + h * 0.42 + 0.03, z + hd * 0.25, 5, 3), P.accent, 0);
     }
   }
@@ -1046,27 +1076,49 @@ export function roofShikhara(k, P, st, o) {
 
 export function roofStepped(k, P, st, o) {
   const { x = 0, z = 0, w, d, y, grade = 'small', team = true } = o;
-  k.b(box(w + 0.06, 0.08, d + 0.06, x, y, z), P.roof, 0.03);
-  let top = y + 0.08;
-  const merlon = (mx, mz, s = 1) => {
-    k.b(box(0.13 * s, 0.08 * s, 0.07, mx, top, mz), P.roof, 0.03);
-    k.b(box(0.07 * s, 0.07 * s, 0.07, mx, top + 0.08 * s, mz), P.roof, 0.03);
+  const rich = k.lod && !o.simple && !k.tight;
+  // the deck: a thick slab, rounded off at the detailed level, with a coping all round its edge
+  k.b(bx(k, 0.022, w + 0.06, 0.08, d + 0.06, x, y, z), P.roof, 0.03);
+  const cy = y + 0.08;
+  const cp = 0.07;
+  const strip = (sw, sd, sx, sz) => k.b(rich ? bevelBox(sw, 0.05, sd, 0.016, sx, cy, sz) : box(sw, 0.05, sd, sx, cy, sz), P.stone, 0.03);
+  const fz = z + (d + 0.06 - cp) / 2;
+  const sxe = (w + 0.06 - cp) / 2;
+  for (const sz of [-1, 1]) strip(w + 0.06, cp, x, z + sz * ((d + 0.06 - cp) / 2));
+  for (const sx of [-1, 1]) strip(cp, d + 0.06 - 2 * cp + 0.002, x + sx * sxe, z);
+  let top = cy + 0.05;
+  // stepped merlons stand on the coping along the front and both sides, in the wall's own stone
+  const merlon = (mx, mz, alongX, s = 1) => {
+    const [lw, ld] = alongX ? [0.13 * s, 0.07] : [0.07, 0.13 * s];
+    const [uw, ud] = alongX ? [0.07 * s, 0.07] : [0.07, 0.07 * s];
+    k.b(box(lw, 0.08 * s, ld, mx, top, mz), P.wall, 0.03);
+    k.b(box(uw, 0.07 * s, ud, mx, top + 0.08 * s, mz), P.wall, 0.03);
   };
   const nf = Math.max(2, Math.round(w / 0.34));
-  for (let i = 0; i < nf; i++) merlon(x - w / 2 + (w * (i + 0.5)) / nf, z + d / 2, 1);
+  for (let i = 0; i < nf; i++) merlon(x - w / 2 + (w * (i + 0.5)) / nf, fz, true, 1);
   const ns = Math.max(1, Math.round(d / 0.45));
-  for (const sx of [-1, 1]) for (let i = 0; i < ns; i++) merlon(x + sx * (w / 2), z - d / 2 + (d * (i + 0.5)) / ns, 0.9);
+  for (const sx of [-1, 1]) for (let i = 0; i < ns; i++) merlon(x + sx * sxe, z - d / 2 + (d * (i + 0.5)) / ns, false, 0.9);
   if (grade !== 'small') {
     const bw = w * 0.5;
     const bd = d * 0.5;
-    k.b(frustum(bw, 0.32, bd, 0.92, x, top, z - d * 0.08), P.wall, 0.04);
-    k.b(box(bw * 0.92 + 0.05, 0.06, bd * 0.92 + 0.05, x, top + 0.3, z - d * 0.08), P.trim, 0.02);
+    k.b(bfr(k, 0.03, bw, 0.32, bd, 0.92, x, top, z - d * 0.08), P.wall, 0.04);
+    k.b(bx(k, 0.02, bw * 0.92 + 0.05, 0.06, bd * 0.92 + 0.05, x, top + 0.3, z - d * 0.08), P.trim, 0.02);
     door(k, P, st, x, top, z - d * 0.08 + bd * 0.46, 0.16, 0.2, !o.simple);
     top += 0.36;
+  } else if (rich && w > 0.8) {
+    // a stair-house on the deck: a small block with a dark doorway and its own coping, set toward the back
+    const hs = k.rng.next() < 0.5 ? -1 : 1;
+    const hx = x + hs * w * 0.24;
+    const hz = z - d * 0.2;
+    const hw = Math.min(0.38, w * 0.3);
+    const hd = Math.min(0.3, d * 0.3);
+    k.b(bevelBox(hw, 0.2, hd, 0.02, hx, top, hz), P.wall, 0.03);
+    k.hole(box(0.1, 0.13, 0.03, hx, top, hz + hd / 2), top, 0.13);
+    k.b(bevelBox(hw + 0.05, 0.035, hd + 0.05, 0.012, hx, top + 0.2, hz), P.stoneD, 0.02);
   }
   if (team) {
-    for (const sx of [-1, 1]) flag(k, P, x + sx * (w / 2 - 0.05), y + 0.08, z + d / 2 - 0.05, 0.55, 0.26, 0.16);
-    k.t(box(w + 0.07, 0.035, d + 0.07, x, y + 0.02, z), 1);
+    for (const sx of [-1, 1]) flag(k, P, x + sx * (w / 2 - 0.05), cy, z + d / 2 - 0.05, 0.55, 0.26, 0.16);
+    k.t(rich ? bevelBox(w + 0.07, 0.035, d + 0.07, 0.012, x, y + 0.02, z) : box(w + 0.07, 0.035, d + 0.07, x, y + 0.02, z), 1);
   }
   return top + 0.15;
 }
@@ -1078,8 +1130,12 @@ export function roofFlatDome(k, P, st, o) {
   const r = Math.min(w, d) * (grade === 'small' ? 0.32 : 0.36);
   k.b(cyl(r + 0.03, r + 0.04, 0.12, 8, x, y + 0.06, z), P.wall, 0.03);
   if (team) k.t(cyl(r + 0.045, r + 0.045, 0.05, 8, x, y + 0.14, z, true), 1);
-  k.b(dome(r, Math.max(r * 0.9, h * 0.8), x, y + 0.18, z, 8, 3), P.roof, 0.05);
-  const top = y + 0.18 + Math.max(r * 0.9, h * 0.8);
+  const dh = Math.max(r * 0.9, h * 0.8);
+  k.b(courseCone({
+    cx: x, cz: z, y: y + 0.18, r, h: dh, ...domeCuts(k, r), dome: true,
+    lip: 0.022, shadow: 0.2, butt: 0.55, tint: 0.05, rnd: () => k.rng.next(),
+  }), P.roof, 0.05);
+  const top = y + 0.18 + dh;
   k.b(cone(0.04, 0.16, 5, x, top - 0.02, z), P.wall, 0);
   k.b(ball(0.035, x, top + 0.16, z, 5, 3, 1.3), P.white, 0);
   if (grade !== 'small') {
@@ -1100,9 +1156,13 @@ export function roofThatchHip(k, P, st, o) {
   const { x = 0, z = 0, w, d, y, h, team = true } = o;
   const alongX = w >= d;
   const ridge = Math.max(0.04, (Math.abs(w - d) / 2) * 0.9);
-  k.b(hipLoft({
-    cx: x, cz: z, y: y - 0.06, hw: w / 2 + 0.14, hd: d / 2 + 0.14, tw: alongX ? ridge : 0.001, td: alongX ? 0.001 : ridge, h, steps: 3, pi: 1, py: 0.85, per: 2,
-  }), P.roof, 0.14);
+  const hw = w / 2 + 0.14;
+  const hd = d / 2 + 0.14;
+  // thatch laid in thick overlapping bundles
+  k.b(courseLoft({
+    cx: x, cz: z, y: y - 0.06, hw, hd, tw: alongX ? ridge : 0.001, td: alongX ? 0.001 : ridge, h,
+    n: roofRows(k, Math.hypot(Math.min(hw, hd), h), 0.15, 4, 8, o.simple), py: 0.85, lip: 0.04, shadow: 0.28, butt: 0.5, tint: 0.1, rnd: () => k.rng.next(),
+  }), P.roofC, 0.14);
   const cap = box(alongX ? ridge * 2 + 0.1 : 0.1, 0.07, alongX ? 0.1 : ridge * 2 + 0.1, x, y - 0.06 + h - 0.03, z);
   if (team) k.t(cap, 1);
   else k.b(cap, P.roofD, 0);
@@ -1142,20 +1202,30 @@ export function roundRoof(k, P, st, o) {
   if (st.roof === 'dome') {
     const rr = r * (st.wall === 'mudbrick' ? 0.92 : 1) + 0.02;
     if (team) k.t(cyl(rr + 0.035, rr + 0.035, 0.06, 10, x, y - 0.02, z, true, true), 1);
-    k.b(dome(rr, h, x, y, z, 10, 3), P.roof, 0.05);
+    // a dome of mud laid in rounded courses, drawing in to the crown
+    k.b(courseCone({
+      cx: x, cz: z, y, r: rr, h, ...domeCuts(k, rr), dome: true,
+      lip: 0.022, shadow: 0.2, butt: 0.55, tint: 0.05, rnd: () => k.rng.next(),
+    }), P.roof, 0.05);
     k.b(cone(0.045, 0.18, 5, x, y + h - 0.03, z), P.wall, 0);
     k.b(ball(0.04, x, y + h + 0.17, z, 5, 3, 1.3), P.white, 0);
     return y + h + 0.22;
   }
   const R = r + 0.14;
-  k.b(cone(R, h, 10, x, y - 0.05, z, true, true), st.roof === 'thatch_cone' ? P.roof : P.roof, st.roof === 'thatch_cone' ? 0.13 : 0.05);
+  const lip = 0.04;
+  k.b(courseCone({
+    cx: x, cz: z, y: y - 0.05, r: R, h, seg: 10, n: k.tight && k.lod ? 5 : roofRows(k, Math.hypot(R, h), 0.15, 4, 8),
+    lip, shadow: 0.28, butt: 0.5, tint: 0.1, rnd: () => k.rng.next(),
+  }), P.roofC, 0.13);
   const ty = y - 0.05;
   k.b(cyl(R * 0.12, R * 0.2, h * 0.14, 6, x, ty + h * 0.8, z, true), P.roofD, 0.05);
   k.b(cone(R * 0.1, h * 0.12, 6, x, ty + h * 0.93, z), P.roofD, 0);
   if (team) {
+    // the band stands proud of the courses: a lip lifts the edge of each by lip × the slope of the cone
     const f = 0.42;
-    const rb = R * (1 - f) + 0.012;
-    const rt = R * (1 - f - 0.09) + 0.012;
+    const out = lip * (R / h) + 0.012;
+    const rb = R * (1 - f) + out;
+    const rt = R * (1 - f - 0.09) + out;
     k.t(cyl(rt, rb, h * 0.09, 10, x, ty + h * f, z, true, true), 1);
   }
   return ty + h * 1.05;

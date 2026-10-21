@@ -50,7 +50,7 @@ import {
   pinnacle, ornament, ornamentPair, isRound, door, frieze,
   rectWalls, roundWalls, roofH, roofOver, roofGable, roofLonghouse,
   roofPyramid, roofPagoda, roofCurved, roofShikhara, roofStepped, roofFlatDome,
-  roofFlat, rectRoof, roundRoof,
+  roofFlat, rectRoof, roundRoof, bx, bfr,
 } from './building-pieces.js';
 
 // the toolkit's public names stay importable from here
@@ -739,7 +739,7 @@ function templeDome(k, P, st) {
   const top = roofFlatDome(k, P, { ...st, ornament: 'none' }, { x: 0, z: hz - 0.1, w: W * 0.7, d: D * 0.8, y: y + h + 0.06, h: 0.55, grade: 'grand', team: true });
   // buttress towers along the front
   const fz = hz + D / 2;
-  for (const bx of [-1.05, -0.5, 0.5, 1.05]) pinnacle(k, P, bx, y, fz + 0.03, 1.5 + (Math.abs(bx) < 0.7 ? 0.25 : 0), 0.26);
+  for (const px of [-1.05, -0.5, 0.5, 1.05]) pinnacle(k, P, px, y, fz + 0.03, 1.5 + (Math.abs(px) < 0.7 ? 0.25 : 0), 0.26);
   // the central tower over the door
   k.b(frustum(0.5, 1.75, 0.3, 0.6, 0, y, fz + 0.06, 0.7), P.wall, 0.04);
   k.b(cone(0.11, 0.35, 6, 0, y + 1.75, fz + 0.06), P.wall, 0);
@@ -1146,9 +1146,9 @@ function buildTownCenter(k, P, st, tier) {
       top = roofShikhara(k, P, st, { x: 0, z: -0.55, w: 1.2, d: 0.95, y: uy + 0.4, h: 1.45, grade: 'grand', team: true });
     } else if (st.roof === 'stepped') {
       const mud = st.wall === 'mudbrick' || st.wall === 'brick';
-      k.b(frustum(1.6, 0.42, 1.2, 0.93, 0, uy, -0.55), mud ? P.wallD : P.wall, 0.05);
-      k.b(frustum(1.05, 0.38, 0.8, 0.9, 0, uy + 0.42, -0.6), mud ? P.wall : P.wallD, 0.05);
-      k.b(box(0.6, 0.32, 0.45, 0, uy + 0.8, -0.62), P.trim, 0.04);
+      k.b(bfr(k, 0.045, 1.6, 0.42, 1.2, 0.93, 0, uy, -0.55), mud ? P.wallD : P.wall, 0.05);
+      k.b(bfr(k, 0.04, 1.05, 0.38, 0.8, 0.9, 0, uy + 0.42, -0.6), mud ? P.wall : P.wallD, 0.05);
+      k.b(bx(k, 0.03, 0.6, 0.32, 0.45, 0, uy + 0.8, -0.62), P.trim, 0.04);
       top = roofStepped(k, P, st, { x: 0, z: -0.62, w: 0.62, d: 0.48, y: uy + 1.12, grade: 'small', team: true });
     } else if (st.roof === 'pyramid') {
       k.b(box(1.3, 0.5, 1.0, 0, uy, -0.6), P.wall, 0.04);

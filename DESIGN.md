@@ -943,8 +943,9 @@ per-frame budget, so a revealed army appears over a few frames.
   cobbled court, drawn from the object-space position and normal, plus grime and contact shading);
   `building-pieces.js` the palette and the reusable pieces (walls in each wall material, a roof in
   each roof style, props, ornaments); `building-models.js` the buildings and the public API. Roofs are
-  laid in real courses (`courseSlope`) and big masses have rounded edges (`bevelBox`), so edges catch
-  the low sun. The detail level follows the quality tier (`QUALITY.detail`: low 0, the essential forms;
+  laid in real courses (`courseSlope` for a gable, `courseLoft` for hipped, swept and stepped roofs,
+  `courseCone` for cones and domes with smooth normals) and big masses have rounded edges (`bevelBox`,
+  and `bevelFrustum` for battered walls), so edges catch the low sun. The detail level follows the quality tier (`QUALITY.detail`: low 0, the essential forms;
   medium and up 1, which adds rounded edges, shutters, wall lanterns, loose stones and grass, thick
   eaves); `GameRenderer.setQuality` switches it and rebuilds the models in place. Budgets, checked by
   the tests: at most 3000 triangles a building, 700 a wall segment (two meshes), 6 meshes; a style
