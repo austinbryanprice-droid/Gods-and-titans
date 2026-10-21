@@ -1046,7 +1046,8 @@ function gateTop(k, P, st, y) {
 
 function buildTitanGate(k, P, st) {
   const y = PLINTH;
-  const sc = st.wall === 'marble' ? P.stoneL : P.stone;
+  // marble steps a shade down: a broad flat top of near-white stone burns out in a low sun
+  const sc = st.wall === 'marble' ? shade(P.stone, 0.86) : P.stone;
   const top0 = steps(k, P, 3.75, 3.6, y, 3, 0.09, 0.12, sc, 0, -0.05);
   stair(k, P, 0, y, top0, 1.78, 1.5, 1.2, shade(sc, 0.95));
   let top;
