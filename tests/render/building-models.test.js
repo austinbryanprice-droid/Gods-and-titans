@@ -21,7 +21,7 @@ const {
   buildBuildingModel, buildGoldMineModel, getBuildingModelInfo, getGoldMineInfo, setBuildingTime, clearBuildingCaches, PLINTH,
   setBuildingDetail, getBuildingDetail, pruneBuildingCaches,
 } = await import('../../src/render/models/building-models.js');
-const { bevelBox, courseSlope, shadedTris } = await import('../../src/render/models/building-core.js');
+const { bevelBox, bevelFrustum, courseSlope, courseLoft, courseCone, shadedTris } = await import('../../src/render/models/building-core.js');
 const { BUILDINGS, PANTHEON_LIST, GOLD_MINE } = await import('../../src/data/index.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
 const { WALL_N, WALL_E, WALL_S, WALL_W, WALL_TOWER_SHIFT } = await import('../../src/data/walls.js');
@@ -240,6 +240,7 @@ test('wall segments: every neighbour combination builds in budget, with arms tha
         const label = `${p.id}/${type}/${mask.toString(2)}`;
         const info = getBuildingModelInfo(type, p, 1, mask);
         assert.equal(info.meshes, 2, `${label}: body and team color, two draws a segment`);
+        assert.equal(info.level, 1, `${label}: the rounded detailed build fits the budget, no rebuild at the plain level`);
         assert.ok(info.triangles > 30 && info.triangles <= 700, `${label}: ${info.triangles} triangles`);
         assert.equal(info.fit, 1, `${label}: never shrunk`);
         assert.ok(info.extent <= info.limit, `${label}: reaches ${info.extent.toFixed(3)}`);
@@ -511,4 +512,191 @@ test('shadedTris: per-vertex shades, faces turned away from the reference point'
     assert.ok(new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).y > 0, 'turned up, away from below');
   }
   assert.deepEqual([...g.attributes.color.array].slice(0, 9), [0.5, 0.5, 0.5, 1, 1, 1, 0.75, 0.75, 0.75], 'a flipped face swaps its shades with its vertices');
+});
+
+/** The triangles of a geometry as [a, b, c] vectors. */
+function trisOf(g) {
+  const p = g.attributes.position;
+  const out = [];
+  for (let i = 0; i < p.count; i += 3) {
+    out.push([0, 1, 2].map((j) => new THREE.Vector3().fromBufferAttribute(p, i + j)));
+  }
+  return out;
+}
+
+test('courseLoft: a roof in courses, faces turned up and butts turned away from the axis, no degenerate triangle', () => {
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const n = 5;
+  const g = courseLoft({ cx: 1, cz: -2, y: 0.5, hw: 1, hd: 0.7, tw: 0.1, td: 0.1, h: 0.8, n, per: 2, lip: 0.03, rnd });
+  const cols = 8;
+  const tris = trisOf(g);
+  assert.ok(tris.length === n * cols * 4, `${tris.length} triangles: four a course for each of the ${cols} columns`);
+  assert.equal(g.attributes.color.count, g.attributes.position.count);
+  let up = 0;
+  for (const [a, b, c] of tris) {
+    const nrm = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+    assert.ok(nrm.length() > 1e-4, 'no sliver');
+    nrm.normalize();
+    if (nrm.y > 0.05) { up++; continue; }
+    const mid = a.clone().add(b).add(c).divideScalar(3);
+    assert.ok(nrm.x * (mid.x - 1) + nrm.z * (mid.z + 2) > -1e-6, 'a butt edge faces away from the axis');
+  }
+  assert.equal(up, n * cols * 2, 'the face of every course points up the slope');
+  g.computeBoundingBox();
+  const bb = g.boundingBox;
+  assert.ok(Math.abs(bb.min.y - 0.5) < 1e-5 && bb.max.y > 1.29 && bb.max.y < 1.3 + 0.031, 'from the eave to the top');
+  assert.ok(Math.abs(bb.max.x - 2) < 1e-5 && Math.abs(bb.min.z + 2.7) < 1e-5, 'on the footprint');
+  const col = g.attributes.color;
+  for (let i = 0; i < col.count; i++) assert.ok(col.getX(i) > 0.2 && col.getX(i) < 1.2, 'shades stay in a sane range');
+});
+
+test('courseLoft: a point at the top leaves no sliver, a cap closes a flat top, alt bands the courses', () => {
+  const pointed = courseLoft({ y: 0, hw: 1, hd: 1, tw: 0, td: 0, h: 1, n: 4, rnd: () => 0.5 });
+  const flat = courseLoft({ y: 0, hw: 1, hd: 1, tw: 0.3, td: 0.3, h: 1, n: 4, cap: true, rnd: () => 0.5 });
+  assert.ok(trisOf(pointed).length < 4 * 4 * 4 && trisOf(pointed).length > 3 * 4 * 4, 'the collapsed top ring drops its slivers');
+  assert.equal(trisOf(flat).length, 4 * 4 * 4 + 2, 'a cap over four corners is two triangles');
+  const banded = courseLoft({ y: 0, hw: 1, hd: 1, tw: 0.2, td: 0.2, h: 1, n: 4, alt: 0.5, tint: 0, shadow: 0, butt: 1, rnd: () => 0.5 });
+  const shades = new Set();
+  for (let i = 0; i < banded.attributes.color.count; i++) shades.add(banded.attributes.color.getX(i).toFixed(3));
+  assert.deepEqual([...shades].sort(), ['0.500', '1.000'], 'every other course is half as bright');
+});
+
+test('courseCone: round roofs in courses with smooth normals, a cone or a half ellipsoid', () => {
+  let seed = 5;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const seg = 10;
+  const n = 4;
+  for (const dome of [false, true]) {
+    const g = courseCone({ cx: 0.5, cz: 0.25, y: 1, r: 0.8, h: 0.7, seg, n, dome, lip: 0.03, rnd });
+    const tris = trisOf(g);
+    assert.ok(tris.length <= n * seg * 4 && tris.length > (n - 1) * seg * 4, `${tris.length} triangles`);
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    assert.ok(Math.abs(bb.min.y - 1) < 1e-5 && bb.max.y > 1.69 - 1e-5 && bb.max.y < 1.7 + 0.031, `the ${dome ? 'dome' : 'cone'} stands on y and rises to its height`);
+    assert.ok(bb.max.x <= 0.5 + 0.8 + 1e-5 && bb.max.x > 0.5 + 0.7, 'on its radius');
+    const nor = g.attributes.normal;
+    const pos = g.attributes.position;
+    assert.equal(nor.count, pos.count, 'every vertex has a normal');
+    let smooth = 0;
+    for (let i = 0; i < nor.count; i++) {
+      const nv = new THREE.Vector3().fromBufferAttribute(nor, i);
+      assert.ok(Math.abs(nv.length() - 1) < 1e-4, 'unit normals');
+      const out = nv.x * (pos.getX(i) - 0.5) + nv.z * (pos.getZ(i) - 0.25);
+      assert.ok(out > -1e-6, 'the normals point outward');
+      if (nv.y > 0.05) smooth++;
+    }
+    assert.ok(smooth > 0, 'the faces are smooth-shaded up and outward');
+  }
+});
+
+test('bevelFrustum: a battered block with rounded edges, narrower toward the top, normals tilted up with the batter', () => {
+  const w = 1;
+  const h = 0.8;
+  const d = 0.6;
+  const g = bevelFrustum(w, h, d, 0.8, 0.05, 2, 1, 3);
+  assert.equal(g.attributes.position.count / 3, 30);
+  const p = g.attributes.position;
+  const n = g.attributes.normal;
+  let foot = 0;
+  let head = 0;
+  let tilted = 0;
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i) - 1;
+    const x = Math.abs(p.getX(i) - 2);
+    if (y < 0.04 * h) foot = Math.max(foot, x);
+    if (y > 0.96 * h) head = Math.max(head, x);
+    const nv = new THREE.Vector3().fromBufferAttribute(n, i);
+    assert.ok(Math.abs(nv.length() - 1) < 1e-4, 'unit normals');
+    if (nv.z > 0.9 && nv.y > 0.01) tilted++;
+  }
+  assert.ok(Math.abs(foot - w / 2) < 1e-4, 'the foot keeps its width');
+  assert.ok(head < w / 2 * 0.8 + 1e-4 && head > w / 2 * 0.6, `the top is drawn in (${head.toFixed(3)})`);
+  assert.ok(tilted > 0, 'a battered face leans back, its normal rises');
+  g.computeBoundingBox();
+  assert.ok(Math.abs(g.boundingBox.min.y - 1) < 1e-5 && Math.abs(g.boundingBox.max.y - 1.8) < 1e-5, 'stands on y');
+  const straight = bevelFrustum(w, h, d, 1, 0.05);
+  const box = bevelBox(w, h, d, 0.05);
+  for (let i = 0; i < box.attributes.position.count; i++) {
+    assert.ok(Math.abs(straight.attributes.position.getX(i) - box.attributes.position.getX(i)) < 1e-6, 'no batter, no change');
+  }
+});
+
+// ---- team color ----
+
+/**
+ * The share (0 to 1) of a model's team-colored area, on the faces that turn toward the game camera
+ * (pitched 55 degrees, looking north), that nothing stands in front of.
+ */
+function visibleTeamShare(model) {
+  model.root.updateMatrixWorld(true);
+  const meshes = meshesOf(model.root).filter((o) => o.visible);
+  const team = meshes.find((o) => o.name === 'building-team');
+  if (!team) return 0;
+  const pitch = (55 * Math.PI) / 180;
+  const dir = new THREE.Vector3(0, -Math.sin(pitch), -Math.cos(pitch));
+  const ray = new THREE.Raycaster();
+  const pos = team.geometry.attributes.position;
+  const idx = team.geometry.index;
+  const count = (idx ? idx.count : pos.count) / 3;
+  const step = Math.max(1, Math.floor(count / 400));
+  const [a, b, c, n] = [0, 1, 2, 3].map(() => new THREE.Vector3());
+  let seen = 0;
+  let all = 0;
+  for (let t = 0; t < count; t += step) {
+    const at = (j) => (idx ? idx.getX(t * 3 + j) : t * 3 + j);
+    a.fromBufferAttribute(pos, at(0)).applyMatrix4(team.matrixWorld);
+    b.fromBufferAttribute(pos, at(1)).applyMatrix4(team.matrixWorld);
+    c.fromBufferAttribute(pos, at(2)).applyMatrix4(team.matrixWorld);
+    n.crossVectors(b.clone().sub(a), c.clone().sub(a));
+    const area = n.length() / 2;
+    if (n.normalize().dot(dir) >= 0) continue;
+    all += area;
+    ray.set(a.clone().add(b).add(c).divideScalar(3).addScaledVector(dir, -8), dir);
+    const first = ray.intersectObjects(meshes, false)[0];
+    if (first && (first.object === team || Math.abs(first.distance - 8) < 0.02)) seen += area;
+  }
+  return all ? seen / all : 0;
+}
+
+test('team color: every building shows some of it to the game camera, and the Celtic round roofs keep their band above the thatch courses', () => {
+  const celtic = PANTHEON_LIST.find((q) => q.id === 'celtic');
+  const banded = ['house', 'barracks', 'town_center1', 'town_center2', 'town_center3', 'temple', 'tower'];
+  for (const p of PANTHEON_LIST) {
+    for (const [type, tier] of VARIANTS) {
+      if (BUILDINGS[type].wall) continue; // a wall segment is team color in its own mesh, along both faces
+      const m = buildBuildingModel(type, p, '#ff00ff');
+      if (tier > 1) m.setTier(tier);
+      const share = visibleTeamShare(m);
+      assert.ok(share >= 0.03, `${p.id}/${type}${tier}: ${(share * 100).toFixed(0)}% of its team color shows`);
+      if (p === celtic && banded.includes(`${type}${type === 'town_center' ? tier : ''}`)) {
+        assert.ok(share >= 0.9, `${p.id}/${type}${tier}: the roof band stands clear of the courses (${(share * 100).toFixed(0)}% shows)`);
+      }
+      m.dispose();
+    }
+  }
+});
+
+// ---- the light of a lookout ----
+
+test('the watch tower lights a lamp on its lookout at the detailed level, and the plain level draws none', () => {
+  const was = getBuildingDetail();
+  try {
+    for (const p of PANTHEON_LIST) {
+      const glowTriangles = (level) => {
+        setBuildingDetail(level);
+        pruneBuildingCaches();
+        const m = buildBuildingModel('tower', p, '#ff0000');
+        const g = meshesOf(m.root).find((o) => o.name === 'building-glow');
+        const n = g ? g.geometry.attributes.position.count / 3 : 0;
+        m.dispose();
+        return n;
+      };
+      const plain = glowTriangles(0);
+      assert.ok(glowTriangles(1) >= plain + 12, `${p.id}: the lookout has a lit lamp at the detailed level`);
+    }
+  } finally {
+    setBuildingDetail(was);
+    pruneBuildingCaches();
+  }
 });
