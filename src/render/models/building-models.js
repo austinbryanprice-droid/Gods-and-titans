@@ -33,7 +33,7 @@ import { BUILDINGS, GOLD_MINE } from '../../data/buildings.js';
 import {
   PLINTH, DEPTH, MARGIN, PI, BUCKETS, DEFAULT_STYLE,
   DEFAULT_COLORS, C, mix, shade, tint, SURF,
-  made, prep, box, bevelBox, frustum, cyl, cone,
+  made, prep, box, bevelBox, courseLoft, courseCone, frustum, cyl, cone,
   ball, dome, octa, dodeca, torus, strut,
   pole, extrude, fromTris, soft, solid, hipLoft,
   GLOW, Kit, finishKit,
@@ -50,7 +50,7 @@ import {
   pinnacle, ornament, ornamentPair, isRound, door, frieze,
   rectWalls, roundWalls, roofH, roofOver, roofGable, roofLonghouse,
   roofPyramid, roofPagoda, roofCurved, roofShikhara, roofStepped, roofFlatDome,
-  roofFlat, rectRoof, roundRoof,
+  roofFlat, rectRoof, roundRoof, bx, bfr, domeCuts, postLamp,
 } from './building-pieces.js';
 
 // the toolkit's public names stay importable from here
@@ -144,8 +144,8 @@ function towerStruct(k, P, st, o) {
     }
   } else {
     const taper = { sandstone: 0.8, mudbrick: 0.78, stone: 0.92, marble: 0.95, brick: 0.92, lacquer: 0.9 }[st.wall] ?? 0.92;
-    k.b(box(s + 0.08, 0.12, s + 0.08, x, y, z), P.stoneD, 0.06);
-    k.b(frustum(s, h, s, taper, x, y, z), st.wall === 'lacquer' ? P.infill : P.wall, st.wall === 'stone' ? 0.08 : 0.04);
+    k.b(o.simple ? box(s + 0.08, 0.12, s + 0.08, x, y, z) : bx(k, 0.03, s + 0.08, 0.12, s + 0.08, x, y, z), P.stoneD, 0.06);
+    k.b(o.simple ? frustum(s, h, s, taper, x, y, z) : bfr(k, 0.04, s, h, s, taper, x, y, z), st.wall === 'lacquer' ? P.infill : P.wall, st.wall === 'stone' ? 0.08 : 0.04);
     if (st.wall === 'lacquer') {
       for (const sx of [-1, 1]) k.b(frustum(0.08, h, 0.08, 0.9, x + sx * (s / 2 - 0.02) * (1 + taper) / 2, y, z + (s / 2) * (1 + taper) / 2 - 0.02), P.wall, 0.03);
       k.b(box(s * taper + 0.04, 0.08, s * taper + 0.04, x, y + h * 0.5, z), P.wall, 0.02);
@@ -171,9 +171,11 @@ function towerStruct(k, P, st, o) {
   const pw = s + (st.wall === 'timber' ? 0.18 : 0.22);
   const platColor = st.wall === 'timber' || st.wall === 'lacquer' ? P.woodD : P.stoneD;
   if (round && st.wall !== 'timber') k.b(cyl(pw / 2, pw / 2 - 0.04, 0.1, 10, x, ty, z, false, true), platColor, 0.04);
-  else k.b(box(pw, 0.09, pw, x, ty, z), platColor, 0.04);
+  else k.b(o.simple ? box(pw, 0.09, pw, x, ty, z) : bx(k, 0.03, pw, 0.09, pw, x, ty, z), platColor, 0.04);
   const py = ty + 0.09;
   const battlements = st.roof === 'flat' || st.roof === 'stepped' || st.wall === 'sandstone' && st.roof !== 'shikhara' || o.battlements;
+  // a lamp lit after dusk on the lookout (between two merlons, or by a post of the roofed one); the City's corner towers leave it out
+  if (!o.simple) postLamp(k, P, battlements ? x + pw * 0.25 : x - (pw / 2 - 0.05) + 0.09, py, z + pw / 2 - (battlements ? 0.045 : 0.1), 1.3);
   let top;
   if (battlements) {
     const n = 3;
@@ -428,7 +430,7 @@ function buildShrine(k, P, st) {
     }
     case 'torii': {
       // small hokora shrine house on a stone base, with a torii in front
-      k.b(box(0.62, 0.22, 0.56, 0, py, -0.3), P.stone, 0.04);
+      k.b(bx(k, 0.03, 0.62, 0.22, 0.56, 0, py, -0.3), P.stone, 0.04);
       hall(k, P, st, { x: 0, z: -0.3, w: 0.56, d: 0.5, y: py + 0.22, h: 0.36, rh: 0.26, round: false, doorW: 0.18, doorH: 0.22, team: true });
       torii(k, P, 0, py, 0.48, 0.92, 0.82);
       stoneLantern(k, P, -0.58, py, 0.08, 0.42);
@@ -461,7 +463,7 @@ function buildShrine(k, P, st) {
       if (st.ornament === 'columns' || st.wall === 'marble') column(k, P, px, py, pz, ph, 0.06);
       else k.b(box(0.08, ph, 0.08, px, py, pz), st.wall === 'lacquer' ? P.wall : st.wall === 'timber' ? P.woodD : P.wallD, 0.03);
     }
-    k.b(box(cw, 0.07, cd, 0, py + ph - 0.07, cz), st.wall === 'lacquer' ? P.wall : P.wallL, 0.03);
+    k.b(bx(k, 0.025, cw, 0.07, cd, 0, py + ph - 0.07, cz), st.wall === 'lacquer' ? P.wall : P.wallL, 0.03);
     k.b(box(cw, ph * 0.75, 0.05, 0, py, cz - cd / 2 + 0.04), st.wall === 'lacquer' ? P.infill : P.wallD, 0.04);
     rectRoof(k, P, st, { x: 0, z: cz, w: cw, d: cd, y: py + ph, h: roofH(st, Math.min(cw, cd), 'small'), grade: 'small', team: true, ridge: st.roof === 'gable' ? 'z' : undefined, tiers: 1 });
   }
@@ -500,8 +502,8 @@ function templeGable(k, P, st) {
   }
   for (const [cx, cz] of cols) column(k, P, cx, top0, cz, ch, 0.075, st.wall === 'marble' ? P.wallL : P.wall);
   // entablature with frieze
-  k.b(box(W + 0.06, 0.16, D + 0.06, 0, top0 + ch, 0), st.wall === 'marble' ? P.wallL : P.wall, 0.02);
-  k.b(box(W + 0.08, 0.06, D + 0.08, 0, top0 + ch + 0.05, 0), P.trim, 0.02);
+  k.b(bx(k, 0.025, W + 0.06, 0.16, D + 0.06, 0, top0 + ch, 0), st.wall === 'marble' ? P.wallL : P.wall, 0.02);
+  k.b(bx(k, 0.018, W + 0.08, 0.06, D + 0.08, 0, top0 + ch + 0.05, 0), P.trim, 0.02);
   for (let i = 0; i < 9; i++) k.b(box(0.06, 0.06, 0.02, -W / 2 + 0.15 + (i * (W - 0.3)) / 8, top0 + ch + 0.05, D / 2 + 0.045), P.accent, 0);
   const top = roofGable(k, P, st, { x: 0, z: 0, w: W + 0.04, d: D + 0.04, y: top0 + ch + 0.16, h: 0.58, ridge: 'z', grade: 'grand', team: true });
   // cult statue before the door and team banners between the front columns
@@ -517,11 +519,11 @@ function templeLonghouse(k, P, st) {
   // great hof with a raised clerestory roof, stave-church style
   const top1 = hall(k, P, st, { x: 0, z: -0.25, w: 2.4, d: 1.5, h: 0.9, rh: 0.95, grade: 'mid', doorW: 0.4, doorH: 0.58, lim: 1.4 });
   const y2 = y + 0.9 + 0.62;
-  k.b(box(1.2, 0.42, 0.75, 0, y2 - 0.06, -0.25), P.wallD, 0.06);
+  k.b(bx(k, 0.03, 1.2, 0.42, 0.75, 0, y2 - 0.06, -0.25), P.wallD, 0.06);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.b(box(0.07, 0.42, 0.07, sx * 0.6, y2 - 0.06, -0.25 + sz * 0.375), P.woodD, 0.03);
   const top2 = roofLonghouse(k, P, st, { x: 0, z: -0.25, w: 1.2, d: 0.75, y: y2 + 0.36, h: 0.62, grade: 'grand', team: true });
   // entrance porch
-  k.b(box(0.62, 0.5, 0.36, 0, y, 0.62), P.wall, 0.06);
+  k.b(bx(k, 0.03, 0.62, 0.5, 0.36, 0, y, 0.62), P.wall, 0.06);
   roofGable(k, P, { ...st, ornament: 'none' }, { x: 0, z: 0.64, w: 0.66, d: 0.42, y: y + 0.5, h: 0.32, ridge: 'z', team: false });
   k.hole(box(0.26, 0.38, 0.03, 0, y, 0.82), y, 0.38);
   // carved pillars with shields, sacred fire
@@ -539,20 +541,20 @@ function templePyramid(k, P, st) {
   // pyramid with a golden capstone behind a pylon gateway with flagpoles and obelisks
   const pz = -0.32;
   const ph = 2.0;
-  k.b(box(2.1, 0.12, 2.0, 0, y, pz), P.stoneD, 0.04);
+  k.b(bx(k, 0.04, 2.1, 0.12, 2.0, 0, y, pz), P.stoneD, 0.04);
   const B = 0.98;
-  k.b(hipLoft({ cx: 0, cz: pz, y: y + 0.12, hw: B, hd: B * 0.95, tw: B * 0.16, td: B * 0.16 * 0.95, h: ph * 0.84, steps: 1 }), P.roof, 0.05);
+  // the great pyramid in courses of dressed stone, each set back from the one below
+  k.b(courseLoft({
+    cx: 0, cz: pz, y: y + 0.12, hw: B, hd: B * 0.95, tw: B * 0.16, td: B * 0.16 * 0.95, h: ph * 0.84,
+    n: k.lod ? 12 : 6, lip: 0.03, shadow: 0.14, butt: 0.62, tint: 0.05, rnd: () => k.rng.next(),
+  }), P.roofC, 0.04);
   k.b(hipLoft({ cx: 0, cz: pz, y: y + 0.12 + ph * 0.84, hw: B * 0.16, hd: B * 0.16 * 0.95, h: ph * 0.16, steps: 1 }), P.accent, 0);
-  for (let i = 1; i < 5; i++) {
-    const f = i / 5;
-    k.b(box(2 * B * (1 - f * 0.84) + 0.012, 0.02, 0.02, 0, y + 0.12 + ph * 0.84 * f, pz + B * 0.95 * (1 - f * 0.84)), P.roofD, 0);
-  }
   // pylons
   const pyz = 0.82;
   for (const sx of [-1, 1]) {
     const px = sx * 0.62;
-    k.b(frustum(0.82, 1.25, 0.42, 0.8, px, y, pyz, 0.85), P.wall, 0.04);
-    k.b(box(0.82 * 0.8 + 0.08, 0.1, 0.42 * 0.85 + 0.08, px, y + 1.2, pyz), P.trim, 0.02);
+    k.b(bfr(k, 0.04, 0.82, 1.25, 0.42, 0.8, px, y, pyz, 0.85), P.wall, 0.04);
+    k.b(bx(k, 0.02, 0.82 * 0.8 + 0.08, 0.1, 0.42 * 0.85 + 0.08, px, y + 1.2, pyz), P.trim, 0.02);
     k.b(box(0.82 * 0.8 + 0.06, 0.03, 0.42 * 0.85 + 0.06, px, y + 1.17, pyz), P.accent, 0);
     k.b(box(0.36, 0.5, 0.02, px, y + 0.42, pyz + 0.19), P.trimD, 0.05);
     k.b(ball(0.05, px, y + 0.82, pyz + 0.2, 5, 3), P.accent, 0);
@@ -571,23 +573,23 @@ function templeShikhara(k, P, st) {
   const y = PLINTH;
   // raised platform (jagati) with steps, sanctum tower and a pillared hall in front
   const top0 = steps(k, P, 2.7, 2.7, y, 2, 0.1, 0.08, P.stoneD);
-  k.b(box(2.5, 0.04, 2.5, 0, top0, 0), P.wallD, 0.03);
+  k.b(bx(k, 0.015, 2.5, 0.04, 2.5, 0, top0, 0), P.wallD, 0.03);
   const py = top0 + 0.04;
   // sanctum
   const sz = -0.42;
-  k.b(box(1.3, 0.75, 1.3, 0, py, sz), P.wall, 0.04);
+  k.b(bx(k, 0.04, 1.3, 0.75, 1.3, 0, py, sz), P.wall, 0.04);
   frieze(k, P, 0, sz + 0.65, 1.25, py + 0.55);
-  k.b(box(1.38, 0.08, 1.38, 0, py + 0.72, sz), P.trim, 0.02);
+  k.b(bx(k, 0.02, 1.38, 0.08, 1.38, 0, py + 0.72, sz), P.trim, 0.02);
   const top = roofShikhara(k, P, st, { x: 0, z: sz, w: 1.28, d: 1.28, y: py + 0.8, h: 1.8, grade: 'grand', team: true });
   // mandapa hall
   const mz = 0.62;
-  k.b(box(1.15, 0.06, 0.95, 0, py, mz), P.stone, 0.02);
+  k.b(bx(k, 0.02, 1.15, 0.06, 0.95, 0, py, mz), P.stone, 0.02);
   for (const sx of [-1, 1]) for (const zz of [-0.35, 0.05, 0.42]) k.b(cyl(0.05, 0.06, 0.55, 6, sx * 0.48, py + 0.06, mz + zz, true), P.wallL, 0.03);
-  k.b(box(1.15, 0.08, 0.95, 0, py + 0.6, mz), P.trim, 0.02);
+  k.b(bx(k, 0.025, 1.15, 0.08, 0.95, 0, py + 0.6, mz), P.trim, 0.02);
   // stepped pyramidal hall roof (phamsana)
   for (let i = 0; i < 4; i++) {
     const s = 1 - i * 0.2;
-    k.b(frustum(1.2 * s, 0.11, 1.0 * s, 0.88, 0, py + 0.68 + i * 0.11, mz), i % 2 ? P.roofD : P.roof, 0.03);
+    k.b(bfr(k, 0.03, 1.2 * s, 0.11, 1.0 * s, 0.88, 0, py + 0.68 + i * 0.11, mz), i % 2 ? P.roofD : P.roof, 0.03);
   }
   k.b(ball(0.07, 0, py + 1.15, mz, 6, 3), P.accent, 0);
   idol(k, P, 0, py, mz - 0.05, 0.62);
@@ -605,7 +607,7 @@ function templePagoda(k, P, st) {
   const top0 = steps(k, P, 2.5, 2.5, y, 1, 0.12, 0, P.stone);
   // three-tier pagoda on the back half, torii and stone lanterns in front, nobori banners
   const pz = -0.38;
-  k.b(box(1.3, 0.12, 1.3, 0, top0, pz), P.stoneD, 0.03);
+  k.b(bx(k, 0.035, 1.3, 0.12, 1.3, 0, top0, pz), P.stoneD, 0.03);
   rectWalls(k, P, st, { x: 0, z: pz, w: 1.08, d: 1.08, y: top0 + 0.12, h: 0.55, doorW: 0.24, doorH: 0.38 });
   const top = roofPagoda(k, P, st, { x: 0, z: pz, w: 1.08, d: 1.08, y: top0 + 0.67, h: 1.15, tiers: 3, grade: 'grand', team: true });
   if (st.ornament === 'torii') torii(k, P, 0, top0, 0.95, 1.5, 1.05);
@@ -652,20 +654,20 @@ function templeStepped(k, P, st) {
     let zc = -0.25;
     for (let i = 0; i < tiers.length; i++) {
       const [tw, td, th] = tiers[i];
-      k.b(frustum(tw, th, td, 0.95, 0, yy, zc, 0.95), i % 2 ? P.wallD : P.wall, 0.05);
+      k.b(bfr(k, 0.05, tw, th, td, 0.95, 0, yy, zc, 0.95), i % 2 ? P.wallD : P.wall, 0.05);
       const nb = Math.round(tw / 0.32);
       for (let b = 0; b < nb; b++) {
         k.b(box(0.06, th * 0.9, 0.03, -tw / 2 + 0.16 + (b * (tw - 0.32)) / (nb - 1), yy, zc + td / 2 - 0.005), P.wallD, 0);
       }
-      k.b(box(tw * 0.95 + 0.04, 0.04, td * 0.95 + 0.04, 0, yy + th - 0.03, zc), P.trim, 0.02);
+      k.b(bx(k, 0.016, tw * 0.95 + 0.04, 0.04, td * 0.95 + 0.04, 0, yy + th - 0.03, zc), P.trim, 0.02);
       yy += th;
       zc -= 0.06;
     }
     stair(k, P, 0, y, yy - 0.42, 1.22, 0.35, 0.32, P.wallL);
     stair(k, P, 0, yy - 0.42, yy, 0.42, 0.0, 0.26, P.wallL);
     // shrine on top with blue glazed walls
-    k.b(box(0.7, 0.42, 0.55, 0, yy, zc), P.trim, 0.04);
-    k.b(box(0.76, 0.06, 0.6, 0, yy + 0.42, zc), P.accent, 0.02);
+    k.b(bx(k, 0.035, 0.7, 0.42, 0.55, 0, yy, zc), P.trim, 0.04);
+    k.b(bx(k, 0.022, 0.76, 0.06, 0.6, 0, yy + 0.42, zc), P.accent, 0.02);
     k.hole(box(0.18, 0.28, 0.03, 0, yy, zc + 0.28), yy, 0.28);
     for (let i = 0; i < 4; i++) k.b(box(0.1, 0.1, 0.06, -0.3 + i * 0.2, yy + 0.48, zc + 0.27), P.wallL, 0.02);
     flag(k, P, 0.3, yy + 0.48, zc - 0.15, 0.6, 0.3, 0.18);
@@ -682,8 +684,8 @@ function templeStepped(k, P, st) {
   let yy = y;
   for (let i = 0; i < tiers.length; i++) {
     const [tw, th] = tiers[i];
-    k.b(frustum(tw, th, tw * 0.94, 0.94, 0, yy, -0.1, 0.94), P.wall, 0.05);
-    k.b(box(tw * 0.94 + 0.02, 0.05, tw * 0.94 * 0.94 + 0.02, 0, yy + th - 0.08, -0.1), shade(P.wall, 0.82), 0.02);
+    k.b(bfr(k, 0.045, tw, th, tw * 0.94, 0.94, 0, yy, -0.1, 0.94), P.wall, 0.05);
+    k.b(bx(k, 0.02, tw * 0.94 + 0.02, 0.05, tw * 0.94 * 0.94 + 0.02, 0, yy + th - 0.08, -0.1), shade(P.wall, 0.82), 0.02);
     yy += th;
   }
   const sw = 0.62;
@@ -693,9 +695,9 @@ function templeStepped(k, P, st) {
   for (const sx of [-1, 1]) {
     const sxp = sx * 0.33;
     const c = sx < 0 ? P.trim : P.roof;
-    k.b(box(0.5, 0.42, 0.62, sxp, yy, -0.32), P.wallL, 0.03);
+    k.b(bx(k, 0.03, 0.5, 0.42, 0.62, sxp, yy, -0.32), P.wallL, 0.03);
     k.hole(box(0.16, 0.26, 0.03, sxp, yy, -0.0), yy, 0.26);
-    k.b(frustum(0.54, 0.32, 0.66, 0.85, sxp, yy + 0.42, -0.32), c, 0.04);
+    k.b(bfr(k, 0.03, 0.54, 0.32, 0.66, 0.85, sxp, yy + 0.42, -0.32), c, 0.04);
     for (let i = 0; i < 3; i++) k.b(box(0.08, 0.1, 0.08, sxp - 0.16 + i * 0.16, yy + 0.74, -0.06), c, 0.03);
     k.t(box(0.5, 0.08, 0.02, sxp, yy + 0.26, -0.005), 1);
     brazier(k, P, sx * 0.62, yy, 0.18, 0.5, 0.12);
@@ -735,13 +737,13 @@ function templeDome(k, P, st) {
   const D = 1.6;
   const h = 1.05;
   rectWalls(k, P, st, { x: 0, z: hz, w: W, d: D, y, h, doorW: 0.34, doorH: 0.62 });
-  k.b(box(W + 0.02, 0.06, D + 0.02, 0, y + h, hz), P.wallD, 0.03);
+  k.b(bx(k, 0.025, W + 0.02, 0.06, D + 0.02, 0, y + h, hz), P.wallD, 0.03);
   const top = roofFlatDome(k, P, { ...st, ornament: 'none' }, { x: 0, z: hz - 0.1, w: W * 0.7, d: D * 0.8, y: y + h + 0.06, h: 0.55, grade: 'grand', team: true });
   // buttress towers along the front
   const fz = hz + D / 2;
-  for (const bx of [-1.05, -0.5, 0.5, 1.05]) pinnacle(k, P, bx, y, fz + 0.03, 1.5 + (Math.abs(bx) < 0.7 ? 0.25 : 0), 0.26);
+  for (const px of [-1.05, -0.5, 0.5, 1.05]) pinnacle(k, P, px, y, fz + 0.03, 1.5 + (Math.abs(px) < 0.7 ? 0.25 : 0), 0.26);
   // the central tower over the door
-  k.b(frustum(0.5, 1.75, 0.3, 0.6, 0, y, fz + 0.06, 0.7), P.wall, 0.04);
+  k.b(bfr(k, 0.04, 0.5, 1.75, 0.3, 0.6, 0, y, fz + 0.06, 0.7), P.wall, 0.04);
   k.b(cone(0.11, 0.35, 6, 0, y + 1.75, fz + 0.06), P.wall, 0);
   k.b(ball(0.06, 0, y + 2.12, fz + 0.06, 5, 4, 1.3), P.white, 0);
   for (let i = 0; i < 3; i++) k.b(pole([-0.18, y + 0.85 + i * 0.3, fz + 0.2], [0.18, y + 0.85 + i * 0.3, fz + 0.2], 0.018, 3), P.woodD, 0);
@@ -760,7 +762,7 @@ function templeFlat(k, P, st) {
   const top0 = steps(k, P, 2.7, 2.7, y, 2, 0.1, 0.08, P.stone);
   rectWalls(k, P, st, { x: 0, z: -0.3, w: 2.1, d: 1.5, y: top0, h: 1.15, doorW: 0.4, doorH: 0.7 });
   for (let i = 0; i < 6; i++) column(k, P, -0.95 + i * 0.38, top0, 0.6, 1.15, 0.07, P.wallL);
-  k.b(box(2.2, 0.12, 0.4, 0, top0 + 1.15, 0.55), P.wallL, 0.02);
+  k.b(bx(k, 0.03, 2.2, 0.12, 0.4, 0, top0 + 1.15, 0.55), P.wallL, 0.02);
   const top = roofFlat(k, P, st, { x: 0, z: -0.15, w: 2.2, d: 1.85, y: top0 + 1.15, grade: 'grand', team: true });
   idol(k, P, 0, top0, 0.95, 0.8);
   ornamentPair(k, P, st, 1.05, y, 1.04, 0.8);
@@ -817,9 +819,12 @@ function buildWoodenWall(k, P, mask) {
   const arms = wallArms(mask);
   const H = 0.9;
   const sunk = 0.35;
+  // round logs shaded smooth at the detailed level (a sixth side), faceted at the plain one; a segment
+  // with a tower on every side (the most stakes it can have) keeps five to stay under the wall budget
+  const sides = k.lod && arms.filter((a) => a.reach > WALL_REACH).length < 4 ? 6 : 5;
   const stake = (x, z, h, r, color) => {
-    k.b(cyl(r * 0.9, r, h + sunk, 5, x, -sunk, z, true), color, 0.06);
-    k.b(cone(r * 0.9, 0.2, 5, x, h, z, true), P.woodL, 0.05);
+    k.b(cyl(r * 0.9, r, h + sunk, sides, x, -sunk, z, true), color, 0.06);
+    k.b(cone(r * 0.9, 0.2, sides, x, h, z, true), P.woodL, 0.05);
   };
   stake(0, 0, H + 0.15, 0.1, P.woodD);
   k.t(box(0.23, 0.07, 0.23, 0, H * 0.62, 0), 1);
@@ -843,14 +848,20 @@ function buildWoodenWall(k, P, mask) {
 function buildStoneWall(k, P, mask) {
   const arms = wallArms(mask);
   const H = 0.9;
+  // the pier, the wall and its cope are rounded off at the detailed level (the worst mask stays well under the budget)
+  const bev = (w, h, d, r, x, y, z) => (k.lod ? bevelBox(w, h, d, r, x, y, z) : box(w, h, d, x, y, z));
+  const armBev = (arm, a, b, w, y, h, r) => {
+    const mid = (a + b) / 2;
+    return arm.dx ? bev(b - a, h, w, r, arm.dx * mid, y, 0) : bev(w, h, b - a, r, 0, y, arm.dz * mid);
+  };
   k.b(box(0.5, 0.5, 0.5, 0, -0.5, 0), P.stoneD, 0.06);
-  k.b(box(0.46, H + 0.18, 0.46, 0, 0, 0), P.stone, 0.08);
-  k.b(box(0.56, 0.07, 0.56, 0, H + 0.18, 0), P.stoneL, 0.05);
+  k.b(bev(0.46, H + 0.18, 0.46, 0.04, 0, 0, 0), P.stone, 0.08);
+  k.b(bev(0.56, 0.07, 0.56, 0.025, 0, H + 0.18, 0), P.stoneL, 0.05);
   k.t(box(0.48, 0.07, 0.48, 0, H * 0.58, 0), 1);
   for (const a of arms) {
     k.b(armBox(a, 0.2, a.reach, 0.36, -0.5, 0.5), P.stoneD, 0.06);
-    k.b(armBox(a, 0.2, a.reach, 0.32, 0, H), P.stone, 0.08);
-    k.b(armBox(a, 0.2, a.reach, 0.38, H, 0.07), P.stoneL, 0.04);
+    k.b(armBev(a, 0.2, a.reach, 0.32, 0, H, 0.03), P.stone, 0.08);
+    k.b(armBev(a, 0.2, a.reach, 0.38, H, 0.07, 0.022), P.stoneL, 0.04);
     for (let t = 0.42; t <= a.reach - 0.1; t += 0.4) k.b(armBox(a, t - 0.07, t + 0.07, 0.3, H + 0.07, 0.13), P.stone, 0.06);
     for (const side of [-1, 1]) k.t(armBox(a, 0.2, a.reach, 0.02, H * 0.58, 0.07, side * 0.165), 1);
   }
@@ -868,9 +879,9 @@ function gatePillars(k, P, st, y) {
     const x = sx * px;
     switch (st.wall) {
       case 'timber':
-        k.b(box(pw, 0.2, pd, x, y, 0), P.stoneD, 0.08);
-        k.b(box(pw * 0.7, H, pd * 0.7, x, y + 0.2, 0), P.wood, 0.07);
-        for (let i = 0; i < 4; i++) k.b(box(pw * 0.76, 0.08, pd * 0.76, x, y + 0.45 + i * 0.65, 0), i % 2 ? P.accent : P.trim, 0.03);
+        k.b(bx(k, 0.035, pw, 0.2, pd, x, y, 0), P.stoneD, 0.08);
+        k.b(bx(k, 0.045, pw * 0.7, H, pd * 0.7, x, y + 0.2, 0), P.wood, 0.07);
+        for (let i = 0; i < 4; i++) k.b(bx(k, 0.022, pw * 0.76, 0.08, pd * 0.76, x, y + 0.45 + i * 0.65, 0), i % 2 ? P.accent : P.trim, 0.03);
         break;
       case 'lacquer':
         k.b(cyl(pw * 0.32, pw * 0.36, H + 0.2, 8, x, y, 0, true), P.wall, 0.03);
@@ -878,12 +889,12 @@ function gatePillars(k, P, st, y) {
         break;
       case 'marble':
         for (const ox of [-1, 1]) column(k, P, x + ox * pw * 0.22, y, pd * 0.18 * ox, H + 0.2, 0.13, P.wallL);
-        k.b(box(pw + 0.06, 0.12, pd, x, y, 0), P.stoneL, 0.02);
+        k.b(bx(k, 0.03, pw + 0.06, 0.12, pd, x, y, 0), P.stoneL, 0.02);
         break;
       case 'sandstone':
       case 'mudbrick':
-        k.b(frustum(pw + 0.15, H + 0.2, pd + 0.1, 0.72, x, y, 0, 0.8), P.wall, 0.05);
-        k.b(box((pw + 0.15) * 0.72 + 0.08, 0.1, (pd + 0.1) * 0.8 + 0.08, x, y + H + 0.1, 0), st.wall === 'mudbrick' ? P.wallL : P.trim, 0.02);
+        k.b(bfr(k, 0.06, pw + 0.15, H + 0.2, pd + 0.1, 0.72, x, y, 0, 0.8), P.wall, 0.05);
+        k.b(bx(k, 0.03, (pw + 0.15) * 0.72 + 0.08, 0.1, (pd + 0.1) * 0.8 + 0.08, x, y + H + 0.1, 0), st.wall === 'mudbrick' ? P.wallL : P.trim, 0.02);
         if (st.ornament === 'spikes') {
           for (let i = 0; i < 4; i++) {
             const yy = y + 0.6 + i * 0.6;
@@ -894,12 +905,12 @@ function gatePillars(k, P, st, y) {
         }
         break;
       case 'brick':
-        k.b(box(pw, H + 0.2, pd, x, y, 0), P.trim, 0.06);
+        k.b(bx(k, 0.04, pw, H + 0.2, pd, x, y, 0), P.trim, 0.06);
         for (let i = 0; i < 3; i++) k.b(box(0.3, 0.3, 0.03, x, y + 0.5 + i * 0.85, pd / 2 + 0.005), P.accent, 0.04);
         break;
       case 'stone':
       default:
-        k.b(box(pw, H + 0.2, pd, x, y, 0), P.wall, 0.08);
+        k.b(bx(k, 0.045, pw, H + 0.2, pd, x, y, 0), P.wall, 0.08);
         for (let i = 0; i < 5; i++) k.b(box(pw + 0.04, 0.06, pd + 0.04, x, y + 0.3 + i * 0.6, 0), P.wallD, 0.04);
         break;
     }
@@ -912,8 +923,8 @@ function gateTop(k, P, st, y) {
   const d = GATE.pd;
   switch (st.roof) {
     case 'gable': {
-      k.b(box(span, 0.22, d, 0, y, 0), P.wallL, 0.02);
-      k.b(box(span + 0.04, 0.07, d + 0.04, 0, y + 0.08, 0), P.trim, 0.02);
+      k.b(bx(k, 0.035, span, 0.22, d, 0, y, 0), P.wallL, 0.02);
+      k.b(bx(k, 0.02, span + 0.04, 0.07, d + 0.04, 0, y + 0.08, 0), P.trim, 0.02);
       const ped = solid([
         [[-span / 2, 0, 0.12], [span / 2, 0, 0.12], [0, 0.62, 0.12]],
         [[-span / 2, 0, -0.12], [0, 0.62, -0.12], [span / 2, 0, -0.12]],
@@ -956,8 +967,8 @@ function gateTop(k, P, st, y) {
       return y + 0.75;
     }
     case 'pyramid': {
-      k.b(box(span * 0.62, 0.26, d * 0.8, 0, y, 0), P.wall, 0.03);
-      k.b(box(span * 0.62 + 0.08, 0.1, d * 0.8 + 0.08, 0, y + 0.22, 0), P.trim, 0.02);
+      k.b(bx(k, 0.035, span * 0.62, 0.26, d * 0.8, 0, y, 0), P.wall, 0.03);
+      k.b(bx(k, 0.022, span * 0.62 + 0.08, 0.1, d * 0.8 + 0.08, 0, y + 0.22, 0), P.trim, 0.02);
       k.b(cyl(0.16, 0.16, 0.04, 10, 0, 0, 0).rotateX(PI / 2).translate(0, y + 0.13, d * 0.4 + 0.02), P.accent, 0);
       for (const sx of [-1, 1]) {
         const wing = box(0.55, 0.09, 0.03, sx * 0.43, y + 0.09, d * 0.4 + 0.015);
@@ -967,12 +978,12 @@ function gateTop(k, P, st, y) {
       return y + 0.4;
     }
     case 'shikhara': {
-      k.b(box(span, 0.18, d, 0, y, 0), P.wall, 0.03);
+      k.b(bx(k, 0.03, span, 0.18, d, 0, y, 0), P.wall, 0.03);
       frieze(k, P, 0, d / 2, span * 0.9, y + 0.05);
       let yy = y + 0.18;
       for (let i = 0; i < 5; i++) {
         const s = 1 - i * 0.15;
-        k.b(frustum(span * 0.86 * s, 0.17, d * 0.9 * s, 0.94, 0, yy, 0), i % 2 ? P.roofD : P.roof, 0.03);
+        k.b(bfr(k, 0.03, span * 0.86 * s, 0.17, d * 0.9 * s, 0.94, 0, yy, 0), i % 2 ? P.roofD : P.roof, 0.03);
         for (let j = 0; j < 3; j++) k.b(ball(0.04, -span * 0.3 * s + j * span * 0.3 * s, yy + 0.2, d * 0.42 * s, 4, 3), P.accent, 0);
         yy += 0.17;
       }
@@ -983,11 +994,11 @@ function gateTop(k, P, st, y) {
     }
     case 'pagoda': {
       if (st.ornament === 'torii') return y;
-      k.b(box(span * 0.95, 0.12, d * 0.8, 0, y, 0), P.beam, 0.02);
+      k.b(bx(k, 0.03, span * 0.95, 0.12, d * 0.8, 0, y, 0), P.beam, 0.02);
       return roofPagoda(k, P, st, { x: 0, z: 0, w: span * 0.92, d: d * 0.9, y: y + 0.12, h: 0.7, tiers: 2, grade: 'mid', team: true });
     }
     case 'curved': {
-      k.b(box(span, 0.16, d * 0.7, 0, y, 0), P.beam, 0.02);
+      k.b(bx(k, 0.03, span, 0.16, d * 0.7, 0, y, 0), P.beam, 0.02);
       k.b(box(span * 0.7, 0.2, 0.04, 0, y - 0.32, d * 0.3), P.accent, 0.03);
       k.b(box(span * 0.4, 0.12, 0.05, 0, y - 0.28, d * 0.3 + 0.01), P.roofD, 0);
       roofCurved(k, P, st, { x: 0, z: 0, w: span * 0.55, d: d * 0.65, y: y + 0.16, h: 0.42, grade: 'small', team: true });
@@ -997,8 +1008,8 @@ function gateTop(k, P, st, y) {
     }
     case 'stepped': {
       const mud = st.wall === 'mudbrick' || st.wall === 'brick';
-      k.b(box(span, 0.3, d, 0, y, 0), mud ? P.trim : P.wall, 0.05);
-      k.b(box(span * 0.75, 0.22, d * 0.85, 0, y + 0.3, 0), mud ? P.trim : P.wallD, 0.05);
+      k.b(bx(k, 0.04, span, 0.3, d, 0, y, 0), mud ? P.trim : P.wall, 0.05);
+      k.b(bx(k, 0.035, span * 0.75, 0.22, d * 0.85, 0, y + 0.3, 0), mud ? P.trim : P.wallD, 0.05);
       const n = 7;
       for (let i = 0; i < n; i++) {
         const mx = -span * 0.375 + (i * span * 0.75) / (n - 1);
@@ -1011,7 +1022,9 @@ function gateTop(k, P, st, y) {
         k.b(box(0.7, 0.14, 0.03, 0, y + 0.09, d / 2), P.trim, 0.03);
         k.b(box(0.18, 0.18, 0.04, 0, y + 0.07, d / 2 + 0.01), P.accent, 0);
       }
-      k.t(box(span + 0.02, 0.06, d + 0.02, 0, y + 0.27, 0), 1);
+      // the team's color runs round the edge of the lower block (a whole flat top of it burned in the sun)
+      for (const sz of [-1, 1]) k.t(box(span + 0.02, 0.06, 0.11, 0, y + 0.27, sz * (d / 2 - 0.045)), 1);
+      for (const sx of [-1, 1]) k.t(box(0.11, 0.06, d - 0.2, sx * (span / 2 - 0.045), y + 0.27, 0), 1);
       return y + 0.72;
     }
     case 'thatch_cone': {
@@ -1027,8 +1040,8 @@ function gateTop(k, P, st, y) {
       return y + 0.4;
     }
     case 'dome': {
-      k.b(frustum(span * 0.85, 0.36, d * 0.85, 0.94, 0, y - 0.05, 0), P.wall, 0.04);
-      k.b(dome(0.42, 0.4, 0, y + 0.31, 0, 8, 3), P.roof, 0.05);
+      k.b(bfr(k, 0.045, span * 0.85, 0.36, d * 0.85, 0.94, 0, y - 0.05, 0), P.wall, 0.04);
+      k.b(courseCone({ cx: 0, cz: 0, y: y + 0.31, r: 0.42, h: 0.4, ...domeCuts(k, 0.42), dome: true, lip: 0.022, shadow: 0.2, butt: 0.55, tint: 0.05, rnd: () => k.rng.next() }), P.roof, 0.05);
       k.t(cyl(0.45, 0.45, 0.06, 8, 0, y + 0.29, 0, true), 1);
       k.b(ball(0.05, 0, y + 0.78, 0, 5, 4, 1.3), P.white, 0);
       for (const sx of [-1, 1]) pinnacle(k, P, sx * GATE.px, y - 0.05, 0, 0.75, 0.32);
@@ -1037,8 +1050,8 @@ function gateTop(k, P, st, y) {
     }
     case 'flat':
     default:
-      k.b(box(span, 0.28, d, 0, y, 0), P.wall, 0.04);
-      k.b(box(span + 0.06, 0.08, d + 0.06, 0, y + 0.26, 0), P.trim, 0.02);
+      k.b(bx(k, 0.04, span, 0.28, d, 0, y, 0), P.wall, 0.04);
+      k.b(bx(k, 0.025, span + 0.06, 0.08, d + 0.06, 0, y + 0.26, 0), P.trim, 0.02);
       k.t(box(span * 0.4, 0.15, 0.02, 0, y + 0.06, d / 2 + 0.01), 1);
       return y + 0.4;
   }
@@ -1146,9 +1159,9 @@ function buildTownCenter(k, P, st, tier) {
       top = roofShikhara(k, P, st, { x: 0, z: -0.55, w: 1.2, d: 0.95, y: uy + 0.4, h: 1.45, grade: 'grand', team: true });
     } else if (st.roof === 'stepped') {
       const mud = st.wall === 'mudbrick' || st.wall === 'brick';
-      k.b(frustum(1.6, 0.42, 1.2, 0.93, 0, uy, -0.55), mud ? P.wallD : P.wall, 0.05);
-      k.b(frustum(1.05, 0.38, 0.8, 0.9, 0, uy + 0.42, -0.6), mud ? P.wall : P.wallD, 0.05);
-      k.b(box(0.6, 0.32, 0.45, 0, uy + 0.8, -0.62), P.trim, 0.04);
+      k.b(bfr(k, 0.045, 1.6, 0.42, 1.2, 0.93, 0, uy, -0.55), mud ? P.wallD : P.wall, 0.05);
+      k.b(bfr(k, 0.04, 1.05, 0.38, 0.8, 0.9, 0, uy + 0.42, -0.6), mud ? P.wall : P.wallD, 0.05);
+      k.b(bx(k, 0.03, 0.6, 0.32, 0.45, 0, uy + 0.8, -0.62), P.trim, 0.04);
       top = roofStepped(k, P, st, { x: 0, z: -0.62, w: 0.62, d: 0.48, y: uy + 1.12, grade: 'small', team: true });
     } else if (st.roof === 'pyramid') {
       k.b(box(1.3, 0.5, 1.0, 0, uy, -0.6), P.wall, 0.04);
