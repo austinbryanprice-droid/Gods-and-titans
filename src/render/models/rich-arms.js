@@ -136,12 +136,35 @@ function conch(kit, pal, s0) {
   });
 }
 
+/** An ankh: a gold cross topped by a loop, held by the foot of its shaft (a wrapped grip); also an offhand emblem. */
+function ankh(kit, pal, s, { color = null } = {}) {
+  const gold = color || pal.accentMetal;
+  grip(kit, -0.085 * s, 0.075 * s, 0.0195 * s, pal.leather, 4);
+  kit.loft(along([[-0.125, 0.021], [-0.1, 0.0195], [0.0, 0.0155], [0.15, 0.0145], [0.3, 0.0145]], s), {
+    ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.008 * s, color: gold, mat: 'gold', glow: 0.1,
+  });
+  // the arms: a bar across the top of the shaft, its ends flaring a little
+  const by = 0.292;
+  kit.loft([
+    ps(-0.118 * s, by * s, 0, 0.0155 * s, 0.0125 * s), ps(-0.06 * s, by * s, 0, 0.0125 * s, 0.0115 * s),
+    ps(0, by * s, 0, 0.0145 * s, 0.0125 * s), ps(0.06 * s, by * s, 0, 0.0125 * s, 0.0115 * s), ps(0.118 * s, by * s, 0, 0.0155 * s, 0.0125 * s),
+  ], { ref: [0, 1, 0], rings: 8, sides: 8, start: 'round', end: 'round', capDepth: 0.01 * s, color: gold, mat: 'gold', glow: 0.1 });
+  // the loop: an oval ring rising from the crossing, open at its foot where the shaft meets it
+  const n = 22;
+  const loop = [];
+  for (let i = 0; i < n; i++) {
+    const t = -PI / 2 + 0.3 + (i / (n - 1)) * (TAU - 0.6);
+    loop.push(ps(Math.cos(t) * 0.056 * s, (0.398 + Math.sin(t) * 0.088) * s, 0, 0.0128 * s, 0.0118 * s));
+  }
+  kit.loft(loop, { ref: [0, 0, 1], sides: 8, start: 'round', end: 'round', capDepth: 0.009 * s, color: gold, mat: 'gold', glow: 0.1 });
+}
+
 /** The weapons built here, by the visual's weapon id. */
-const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe };
+const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.82, opts) };
 export const RICH_ARMS = new Set(Object.keys(ARMS));
 
 /** The offhand items built here, by the visual's offhand id. */
-const OFFHANDS = { shell: conch };
+const OFFHANDS = { shell: conch, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.7, opts) };
 export const RICH_OFFHANDS = new Set(Object.keys(OFFHANDS));
 
 /** Add weapon or offhand item `id` (one of RICH_ARMS, RICH_OFFHANDS) to `kit` in the grip frame; opts as for richWeapon. Returns whether it was built. */

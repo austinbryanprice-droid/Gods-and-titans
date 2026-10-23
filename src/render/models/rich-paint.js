@@ -46,6 +46,13 @@ export const dye = (o, c, t = 1) => {
   o.b = lerp(o.b, c.b, t);
 };
 
+/** Like dye, where `c` may also be a team color ({ team }): the vertex turns team painted (a stripe of the team's color on cloth of another). */
+export const recolor = (o, c, t = 1) => {
+  if (c.team) {
+    if (t >= 0.5) o.team = c.team;
+  } else dye(o, c, t);
+};
+
 /** Brighten / darken by height: k0 at y0 to k1 at y1. */
 export const gradY = (y0, y1, k0, k1) => (o, x, y) => mul(o, lerp(k0, k1, clamp((y - y0) / (y1 - y0))));
 

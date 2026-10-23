@@ -936,7 +936,12 @@ per-frame budget, so a revealed army appears over a few frames.
   shells) and `rich-outfits.js`, where each pantheon registers only the layers (legs, torso, arms, armor,
   cloaks, head, extras) and the shield style in which its people dress differently from the default
   (`rich-outfit-default.js`, the Norse; `rich-outfits-greek.js`: chiton, peplos, himation, muscle
-  cuirass, pteruges, greaves, sandals, laurels, crowns, the hoplon). Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
+  cuirass, pteruges, greaves, sandals, laurels, crowns, the hoplon; `rich-outfits-egyptian.js`: pleated
+  shendyt kilts with an apron, the beaded usekh collar, corselets, the gods' sheath dress, mummy
+  wraps over dried skin (`outfit.skinPaint`), the nemes, the double crown, a tall hide shield).
+  Animal heads the kit builds (`BEAST_HEADS`: the jackal, the falcon) live in `rich-heads.js` and are
+  skinned to the head bone like a human one; any other beast head keeps a unit out of `richSupported`.
+  Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
   `spawnProjectile({ kind, el, from: {x, y, h}, to: {x, y, h}, flight })`,

@@ -22,6 +22,7 @@ const {
 const { richSupported, buildRichTemplate } = await import('../../src/render/models/rich-humanoid.js');
 const { BONE_COUNT, B } = await import('../../src/render/models/rich-kit.js');
 const { outfitFor, LAYERS } = await import('../../src/render/models/rich-outfits.js');
+const { RICH_ARMS, RICH_OFFHANDS } = await import('../../src/render/models/rich-arms.js');
 const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
 const { unitLook } = await import('../../src/render/models/unit-looks.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
@@ -49,10 +50,12 @@ function allTypes() {
 
 const norse = (id) => looks(UNITS[id] || MORTALS[id], 'norse');
 const greek = (id) => looks(UNITS[id] || MORTALS[id], 'greek');
+const egyptian = (id) => looks(UNITS[id] || MORTALS[id], 'egyptian');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
 const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek_athena', 'greek_poseidon', 'greek_hades', 'greek_kronos', 'greek_cyclops', 'greek_hoplite'];
+const EGYPTIAN = ['worshipper', 'warrior', 'archer', 'priest', 'egyptian_ra', 'egyptian_anubis', 'egyptian_isis', 'egyptian_set', 'egyptian_mummy', 'egyptian_chariot_archer'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -215,6 +218,97 @@ test('a third eye on a god adds the eye on the brow, and a giant\'s is its one g
   const tpl = buildRichTemplate(cyclops);
   finite(tpl.rich.geo.attributes.position.array, 'cyclops');
   assert.ok(tpl.triangles <= RICH_BUDGET.creature);
+});
+
+test('the Egyptians dress their own way: kilts, corselets, collars and a wrapped mummy', () => {
+  const base = outfitFor('norse');
+  const egy = outfitFor('egyptian');
+  for (const layer of LAYERS) assert.equal(typeof egy[layer], 'function', `the Egyptian ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(egy[layer], base[layer], `the Egyptians dress their ${layer} their own way`);
+  assert.ok(egy.shield && !base.shield, 'a tall hide shield');
+  assert.equal(typeof egy.skinPaint, 'function', 'the dead paint their bare skin');
+  assert.equal(base.skinPaint, undefined, 'no other people does');
+});
+
+test('every Egyptian humanoid is dressed in the Egyptian look, the beasts and the serpent stay low-poly', () => {
+  for (const id of EGYPTIAN) assert.ok(richSupported(egyptian(id)), `${id} is supported`);
+  for (const id of ['egyptian_apep', 'egyptian_scarab', 'egyptian_bennu', 'egyptian_sphinx', 'egyptian_jackal', 'battering_ram']) assert.ok(!richSupported(egyptian(id)), `${id} stays low-poly`);
+  // only the animal heads the kit builds (the jackal's, the falcon's) are let through
+  const anubis = egyptian('egyptian_anubis');
+  assert.ok(!richSupported({ ...anubis, visual: { ...anubis.visual, head: 'wolf' } }));
+  assert.ok(richSupported({ ...anubis, visual: { ...anubis.visual, head: 'falcon' } }));
+  // a Egyptian warrior is not a Greek one
+  assert.notEqual(buildRichTemplate(egyptian('warrior')).triangles, buildRichTemplate(greek('warrior')).triangles);
+});
+
+test('the Egyptian gods carry what they are known by and the soldiers a tall hide shield', () => {
+  const names = (id) => buildRichTemplate(egyptian(id)).rich.attach.map((x) => x.name).sort();
+  assert.deepEqual(names('egyptian_ra'), ['weaponL', 'weaponR'], 'a scepter, and an ankh in the other hand');
+  assert.deepEqual(names('egyptian_anubis'), ['weaponR'], 'a staff');
+  assert.deepEqual(names('egyptian_isis'), ['weaponR', 'wingL1', 'wingL2', 'wingR1', 'wingR2'], 'an ankh, and her wings');
+  assert.deepEqual(names('egyptian_set'), ['weaponR'], 'a spear');
+  assert.deepEqual(names('priest'), ['weaponR'], 'an ankh');
+  assert.deepEqual(names('warrior'), ['shield', 'weaponR']);
+  assert.ok(RICH_ARMS.has('ankh') && RICH_OFFHANDS.has('ankh'), 'the ankh is built, in the hand and as an emblem');
+  const shield = buildRichTemplate(egyptian('warrior')).rich.attach.find((x) => x.shield).geo;
+  shield.computeBoundingBox();
+  const size = shield.boundingBox.getSize(new THREE.Vector3());
+  assert.ok(size.y > size.x * 1.5, `a tall oval, not a round shield (${size.x.toFixed(2)} x ${size.y.toFixed(2)})`);
+});
+
+test('the falcon\'s and the jackal\'s heads are built on the head bone, and Set\'s tail and crown are extra geometry', () => {
+  const ra = egyptian('egyptian_ra');
+  const human = buildRichTemplate({ ...ra, visual: { ...ra.visual, head: 'human' } });
+  const falcon = buildRichTemplate(ra);
+  assert.notEqual(falcon.triangles, human.triangles, 'a beak is not a face');
+  const set = egyptian('egyptian_set');
+  const bare = buildRichTemplate({ ...set, visual: { ...set.visual, extras: set.visual.extras.filter((e) => e !== 'tail'), headgear: 'none' } });
+  assert.ok(buildRichTemplate(set).triangles > bare.triangles + 150, 'the forked tail and the double crown');
+  // every vertex of the heads follows the skeleton, with weights that sum to one
+  for (const id of ['egyptian_ra', 'egyptian_anubis', 'egyptian_set']) {
+    const g = buildRichTemplate(egyptian(id)).rich.geo;
+    finite(g.attributes.position.array, id);
+    finite(g.attributes.skinWeight.array, id);
+  }
+});
+
+test('Egyptian mortals wear team-colored linen, and the gods the team\'s color on apron and collar', () => {
+  for (const [id, share] of [['worshipper', 0.06], ['warrior', 0.06], ['archer', 0.015], ['priest', 0.012], ['egyptian_ra', 0.01], ['egyptian_isis', 0.01]]) {
+    const fx = buildRichTemplate(egyptian(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) team++;
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+  }
+});
+
+test('the mummy is dark dried skin under pale bandage, and its eyes glow', () => {
+  const tpl = buildRichTemplate(egyptian('egyptian_mummy'));
+  const col = tpl.rich.geo.attributes.color.array;
+  let dark = 0;
+  let pale = 0;
+  for (let i = 0; i < col.length; i += 3) {
+    const l = (col[i] + col[i + 1] + col[i + 2]) / 3;
+    if (l < 0.16) dark++;
+    else if (l > 0.45) pale++;
+  }
+  const n = col.length / 3;
+  assert.ok(dark > n * 0.12, `dark skin: ${dark} of ${n}`);
+  assert.ok(pale > n * 0.12, `pale bandage: ${pale} of ${n}`);
+  const fx = tpl.rich.geo.attributes.aFx.array;
+  let glow = 0;
+  for (let i = 1; i < fx.length; i += 4) if (fx[i] > 0.5) glow++;
+  assert.ok(glow > 0, 'glowing eyes');
+  assert.ok(tpl.triangles > 5500, 'the wraps are geometry, not paint');
+});
+
+test('the Egyptian gods, mortals and the dead animate every state without a NaN', () => {
+  for (const id of EGYPTIAN) {
+    const m = buildUnitModel(egyptian(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
 });
 
 test('winged units grow four wing bones and four feather pieces; the body skin never uses them', () => {

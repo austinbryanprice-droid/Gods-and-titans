@@ -4,7 +4,7 @@
 // and color them.
 import { shadeC } from './unit-geo.js';
 import { vs, ps, B, smoothstep } from './rich-kit.js';
-import { torsoStations, torsoRing, legRing } from './rich-body.js';
+import { torsoStations, torsoRing, legRing, ringAt } from './rich-body.js';
 import { clamp, lerp, hash, mul, dye, gradY, paints } from './rich-paint.js';
 
 const PI = Math.PI;
@@ -281,4 +281,174 @@ export function addMeander(kit, bind, y, rx, rz, { color, ink, h = 0.034, cols =
       if ((Math.floor(col) + row) % 2 === 0) dye(o, color, 0.9);
     },
   });
+}
+
+/**
+ * A long skirt to the ankles, hugging the body at the waist (clearance `top`); returns the ring at
+ * its hem so a border can go on. A wrap over a bare chest needs an addWaistBelt over its top edge.
+ */
+export function addLongSkirt(kit, D, bind, color, { flare = 1, pleat = 0.008, top = 0.008 } = {}) {
+  const y0 = D.ankleY + 0.05;
+  const rx = D.depth * 0.5 + 0.1 * flare;
+  const rz = D.waistW * 0.5 + 0.11 * flare;
+  const t = torsoRing(D, 0.12, top);
+  kit.loft([
+    vs(y0, rx, rz),
+    vs(y0 + 0.12, D.depth * 0.5 + 0.075 * flare, D.waistW * 0.5 + 0.085 * flare),
+    vs(D.hipY - 0.04, D.depth * 0.5 + 0.045, D.waistW * 0.5 + 0.055),
+    vs(t.y, t.rx, t.rz, t.dx),
+  ], {
+    rings: 7, sides: 36, start: null, end: null, color, bind: bind.skirt,
+    warp: (p, a, u) => {
+      const s = Math.sin(a * 9) * pleat * (1 - u);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: gradY(y0, D.hipY, 0.8, 1),
+  });
+  return { y0, rx, rz };
+}
+
+/** A broad belt over the top edge of a wrap, with a round clasp at the front. */
+export function addWaistBelt(kit, D, bind, color, clasp, mat = 'trim') {
+  const a = torsoRing(D, -0.04, 0.05);
+  const b = torsoRing(D, 0.2, 0.034);
+  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs(b.y, b.rx, b.rz, b.dx)], { sides: 18, rings: 3, start: null, end: null, color, mat, bind: bind.torso });
+  const m = torsoRing(D, 0.08, 0.044);
+  const r = 0.026 * D.k;
+  kit.loft([ps(m.dx + m.rx - 0.004, m.y, 0, r, r), ps(m.dx + m.rx + 0.01, m.y, 0, r * 0.85, r * 0.85)],
+    { ref: [0, 1, 0], sides: 12, start: 'round', end: 'round', capDepth: 0.006, color: clasp, mat: 'gold', bind: bind.torso });
+}
+
+// ---------------------------------------------------------------------------
+// Egyptian dress: the wrapped kilt with its stiff apron, a banded corselet, the broad collar
+// ---------------------------------------------------------------------------
+
+/**
+ * The shendyt: a linen kilt wrapped about the hips and falling to the knee, pleated, with a stiff
+ * apron standing out at the front. opts: color, trim (the hem), apron (the apron's color, default
+ * the kilt's), len (scale of the length), flare (how far the skirt opens).
+ */
+export function addShendyt(kit, D, bind, { color, trim = null, apron = null, len = 1, flare = 1 } = {}) {
+  const yb = D.hipY - 0.2 * len;
+  const t = torsoRing(D, 0.12, 0.014);
+  const bx = D.depth * 0.5 + 0.07 * flare;
+  const bz = D.waistW * 0.5 + 0.085 * flare;
+  const st = [
+    vs(yb, bx, bz),
+    vs(lerp(yb, D.hipY - 0.04, 0.5), D.depth * 0.5 + 0.052 * flare, D.waistW * 0.5 + 0.062 * flare),
+    vs(D.hipY - 0.04, D.depth * 0.5 + 0.038, D.waistW * 0.5 + 0.048),
+    vs(t.y, t.rx, t.rz, t.dx),
+  ];
+  kit.loft(st, {
+    rings: 6, sides: 36, start: null, end: null, color, bind: bind.skirt,
+    warp: (p, a, u) => {
+      const s = Math.sin(a * 9) * 0.006 * (1 - u);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: gradY(yb, D.hipY, 0.84, 1),
+  });
+  if (trim) kit.loft([vs(yb - 0.002, bx + 0.003, bz + 0.003), vs(yb + 0.022, bx - 0.001, bz - 0.001)], { sides: 36, start: null, end: null, color: trim, mat: 'gold', bind: bind.skirt });
+  // the apron: a panel narrow at the belt, wide at the hem, standing out from the front of the kilt
+  const ap = apron || color;
+  const top = D.hipY + 0.02;
+  const hem = yb - 0.012 * len;
+  const front = (y) => {
+    for (let i = 0; i + 1 < st.length; i++) {
+      const a = st[i];
+      const b = st[i + 1];
+      if (y <= b.c[1] || i + 2 === st.length) return lerp(a.c[0] + a.rx, b.c[0] + b.rx, clamp((y - a.c[1]) / (b.c[1] - a.c[1] || 1e-9)));
+    }
+    return bx;
+  };
+  kit.sheet(5, 8, (u, v, out) => {
+    const y = lerp(top, hem, v);
+    const w = lerp(0.042, 0.1, v ** 0.8) * D.k;
+    const z = (u - 0.5) * 2 * w;
+    // it follows the kilt to the knee, then leans out into a stiff point, its sides curving back
+    out[0] = front(y) + 0.012 + 0.05 * v ** 2.2 * D.k - 0.016 * (z / (w || 1)) ** 2 * v;
+    out[1] = y;
+    out[2] = z;
+  }, {
+    thick: 0.008, color: ap, inner: shadeC(ap, 0.82), bind: bind.skirt,
+    paint: (o, x, y, z, u, a) => {
+      mul(o, 0.92 + 0.08 * Math.cos(u * PI * 8));
+      if (trim && a > 0.9) dye(o, trim, 0.95);
+    },
+  });
+}
+
+/**
+ * A corselet of overlapping bands of leather or scale from the waist to the chest, each band lipping
+ * out over the one below, with a collar edge of trim. opts: color, trim, bands.
+ */
+export function addCorselet(kit, D, pal, bind, { color, trim, bands = 6 } = {}) {
+  const y = (f) => D.hipY + (D.shoulderY - D.hipY) * f;
+  const g = 0.024;
+  const rows = [];
+  for (let i = 0; i < bands; i++) {
+    const f0 = 0.14 + (i / bands) * 0.8;
+    const f1 = 0.14 + ((i + 1.45) / bands) * 0.8;
+    const r0 = torsoRing(D, f0, g + 0.012);
+    const r1 = torsoRing(D, Math.min(f1, 1.0), g);
+    rows.push([r0, r1]);
+  }
+  rows.forEach(([r0, r1], i) => {
+    kit.loft([vs(r0.y, r0.rx + 0.012, r0.rz + 0.012, r0.dx), vs(r0.y + (r1.y - r0.y) * 0.3, r0.rx + 0.002, r0.rz + 0.002, r0.dx), vs(r1.y, r1.rx, r1.rz, r1.dx)],
+      { rings: 3, sides: 22, start: null, end: null, color: shadeC(color, 0.94 + (i % 2) * 0.1), bind: bind.torso, paint: gradY(r0.y, r1.y, 0.86, 1.04) });
+  });
+  // a rolled edge of trim at the top and the hem
+  const hem = torsoRing(D, 0.12, g + 0.02);
+  kit.loft([vs(hem.y - 0.008, hem.rx + 0.006, hem.rz + 0.006, hem.dx), vs(hem.y + 0.018, hem.rx + 0.002, hem.rz + 0.002, hem.dx)], { sides: 22, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
+  void y;
+}
+
+/**
+ * The broad collar (usekh) that lies over the shoulders and chest: rows of beads, each a strip of
+ * its own color (`rows`, from the neck out; a team color among them if wanted), its lower edge
+ * fringed like a fringe of drops. grow: how far it stands off the body (over armor).
+ */
+export function addUsekh(kit, D, bind, { rows, reach = 0.78, grow = 0 } = {}) {
+  const n = rows.length;
+  const ring = (g) => {
+    const r = torsoRing(D, lerp(1.07, reach, g), 0.026 + 0.004 * g + grow);
+    return vs(r.y, r.rx, r.rz, r.dx);
+  };
+  const yTop = ring(0).c[1];
+  const yFront = ring(1).c[1];
+  rows.forEach((color, i) => {
+    const g0 = i / n;
+    const g1 = (i + 1) / n;
+    kit.loft([ring(g0), ring(g1)], {
+      sides: 32, start: null, end: null, color, mat: 'lacquer', bind: bind.torso,
+      warp: (p, a, u) => {
+        // a shoulder collar: full depth at the front, shallow at the sides and back
+        const aa = Math.abs(wrap(a));
+        const depth = 1 - smoothstep(0.35, 1.7, aa) * 0.78;
+        const g = lerp(g0, g1, u);
+        p[1] = lerp(yTop, yFront, g * depth);
+        // the fringe: drops along the outer edge
+        if (i === n - 1) p[1] -= 0.014 * smoothstep(0, 1, u) * (0.5 + 0.5 * Math.cos(a * 8)) * (aa < 2.4 ? 1 : 0);
+      },
+    });
+  });
+}
+
+/**
+ * Strips of bandage laid round a part: `n` bands from height y0 to y1 over the stations `st`
+ * (a limb's or the head's), each slanting the other way from the last, a shade of its own, the
+ * body showing dark in the gaps between. opts: g (stand-off), fill (how much of each pitch a
+ * band covers), shades (how far the bands differ), seed.
+ */
+export function addWraps(kit, bind, st, y0, y1, n, color, { g = 0.009, fill = 0.9, sides = 14, shades = 0.16, seed = 1, slant = 0.3 } = {}) {
+  const pitch = (y1 - y0) / n;
+  for (let i = 0; i < n; i++) {
+    const a = ringAt(st, y0 + i * pitch, g);
+    const b = ringAt(st, y0 + (i + fill) * pitch, g);
+    const tilt = (i % 2 ? 1 : -1) * slant * pitch;
+    a.c[2] += tilt;
+    b.c[2] -= tilt;
+    kit.loft([a, b], { sides, start: null, end: null, color: shadeC(color, 1 - shades * 0.5 + shades * hash(i, seed, 5)), mat: 'cloth', bind });
+  }
 }

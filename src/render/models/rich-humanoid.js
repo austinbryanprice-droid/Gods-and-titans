@@ -13,23 +13,24 @@ import { RICH_ARMS, RICH_OFFHANDS, richArm } from './rich-arms.js';
 import { richDims, makeBinds, lavaSkin, addHeadAndNeck, addHands } from './rich-body.js';
 import { outfitFor, LAYERS } from './rich-outfits.js';
 import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.js';
+import { BEAST_HEADS } from './rich-heads.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown']);
-const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers']);
+const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail']);
 
 /**
  * The pantheons whose units are drawn with the rich characters in play. The Norse are the
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
   const v = unitType.visual;
   if (!v || !RICH_BODIES.has(v.body || 'humanoid')) return false;
-  if ((v.head || 'human') !== 'human' || (v.heads || 1) !== 1) return false;
+  if (((v.head || 'human') !== 'human' && !BEAST_HEADS.has(v.head)) || (v.heads || 1) !== 1) return false;
   if (!RICH_HEADGEAR.has(v.headgear || 'none')) return false;
   return (v.extras || []).every((e) => RICH_EXTRAS.has(e));
 }
@@ -110,9 +111,11 @@ export function buildRichTemplate(unitType, detail = 1) {
     attach: [], // rigid pieces the layers add (flames, wings ...), riding bones
   };
 
+  // a pantheon's outfit may paint the bare skin itself (bandage on a mummy) before anything is built on it
+  const outfit = outfitFor(E.pantheon);
+  if (outfit.skinPaint) E.skinPaint = outfit.skinPaint(E) || E.skinPaint;
   addHeadAndNeck(kit, D, pal, ctx, bind, E.skinPaint);
   addHands(kit, D, pal, bind, E.skin, E.skinPaint);
-  const outfit = outfitFor(E.pantheon);
   for (const layer of LAYERS) outfit[layer](E);
 
   const geo = kit.build({ ground: 1 });
