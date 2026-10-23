@@ -8,7 +8,7 @@ import { richArm } from './rich-arms.js';
 import { shadeC, mixC, tintC } from './unit-geo.js';
 import { torsoRing } from './rich-body.js';
 import { feather } from './rich-feathers.js';
-import { hash, lerp, clamp, gradY, mul, tint } from './rich-paint.js';
+import { hash, lerp, clamp, gradY, mul, tint, recolor } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -221,6 +221,116 @@ export function addSashimono(E, { flag, inner = null, stripe = null, mon = null 
   kit.loft([ps(mx - 0.011, fy - 0.012 - fh * 0.5, 0, mr, mr), ps(mx + 0.011, fy - 0.012 - fh * 0.5, 0, mr, mr)], {
     ref: [0, 1, 0], sides: 14, start: 'flat', end: 'flat', color: mon || gold, mat: 'gold', bind,
   });
+}
+
+/**
+ * The kaoqi: four pennants on slender poles standing up behind a general's shoulders, two to a side and fanned apart,
+ * riding the chest. Each pole ends in a gold point; its pennant, swallow-tailed and edged in gold, streams outward from
+ * it. opts: flag (the pennants' color, the team's), edge (the border; default the unit's gold).
+ */
+export function addKaoqi(E, { flag, edge = null } = {}) {
+  const { kit, D, pal } = E;
+  const bind = E.bind.chest;
+  const K = D.k;
+  const gold = pal.accentMetal;
+  const border = edge || gold;
+  const wood = pal.woodDark || pal.wood;
+  const x0 = -D.chestD * 0.5 - 0.034;
+  const y0 = D.shoulderY - 0.05;
+  // [outward lean, length, fore-aft lean] of each pole on the right side; the left mirrors them
+  const poles = [[0.3, 0.44, 0.16], [0.72, 0.34, 0.2]];
+  for (const side of [1, -1]) {
+    for (const [lean, L0, back] of poles) {
+      const L = L0 * K;
+      const t = [-Math.sin(back), Math.cos(lean) * Math.cos(back), side * Math.sin(lean) * Math.cos(back)];
+      const tl = Math.hypot(...t);
+      const dir = t.map((q) => q / tl);
+      const root = [x0, y0, side * 0.05 * K];
+      const at = (d) => [root[0] + dir[0] * d, root[1] + dir[1] * d, root[2] + dir[2] * d];
+      const tip = at(L);
+      const mid = at(L * 0.5);
+      kit.loft([ps(root[0], root[1], root[2], 0.0066 * K), ps(mid[0], mid[1], mid[2], 0.0058 * K), ps(tip[0], tip[1], tip[2], 0.0048 * K)],
+        { ref: [1, 0, 0], rings: 3, sides: 5, start: 'round', end: null, capRings: 1, capDepth: 0.006 * K, color: wood, mat: 'wood', bind });
+      // the gold socket at the foot, and the point at the top
+      const s0 = at(0.03 * K);
+      const s1 = at(0.075 * K);
+      kit.loft([ps(s0[0], s0[1], s0[2], 0.011 * K), ps(s1[0], s1[1], s1[2], 0.009 * K)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: gold, mat: 'gold', bind });
+      const p1 = at(L + 0.075 * K);
+      kit.loft([ps(tip[0], tip[1], tip[2], 0.0105 * K), ps(...at(L + 0.02 * K), 0.0105 * K), ps(p1[0], p1[1], p1[2], 0.0015 * K)],
+        { ref: [1, 0, 0], rings: 3, sides: 6, start: null, end: 'round', capRings: 1, capDepth: 0.006 * K, color: gold, mat: 'gold', bind });
+      // the pennant: flown outward and a little back from the pole, narrowing to a swallow tail
+      const f = [-0.25, 0, side];
+      const fd = f[0] * dir[0] + f[1] * dir[1] + f[2] * dir[2];
+      const w = [f[0] - dir[0] * fd, f[1] - dir[1] * fd, f[2] - dir[2] * fd];
+      const wl = Math.hypot(...w);
+      const wv = w.map((q) => q / wl);
+      const nv = [dir[1] * wv[2] - dir[2] * wv[1], dir[2] * wv[0] - dir[0] * wv[2], dir[0] * wv[1] - dir[1] * wv[0]];
+      const s0f = 0.5 * L;
+      const s1f = 0.94 * L;
+      const Lf = 0.2 * K;
+      kit.sheet(5, 5, (u, v, out) => {
+        const notch = 0.34 * (1 - Math.abs(2 * v - 1));
+        const uu = u * (1 - notch * u);
+        const vv = 0.5 + (v - 0.5) * (1 - 0.5 * uu);
+        const p = at(s0f + (s1f - s0f) * vv);
+        const rip = 0.012 * K * Math.sin(uu * 4 + side) * uu;
+        for (let k = 0; k < 3; k++) out[k] = p[k] + wv[k] * Lf * uu + nv[k] * rip;
+        out[1] -= 0.03 * K * uu * uu;
+      }, {
+        thick: 0.005, color: flag, inner: flag.team ? { team: flag.team * 0.8, mat: flag.mat } : shadeC(flag, 0.8), mat: 'cloth', bind,
+        paint: (o, x, y, z, u, a) => { if (a < 0.1 || a > 0.9 || u > 0.92) recolor(o, border, 1); },
+      });
+    }
+  }
+}
+
+/** Catmull-Rom through a list of [x, y, z] points, t from 0 to 1. */
+function spline3(pts, t) {
+  const n = pts.length - 1;
+  const f = Math.min(n - 1e-6, Math.max(0, t * n));
+  const i = Math.floor(f);
+  const u = f - i;
+  const p0 = pts[Math.max(0, i - 1)];
+  const p1 = pts[i];
+  const p2 = pts[i + 1];
+  const p3 = pts[Math.min(n, i + 2)];
+  return [0, 1, 2].map((k) => 0.5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * u + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * u * u + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * u * u * u));
+}
+
+/**
+ * The pibo: two long ribbons of silk draped from the nape over the shoulders and flowing down behind the arms in
+ * arcs, their ends trailing: a goddess's. They ride the cape bones, so they stream behind her when she moves. opts:
+ * color, trim (a thin edge at each border).
+ */
+export function addPibo(E, { color, trim = null } = {}) {
+  const { kit, D } = E;
+  const bind = E.bind.cape;
+  const K = D.k;
+  const sh = D.shoulderY;
+  const z = D.shoulderZ;
+  for (const side of [1, -1]) {
+    const path = [
+      [-0.05, sh + 0.045 * K, side * 0.02 * K],
+      [-0.03, sh + 0.06 * K, side * z * 0.55],
+      [-0.012, sh + 0.05 * K, side * z * 0.95],
+      [-0.05, sh - 0.03 * K, side * (z + 0.07 * K)],
+      [-0.12, sh - 0.18 * K, side * (z + 0.09 * K)],
+      [-0.2, sh - 0.34 * K, side * (z + 0.06 * K)],
+      [-0.27, sh - 0.5 * K, side * (z + 0.08 * K)],
+      [-0.31, sh - 0.62 * K, side * (z + 0.04 * K)],
+    ];
+    const edge = (u) => (u < 0.1 || u > 0.9);
+    kit.sheet(4, 20, (u, v, out) => {
+      const p = spline3(path, v);
+      const wid = 0.036 * K * (1 - 0.35 * v) * (u - 0.5) * 2;
+      out[0] = p[0] + wid + 0.012 * K * Math.sin(v * 9 + (side > 0 ? 0 : 1.7)) * v;
+      out[1] = p[1];
+      out[2] = p[2] + 0.014 * K * Math.sin(v * 7 + 1) * v;
+    }, {
+      thick: 0.005, color, inner: color.team ? { team: color.team * 0.82, mat: color.mat } : shadeC(color, 0.84), mat: 'cloth', bind,
+      paint: trim ? (o, x, y, z2, u) => { if (edge(u)) recolor(o, trim, 1); } : null,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

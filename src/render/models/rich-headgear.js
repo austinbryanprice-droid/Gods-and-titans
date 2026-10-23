@@ -3,7 +3,7 @@
 // outfits (rich-outfits.js) choose among them.
 import * as THREE from 'three';
 import { shadeC, tintC } from './unit-geo.js';
-import { vs, ps, smoothstep } from './rich-kit.js';
+import { vs, ps, smoothstep, mixBind } from './rich-kit.js';
 import { torsoRing } from './rich-body.js';
 import { clamp, lerp, gradY, paints, recolor, mul, hash } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
@@ -71,7 +71,14 @@ export function addBeard(kit, D, pal, bind, fiery = false) {
       o.b = lerp(0.015, pal.fire.b, t);
       o.glow = 0.55 * t;
     } : gradY(hy - 0.265 * hs, hy - 0.06 * hs, 0.82, 1.04) });
-  // moustache
+  addMoustache(kit, D, pal, bind);
+}
+
+/** The moustache: a slim tube swept out and down over each side of the lip. */
+export function addMoustache(kit, D, pal, bind) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
   for (const side of [1, -1]) {
     kit.loft([ps(hx + 0.095 * hs, hy - 0.04 * hs, side * 0.004 * hs, 0.012 * hs, 0.018 * hs), ps(hx + 0.093 * hs, hy - 0.046 * hs, side * 0.034 * hs, 0.012 * hs, 0.016 * hs),
       ps(hx + 0.08 * hs, hy - 0.062 * hs, side * 0.06 * hs, 0.01 * hs, 0.012 * hs)], { ref: [1, 0, 0], sides: 6, capDepth: 0.01 * hs, color: pal.hair, mat: 'hair', bind: bind.head });
@@ -596,22 +603,25 @@ export function addTopknot(kit, D, pal, bind, { band = null, size = 1 } = {}) {
 /**
  * Matted hair coiled into a tall bun on the crown with a crescent moon set in its front (the god of
  * the ascetics'): the coil winds round and narrows to a tip. opts: moon (the crescent's color), band (the cord
- * round the coil's foot).
+ * round the coil's foot), coil (false: a smooth round knot of combed hair, a goddess's, in place of the coiled locks).
  */
-export function addCrescent(kit, D, pal, bind, { moon, band, metal } = {}) {
+export function addCrescent(kit, D, pal, bind, { moon, band, metal, coil = true } = {}) {
   const hs = D.hs;
   const x = D.headX - 0.016 * hs;
   const y0 = D.headCY + 0.1 * hs;
   const at = (y, r, dx = 0) => ps(x + dx * hs, y0 + y * hs, 0, r * hs, r * 0.94 * hs);
-  kit.loft([at(-0.01, 0.06), at(0.03, 0.074, -0.004), at(0.08, 0.07, -0.01), at(0.13, 0.054, -0.014), at(0.17, 0.03, -0.016), at(0.2, 0.006, -0.016)], {
+  const knot = coil
+    ? [at(-0.01, 0.06), at(0.03, 0.074, -0.004), at(0.08, 0.07, -0.01), at(0.13, 0.054, -0.014), at(0.17, 0.03, -0.016), at(0.2, 0.006, -0.016)]
+    : [at(-0.01, 0.06), at(0.03, 0.082, -0.004), at(0.072, 0.09, -0.01), at(0.114, 0.072, -0.014), at(0.148, 0.038, -0.016), at(0.164, 0.006, -0.016)];
+  kit.loft(knot, {
     ref: [1, 0, 0], rings: 10, sides: 14, start: 'round', end: 'round', capRings: 2, capDepth: [0.014 * hs, 0.012 * hs], color: pal.hair, mat: 'hair', bind: bind.head,
-    warp: (p, a, u) => {
+    warp: coil ? (p, a, u) => {
       // coils: a rope wound round the bun, rising as it goes
       const s = 0.012 * hs * Math.sin(a - u * 19) * Math.sin(u * PI) ** 0.6;
       p[0] += Math.cos(a) * s;
       p[2] += Math.sin(a) * s;
-    },
-    paint: (o, x2, y, z, u, a) => mul(o, 0.8 + 0.34 * (0.5 + 0.5 * Math.sin(a - u * 19)) * 0.9 + 0.1 * u),
+    } : null,
+    paint: coil ? (o, x2, y, z, u, a) => mul(o, 0.8 + 0.34 * (0.5 + 0.5 * Math.sin(a - u * 19)) * 0.9 + 0.1 * u) : gradY(y0, y0 + 0.17 * hs, 0.8, 1.14),
   });
   kit.loft([at(0.0, 0.064), at(0.016, 0.066)], { sides: 14, start: null, end: null, color: band, mat: 'trim', bind: bind.head });
   // the crescent: a horned moon in the frontal plane against the front of the coil, tips up
@@ -945,5 +955,268 @@ export function addHeadband(kit, D, pal, bind, { color, tails = true } = {}) {
       out[1] = y0 + 0.012 * hs - drop * hs * v;
       out[2] = side * (0.012 + 0.03 * v) * hs + (0.5 - u) * 0.026 * hs * (1 + v);
     }, { thick: 0.004 * hs, color, inner: shade(color, 0.85), bind: bind.hair });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chinese headgear: the bamboo hat, the scarf cap, the soldier's helm, the Taoist's crown, the pheasant crown, the
+// fillet, the long beard, the hairpins
+// ---------------------------------------------------------------------------
+
+/** A little ball (a knot, a bead) at `p`: a short loft with round ends. */
+function knob(kit, p, r, opts) {
+  kit.loft([ps(p[0] - r * 0.1, p[1], p[2], r), ps(p[0] + r * 0.1, p[1], p[2], r)], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: r, ...opts });
+}
+
+/**
+ * A douli, the farmer's bamboo hat: a very wide, shallow cone of woven strips (ribs running from the apex to the rim, rings
+ * between them), the rim bound, a small knot at the apex, a cord down each cheek to a knot under the chin. opts: color
+ * (the straw), rim (the binding), cord (omit for none), size.
+ */
+export function addDouli(kit, D, pal, bind, { color, rim, cord = null, size = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const R = 0.3 * hs * size;
+  const y0 = hy + 0.052 * hs;
+  const H = 0.12 * hs;
+  const cx = hx - 0.004 * hs;
+  const n = 7;
+  const prof = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const r = R * (1 - t) + 0.004 * hs;
+    prof.push(vs(y0 + H * (1 - (1 - t) ** 1.45), r, r * 0.98, cx));
+  }
+  kit.loft(prof, {
+    rings: 7, sides: 32, start: null, end: 'round', capRings: 2, capDepth: 0.01 * hs, color, mat: 'cloth', bind: bind.head,
+    paint: (o, x, y, z, u, a) => mul(o, 0.8 + 0.22 * Math.abs(Math.sin(a * TAU * 8)) + 0.08 * Math.cos(u * PI * 9)),
+  });
+  // the rim, a rolled binding, and the knot at the apex
+  kit.loft([vs(y0 - 0.006 * hs, R * 1.004, R * 0.984, cx), vs(y0 + 0.01 * hs, R * 0.968, R * 0.95, cx)], { sides: 32, start: null, end: null, color: rim, mat: 'wood', bind: bind.head });
+  const top = y0 + H;
+  kit.loft([vs(top - 0.004 * hs, 0.014 * hs, 0.014 * hs, cx), vs(top + 0.014 * hs, 0.014 * hs, 0.014 * hs, cx), vs(top + 0.03 * hs, 0.003 * hs, 0.003 * hs, cx)],
+    { rings: 3, sides: 6, start: null, end: 'round', capDepth: 0.004 * hs, color: rim, mat: 'wood', bind: bind.head });
+  if (cord) {
+    for (const side of [1, -1]) {
+      kit.loft([ps(hx - 0.004 * hs, hy + 0.054 * hs, side * (0.094 * hs + 0.017 * hs), 0.005 * hs), ps(hx + 0.01 * hs, hy - 0.04 * hs, side * 0.1 * hs, 0.0045 * hs), ps(hx + 0.052 * hs, hy - 0.098 * hs, side * 0.05 * hs, 0.0045 * hs), ps(hx + 0.06 * hs, hy - 0.112 * hs, side * 0.01 * hs, 0.004 * hs)],
+        { ref: [1, 0, 0], rings: 6, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: cord, mat: 'cloth', bind: bind.head });
+    }
+  }
+}
+
+/**
+ * A scarf cap: a length of cloth wound over the crown, its edge at the brow in front and down at the nape, a band at the brow,
+ * the ends knotted behind the crown and hanging in two tails that swing like hair (the green scarf of the god of war, a
+ * soldier's cap). opts: color, band (default none), tails (how far they hang, head scales: 0 for none), tail (their color).
+ */
+export function addScarfCap(kit, D, pal, bind, { color, band = null, tails = 0.24, tail = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.017 * hs;
+  const dome = [
+    vs(hy - 0.03 * hs, 0.092 * hs + g, 0.082 * hs + g, hx - 0.008 * hs),
+    vs(hy + 0.0 * hs, 0.098 * hs + g, 0.087 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.035 * hs, 0.103 * hs + g, 0.091 * hs + g, hx - 0.003 * hs),
+    vs(hy + 0.072 * hs, 0.097 * hs + g, 0.086 * hs + g, hx - 0.007 * hs),
+    vs(hy + 0.104 * hs, 0.076 * hs + g, 0.068 * hs + g, hx - 0.012 * hs),
+    vs(hy + 0.126 * hs, 0.04 * hs + g, 0.038 * hs + g, hx - 0.016 * hs),
+  ];
+  kit.loft(dome, {
+    rings: 9, sides: 18, start: null, end: 'round', capDepth: 0.03 * hs, color, mat: 'cloth', bind: bind.head,
+    warp: (p, a, u) => {
+      // the cloth is wound: its edge sits at the brow in front and drops to the nape behind, with soft folds between
+      const line = hy + 0.05 * hs - 0.082 * hs * smoothstep(0.55, 1.5, Math.abs(wrap(a)));
+      if (p[1] < line) p[1] = line;
+      const s = 0.0035 * hs * Math.sin(a * 5 + u * 4);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: gradY(hy - 0.04 * hs, hy + 0.14 * hs, 0.82, 1.1),
+  });
+  if (band) {
+    kit.loft([vs(hy + 0.034 * hs, 0.1 * hs + g + 0.004 * hs, 0.089 * hs + g + 0.004 * hs, hx - 0.002 * hs), vs(hy + 0.062 * hs, 0.104 * hs + g + 0.004 * hs, 0.093 * hs + g + 0.004 * hs, hx - 0.003 * hs)],
+      { sides: 18, start: null, end: null, color: band, mat: 'cloth', bind: bind.head });
+  }
+  if (tails > 0) {
+    const kx = hx - 0.11 * hs;
+    const ky = hy + 0.062 * hs;
+    const tc = tail || color;
+    knob(kit, [kx, ky, 0], 0.021 * hs, { color: tc, mat: 'cloth', bind: bind.head });
+    for (const [side, drop] of [[1, tails], [-1, tails * 1.18]]) {
+      kit.sheet(2, 5, (u, v, out) => {
+        out[0] = kx - 0.012 * hs - 0.02 * hs * v;
+        out[1] = ky - 0.01 * hs - drop * hs * v;
+        out[2] = side * (0.014 + 0.034 * v) * hs + (0.5 - u) * 0.034 * hs * (1 + 0.6 * v);
+      }, { thick: 0.004 * hs, color: tc, inner: shade(tc, 0.85), bind: bind.hair });
+    }
+  }
+}
+
+/**
+ * The soldier's helm: a steel dome with a raised ridge from brow to nape, a brow band, cheek guards and a flared neck guard,
+ * a gold spike on the crown and, hung from the spike, a plume bell-shaped over the top of the dome, its hem ragged (the
+ * team's color on a soldier's). opts: steel, trim, plume (omit for none), tall (scale of the spike).
+ */
+export function addCnHelm(kit, D, pal, bind, { steel, trim, plume = null, tall = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  helmShell(kit, D, bind, steel, trim, { nasal: false, cheeks: true, neck: true });
+  // the ridge: a thin arch standing proud of the dome along the midline
+  const arch = [[0.116, 0.03], [0.112, 0.07], [0.094, 0.108], [0.056, 0.136], [0.0, 0.148], [-0.05, 0.138], [-0.09, 0.108], [-0.11, 0.07], [-0.114, 0.03]];
+  const outline = [...arch.map(([x, y]) => [hx + x * hs, hy + y * hs]), ...arch.slice().reverse().map(([x, y]) => [hx + x * hs * 0.93, hy + (y - 0.014) * hs])];
+  kit.slab(outline, { depth: 0.012 * hs, bevel: 0.0035 * hs, color: shade(steel, 0.88), mat: 'iron', bind: bind.head });
+  // the spike
+  const ty = hy + 0.146 * hs;
+  kit.loft([ps(hx - 0.007 * hs, ty - 0.006 * hs, 0, 0.017 * hs), ps(hx - 0.007 * hs, ty + 0.01 * hs, 0, 0.014 * hs), ps(hx - 0.007 * hs, ty + 0.03 * hs, 0, 0.008 * hs), ps(hx - 0.007 * hs, ty + 0.072 * tall * hs, 0, 0.002 * hs)],
+    { ref: [1, 0, 0], rings: 4, sides: 6, start: null, end: 'round', capRings: 2, capDepth: 0.006 * hs, color: trim, mat: 'gold', bind: bind.head });
+  if (plume) {
+    kit.loft([
+      vs(hy + 0.08 * hs, 0.114 * hs, 0.104 * hs, hx - 0.004 * hs),
+      vs(hy + 0.098 * hs, 0.102 * hs, 0.092 * hs, hx - 0.005 * hs),
+      vs(hy + 0.124 * hs, 0.08 * hs, 0.073 * hs, hx - 0.006 * hs),
+      vs(hy + 0.148 * hs, 0.044 * hs, 0.042 * hs, hx - 0.007 * hs),
+      vs(hy + 0.162 * hs, 0.012 * hs, 0.012 * hs, hx - 0.007 * hs),
+    ], {
+      rings: 6, sides: 18, start: null, end: 'round', capRings: 2, capDepth: 0.008 * hs, color: plume, mat: 'hair', bind: bind.head,
+      warp: (p, a, u) => { p[1] -= 0.018 * hs * Math.abs(Math.sin(a * 6)) * (1 - smoothstep(0, 0.2, u)); },
+      paint: (o, x, y, z, u, a) => mul(o, 0.78 + 0.34 * Math.abs(Math.sin(a * TAU * 6)) + 0.08 * u),
+    });
+  }
+}
+
+/**
+ * A Taoist's crown (daoguan): the hair drawn up into a rounded bun on the crown, held in a small stepped crown of gold with a
+ * lotus petal standing at its front, a long gold pin laid across through it with a bead at each end. opts: metal, bead.
+ */
+export function addDaoguan(kit, D, pal, bind, { metal, bead = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX - 0.014 * hs;
+  const y0 = D.headCY + 0.104 * hs;
+  const at = (y, r) => ps(hx, y0 + y * hs, 0, r * hs, r * hs);
+  kit.loft([at(-0.01, 0.034), at(0.012, 0.042), at(0.04, 0.05), at(0.072, 0.046), at(0.098, 0.03), at(0.112, 0.008)], {
+    ref: [1, 0, 0], rings: 6, sides: 12, start: 'round', end: 'round', capRings: 2, capDepth: [0.012 * hs, 0.014 * hs], color: pal.hair, mat: 'hair', bind: bind.head,
+    paint: gradY(y0, y0 + 0.12 * hs, 0.84, 1.1),
+  });
+  kit.loft([at(0.002, 0.05), at(0.016, 0.058), at(0.034, 0.062), at(0.052, 0.056), at(0.062, 0.05)], {
+    ref: [1, 0, 0], rings: 5, sides: 14, start: null, end: null, color: metal, mat: 'gold', glow: 0.1, bind: bind.head,
+    warp: (p, a, u) => {
+      const s = 0.003 * hs * Math.sin(a * 7) * smoothstep(0.1, 0.5, u);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+  });
+  // the petal at the front: a pointed leaf standing in the frontal plane
+  const M = new THREE.Matrix4().compose(new THREE.Vector3(hx + 0.058 * hs, y0 + 0.012 * hs, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -PI / 2, 0)), new THREE.Vector3(1, 1, 1));
+  kit.placed(M, (k) => {
+    k.slab([[-0.022, 0], [-0.027, 0.022], [-0.018, 0.048], [0, 0.07], [0.018, 0.048], [0.027, 0.022], [0.022, 0]].map(([x, y]) => [x * hs, y * hs]),
+      { depth: 0.008 * hs, bevel: 0.0025 * hs, color: metal, mat: 'gold', glow: 0.1, bind: bind.head });
+  });
+  // the pin
+  const py = y0 + 0.046 * hs;
+  kit.loft([ps(hx, py, -0.092 * hs, 0.0042 * hs), ps(hx, py, 0, 0.0042 * hs), ps(hx, py, 0.092 * hs, 0.0042 * hs)],
+    { ref: [1, 0, 0], rings: 4, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: metal, mat: 'gold', bind: bind.head });
+  for (const side of [1, -1]) knob(kit, [hx, py, side * 0.096 * hs], 0.0105 * hs, { color: bead || metal, mat: bead ? 'gem' : 'gold', glow: bead ? 0.3 : 0, bind: bind.head });
+}
+
+/**
+ * The Monkey King's crown (the purple-gold crown with the phoenix wings): a tall band of gold round the brow, a pointed plate
+ * standing at its front with a gem set in it, and two long pheasant feathers springing from either side of the plate,
+ * sweeping up and back in arcs that droop toward their tips. opts: metal, gem, plume (the feathers), tip, len (their length).
+ */
+export function addPheasantCrown(kit, D, pal, bind, { metal, gem, plume, tip = null, len = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.007 * hs;
+  const rx = 0.1 * hs + g;
+  const rz = 0.088 * hs + g;
+  kit.loft([vs(hy + 0.05 * hs, rx, rz, hx - 0.002 * hs), vs(hy + 0.07 * hs, rx + 0.003 * hs, rz + 0.003 * hs, hx - 0.002 * hs), vs(hy + 0.092 * hs, rx, rz, hx - 0.003 * hs)],
+    { rings: 3, sides: 22, start: null, end: null, color: metal, mat: 'gold', glow: 0.1, bind: bind.head });
+  for (const y of [0.05, 0.092]) {
+    kit.loft([vs(hy + (y - 0.006) * hs, rx + 0.006 * hs, rz + 0.006 * hs, hx - 0.002 * hs), vs(hy + (y + 0.006) * hs, rx + 0.006 * hs, rz + 0.006 * hs, hx - 0.002 * hs)],
+      { sides: 22, start: null, end: null, color: shade(metal, 0.85), mat: 'gold', bind: bind.head });
+  }
+  // the plate at the front, a gem in its foot
+  const fx = hx - 0.002 * hs + rx + 0.002 * hs;
+  const M = new THREE.Matrix4().compose(new THREE.Vector3(fx, hy + 0.074 * hs, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -PI / 2, 0)), new THREE.Vector3(1, 1, 1));
+  kit.placed(M, (k) => {
+    k.slab([[-0.05, 0], [-0.054, 0.03], [-0.04, 0.06], [-0.016, 0.092], [0, 0.138], [0.016, 0.092], [0.04, 0.06], [0.054, 0.03], [0.05, 0]].map(([x, y]) => [x * hs, y * hs]),
+      { depth: 0.011 * hs, bevel: 0.0035 * hs, color: metal, mat: 'gold', glow: 0.1, bind: bind.head, paint: gradY(0, 0.14 * hs, 0.88, 1.1) });
+  });
+  kit.loft([ps(fx + 0.004 * hs, hy + 0.086 * hs, 0, 0.014 * hs, 0.014 * hs), ps(fx + 0.012 * hs, hy + 0.086 * hs, 0, 0.0125 * hs, 0.0125 * hs)],
+    { ref: [0, 1, 0], sides: 10, start: 'round', end: 'round', capRings: 1, capDepth: 0.006 * hs, color: gem, mat: 'gem', glow: 0.8, bind: bind.head });
+  // the two pheasant feathers
+  for (const side of [1, -1]) {
+    const root = [fx - 0.012 * hs, hy + 0.1 * hs, side * 0.044 * hs];
+    feather(kit, root, [-0.22, 1, side * 0.3], [1, 0.1, side * 0.2], 0.4 * len * hs, 0.042 * hs, {
+      color: plume, tip, bind: bind.head, bend: [-0.3 * len * hs, -0.16 * len * hs, side * 0.14 * len * hs], rows: 8, thick: 0.0032 * hs, shape: 0.45, cup: 0.2,
+    });
+  }
+}
+
+/** A plain gold fillet round the brow with a small boss at the front (the band the Monkey King's copies wear). */
+export function addFillet(kit, D, pal, bind, { metal, boss = true } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.005 * hs;
+  const y0 = hy + 0.05 * hs;
+  const rx = 0.1 * hs + g;
+  const rz = 0.088 * hs + g;
+  kit.loft([vs(y0, rx, rz, hx - 0.002 * hs), vs(y0 + 0.014 * hs, rx + 0.002 * hs, rz + 0.002 * hs, hx - 0.002 * hs), vs(y0 + 0.028 * hs, rx, rz, hx - 0.002 * hs)],
+    { rings: 3, sides: 22, start: null, end: null, color: metal, mat: 'gold', glow: 0.1, bind: bind.head });
+  if (boss) knob(kit, [hx - 0.002 * hs + rx + 0.004 * hs, y0 + 0.014 * hs, 0], 0.014 * hs, { color: metal, mat: 'gold', glow: 0.1, bind: bind.head });
+}
+
+/**
+ * The long beard (the god of war's): whiskers sweep from the jaw into one broad lock that hangs over the breast and belly,
+ * combed straight in long strands, ending in a rounded point, with a moustache. The head bone holds it at the jaw and the
+ * chest at the breast. opts: len (how far it hangs, as a fraction of the torso's height; 0.58 to the belly).
+ */
+export function addLongBeard(kit, D, pal, bind, { len = 0.58 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const st = [
+    ps(hx + 0.068 * hs, hy - 0.05 * hs, 0, 0.032 * hs, 0.084 * hs),
+    ps(hx + 0.09 * hs, hy - 0.108 * hs, 0, 0.044 * hs, 0.082 * hs),
+  ];
+  const n = 5;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const r = torsoRing(D, lerp(1.0, 1.0 - len, t), 0.05);
+    const thick = 0.042 * hs * (1 - 0.72 * t);
+    st.push(ps(Math.max(r.dx + r.rx + thick * 0.7, hx + 0.09 * hs), r.y, 0, thick, 0.082 * hs * (1 - t ** 1.7) + 0.01 * hs));
+  }
+  const hold = mixBind(bind.head, bind.chest, (x, y) => smoothstep(hy - 0.04 * hs, hy - 0.2 * hs, y));
+  kit.loft(st, {
+    ref: [1, 0, 0], rings: 12, sides: 14, start: 'round', end: 'round', capDepth: [0.02 * hs, 0.02 * hs], color: pal.hair, mat: 'hair', bind: hold,
+    paint: (o, x, y, z, u, a) => mul(o, 0.8 + 0.28 * Math.abs(Math.sin(a * TAU * 3.5 + u * 1.5)) + 0.1 * (1 - u)),
+  });
+  addMoustache(kit, D, pal, bind);
+}
+
+/**
+ * Hairpins: a fan of slender gold pins swept out and back from the foot of the bun, a bead at the end of each (a goddess's).
+ * opts: metal, bead, n (pins to a side).
+ */
+export function addHairpins(kit, D, pal, bind, { metal, bead = null, n = 3 } = {}) {
+  const hs = D.hs;
+  const bx = D.headX - 0.03 * hs;
+  const by = D.headCY + 0.112 * hs;
+  for (const side of [1, -1]) {
+    for (let i = 0; i < n; i++) {
+      const k = n > 1 ? i / (n - 1) : 0.5;
+      const base = [bx, by + 0.02 * k * hs, side * 0.052 * hs];
+      const d = [-0.45 - 0.2 * k, 0.5 - 0.42 * k, side * (0.62 + 0.3 * k)];
+      const dl = Math.hypot(...d);
+      const L = 0.19 * hs * (1 - 0.14 * k);
+      const tip = [base[0] + (d[0] / dl) * L, base[1] + (d[1] / dl) * L, base[2] + (d[2] / dl) * L];
+      kit.loft([ps(base[0], base[1], base[2], 0.0042 * hs), ps(tip[0], tip[1], tip[2], 0.0032 * hs)], { ref: [0, 1, 0.3], rings: 2, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: metal, mat: 'gold', bind: bind.head });
+      knob(kit, tip, 0.0105 * hs, { color: bead || metal, mat: bead ? 'gem' : 'gold', glow: bead ? 0.3 : 0, bind: bind.head });
+    }
   }
 }

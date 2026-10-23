@@ -56,6 +56,9 @@ export const recolor = (o, c, t = 1) => {
 /** Brighten / darken by height: k0 at y0 to k1 at y1. */
 export const gradY = (y0, y1, k0, k1) => (o, x, y) => mul(o, lerp(k0, k1, clamp((y - y0) / (y1 - y0))));
 
+/** A fur coat: streaks of lighter and darker hair over a surface (a monkey's), a speckle of tufts between. */
+export const furStreaks = (o, x, y, z) => mul(o, 0.88 + 0.16 * Math.abs(Math.sin(z * 85 + x * 55 + y * 9)) + 0.08 * hash(Math.round(x * 60), Math.round(y * 45), Math.round(z * 60)));
+
 /** Several paints in a row. */
 export const paints = (...fns) => (o, x, y, z, u, a) => {
   for (const f of fns) if (f) f(o, x, y, z, u, a);

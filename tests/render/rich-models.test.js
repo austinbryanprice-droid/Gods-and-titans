@@ -56,6 +56,7 @@ const greek = (id) => looks(UNITS[id] || MORTALS[id], 'greek');
 const egyptian = (id) => looks(UNITS[id] || MORTALS[id], 'egyptian');
 const hindu = (id) => looks(UNITS[id] || MORTALS[id], 'hindu');
 const japanese = (id) => looks(UNITS[id] || MORTALS[id], 'japanese');
+const chinese = (id) => looks(UNITS[id] || MORTALS[id], 'chinese');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
@@ -65,6 +66,8 @@ const EGYPTIAN = ['worshipper', 'warrior', 'archer', 'priest', 'egyptian_ra', 'e
 const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hindu_vishnu', 'hindu_durga', 'hindu_hanuman', 'hindu_garuda', 'hindu_kshatriya'];
 // every Japanese unit on the humanoid and giant bodies (the great serpent, the foxes and the fox spirits keep their low-poly models)
 const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amaterasu', 'japanese_susanoo', 'japanese_raijin', 'japanese_inari', 'japanese_tengu', 'japanese_oni', 'japanese_samurai'];
+// every Chinese unit on the humanoid, giant and upright-monkey bodies (Nuwa, the lion, the phoenix and the dragon keep their low-poly models)
+const CHINESE = ['worshipper', 'warrior', 'archer', 'priest', 'chinese_sun_wukong', 'chinese_guan_yu', 'chinese_chang_e', 'chinese_pangu', 'chinese_monkey_clone', 'chinese_clay_warrior', 'chinese_crossbowman'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -589,6 +592,145 @@ test('Japanese mortals and gods carry the team\'s color on their cloth, the meta
 test('the Japanese gods, mortals and creatures animate every state without a NaN', () => {
   for (const id of JAPANESE) {
     const m = buildUnitModel(japanese(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('the Chinese dress their own way: crossed jackets, mirror armor, a round tiger shield and black hair', () => {
+  const base = outfitFor('norse');
+  const cn = outfitFor('chinese');
+  for (const layer of LAYERS) assert.equal(typeof cn[layer], 'function', `the Chinese ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(cn[layer], base[layer], `the Chinese dress their ${layer} their own way`);
+  assert.equal(typeof cn.palette, 'function', 'the people have black hair');
+  assert.equal(typeof cn.gear, 'function', 'a halberd, a crossbow, a Ruyi staff and a crane fan are styled');
+  assert.equal(typeof cn.skinPaint, 'function', 'the monkeys\' fur is painted over their skin');
+  assert.ok(cn.shield && cn.shield.studs === undefined, 'a round shield of their own');
+});
+
+test('every Chinese humanoid, giant and upright monkey is dressed in the Chinese look, Nuwa, the lion, the phoenix and the dragon stay low-poly', () => {
+  for (const id of CHINESE) assert.ok(richSupported(chinese(id)), `${id} is supported`);
+  for (const id of ['chinese_nuwa', 'chinese_guardian_lion', 'chinese_fenghuang', 'chinese_celestial_dragon', 'battering_ram']) assert.ok(!richSupported(chinese(id)), `${id} stays low-poly`);
+  // an upright monkey is dressed on the humanoid rig by the Chinese only: the Hindu monkey soldier keeps its low-poly beast
+  const monkey = chinese('chinese_monkey_clone');
+  assert.equal(monkey.visual.body, 'beast_biped');
+  assert.ok(!richSupported({ ...monkey, pantheon: 'hindu' }), 'no other people\'s upright beast is let through');
+  assert.ok(!richSupported(hindu('hindu_vanara')), 'the Hindu monkey soldier stays low-poly');
+  // a Chinese warrior is not a Japanese one
+  assert.notEqual(buildRichTemplate(chinese('warrior')).triangles, buildRichTemplate(japanese('warrior')).triangles);
+});
+
+test('the Chinese carry what they are known by: a halberd, a crossbow, a bow, a crane fan, a Ruyi staff, a lantern, an axe', () => {
+  const names = (id) => buildRichTemplate(chinese(id)).rich.attach.map((x) => x.name).sort();
+  assert.deepEqual(names('warrior'), ['shield', 'weaponR'], 'a halberd and a round shield');
+  assert.deepEqual(names('archer'), ['weaponL'], 'a bow');
+  assert.deepEqual(names('priest'), ['weaponR'], 'a fan');
+  assert.deepEqual(names('chinese_crossbowman'), ['weaponL'], 'a repeating crossbow');
+  assert.deepEqual(names('chinese_clay_warrior'), ['shield', 'weaponR'], 'a spear and a shield');
+  assert.deepEqual(names('chinese_sun_wukong'), ['weaponR'], 'the Ruyi staff');
+  assert.deepEqual(names('chinese_monkey_clone'), ['weaponR'], 'a copy of it');
+  assert.deepEqual(names('chinese_guan_yu'), ['weaponR'], 'the Green Dragon crescent blade');
+  assert.deepEqual(names('chinese_chang_e'), ['weaponL'], 'a lantern');
+  assert.deepEqual(names('chinese_pangu'), ['weaponR'], 'an axe');
+  assert.ok(RICH_WEAPONS.has('halberd'), 'the halberd is built');
+  assert.ok(RICH_ARMS.has('fan'), 'the fan is built');
+  assert.ok(RICH_OFFHANDS.has('lantern'), 'the lantern is built');
+});
+
+test('the Chinese hold their things their own way: a crescent blade, a level crossbow, a Ruyi pole, a fan of crane feathers, a broad yue', () => {
+  // the same unit under another people's outfit holds the shared item
+  const shared = (id) => ({ ...chinese(id), pantheon: 'norse' });
+  const guan = pieceSize(chinese('chinese_guan_yu'), 'weaponR');
+  assert.ok(guan.y > pieceSize(chinese('warrior'), 'weaponR').y * 1.1, 'the crescent blade is longer than a soldier\'s halberd');
+  assert.ok(pieceSize(chinese('chinese_sun_wukong'), 'weaponR').x > pieceSize(shared('chinese_sun_wukong'), 'weaponR').x * 1.1, 'the Ruyi pole is long');
+  assert.ok(pieceTris(chinese('chinese_sun_wukong'), 'weaponR') < pieceTris(shared('chinese_sun_wukong'), 'weaponR'), 'a plain lacquered pole with gold bands, not the shared staff\'s crown');
+  assert.ok(pieceSize(chinese('chinese_pangu'), 'weaponR').x > pieceSize(shared('chinese_pangu'), 'weaponR').x * 1.1, 'the yue is broad');
+  assert.notEqual(pieceTris(chinese('priest'), 'weaponR'), pieceTris(shared('priest'), 'weaponR') + 1, 'a fan of feathers');
+  assert.ok(pieceTris(chinese('chinese_crossbowman'), 'weaponL') > pieceTris(chinese('archer'), 'weaponL') * 2, 'a crossbow with its stock, prod, bolt and magazine is more than a bow');
+  // a crossbow is carried level before the body (the elbow square); a bow hangs at the side
+  assert.equal(buildRichTemplate(chinese('chinese_crossbowman')).rig.leftElbow, 1);
+  assert.ok(buildRichTemplate(chinese('archer')).rig.leftElbow < 0.3);
+  const cross = pieceSize(chinese('chinese_crossbowman'), 'weaponL');
+  assert.ok(cross.z > 0.4, `the prod spreads across the front of the body (${cross.z.toFixed(2)})`);
+});
+
+test('Guan Yu and the Monkey King stand before four pennants on poles, Chang\'e before two ribbons that float behind her', () => {
+  const shared = (id) => ({ ...chinese(id), pantheon: 'norse' });
+  for (const id of ['chinese_guan_yu', 'chinese_sun_wukong']) {
+    const flags = bodyBox(buildRichTemplate(chinese(id)));
+    const plain = bodyBox(buildRichTemplate(shared(id)));
+    assert.ok(flags.max.z > plain.max.z + 0.08 && flags.min.z < plain.min.z - 0.08, `${id}: the pennants fan out wider than the shoulders`);
+    assert.ok(flags.max.y > plain.max.y + 0.1, `${id}: the poles rise over the head`);
+  }
+  // the ribbons ride the cape bones, so they stream behind her when she moves
+  const capeWeight = (u) => {
+    const g = buildRichTemplate(u).rich.geo;
+    const idx = g.attributes.skinIndex.array;
+    const w = g.attributes.skinWeight.array;
+    let sum = 0;
+    for (let i = 0; i < idx.length; i++) if (idx[i] >= B.cape1 && idx[i] <= B.cape3) sum += w[i];
+    return sum;
+  };
+  assert.ok(capeWeight(chinese('chinese_chang_e')) > capeWeight(shared('chinese_chang_e')) * 1.2, 'the pibo hangs on the cape chain');
+  assert.ok(bodyBox(buildRichTemplate(chinese('chinese_chang_e'))).min.x < bodyBox(buildRichTemplate(shared('chinese_chang_e'))).min.x - 0.06, 'and falls behind her');
+});
+
+test('the Monkey King and his clones are dressed on the humanoid rig: a monkey\'s head, a long tail, fur, a tiger skin about the loins', () => {
+  for (const id of ['chinese_sun_wukong', 'chinese_monkey_clone']) {
+    const u = chinese(id);
+    assert.equal(u.visual.head, 'monkey');
+    const monkey = buildRichTemplate(u);
+    const human = buildRichTemplate(withVisual(u, () => ({ head: 'human' })));
+    assert.notEqual(monkey.triangles, human.triangles, `${id}: a muzzle is not a face`);
+    const noTail = buildRichTemplate(withVisual(u, (v) => ({ extras: v.extras.filter((e) => e !== 'tail') })));
+    assert.ok(monkey.triangles > noTail.triangles + 200, `${id}: the tail is geometry`);
+    assert.ok(bodyBox(monkey).min.x < bodyBox(noTail).min.x - 0.05, `${id}: a tail behind the body`);
+    // the fur breaks the skin color up: streaks of lighter and darker hair on the bare arms
+    const col = monkey.rich.geo.attributes.color.array;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < col.length; i += 3) {
+      const l = col[i] + col[i + 1] + col[i + 2];
+      if (col[i] > col[i + 2] * 1.6) { lo = Math.min(lo, l); hi = Math.max(hi, l); }
+    }
+    assert.ok(hi > lo * 1.15, `${id}: fur streaks ${lo.toFixed(2)} to ${hi.toFixed(2)}`);
+  }
+  // the clone is a copy of him in a smaller, plainer dress: no armor, no pennants
+  assert.ok(buildRichTemplate(chinese('chinese_monkey_clone')).triangles < buildRichTemplate(chinese('chinese_sun_wukong')).triangles * 0.7);
+});
+
+test('the Chinese people have black hair, a clay soldier\'s is clay, the gods keep the shared palette', () => {
+  const cn = outfitFor('chinese');
+  const pal = { hair: new THREE.Color('#8a5a3a'), skin: new THREE.Color('#d9a678'), primary: new THREE.Color('#b08a5a') };
+  const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const people = cn.palette(pal, { mortal: true, unit: { id: 'warrior' } });
+  assert.ok(lum(people.hair) < 0.03, 'black hair');
+  assert.equal(people.skin, pal.skin, 'the rest of the palette is kept');
+  assert.equal(pal.hair.getHexString(), '8a5a3a', 'the shared palette itself is not touched');
+  assert.equal(cn.palette(pal, { mortal: false, unit: { id: 'chinese_guan_yu' } }), pal, 'a god keeps his own');
+  const clay = cn.palette(pal, { mortal: false, unit: { id: 'chinese_clay_warrior' } });
+  assert.ok(lum(clay.hair) > 0.05 && lum(clay.hair) < lum(pal.primary), 'the clay soldier\'s hair is the clay, darker');
+});
+
+test('Chinese mortals and gods carry the team\'s color on their cloth, plumes and pennants, the metal keeps its own', () => {
+  for (const [id, share] of [['worshipper', 0.06], ['warrior', 0.08], ['archer', 0.015], ['priest', 0.025], ['chinese_crossbowman', 0.08], ['chinese_clay_warrior', 0.025], ['chinese_guan_yu', 0.025], ['chinese_sun_wukong', 0.015], ['chinese_chang_e', 0.03], ['chinese_monkey_clone', 0.03], ['chinese_pangu', 0.005]]) {
+    const fx = buildRichTemplate(chinese(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    let metal = 0;
+    for (let i = 0; i < fx.length; i += 4) {
+      if (fx[i] > 0) team++;
+      if (fx[i + 3] > 0.3) metal++;
+    }
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+    if (id === 'chinese_crossbowman' || id === 'warrior') assert.ok(metal > n * 0.1, `${id}: metal vertices ${metal} of ${n}`);
+  }
+});
+
+test('the Chinese gods, mortals and the monkeys animate every state without a NaN', () => {
+  for (const id of CHINESE) {
+    const m = buildUnitModel(chinese(id), PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();

@@ -6,7 +6,7 @@ import { ps } from './rich-kit.js';
 import { shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { grip, grain, sstep } from './rich-gear.js';
 import { featherFan } from './rich-feathers.js';
-import { mul, lerp, tint } from './rich-paint.js';
+import { mul, lerp, tint, dye } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -353,10 +353,52 @@ function hauchiwa(kit, pal, s) {
   kit.loft([ps(0, (pivotY + 0.03) * s, 0, 0.014 * s, 0.03 * s), ps(0, (pivotY + 0.06) * s, 0, 0.011 * s, 0.026 * s)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: pal.accent, mat: 'cloth' });
 }
 
-/** The weapon fan of a unit: a priest's folding fan, or (opts.fan 'hauchiwa') the tengu's feather fan. */
+/**
+ * A feather fan (yushan): a fan of long white crane feathers from a short handle, dark at their tips, a silk cord and tassel
+ * hung at the pivot. Lies in the grip's X-Y plane.
+ */
+function craneFan(kit, pal, s) {
+  const pivotY = 0.09;
+  fanHandle(kit, pal, s, pivotY);
+  const white = withMat(mixC(pal.primary, '#ffffff', 0.55), 'feather');
+  const tip = mixC(pal.secondary, '#2a2022', 0.6);
+  featherFan(kit, [0, pivotY * s, 0], [0, 1, 0], [0, 0, 1], -0.95, 0.95, 9, (k) => (0.4 - 0.1 * Math.abs(k - 0.5) * 2) * s, 0.05 * s, (i) => ({
+    color: shadeC(white, 0.96 + 0.08 * (i % 2)), tip, mat: 'feather', cup: 0.1, rows: 4, thick: 0.004 * s, shape: 0.55,
+  }));
+  kit.loft([ps(0, (pivotY + 0.02) * s, 0, 0.014 * s, 0.03 * s), ps(0, (pivotY + 0.05) * s, 0, 0.011 * s, 0.026 * s)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: pal.accentMetal, mat: 'gold' });
+  kit.loft([ps(0.012 * s, (pivotY - 0.01) * s, 0, 0.004 * s), ps(0.03 * s, (pivotY - 0.06) * s, 0, 0.007 * s), ps(0.034 * s, (pivotY - 0.11) * s, 0, 0.011 * s), ps(0.034 * s, (pivotY - 0.16) * s, 0, 0.002 * s)],
+    { ref: [0, 0, 1], rings: 5, sides: 6, start: 'round', end: 'round', capDepth: 0.006 * s, color: pal.secondary, mat: 'cloth' });
+}
+
+/** The weapon fan of a unit: a priest's folding fan, or (opts.fan 'hauchiwa') the tengu's feather fan, or ('crane') a scholar's of white feathers. */
 function fan(kit, pal, s, { fan: style = 'ogi' } = {}) {
   if (style === 'hauchiwa') hauchiwa(kit, pal, s);
+  else if (style === 'crane') craneFan(kit, pal, s);
   else ogi(kit, pal, s);
+}
+
+/**
+ * A palace lantern, hung from the hand by a cord: a flared gold roof, a body of glowing paper in eight ribs of gold swelling at
+ * the middle, a gold rim, and a tassel of silk below. Hangs along the grip's +Y (down when the elbow is bent).
+ */
+function lantern(kit, pal, size) {
+  const s = size * 0.72;
+  const gold = pal.accentMetal;
+  const glow = tintC(pal.glow, 0.3);
+  kit.loft([ps(0, -0.02 * s, 0, 0.0055 * s), ps(0, 0.1 * s, 0, 0.0045 * s)], { ref: [1, 0, 0], sides: 4, start: 'round', end: null, capDepth: 0.004 * s, color: shadeC(pal.secondary, 0.8), mat: 'cloth' });
+  kit.loft(along([[0.1, 0.012], [0.112, 0.04], [0.13, 0.07], [0.146, 0.078]], s), { ref: [1, 0, 0], rings: 5, sides: 12, start: 'round', end: null, capDepth: 0.006 * s, color: gold, mat: 'gold' });
+  kit.loft(along([[0.146, 0.066], [0.18, 0.086], [0.22, 0.092], [0.26, 0.084], [0.294, 0.064]], s), {
+    ref: [1, 0, 0], rings: 8, sides: 16, start: null, end: null, color: glow, mat: 'gem', glow: 1,
+    paint: (o, x, y, z, u, a) => {
+      // the ribs: every other vertex round the lamp is gold, the paper between glowing
+      if (Math.round(a * 16) % 2 === 0) {
+        dye(o, gold, 0.9);
+        o.glow = 0.12;
+      } else mul(o, 0.9 + 0.14 * Math.sin(u * PI));
+    },
+  });
+  kit.loft(along([[0.292, 0.066], [0.3, 0.07], [0.314, 0.056]], s), { ref: [1, 0, 0], rings: 3, sides: 12, start: null, end: 'round', capDepth: 0.006 * s, color: gold, mat: 'gold' });
+  kit.loft(along([[0.314, 0.01], [0.34, 0.026], [0.38, 0.03], [0.44, 0.004]], s), { ref: [1, 0, 0], rings: 5, sides: 8, start: 'round', end: 'round', capDepth: 0.006 * s, color: pal.secondary, mat: 'cloth', paint: (o, x, y, z, u, a) => mul(o, 0.82 + 0.28 * Math.abs(Math.sin(a * TAU * 4))) });
 }
 
 /**
@@ -414,7 +456,7 @@ const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (k
 export const RICH_ARMS = new Set(Object.keys(ARMS));
 
 /** The offhand items built here, by the visual's offhand id (lotus and flame are only carried by the extra hands of many-armed gods). */
-const OFFHANDS = { shell: conch, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.7, opts), drum, lotus, flame, mirror, orb: jewel };
+const OFFHANDS = { shell: conch, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.7, opts), drum, lotus, flame, mirror, orb: jewel, lantern };
 export const RICH_OFFHANDS = new Set(Object.keys(OFFHANDS));
 
 /**

@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { shadeC, TEAM } from './unit-geo.js';
 import { vs, ps, B, smoothstep } from './rich-kit.js';
-import { torsoStations, torsoRing, legRing, ringAt } from './rich-body.js';
+import { torsoStations, torsoRing, legRing, ringAt, legStations, legFrom } from './rich-body.js';
 import { clamp, lerp, hash, mul, dye, gradY, paints, recolor } from './rich-paint.js';
 
 const PI = Math.PI;
@@ -78,7 +78,8 @@ export function addCuirass(kit, D, pal, bind, color, trim, trimGlow = 0) {
   }
 }
 
-export function addPauldrons(kit, D, pal, bind, color, trim, trimGlow = 0) {
+/** Round shoulder guards: two domed plates a side over a rim. `fine` (sides, rings) coarsens them where a figure is already heavy. */
+export function addPauldrons(kit, D, pal, bind, color, trim, trimGlow = 0, { sides = 12, rings = 6 } = {}) {
   const sh = D.shoulderY - 0.02;
   const K = D.k;
   for (const side of [1, -1]) {
@@ -94,9 +95,9 @@ export function addPauldrons(kit, D, pal, bind, color, trim, trimGlow = 0) {
         vs(sh - 0.012 - i * 0.028, 0.078 * K * s, 0.074 * K * s, 0.0, z),
         vs(sh + 0.018 - i * 0.02, 0.07 * K * s, 0.068 * K * s, 0.0, z),
         vs(sh + 0.04 - i * 0.012, 0.048 * K * s, 0.046 * K * s, 0.0, z),
-      ], { rings: 6, sides: 12, start: null, end: 'round', capDepth: 0.02 * K, color: i ? shadeC(color, 0.9) : color, bind: bd, mat: trimGlow ? 'iron' : undefined });
+      ], { rings, sides, start: null, end: 'round', capDepth: 0.02 * K, capRings: rings < 6 ? 2 : undefined, color: i ? shadeC(color, 0.9) : color, bind: bd, mat: trimGlow ? 'iron' : undefined });
     }
-    kit.loft([vs(sh - 0.034, 0.083 * K, 0.079 * K, 0, z), vs(sh - 0.022, 0.082 * K, 0.078 * K, 0, z)], { sides: 14, start: null, end: null, color: trim, bind: bd, glow: trimGlow });
+    kit.loft([vs(sh - 0.034, 0.083 * K, 0.079 * K, 0, z), vs(sh - 0.022, 0.082 * K, 0.078 * K, 0, z)], { sides: sides === 12 ? 14 : sides, start: null, end: null, color: trim, bind: bd, glow: trimGlow });
   }
 }
 
@@ -321,6 +322,12 @@ export function addLongSkirt(kit, D, bind, color, { flare = 1, pleat = 0.008, to
     paint: gradY(y0, D.hipY, 0.8, 1),
   });
   return { y0, rx, rz };
+}
+
+/** A hem band in a contrasting color round the long skirt that ends at `sk` (what addLongSkirt returns). */
+export function addHem(kit, bind, sk, color, h = 0.05) {
+  kit.loft([vs(sk.y0 - 0.002, sk.rx + 0.004, sk.rz + 0.004), vs(sk.y0 + h, sk.rx - 0.004, sk.rz - 0.004)],
+    { sides: 36, start: null, end: null, color, mat: 'trim', bind: bind.skirt });
 }
 
 /** A broad belt over the top edge of a wrap, with a round clasp at the front. */
@@ -553,20 +560,32 @@ export function addCharAina(kit, D, pal, bind, { color, plate, trim }) {
   kit.loft([vs(hem.y - 0.01, hem.rx + 0.004, hem.rz + 0.004, hem.dx), vs(hem.y + 0.024, hem.rx, hem.rz, hem.dx)], { sides: 22, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
   const collar = torsoRing(D, 1.03, g + 0.006);
   kit.loft([vs(collar.y - 0.012, collar.rx, collar.rz, collar.dx), vs(collar.y + 0.012, collar.rx - 0.002, collar.rz - 0.002, collar.dx)], { sides: 20, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
-  // a plate: a shallow dome of steel with a gold rim, its axis along (ax, az)
-  const disc = (f, ax, az, r) => {
-    const ring = torsoRing(D, f, g + 0.003);
-    const c = az === 0 ? [ring.dx + ax * ring.rx, ring.y, 0] : [ring.dx, ring.y, az * ring.rz];
-    const at = (d, k) => ps(c[0] + ax * d, c[1], c[2] + az * d, r * k, r * k);
-    const o = { ref: [0, 1, 0], sides: 14 };
-    kit.loft([at(-0.004, 1), at(0.008, 0.98), at(0.017, 0.62)], { ...o, rings: 3, start: null, end: 'round', capRings: 2, capDepth: 0.012, color: plate, mat: 'metal', bind: bind.torso, paint: gradY(c[1] - r, c[1] + r, 0.86, 1.1) });
-    kit.loft([at(0.003, 1.05), at(0.011, 1.05)], { ...o, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
-    kit.loft([at(0.015, 0.2), at(0.026, 0.14)], { ...o, sides: 7, start: null, end: 'round', capRings: 1, capDepth: 0.006, color: trim, mat: 'gold', bind: bind.torso });
-  };
-  disc(0.62, 1, 0, 0.074 * D.k);
-  disc(0.62, -1, 0, 0.074 * D.k);
-  disc(0.5, 0, 1, 0.062 * D.k);
-  disc(0.5, 0, -1, 0.062 * D.k);
+  addMirrorDisc(kit, D, bind, 0.62, 0, 0.074 * D.k, { plate, trim, g });
+  addMirrorDisc(kit, D, bind, 0.62, PI, 0.074 * D.k, { plate, trim, g });
+  addMirrorDisc(kit, D, bind, 0.5, PI / 2, 0.062 * D.k, { plate, trim, g });
+  addMirrorDisc(kit, D, bind, 0.5, -PI / 2, 0.062 * D.k, { plate, trim, g });
+}
+
+/**
+ * A round mirror on the torso: a shallow dome of polished metal in a rim of trim with a boss at its centre, at height
+ * fraction f and angle th about the torso (0 the front, PI the back, +-PI/2 the sides), r its radius. opts: plate (the disc),
+ * trim (rim and boss), g (the clearance of the surface it sits on).
+ */
+export function addMirrorDisc(kit, D, bind, f, th, r, { plate, trim, g = 0.02, sides = 14, caps = 2 }) {
+  const ring = torsoRing(D, f, g + 0.003);
+  const snap = (v) => (Math.abs(v) < 1e-9 ? 0 : v);
+  const ax = snap(Math.cos(th));
+  const az = snap(Math.sin(th));
+  const c = [ring.dx + ax * ring.rx, ring.y, az * ring.rz];
+  // the outward normal of the ellipse there
+  const nl = Math.hypot(ax / ring.rx, az / ring.rz);
+  const nx = ax / ring.rx / nl;
+  const nz = az / ring.rz / nl;
+  const at = (d, k) => ps(c[0] + nx * d, c[1], c[2] + nz * d, r * k, r * k);
+  const o = { ref: [0, 1, 0], sides };
+  kit.loft([at(-0.004, 1), at(0.008, 0.98), at(0.017, 0.62)], { ...o, rings: 3, start: null, end: 'round', capRings: caps, capDepth: 0.012, color: plate, mat: 'metal', bind: bind.torso, paint: gradY(c[1] - r, c[1] + r, 0.86, 1.1) });
+  kit.loft([at(0.003, 1.05), at(0.011, 1.05)], { ...o, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
+  kit.loft([at(0.015, 0.2), at(0.026, 0.14)], { ...o, sides: 7, start: null, end: 'round', capRings: 1, capDepth: 0.006, color: trim, mat: 'gold', bind: bind.torso });
 }
 
 /**
@@ -802,4 +821,212 @@ export function addKote(kit, D, pal, bind, { plate, trim } = {}) {
       kit.loft([vs(y - 0.008, D.armR * 0.7 + 0.016, D.armR * 0.7 + 0.016, 0, z), vs(y + 0.008, D.armR * 0.72 + 0.016, D.armR * 0.72 + 0.016, 0, z)], { sides: 12, start: null, end: null, color: trim, mat: 'gold', bind: bd });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Leg garments of the Japanese and the Chinese
+// ---------------------------------------------------------------------------
+
+/** Trousers from the ankle to the hip, snug to the leg. */
+export function addTrousers(kit, D, bind, color) {
+  for (const side of [1, -1]) {
+    kit.loft(legFrom(D, side, 0.011, D.ankleY - 0.012), { rings: 7, start: null, end: null, color, mat: 'cloth', bind: bind.leg[side], paint: gradY(0.2, D.hipY, 0.85, 1) });
+  }
+}
+
+/** Leg wraps: a snug gaiter from the ankle to below the knee, ridged where the cloth is wound, tied at the top. */
+export function addLegWraps(kit, D, bind, color, steps = 14) {
+  const knee = D.hipY - D.thigh;
+  const y0 = D.ankleY + 0.012;
+  const y1 = knee - 0.04;
+  for (const side of [1, -1]) {
+    const st = legStations(D, side, 0.011);
+    const rings = [];
+    for (let i = 0; i <= steps; i++) rings.push(ringAt(st, lerp(y0, y1, i / steps), 0.006));
+    kit.loft(rings, { sides: 12, start: null, end: null, color, mat: 'cloth', bind: bind.leg[side], paint: (o, x, y) => mul(o, 0.84 + 0.18 * Math.abs(Math.cos((y - y0) * 130))) });
+    kit.loft([ringAt(st, y1 - 0.012, 0.01), ringAt(st, y1 + 0.004, 0.01)], { sides: 12, start: null, end: null, color: shade(color, 0.7), mat: 'cloth', bind: bind.leg[side] });
+  }
+}
+
+/** The leg below a long hem: skin from under the ankle to `top`. */
+export function addAnkles(kit, D, bind, skin, skinPaint, top) {
+  const r = D.legR;
+  for (const side of [1, -1]) {
+    const st = legStations(D, side).filter((q) => q.c[1] <= top);
+    kit.loft([vs(D.ankleY - 0.03, r * 0.62, r * 0.58, 0, side * D.hipZ), ...st], { rings: 4, start: null, end: null, color: skin, bind: bind.leg[side], paint: skinPaint });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chinese dress: wide sleeves, the sash, mirror armor and its shoulder beasts, the wrapped skirt
+// ---------------------------------------------------------------------------
+
+/**
+ * The crossed collar of the Chinese jacket (jiaoling youren): a standing collar at the neck and the lapel closing in a
+ * diagonal from the left of the throat across the breast to the right armpit, a row of frog knots along it. opts: color (the
+ * collar and the lapel's band), knot (the knots' color; default the band's), width (of the lapel's band), knots (how many), lapel
+ * (false: the collar alone, where a cuirass covers the breast).
+ */
+export function addJiaoling(kit, D, bind, { color, knot = null, width = 0.034, knots = 3, lapel = true } = {}) {
+  const at = (t, g) => {
+    const f = lerp(1.06, 0.72, t ** 1.1);
+    const th = lerp(-0.3, 1.18, t);
+    const r = torsoRing(D, f, g);
+    return [r.dx + r.rx * Math.cos(th), r.y, r.rz * Math.sin(th)];
+  };
+  const a = torsoRing(D, 1.03, 0.02);
+  const b = torsoRing(D, 1.1, 0.012);
+  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs(b.y, b.rx * 0.93, b.rz * 0.93, b.dx)], { sides: 20, start: null, end: null, color, mat: 'trim', bind: bind.torso });
+  if (!lapel) return;
+  kit.sheet(2, 12, (u, v, out) => {
+    const p = at(v, 0.02 + 0.004 * Math.sin(v * PI));
+    out[0] = p[0];
+    out[1] = p[1] + (u - 0.5) * width;
+    out[2] = p[2];
+  }, { thick: 0.006, color, inner: shade(color, 0.8), bind: bind.torso });
+  for (let i = 0; i < knots; i++) {
+    const p = at(0.3 + (0.55 * i) / Math.max(1, knots - 1), 0.03);
+    kit.loft([ps(p[0] - 0.002, p[1], p[2], 0.011), ps(p[0] + 0.002, p[1], p[2], 0.011)], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: 0.011, color: knot || color, mat: 'trim', bind: bind.torso });
+  }
+}
+
+/**
+ * Wide sleeves from the shoulder to the wrist, belling out toward the hem, which hangs back a little (a robe's, a
+ * priest's, a goddess's). opts: color, trim (a band at the hem), wide (scale of how far they bell), mat.
+ */
+export function addWideSleeves(kit, D, bind, { color, trim = null, wide = 1, mat = 'cloth' }) {
+  const g = 0.012;
+  const r = D.armR;
+  const sh = D.shoulderY - 0.02;
+  const e = sh - D.upper;
+  const w = e - D.fore;
+  for (const side of [1, -1]) {
+    const z = side * D.shoulderZ;
+    const st = [
+      vs(w, r * (1.5 + 1.1 * wide) + g, r * (1.3 + 0.8 * wide) + g, -0.022 * wide, z),
+      vs(w + 0.035, r * (1.3 + 0.8 * wide) + g, r * (1.2 + 0.6 * wide) + g, -0.014 * wide, z),
+      vs(e - 0.01, r * (1.2 + 0.3 * wide) + g, r * (1.15 + 0.3 * wide) + g, -0.004 * wide, z),
+      vs(sh - 0.04, r * 1.2 + g + 0.005, r * 1.18 + g + 0.005, 0, z),
+      vs(sh + 0.008, r * 1.18 + g, r * 1.16 + g, 0, z),
+    ];
+    kit.loft(st, { rings: 7, sides: 16, start: null, end: 'round', capDepth: 0.014, color, mat, bind: bind.arm[side], paint: gradY(w, sh, 0.86, 1.02) });
+    if (trim) {
+      const a = st[0];
+      kit.loft([vs(w - 0.006, a.rx + 0.004, a.rz + 0.004, a.c[0], z), vs(w + 0.026, st[1].rx + 0.003, st[1].rz + 0.003, st[1].c[0], z)], { sides: 16, start: null, end: null, color: trim, mat: 'trim', bind: bind.arm[side] });
+    }
+  }
+}
+
+/** A fur cuff (a ring of shaggy hair) round a limb, from station `a` (the top) to `b`. */
+export function addFurCuff(kit, a, b, color, bd, seed) {
+  kit.loft([a, b], {
+    sides: 14, start: null, end: null, color, mat: 'fur', bind: bd,
+    warp: (p, ang, u) => { const n = hash(Math.round(ang * 14), seed, 3); p[1] -= 0.008 * (1 - u) * (0.5 + n); },
+    paint: (o, x, y, z, u) => mul(o, 0.82 + 0.26 * u),
+  });
+}
+
+/**
+ * A sash round the waist, rolled at its edges, knotted at the left hip with two ends hanging down the thigh, one
+ * longer than the other. opts: color, trim (a thin edge), tails (false: none), wide (scale of the band's width).
+ */
+export function addSash(kit, D, bind, { color, trim = null, tails = true, wide = 1 } = {}) {
+  const a = torsoRing(D, -0.02, 0.042);
+  const b = torsoRing(D, 0.17 * wide, 0.036);
+  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs((a.y + b.y) / 2, (a.rx + b.rx) / 2 + 0.004, (a.rz + b.rz) / 2 + 0.004, (a.dx + b.dx) / 2), vs(b.y, b.rx, b.rz, b.dx)],
+    { sides: 22, rings: 3, start: null, end: null, color, mat: 'cloth', bind: bind.torso, paint: (o, x, y, z, u) => mul(o, 0.92 + 0.12 * Math.sin(u * PI)) });
+  if (trim) {
+    for (const f of [-0.02, 0.17 * wide - 0.012]) {
+      const r = torsoRing(D, f + 0.006, 0.046);
+      kit.loft([vs(r.y - 0.006, r.rx, r.rz, r.dx), vs(r.y + 0.006, r.rx, r.rz, r.dx)], { sides: 22, start: null, end: null, color: trim, mat: 'trim', bind: bind.torso });
+    }
+  }
+  if (!tails) return;
+  const k = torsoRing(D, 0.07, 0.046);
+  const th = -0.62;
+  const x0 = k.dx + k.rx * Math.cos(th);
+  const z0 = k.rz * Math.sin(th);
+  kit.loft([ps(x0 + 0.004, k.y, z0, 0.02, 0.026), ps(x0 + 0.012, k.y - 0.004, z0, 0.012, 0.016)], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capDepth: 0.01, color: shadeC(color, 0.88), mat: 'cloth', bind: bind.skirt });
+  [[0.3, -0.05, 0.13], [0.22, 0.045, 0.1]].forEach(([drop, dz, w], i) => {
+    kit.sheet(2, 5, (u, v, out) => {
+      out[0] = x0 + 0.024 + 0.026 * v + 0.01 * Math.sin(v * 4 + i * 2);
+      out[1] = k.y - 0.012 - drop * v;
+      out[2] = z0 + dz * v - (0.5 - u) * w * 0.28 * (1 + 0.5 * v);
+    }, { thick: 0.006, color, inner: shade(color, 0.8), bind: bind.skirt });
+  });
+}
+
+/**
+ * The cuirass of a Chinese soldier (mingguang, "bright light"): a lacquered breastplate with its lames, two round mirrors
+ * of polished metal over the breast and two on the back, a belt with a gold boss at the buckle. opts: plate (the lacquer),
+ * trim (gold), mirror (the discs; default the unit's metal), belt (the belt's color; default leather), discs (false: no mirrors).
+ */
+export function addMingguang(kit, D, pal, bind, { plate, trim, mirror = null, belt = null, discs = true } = {}) {
+  const K = D.k;
+  const g = 0.026;
+  addCuirass(kit, D, pal, bind, plate, trim);
+  if (discs) {
+    for (const th of [0.52, -0.52, PI - 0.52, PI + 0.52]) addMirrorDisc(kit, D, bind, 0.66, th, 0.064 * K, { plate: mirror || pal.accentMetal, trim, g: 0.023, sides: 10, caps: 1 });
+  }
+  // the belt over the foot of the plate, and the boss at its buckle
+  const a = torsoRing(D, 0.15, g + 0.016);
+  const b = torsoRing(D, 0.27, g + 0.014);
+  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs((a.y + b.y) / 2, (a.rx + b.rx) / 2 + 0.003, (a.rz + b.rz) / 2 + 0.003, (a.dx + b.dx) / 2), vs(b.y, b.rx, b.rz, b.dx)],
+    { sides: 24, rings: 3, start: null, end: null, color: belt || pal.leather, mat: 'leather', bind: bind.torso });
+  const m = torsoRing(D, 0.21, g + 0.02);
+  const r = 0.034 * K;
+  kit.loft([ps(m.dx + m.rx - 0.004, m.y, 0, r, r), ps(m.dx + m.rx + 0.01, m.y, 0, r * 0.92, r * 0.92), ps(m.dx + m.rx + 0.022, m.y, 0, r * 0.45, r * 0.45)],
+    { ref: [0, 1, 0], rings: 3, sides: 12, start: null, end: 'round', capRings: 1, capDepth: 0.006, color: trim, mat: 'gold', bind: bind.torso });
+}
+
+/**
+ * Shoulder guards in the Chinese manner (tunjian, "swallowing the shoulder"): the pauldrons with a flared lip at their foot
+ * and on the crown a beast's head of gold, its ears pricked, looking forward. opts: plate, trim, face (the head's color,
+ * default the trim).
+ */
+export function addTunjian(kit, D, pal, bind, { plate, trim, face = null } = {}) {
+  addPauldrons(kit, D, pal, bind, plate, trim, 0, { sides: 10, rings: 4 });
+  const sh = D.shoulderY - 0.02;
+  const K = D.k;
+  const head = face || trim;
+  for (const side of [1, -1]) {
+    const upper = side > 0 ? B.upperR : B.upperL;
+    const bd = (x, y, z, S) => { S.add(upper, 0.65); S.add(B.chest, 0.35); };
+    const z = side * (D.shoulderZ + 0.004);
+    kit.loft([vs(sh - 0.05, 0.088 * K, 0.084 * K, 0, z), vs(sh - 0.062, 0.108 * K, 0.104 * K, 0, z)], { sides: 16, start: null, end: null, color: shadeC(plate, 0.82), mat: 'metal', bind: bd });
+    // the beast's head on the crown: a rounded skull, a short muzzle toward the front, two ears
+    const y = sh + 0.052 * K;
+    kit.loft([ps(-0.012 * K, y, z, 0.026 * K, 0.026 * K), ps(0.014 * K, y + 0.002, z, 0.03 * K, 0.028 * K), ps(0.04 * K, y - 0.004, z + side * 0.004, 0.018 * K, 0.02 * K)],
+      { ref: [0, 1, 0], rings: 4, sides: 10, start: 'round', end: 'round', capRings: 2, capDepth: 0.014 * K, color: head, mat: 'gold', bind: bd });
+    for (const e of [1, -1]) {
+      kit.loft([ps(-0.006 * K, y + 0.018 * K, z + e * 0.02 * K, 0.009 * K), ps(-0.01 * K, y + 0.042 * K, z + e * 0.026 * K, 0.0025 * K)],
+        { ref: [1, 0, 0], sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004, color: head, mat: 'gold', bind: bd });
+    }
+  }
+}
+
+/**
+ * A skirt wrapped about the hips and falling to above the knee, bare of any apron: a hide, a kilt of leaves. opts: color,
+ * len (1 reaches the knee), flare (how far it stands out), teeth (a ragged hem of this many points round; 0 an even hem), depth
+ * (how deep the points hang), mark (a paint over the cloth: a hide's stripes), mat.
+ */
+export function addWrapSkirt(kit, D, bind, { color, len = 0.8, flare = 1, teeth = 0, depth = 0.04, mark = null, mat = 'cloth' } = {}) {
+  const yb = D.hipY - D.thigh * len + 0.03;
+  const t = torsoRing(D, 0.12, 0.016);
+  const st = [
+    vs(yb, D.depth * 0.5 + 0.082 * flare, D.waistW * 0.5 + 0.1 * flare),
+    vs(lerp(yb, D.hipY - 0.04, 0.5), D.depth * 0.5 + 0.06 * flare, D.waistW * 0.5 + 0.076 * flare),
+    vs(D.hipY - 0.04, D.depth * 0.5 + 0.042, D.waistW * 0.5 + 0.052),
+    vs(t.y, t.rx, t.rz, t.dx),
+  ];
+  kit.loft(st, {
+    rings: 6, sides: teeth ? Math.max(24, teeth * 4) : 28, start: null, end: null, color, mat, bind: bind.skirt,
+    warp: (p, a, u) => {
+      const s = Math.sin(a * 7 + u * 2) * 0.008 * (1 - u * 0.6);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+      if (teeth && u < 0.02) p[1] -= depth * Math.abs(((a / TAU) * teeth) % 1 - 0.5) * 2;
+    },
+    paint: paints(gradY(yb - depth, D.hipY, 0.8, 1), mark),
+  });
 }

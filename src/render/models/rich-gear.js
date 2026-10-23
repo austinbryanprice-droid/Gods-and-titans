@@ -16,7 +16,7 @@ export const sstep = (a, b, x) => {
 };
 
 /** Weapons the rich kit builds itself. */
-export const RICH_WEAPONS = new Set(['sword', 'axe', 'hammer', 'spear', 'club', 'bow', 'staff', 'katana']);
+export const RICH_WEAPONS = new Set(['sword', 'axe', 'hammer', 'spear', 'club', 'bow', 'staff', 'katana', 'halberd']);
 
 /** Matrix taking a piece modelled in the grip frame into the hand bone's frame (palm center, wrist at the origin's parent). */
 export function handFrame(P, side, grip) {
@@ -428,6 +428,160 @@ function staff(kit, pal, s, { shaftColor = null, orb = null } = {}) {
 }
 
 /**
+ * A pole arm of the Chinese. The ji, the soldier's halberd: a long shaft under a leaf-shaped spearhead with a crescent blade
+ * hooking up from the foot of it, a tassel streaming back from the socket and an iron spike at the butt. With opts.guandao,
+ * the general's great blade: a heavy shaft under a long one-edged blade that swells toward the point, hooked teeth along its
+ * spine and a green inlay down its flat. opts: guandao, tassel (the streamer's color; the team's by default).
+ */
+function halberd(kit, pal, s, { guandao = false, tassel = null } = {}) {
+  const shaft = guandao ? shadeC(pal.woodDark, 0.85) : pal.wood;
+  const metal = pal.accentMetal;
+  const iron = shadeC(pal.darkMetal, 1.15);
+  const top = guandao ? 0.82 : 0.8;
+  kit.loft([ps(0, -0.42 * s, 0, 0.016 * s), ps(0, -0.12 * s, 0, 0.0195 * s), ps(0, 0.4 * s, 0, 0.0185 * s), ps(0, top * s, 0, 0.0165 * s)], {
+    ref: [1, 0, 0], rings: 6, sides: 8, start: null, end: null, color: shaft, mat: 'wood', paint: grain(),
+  });
+  grip(kit, -0.1 * s, 0.1 * s, 0.0235 * s, pal.leather, 5);
+  kit.loft([ps(0, -0.4 * s, 0, 0.021 * s), ps(0, -0.44 * s, 0, 0.0185 * s), ps(0, -0.51 * s, 0, 0.003 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 8, start: 'round', end: 'round', capDepth: [0.008 * s, 0.004 * s], color: iron, mat: 'iron',
+  });
+  kit.loft([ps(0, (top - 0.04) * s, 0, 0.0215 * s), ps(0, top * s, 0, 0.027 * s), ps(0, (top + 0.055) * s, 0, 0.0215 * s)], {
+    ref: [1, 0, 0], rings: 5, sides: 10, start: null, end: null, color: shadeC(metal, 0.72), mat: guandao ? 'gold' : 'metal',
+  });
+  const edge = (o, x, y, z, u) => mul(o, 0.86 + 0.3 * sstep(0.55, 1, u));
+  if (guandao) {
+    const blade = [[0.03, 0.84], [0.075, 0.9], [0.125, 0.98], [0.162, 1.07], [0.172, 1.15], [0.15, 1.24], [0.1, 1.32], [0.03, 1.375], [-0.015, 1.33], [-0.026, 1.22], [-0.022, 1.12],
+      [-0.05, 1.07], [-0.03, 1.04], [-0.056, 0.98], [-0.032, 0.95], [-0.05, 0.9], [-0.03, 0.87]].map(([x, y]) => [x * s, y * s]);
+    kit.slab(blade, { depth: 0.022 * s, bevel: 0.008 * s, color: metal, mat: 'metal', paint: edge });
+    // the green inlay down the flat, showing on both faces
+    kit.slab([[0.0, 0.93], [0.05, 0.99], [0.085, 1.07], [0.09, 1.15], [0.07, 1.24], [0.03, 1.3], [0.0, 1.24], [-0.005, 1.1], [-0.01, 0.99]].map(([x, y]) => [x * s, y * s]),
+      { depth: 0.026 * s, bevel: 0.005 * s, color: mixC(pal.primary, '#2f8f6a', 0.3), mat: 'lacquer' });
+    // the gold ring at the socket
+    kit.loft([ps(0, 0.855 * s, 0, 0.03 * s), ps(0, 0.885 * s, 0, 0.034 * s), ps(0, 0.91 * s, 0, 0.026 * s)], { ref: [1, 0, 0], rings: 4, sides: 10, start: null, end: null, color: metal, mat: 'gold' });
+  } else {
+    const st = [[0.855, 0.017, 0.01], [0.9, 0.032, 0.0115], [0.975, 0.037, 0.012], [1.07, 0.03, 0.0105], [1.16, 0.014, 0.0065], [1.225, 0.002, 0.002]].map(([y, rx, rz]) => ps(0, y * s, 0, rx * s, rz * s, 1.6));
+    kit.loft(st, {
+      ref: [1, 0, 0], rings: 8, sides: 10, start: null, end: 'round', capRings: 2, capDepth: 0.03 * s, color: metal, mat: 'metal',
+      paint: (o, x, y, z, u, a) => {
+        const ang = a * TAU;
+        mul(o, 0.9 + 0.16 * sstep(0.7, 1, Math.abs(Math.cos(ang))) - 0.12 * sstep(0.8, 1, Math.abs(Math.sin(ang))) * sstep(0.1, 0.4, u));
+      },
+    });
+    // the crescent, hooking up from one side of the foot of the head
+    kit.slab([[0.012, 0.8], [0.07, 0.79], [0.15, 0.8], [0.215, 0.845], [0.245, 0.92], [0.236, 1.0], [0.205, 0.96], [0.17, 0.92], [0.12, 0.895], [0.06, 0.89], [0.012, 0.9]].map(([x, y]) => [x * s, y * s]),
+      { depth: 0.02 * s, bevel: 0.007 * s, color: metal, mat: 'metal', paint: edge });
+  }
+  // the tassel, streaming back from the socket
+  const tc = tassel || TEAM(0.95, 'hair');
+  const ty = (top + 0.02) * s;
+  kit.loft([ps(0.004 * s, ty, 0, 0.014 * s), ps(0.02 * s, ty - 0.05 * s, 0, 0.036 * s), ps(0.032 * s, ty - 0.12 * s, 0, 0.04 * s), ps(0.04 * s, ty - 0.2 * s, 0, 0.03 * s), ps(0.04 * s, ty - 0.27 * s, 0, 0.008 * s)], {
+    ref: [0, 0, 1], rings: 6, sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: [0.01 * s, 0.02 * s], color: tc, mat: 'hair',
+    paint: (o, x, y, z, u, a) => mul(o, 0.8 + 0.3 * Math.abs(Math.sin(a * TAU * 5)) + 0.1 * u),
+  });
+}
+
+/**
+ * A crossbow held level before the archer: a wooden stock with a stirrup at its fore end, a broad prod curving back at its
+ * tips, the string drawn back to the nut, a bolt laid in the groove. Lies along the grip's +X (the way it shoots), the limbs
+ * along Z. opts.magazine: the repeating crossbow's box over the stock.
+ */
+function crossbow(kit, pal, s, { magazine = false } = {}) {
+  const wood = pal.wood;
+  const dark = pal.woodDark;
+  const metal = pal.accentMetal;
+  const y0 = 0.04 * s;
+  const sec = (x, h, w) => ps(x * s, y0, 0, h * s, w * s, 3);
+  kit.loft([sec(-0.3, 0.034, 0.017), sec(-0.2, 0.03, 0.016), sec(-0.05, 0.026, 0.0155), sec(0.1, 0.022, 0.015), sec(0.22, 0.02, 0.0145)], {
+    ref: [0, 1, 0], rings: 8, sides: 10, start: 'round', end: 'round', capDepth: 0.014 * s, color: wood, mat: 'wood', paint: grain(0.1),
+  });
+  // the prod: a flat bow set across the fore end, its tips swept back
+  const prod = [];
+  for (let i = 0; i <= 10; i++) {
+    const z = (i / 10 - 0.5) * 0.5;
+    const k = Math.abs(z) / 0.25;
+    prod.push(ps((0.2 - 0.06 * k * k) * s, y0 + 0.006 * s, z * s, (0.02 - 0.012 * k) * s, (0.0095 - 0.003 * k) * s));
+  }
+  kit.loft(prod, { ref: [0, 1, 0], rings: 12, sides: 6, start: 'round', end: 'round', capDepth: 0.008 * s, color: dark, mat: 'wood', paint: (o, x, y, z, u) => mul(o, 0.9 + 0.14 * Math.sin(u * 30) * Math.sin(u * PI)) });
+  // the bridle that lashes it to the stock, the stirrup ahead of it, the trigger below
+  kit.loft([ps(0.185 * s, y0, 0, 0.027 * s, 0.021 * s, 3), ps(0.215 * s, y0, 0, 0.027 * s, 0.021 * s, 3)], { ref: [0, 1, 0], sides: 10, start: null, end: null, color: metal, mat: 'metal' });
+  const ring = [];
+  for (let i = 0; i <= 10; i++) {
+    const a = (i / 10) * TAU;
+    ring.push(ps((0.25 + 0.026 * Math.cos(a)) * s, y0 + 0.026 * Math.sin(a) * s, 0, 0.0046 * s, 0.0046 * s));
+  }
+  kit.loft(ring, { ref: [0, 0, 1], sides: 5, start: null, end: null, color: metal, mat: 'metal' });
+  kit.loft([ps(-0.06 * s, y0 - 0.02 * s, 0, 0.005 * s), ps(-0.066 * s, y0 - 0.056 * s, 0, 0.0045 * s)], { ref: [0, 0, 1], sides: 5, start: 'round', end: 'round', capDepth: 0.004 * s, color: metal, mat: 'metal' });
+  // the string, drawn back in a V to the nut
+  const str = [];
+  for (let i = 0; i <= 8; i++) {
+    const z = (i / 8 - 0.5) * 0.5;
+    const k = Math.abs(z) / 0.25;
+    str.push(ps((0.02 + (0.14 - 0.02) * k) * s, (0.074 - 0.016 * k) * s, z * s, 0.0034 * s, 0.0034 * s));
+  }
+  kit.loft(str, { ref: [0, 1, 0], sides: 4, start: null, end: null, color: mixC(pal.white, pal.leather, 0.3), mat: 'cloth' });
+  // the bolt in its groove: a shaft with an iron head
+  const yb = 0.074 * s;
+  kit.loft([ps(0.02 * s, yb, 0, 0.0042 * s), ps(0.29 * s, yb, 0, 0.0042 * s)], { ref: [0, 1, 0], sides: 6, start: 'round', end: null, capDepth: 0.003 * s, color: shadeC(wood, 1.2), mat: 'wood' });
+  kit.loft([ps(0.285 * s, yb, 0, 0.0065 * s), ps(0.325 * s, yb, 0, 0.0075 * s), ps(0.37 * s, yb, 0, 0.001 * s)], { ref: [0, 1, 0], rings: 4, sides: 6, start: null, end: 'round', capDepth: 0.003 * s, color: shadeC(pal.darkMetal, 1.2), mat: 'iron' });
+  if (magazine) {
+    kit.loft([ps(-0.03 * s, 0.1 * s, 0, 0.034 * s, 0.03 * s, 4), ps(0.07 * s, 0.1 * s, 0, 0.034 * s, 0.03 * s, 4), ps(0.17 * s, 0.1 * s, 0, 0.034 * s, 0.03 * s, 4)], {
+      ref: [0, 1, 0], rings: 4, sides: 12, start: 'flat', end: 'flat', color: dark, mat: 'wood', paint: grain(0.12),
+    });
+    kit.loft([ps(-0.03 * s, 0.1 * s, 0, 0.037 * s, 0.033 * s, 4), ps(-0.015 * s, 0.1 * s, 0, 0.037 * s, 0.033 * s, 4)], { ref: [0, 1, 0], sides: 12, start: null, end: null, color: metal, mat: 'metal' });
+    kit.loft([ps(0.155 * s, 0.1 * s, 0, 0.037 * s, 0.033 * s, 4), ps(0.17 * s, 0.1 * s, 0, 0.037 * s, 0.033 * s, 4)], { ref: [0, 1, 0], sides: 12, start: null, end: null, color: metal, mat: 'metal' });
+  }
+}
+
+/** The Ruyi Jingu Bang: a long straight pole of dark red lacquer, banded in gold at both ends, the bands ridged. */
+function ruyi(kit, pal, s) {
+  const gold = pal.accentMetal;
+  const lacquer = mixC(pal.secondary, '#1c0606', 0.5);
+  kit.loft([ps(0, -0.64 * s, 0, 0.0205 * s), ps(0, 0, 0, 0.0215 * s), ps(0, 0.72 * s, 0, 0.0205 * s)], {
+    ref: [1, 0, 0], rings: 8, sides: 10, start: null, end: null, color: lacquer, mat: 'lacquer', paint: (o, x, y, z, u) => mul(o, 0.92 + 0.1 * Math.sin(u * 20)),
+  });
+  for (const sg of [-1, 1]) {
+    const a = sg > 0 ? 0.56 : -0.52;
+    const b = sg > 0 ? 0.76 : -0.68;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    kit.loft([ps(0, lo * s, 0, 0.022 * s), ps(0, (lo + 0.03) * s, 0, 0.0315 * s), ps(0, (hi - 0.03) * s, 0, 0.0315 * s), ps(0, hi * s, 0, 0.0235 * s)], {
+      ref: [1, 0, 0], rings: 6, sides: 12, start: sg > 0 ? null : 'round', end: sg > 0 ? 'round' : null, capDepth: 0.012 * s, color: gold, mat: 'gold', glow: 0.1,
+    });
+    for (const k of [0.3, 0.5, 0.7]) {
+      const y = lo + (hi - lo) * k;
+      kit.loft([ps(0, (y - 0.008) * s, 0, 0.0335 * s), ps(0, (y + 0.008) * s, 0, 0.0335 * s)], { ref: [1, 0, 0], sides: 12, start: null, end: null, color: shadeC(gold, 0.82), mat: 'gold' });
+    }
+  }
+}
+
+/**
+ * A yue, the great ceremonial axe: a long haft under a broad head, its edge a wide round arc, a gold ring set in the blade,
+ * a spike above. opts: shaftColor.
+ */
+function yue(kit, pal, s, { shaftColor = null } = {}) {
+  const shaft = shaftColor || pal.wood;
+  const head = pal.accentMetal;
+  kit.loft([ps(0, -0.1 * s, 0, 0.022 * s), ps(0, 0.08 * s, 0, 0.0195 * s), ps(0, 0.3 * s, 0, 0.018 * s), ps(0, 0.58 * s, 0, 0.0185 * s)], {
+    ref: [1, 0, 0], rings: 9, sides: 8, start: 'round', end: 'round', capDepth: 0.01 * s, color: shaft, mat: 'wood', paint: grain(0.1),
+  });
+  grip(kit, -0.08 * s, 0.1 * s, 0.0235 * s, pal.leather, 5);
+  kit.loft([ps(0, -0.112 * s, 0, 0.026 * s), ps(0, -0.1 * s, 0, 0.028 * s)], { ref: [1, 0, 0], sides: 8, start: 'round', end: null, capDepth: 0.008 * s, color: shadeC(head, 0.75) });
+  kit.loft([ps(0, 0.3 * s, 0, 0.03 * s, 0.032 * s), ps(0, 0.54 * s, 0, 0.03 * s, 0.032 * s)], { ref: [1, 0, 0], sides: 10, start: null, end: null, color: shadeC(head, 0.7), mat: 'iron' });
+  // the spike over the head
+  kit.loft([ps(0, 0.54 * s, 0, 0.026 * s), ps(0, 0.6 * s, 0, 0.016 * s), ps(0, 0.7 * s, 0, 0.002 * s)], { ref: [1, 0, 0], rings: 5, sides: 8, start: null, end: 'round', capDepth: 0.005 * s, color: head, mat: 'metal' });
+  const y0 = 0.4 * s;
+  const pts = [[-0.03, 0.12], [0.03, 0.14], [0.11, 0.17], [0.19, 0.16], [0.25, 0.11], [0.28, 0.03], [0.275, -0.05], [0.22, -0.13], [0.14, -0.18], [0.05, -0.18], [-0.03, -0.14]].map(([x, y]) => [x * s, y0 + y * s]);
+  kit.slab(pts, { depth: 0.026 * s, bevel: 0.01 * s, color: head, mat: 'metal', paint: (o, x, y, z, u) => mul(o, 0.86 + 0.3 * sstep(0.55, 1, u)) });
+  // the gold ring set in the blade, standing out on both faces
+  const ring = [];
+  for (let i = 0; i <= 14; i++) {
+    const a = (i / 14) * TAU;
+    ring.push(ps((0.13 + 0.06 * Math.cos(a)) * s, y0 - 0.01 * s + 0.06 * Math.sin(a) * s, 0, 0.0085 * s, 0.0165 * s));
+  }
+  kit.loft(ring, { ref: [0, 0, 1], sides: 6, start: null, end: null, color: pal.accentMetal, mat: 'gold' });
+}
+
+/**
  * Add weapon `id` to `kit` in the grip frame (origin = palm, +Y along the weapon, blade
  * width along X, thickness along Z), like the low-poly addWeapon. opts.glowBlade: a flaming
  * blade; opts.runes: the runic glow color of a god's hammer.
@@ -436,12 +590,13 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
   switch (id) {
     case 'sword': sword(kit, pal, s, { flame: !!opts.glowBlade }); return true;
     case 'katana': katana(kit, pal, s); return true;
-    case 'axe': axe(kit, pal, s, opts); return true;
+    case 'axe': if (opts.axe === 'yue') yue(kit, pal, s, opts); else axe(kit, pal, s, opts); return true;
     case 'hammer': hammer(kit, pal, s, { glow: opts.runes || null }); return true;
     case 'spear': spear(kit, pal, s, { runes: opts.runes || null }); return true;
     case 'club': club(kit, pal, s, opts); return true;
-    case 'bow': bow(kit, pal, s, opts); return true;
-    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else staff(kit, pal, s, opts); return true;
+    case 'bow': if (opts.crossbow) crossbow(kit, pal, s, opts); else bow(kit, pal, s, opts); return true;
+    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else staff(kit, pal, s, opts); return true;
+    case 'halberd': halberd(kit, pal, s, opts); return true;
     default: return false;
   }
 }

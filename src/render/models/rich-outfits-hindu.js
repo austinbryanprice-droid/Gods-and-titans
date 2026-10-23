@@ -9,11 +9,11 @@
 import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { vs } from './rich-kit.js';
 import { torsoStations, armStations, legRing, addSandals, addBareLegs } from './rich-body.js';
-import { addCape, addDrape, addLongSkirt, addWaistBelt, addDhoti, addCharAina, addGarland } from './rich-clothing.js';
+import { addCape, addDrape, addLongSkirt, addHem, addWaistBelt, addDhoti, addCharAina, addGarland } from './rich-clothing.js';
 import { addHairCap, addLongHair, addTiara, addTopknot, addCrescent, addKirita } from './rich-headgear.js';
 import { addJewelry, addTail, addPrabhavali, extraArmsPiece } from './rich-regalia.js';
 import { BEAST_HEADS } from './rich-heads.js';
-import { gradY, hash, mul } from './rich-paint.js';
+import { gradY, mul, furStreaks } from './rich-paint.js';
 import { DEFAULT } from './rich-outfit-default.js';
 
 const GOLD = withMat('#dfb54a', 'gold');
@@ -47,12 +47,6 @@ const goldOf = (E) => (E.ctx.mortal ? GOLD : E.pal.accentMetal);
 function bareTorso(E) {
   const { kit, D, bind, skin, skinPaint } = E;
   kit.loft(torsoStations(D), { rings: 11, start: null, end: 'round', color: skin, bind: bind.torso, paint: skinPaint });
-}
-
-/** A hem band in a contrasting color round the long skirt that ends at `sk` (from addLongSkirt). */
-function hem(E, sk, color, h = 0.05) {
-  E.kit.loft([vs(sk.y0 - 0.002, sk.rx + 0.004, sk.rz + 0.004), vs(sk.y0 + h, sk.rx - 0.004, sk.rz - 0.004)],
-    { sides: 36, start: null, end: null, color, mat: 'trim', bind: E.bind.skirt });
 }
 
 function dhoti(E) {
@@ -116,7 +110,7 @@ function sari(E) {
   bareTorso(E);
   kit.loft(torsoStations(D, 0.016, 0.42), { rings: 6, start: null, end: 'round', capDepth: 0.01, color: shadeC(pal.secondary, 0.95), mat: 'cloth', bind: bind.torso, paint: gradY(D.hipY, D.shoulderY, 0.82, 1.02) });
   const sk = addLongSkirt(kit, D, bind, pal.primary, { pleat: 0.012, top: 0.03 });
-  hem(E, sk, pal.secondary);
+  addHem(kit, bind, sk, pal.secondary);
   addDrape(kit, D, bind, TEAM(0.95), pal.secondary, { side: -1, width: 0.36 });
   addWaistBelt(kit, D, bind, shadeC(pal.accentMetal, 0.85), pal.accentMetal);
 }
@@ -243,8 +237,7 @@ export function extras(E) {
 
 /** Hanuman's fur: a streak of lighter and darker hair over every bare surface of the body. */
 export function skinPaint(E) {
-  if (E.v.head !== 'monkey') return null;
-  return (o, x, y, z) => mul(o, 0.88 + 0.16 * Math.abs(Math.sin(z * 85 + x * 55 + y * 9)) + 0.08 * hash(Math.round(x * 60), Math.round(y * 45), Math.round(z * 60)));
+  return E.v.head === 'monkey' ? furStreaks : null;
 }
 
 /** The dhal: a round shield of hide in the team's color, a boss of gold with a ring of studs. */
