@@ -17,14 +17,14 @@ import { BEAST_HEADS } from './rich-heads.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
 const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent']);
-const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms']);
+const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring']);
 
 /**
  * The pantheons whose units are drawn with the rich characters in play. The Norse are the
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
@@ -46,8 +46,11 @@ function finishPiece(b) {
   return g;
 }
 
-/** A weapon / tool in the hand: built in the arm frame like the low-poly arm does, then moved into the hand bone's frame. */
-function heldPiece(ctx, P, side, item, sizeK = 1) {
+/**
+ * A weapon / tool in the hand: built in the arm frame like the low-poly arm does, then moved into the hand bone's frame.
+ * `style` (from the pantheon outfit's `gear(ctx, item)`) adds options to the builder: an iron club, a feather fan.
+ */
+function heldPiece(ctx, P, side, item, sizeK = 1, style = null) {
   const { pal } = ctx;
   const b = new PartBuilder();
   const elbowY = -P.upper;
@@ -62,7 +65,7 @@ function heldPiece(ctx, P, side, item, sizeK = 1) {
   const built = item.kind === 'offhand' ? RICH_OFFHANDS.has(id) : (item.kind === 'weapon' || item.kind === 'bow') && (RICH_WEAPONS.has(id) || RICH_ARMS.has(id));
   if (built) {
     const kit = new MeshKit(null, { sides: 10 });
-    const opts = { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null };
+    const opts = { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null, ...style };
     if (RICH_WEAPONS.has(id)) richWeapon(kit, pal, id, size, opts);
     else richArm(kit, pal, id, size, opts);
     return finishGear(kit, handFrame(P, side, grip));
@@ -111,11 +114,13 @@ export function buildRichTemplate(unitType, detail = 1) {
     attach: [], // rigid pieces the layers add (flames, wings ...), riding bones
   };
 
-  // a pantheon's outfit may paint the bare skin itself (bandage on a mummy) before anything is built on it
+  // a pantheon's outfit may recolor the palette (the people's black hair) and paint the bare skin itself
+  // (bandage on a mummy) before anything is built on it
   const outfit = outfitFor(E.pantheon);
+  if (outfit.palette) E.pal = outfit.palette(E.pal, ctx) || E.pal;
   if (outfit.skinPaint) E.skinPaint = outfit.skinPaint(E) || E.skinPaint;
-  addHeadAndNeck(kit, D, pal, ctx, bind, E.skinPaint);
-  addHands(kit, D, pal, bind, E.skin, E.skinPaint);
+  addHeadAndNeck(kit, D, E.pal, ctx, bind, E.skinPaint);
+  addHands(kit, D, E.pal, bind, E.skin, E.skinPaint);
   for (const layer of LAYERS) outfit[layer](E);
 
   const geo = kit.build({ ground: 1 });
@@ -125,12 +130,13 @@ export function buildRichTemplate(unitType, detail = 1) {
   const attach = [...E.attach];
   if (wings) attach.push(...wingPieces(ctx, D, spec, wings));
   const P = D;
-  const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right) : null;
+  const styleOf = (item) => (outfit.gear ? outfit.gear(ctx, item) : null);
+  const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right)) : null;
   if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece });
   if (items.left.kind === 'offhand' && items.left.id === 'shield') {
     attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, outfit.shield || {}), shield: true });
   } else if (items.left.kind !== 'none') {
-    const left = heldPiece(ctx, P, -1, items.left);
+    const left = heldPiece(ctx, P, -1, items.left, 1, styleOf(items.left));
     if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left });
   }
   const rig = {

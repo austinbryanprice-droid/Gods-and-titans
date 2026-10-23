@@ -3,8 +3,9 @@
 // scepters, scythes ...). Same grip frame as rich-gear.js (origin = palm, +Y along the weapon,
 // blade width along X, thickness along Z). Anything not built here keeps its low-poly model.
 import { ps } from './rich-kit.js';
-import { shadeC, mixC, tintC } from './unit-geo.js';
+import { shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { grip, grain, sstep } from './rich-gear.js';
+import { featherFan } from './rich-feathers.js';
 import { mul, lerp, tint } from './rich-paint.js';
 
 const PI = Math.PI;
@@ -296,17 +297,133 @@ function flame(kit, pal, s) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Japanese gear: the fans, the mirror, the jewel, the drumstick
+// ---------------------------------------------------------------------------
+
+/** A handle for a fan: a slim turned stick from below the palm to the pivot, a gold rivet at the pivot. */
+function fanHandle(kit, pal, s, pivotY) {
+  kit.loft([ps(0, -0.05 * s, 0, 0.0155 * s), ps(0, (pivotY - 0.04) * s, 0, 0.0135 * s), ps(0, pivotY * s, 0, 0.0115 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 6, start: 'round', end: null, capDepth: 0.008 * s, color: pal.woodDark, mat: 'wood',
+  });
+  kit.loft([ps(0, pivotY * s, -0.012 * s, 0.011 * s), ps(0, pivotY * s, 0.012 * s, 0.011 * s)], { ref: [1, 0, 0], sides: 8, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * s, color: pal.accentMetal, mat: 'gold' });
+}
+
+/**
+ * A folding fan (ogi), open: the paper face between two broad outer ribs with thin ribs fanning from a
+ * pivot, a sun disc painted on it in the unit's second color (a priest's). Lies in the grip's X-Y plane.
+ */
+function ogi(kit, pal, s) {
+  const pivotY = 0.1;
+  const R = 0.28 * s;
+  const span = 0.97;
+  const paper = withMat(mixC(pal.primary, '#fff8e8', 0.45), 'cloth');
+  const at = (th, r) => [Math.sin(th) * r, pivotY * s + Math.cos(th) * r];
+  fanHandle(kit, pal, s, pivotY);
+  const outline = [];
+  const n = 10;
+  for (let i = 0; i <= n; i++) outline.push(at(-span + (i / n) * 2 * span, R));
+  for (let i = n; i >= 0; i--) outline.push(at(-span + (i / n) * 2 * span, R * 0.16));
+  kit.slab(outline, { depth: 0.009 * s, bevel: 0.0025 * s, color: paper, mat: 'cloth', paint: (o, x, y, z, u, a) => mul(o, 0.92 + 0.1 * Math.abs(Math.sin(u * 22))) });
+  // the sun disc, on both faces
+  const [dx, dy] = at(0, R * 0.58);
+  kit.loft([ps(dx, dy, -0.0058 * s, R * 0.22, R * 0.22), ps(dx, dy, 0.0058 * s, R * 0.22, R * 0.22)], { ref: [1, 0, 0], sides: 16, start: 'flat', end: 'flat', color: pal.secondary, mat: 'lacquer' });
+  // ribs: two broad outer ones (gold-edged) and thin ones between
+  const rib = (th, rx, rz, color, mat) => {
+    const [x0, y0] = at(th, R * 0.1);
+    const [x1, y1] = at(th, R * 1.0);
+    kit.loft([ps(x0, y0, 0, rx, rz), ps(x1, y1, 0, rx * 0.9, rz * 0.9)], { ref: [0, 0, 1], sides: 4, start: 'round', end: 'round', capRings: 1, capDepth: rz, color, mat });
+  };
+  for (const sg of [-1, 1]) rib(sg * span, 0.0075 * s, 0.0085 * s, pal.accentMetal, 'gold');
+  for (const f of [-0.6, -0.3, 0, 0.3, 0.6]) rib(f * span, 0.0058 * s, 0.0032 * s, shadeC(pal.woodDark, 1.2), 'wood');
+}
+
+/**
+ * A hauchiwa: the tengu's great fan of feathers, a fan of dark leaf-shaped vanes from a short handle,
+ * tipped in the unit's pale color, a cord of red at the pivot. Lies in the grip's X-Y plane.
+ */
+function hauchiwa(kit, pal, s) {
+  const pivotY = 0.08;
+  fanHandle(kit, pal, s, pivotY);
+  const dark = withMat(mixC(pal.secondary, '#1a1a22', 0.35), 'feather');
+  const tip = mixC(pal.primary, '#ffffff', 0.2);
+  featherFan(kit, [0, pivotY * s, 0], [0, 1, 0], [0, 0, 1], -1.12, 1.12, 7, (k) => (0.36 - 0.07 * Math.abs(k - 0.5) * 2) * s, 0.055 * s, (i, k) => ({
+    color: shadeC(dark, 0.94 + 0.12 * (i % 2)), tip, mat: 'feather', cup: 0.1, rows: 4, thick: 0.004 * s, shape: 0.5,
+  }));
+  kit.loft([ps(0, (pivotY + 0.03) * s, 0, 0.014 * s, 0.03 * s), ps(0, (pivotY + 0.06) * s, 0, 0.011 * s, 0.026 * s)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: pal.accent, mat: 'cloth' });
+}
+
+/** The weapon fan of a unit: a priest's folding fan, or (opts.fan 'hauchiwa') the tengu's feather fan. */
+function fan(kit, pal, s, { fan: style = 'ogi' } = {}) {
+  if (style === 'hauchiwa') hauchiwa(kit, pal, s);
+  else ogi(kit, pal, s);
+}
+
+/**
+ * The sacred mirror: a round (eight-sided) bronze disc in a gold rim on a lacquered handle, its face a
+ * glowing silver the goddess holds up to the light, the back a gold boss. The face looks along the grip's +X.
+ */
+function mirror(kit, pal, s) {
+  const gold = pal.accentMetal;
+  const R = 0.118 * s;
+  const cy = 0.27 * s;
+  grip(kit, -0.07 * s, 0.14 * s, 0.0195 * s, shadeC(pal.secondary, 0.9), 4);
+  kit.loft(along([[0.13, 0.021], [0.16, 0.026], [0.19, 0.02], [0.225, 0.014]], s), { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: null, color: gold, mat: 'gold' });
+  // the rim, a rolled band round the disc
+  kit.loft([ps(-0.014 * s, cy, 0, R * 1.1, R * 1.1), ps(0.016 * s, cy, 0, R * 1.1, R * 1.1)], { ref: [0, 1, 0], sides: 8, start: null, end: null, color: gold, mat: 'gold', glow: 0.12 });
+  // the face: glowing, a little inside the rim
+  kit.loft([ps(0.008 * s, cy, 0, R * 0.96, R * 0.96), ps(0.019 * s, cy, 0, R * 0.96, R * 0.96)], {
+    ref: [0, 1, 0], sides: 8, start: 'flat', end: 'flat', color: tintC(pal.glow, 0.55), mat: 'gem', glow: 1,
+    paint: (o, x, y, z, u, a) => mul(o, 0.94 + 0.12 * Math.abs(Math.cos(a * TAU * 4))),
+  });
+  // the back: a boss and a ring of bosses
+  kit.loft([ps(-0.012 * s, cy, 0, R * 0.9, R * 0.9), ps(-0.02 * s, cy, 0, R * 0.7, R * 0.7), ps(-0.026 * s, cy, 0, R * 0.2, R * 0.2)], {
+    ref: [0, 1, 0], sides: 8, start: null, end: 'round', capRings: 1, capDepth: 0.006 * s, color: shadeC(gold, 0.88), mat: 'gold',
+  });
+}
+
+/**
+ * A jewel (hoju): a pointed, drop-shaped gem glowing in a cup of gold petals, the flame of its
+ * point licking up, held over the palm (the offhand of the rice goddess).
+ */
+function jewel(kit, pal, s) {
+  const gold = pal.accentMetal;
+  const glow = tintC(pal.glow, 0.3);
+  kit.loft(along([[0.03, 0.016], [0.06, 0.044], [0.095, 0.052], [0.115, 0.034]], s), { ref: [1, 0, 0], rings: 6, sides: 10, start: 'round', end: null, capDepth: 0.01 * s, color: gold, mat: 'gold',
+    warp: (p, a, u) => { const k = 0.01 * s * Math.sin(a * 5) * u; p[0] += Math.cos(a) * k; p[2] += Math.sin(a) * k; } });
+  kit.loft(along([[0.1, 0.012], [0.14, 0.048], [0.195, 0.062], [0.255, 0.046], [0.31, 0.018], [0.36, 0.0025]], s), {
+    ref: [1, 0, 0], rings: 9, sides: 12, start: 'round', end: 'round', capDepth: [0.01 * s, 0.01 * s], color: glow, mat: 'gem', glow: 1,
+    paint: (o, x, y, z, u) => mul(o, 0.86 + 0.3 * Math.sin(u * PI)),
+  });
+}
+
+/** A drumstick (bachi): a straight turned stick of dark wood, the end that strikes ringed in gold and charged with a glow (the thunder god's). */
+function bachi(kit, pal, s) {
+  kit.loft(along([[-0.12, 0.0165], [0.0, 0.0185], [0.16, 0.0205], [0.34, 0.024], [0.4, 0.0225]], s), {
+    ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.009 * s, color: mixC(pal.woodDark, '#2a1a10', 0.3), mat: 'wood', paint: grain(0.08),
+  });
+  grip(kit, -0.08 * s, 0.1 * s, 0.0225 * s, pal.leather, 4);
+  kit.loft(along([[0.4, 0.0235], [0.425, 0.03], [0.45, 0.0235]], s), { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: null, color: pal.accentMetal, mat: 'gold' });
+  kit.loft(along([[0.44, 0.02], [0.475, 0.036], [0.52, 0.034], [0.55, 0.012], [0.562, 0.003]], s), {
+    ref: [1, 0, 0], rings: 6, sides: 10, start: null, end: 'round', capDepth: 0.01 * s, color: tintC(pal.glow, 0.3), mat: 'gem', glow: 0.95,
+  });
+}
+
 /** The weapons built here, by the visual's weapon id. */
-const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.82, opts), mace, discus };
+const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.82, opts), mace, discus, fan, drum: bachi };
 export const RICH_ARMS = new Set(Object.keys(ARMS));
 
 /** The offhand items built here, by the visual's offhand id (lotus and flame are only carried by the extra hands of many-armed gods). */
-const OFFHANDS = { shell: conch, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.7, opts), drum, lotus, flame };
+const OFFHANDS = { shell: conch, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.7, opts), drum, lotus, flame, mirror, orb: jewel };
 export const RICH_OFFHANDS = new Set(Object.keys(OFFHANDS));
 
-/** Add weapon or offhand item `id` (one of RICH_ARMS, RICH_OFFHANDS) to `kit` in the grip frame; opts as for richWeapon. Returns whether it was built. */
+/**
+ * Add weapon or offhand item `id` (one of RICH_ARMS, RICH_OFFHANDS) to `kit` in the grip frame; opts as for richWeapon.
+ * The drum is a damaru (the offhand), or with opts.drum 'stick' a drumstick (the weapon): the thunder god beats with both hands.
+ * Returns whether it was built.
+ */
 export function richArm(kit, pal, id, s, opts = {}) {
-  const make = ARMS[id] || OFFHANDS[id];
+  const make = id === 'drum' ? (opts.drum === 'stick' ? bachi : drum) : ARMS[id] || OFFHANDS[id];
   if (!make) return false;
   make(kit, pal, s, opts);
   return true;

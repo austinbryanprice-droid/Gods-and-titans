@@ -110,6 +110,119 @@ export function addPrabhavali(E, { size = 1, tongues = 7 } = {}) {
   return { name: 'prabhavali', bone: B.head, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])), flicker: true };
 }
 
+/** A little ball (a pearl, a pompom) at `p`: a short loft with round ends. */
+function ball(kit, p, r, opts) {
+  kit.loft([ps(p[0] - r * 0.1, p[1], p[2], r), ps(p[0] + r * 0.1, p[1], p[2], r)], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: r, ...opts });
+}
+
+/**
+ * The ring standing behind a god's back (the aura_ring extra), upright in the plane across the
+ * shoulders, riding the chest. kind 'drums': Raijin's thunder ring, eight taiko (a barrel with a pale head
+ * and a red boss, a gold band) strung on a rope of gold. kind 'rays': the sun's, a thin glowing ring
+ * with eight pearls and a corona of long and short rays.
+ */
+export function addAuraRing(E, { kind = 'rays', color = null } = {}) {
+  const { kit, D, pal } = E;
+  const bind = E.bind.chest;
+  const K = D.k;
+  const drums = kind === 'drums';
+  const R = D.chestW * (drums ? 1.12 : 1.2);
+  const c = [-D.chestD * 0.5 - (drums ? 0.19 : 0.15), D.shoulderY + (drums ? 0.09 : 0.14), 0];
+  const at = (a, r = R) => [c[0], c[1] + Math.sin(a) * r, Math.cos(a) * r];
+  const gold = pal.accentMetal;
+  const glow = tintC(color || pal.glow, 0.25);
+  // the ring itself (a closed loop of overlapping ends)
+  const N = 26;
+  const loop = [];
+  for (let i = 0; i <= N; i++) {
+    const p = at((i / N) * TAU);
+    loop.push(ps(p[0], p[1], p[2], drums ? 0.011 * K : 0.007 * K, drums ? 0.011 * K : 0.016 * K));
+  }
+  kit.loft(loop, { ref: [1, 0, 0], sides: drums ? 6 : 5, start: null, end: null, color: drums ? mixC(gold, '#7a5a1e', 0.35) : glow, mat: drums ? 'gold' : 'gem', glow: drums ? 0.1 : 0.85, bind });
+  if (drums) {
+    const dr = R * 0.175; // a drum's radius
+    const w = dr * 0.82; // half its length
+    const head = mixC(pal.skin, '#fff6e2', 0.7);
+    const boss = '#c8342a';
+    for (let i = 0; i < 8; i++) {
+      const p = at(((i + 0.5) / 8) * TAU);
+      const st = [-1, -0.78, 0, 0.78, 1].map((f, k) => ps(p[0] + f * w, p[1], p[2], dr * [0.8, 0.94, 1, 0.94, 0.8][k], dr * [0.8, 0.94, 1, 0.94, 0.8][k]));
+      kit.loft(st, {
+        ref: [0, 1, 0], sides: 10, start: 'flat', end: 'flat', color: pal.primary, mat: 'lacquer', bind,
+        paint: (o, x, y, z, u) => {
+          const e = Math.abs(u - 0.5) * 2; // 1 at a head, 0 at the belly
+          tint(o, head, clamp((e - 0.9) / 0.1) * 0.95);
+          if (!o.team) mul(o, 0.92 + 0.12 * (1 - e));
+        },
+      });
+      // a gold band round the belly, a red boss on each head
+      kit.loft([ps(p[0] - 0.012, p[1], p[2], dr * 1.02, dr * 1.02), ps(p[0] + 0.012, p[1], p[2], dr * 1.02, dr * 1.02)], { ref: [0, 1, 0], sides: 10, start: null, end: null, color: gold, mat: 'gold', bind });
+      for (const s of [1, -1]) {
+        kit.loft([ps(p[0] + s * (w + 0.001), p[1], p[2], dr * 0.5, dr * 0.5), ps(p[0] + s * (w + 0.007), p[1], p[2], dr * 0.46, dr * 0.46)], { ref: [0, 1, 0], sides: 8, start: 'flat', end: 'flat', color: boss, mat: 'lacquer', bind });
+      }
+    }
+  } else {
+    // eight pearls on the ring, rays between them
+    for (let i = 0; i < 8; i++) ball(kit, at((i / 8) * TAU), 0.024 * K, { color: tintC(color || pal.glow, 0.4), mat: 'gem', glow: 1, bind });
+    const rays = 16;
+    for (let i = 0; i < rays; i++) {
+      const a = ((i + 0.5) / rays) * TAU;
+      const L = i % 2 ? 0.14 : 0.26;
+      const q = (r) => at(a, r);
+      const p0 = q(R * 1.03);
+      const p1 = q(R * 1.03 + L * 0.45 * K);
+      const p2 = q(R * 1.03 + L * K);
+      kit.loft([ps(p0[0], p0[1], p0[2], 0.006, 0.02 * K), ps(p1[0], p1[1], p1[2], 0.005, 0.012 * K), ps(p2[0], p2[1], p2[2], 0.001, 0.0015)],
+        { ref: [1, 0, 0], sides: 4, start: null, end: 'round', capRings: 1, capDepth: 0.004, color: mixC(gold, '#fff0b0', 0.4), mat: 'gem', glow: 0.8, bind });
+    }
+  }
+}
+
+/**
+ * The sashimono: a banner on a pole at the small of the back, riding the chest. A pole with a gold
+ * finial and a socket, a crossbar, and a flag hanging from it with a ripple in it (a stripe at top and
+ * foot, a gold mon in the middle). opts: flag and inner (the two faces' colors, the team's by default),
+ * stripe, mon.
+ */
+export function addSashimono(E, { flag, inner = null, stripe = null, mon = null } = {}) {
+  const { kit, D, pal } = E;
+  const bind = E.bind.chest;
+  const x = -D.chestD * 0.5 - 0.075;
+  const y0 = D.shoulderY - 0.26;
+  const yTop = D.shoulderY + 0.9;
+  const gold = pal.accentMetal;
+  const wood = pal.woodDark || pal.wood;
+  kit.loft([vs(y0, 0.014, 0.014, x, 0), vs(yTop, 0.011, 0.011, x, 0)], { sides: 8, rings: 4, start: null, end: null, color: wood, mat: 'wood', bind });
+  // the socket on the back, the finial
+  kit.loft([vs(y0 + 0.02, 0.026, 0.026, x, 0), vs(y0 + 0.07, 0.02, 0.02, x, 0)], { sides: 10, start: null, end: null, color: gold, mat: 'gold', bind });
+  kit.loft([ps(x, yTop - 0.004, 0, 0.012, 0.012), ps(x, yTop + 0.034, 0, 0.018, 0.018), ps(x, yTop + 0.07, 0, 0.004, 0.004)], { ref: [1, 0, 0], sides: 8, start: null, end: 'round', capRings: 2, capDepth: 0.01, color: gold, mat: 'gold', bind });
+  // the crossbar the flag hangs from, a knob at each end
+  const fw = 0.145; // half the flag's width
+  const fy = yTop - 0.09;
+  kit.loft([ps(x, fy, -fw - 0.03, 0.008, 0.008), ps(x, fy, fw + 0.03, 0.008, 0.008)], { ref: [1, 0, 0], sides: 6, start: 'round', end: 'round', capRings: 2, capDepth: 0.01, color: wood, mat: 'wood', bind });
+  for (const s of [1, -1]) ball(kit, [x, fy, s * (fw + 0.036)], 0.013, { color: gold, mat: 'gold', bind });
+  // the flag hangs from the bar, a gentle ripple in x
+  const fh = 0.46;
+  const ripple = (u, v) => -0.012 * Math.sin(v * 4.5 + 0.8) * v - 0.004 * Math.sin(u * 3.1 + v * 2) - 0.014 * v * v;
+  const fn = (u, v, out) => {
+    out[0] = x - 0.02 + ripple(u, v);
+    out[1] = fy - 0.012 - v * fh;
+    out[2] = (u - 0.5) * 2 * fw * (1 - 0.04 * v);
+  };
+  const band = stripe || gold;
+  const inside = inner || (flag.team ? { team: flag.team * 0.8, mat: flag.mat } : shadeC(flag, 0.8));
+  const part = (v0, v1, nv, color, back) => kit.sheet(6, nv, (u, v, out) => fn(u, v0 + (v1 - v0) * v, out), { thick: 0.006, color, inner: back, bind });
+  part(0, 0.07, 1, band, band);
+  part(0.07, 0.93, 7, flag, inside);
+  part(0.93, 1, 1, band, band);
+  // the mon: a disc through the middle of the flag, showing on both faces
+  const mr = fh * 0.17;
+  const mx = x - 0.02 + ripple(0.5, 0.5);
+  kit.loft([ps(mx - 0.011, fy - 0.012 - fh * 0.5, 0, mr, mr), ps(mx + 0.011, fy - 0.012 - fh * 0.5, 0, mr, mr)], {
+    ref: [0, 1, 0], sides: 14, start: 'flat', end: 'flat', color: mon || gold, mat: 'gold', bind,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // wings (rigid pieces on four extra bones)
 // ---------------------------------------------------------------------------

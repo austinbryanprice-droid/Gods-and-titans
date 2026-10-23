@@ -1,15 +1,19 @@
 // Head dressing for the rich humanoids: hair, beards, hoods, helmets and horns, lofted over the
 // skull the body builds (rich-body.js addHeadAndNeck) and weighted to the head bone. The pantheon
 // outfits (rich-outfits.js) choose among them.
+import * as THREE from 'three';
 import { shadeC, tintC } from './unit-geo.js';
 import { vs, ps, smoothstep } from './rich-kit.js';
 import { torsoRing } from './rich-body.js';
-import { clamp, lerp, gradY, paints, recolor, mul } from './rich-paint.js';
+import { clamp, lerp, gradY, paints, recolor, mul, hash } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
 const wrap = (a) => (a > PI ? a - TAU : a);
+
+/** A shade of a color that stays a team color when it is one. */
+const shade = (c, k) => (c && c.team ? { team: c.team * k, mat: c.mat } : shadeC(c, k));
 
 export function addHairCap(kit, D, pal, bind) {
   const hs = D.hs;
@@ -500,9 +504,10 @@ export function addDoubleCrown(kit, D, pal, bind, { white, red, metal } = {}) {
 
 /**
  * A sun disk standing over the head: a glowing disc in a gold rim, cradled on the crown, with the
- * rearing cobra at the brow. opts: disk (the glowing face), metal.
+ * rearing cobra at the brow. opts: disk (the glowing face), metal, uraeus (false: no cobra), rays (a ring of
+ * that many spikes of gold round the rim, alternately long and short).
  */
-export function addSunDisk(kit, D, pal, bind, { disk, metal, size = 1 } = {}) {
+export function addSunDisk(kit, D, pal, bind, { disk, metal, size = 1, uraeus = true, rays = 0 } = {}) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
@@ -521,7 +526,16 @@ export function addSunDisk(kit, D, pal, bind, { disk, metal, size = 1 } = {}) {
     ring.push(ps(cx, yc - Math.cos(t) * R * 1.02, Math.sin(t) * R * 1.02, 0.0085 * hs, 0.0085 * hs));
   }
   kit.loft(ring, { sides: 8, start: 'round', end: 'round', capDepth: 0.006 * hs, color: metal, mat: 'gold', glow: 0.25, bind: bind.head });
-  addUraeus(kit, D, bind, metal, { y: 0.048, size: 1.15 });
+  for (let i = 0; i < rays; i++) {
+    const t = (i / rays) * TAU;
+    const c = Math.cos(t);
+    const sn = Math.sin(t);
+    const r0 = R * 1.08;
+    const r1 = R * (i % 2 ? 1.32 : 1.55);
+    kit.loft([ps(cx, yc + sn * r0, c * r0, 0.007 * hs, 0.013 * hs), ps(cx, yc + sn * r1, c * r1, 0.002 * hs, 0.0015 * hs)],
+      { ref: [1, 0, 0], sides: 4, start: null, end: 'round', capRings: 1, capDepth: 0.004 * hs, color: metal, mat: 'gold', glow: 0.3, bind: bind.head });
+  }
+  if (uraeus) addUraeus(kit, D, bind, metal, { y: 0.048, size: 1.15 });
 }
 
 /**
@@ -682,4 +696,254 @@ export function addKirita(kit, D, pal, bind, { metal, trim, gem, tiers = 3, heig
   const fx = X(h + 0.036 * (height));
   kit.loft([ps(fx, top - 0.004 * hs, 0, 0.011 * hs), ps(fx, top + 0.014 * hs, 0, 0.0125 * hs), ps(fx, top + 0.04 * hs, 0, 0.0035 * hs)],
     { ref: [1, 0, 0], rings: 3, sides: 6, start: null, end: 'round', capRings: 2, capDepth: 0.008 * hs, color: trim, mat: 'gold', glow: 0.15, bind: bind.head });
+}
+
+// ---------------------------------------------------------------------------
+// Japanese headgear: the topknot, the war hat, the kabuto, the priest's cap, the tengu's box, the headband
+// ---------------------------------------------------------------------------
+
+/**
+ * Wild hair: spikes of it swept up and back from the crown, round the back and sides of the head (a thunder
+ * god's, an ogre's), each a tapering curl. opts: n, len (scale of the length), lift (how upright), color
+ * (default the hair's).
+ */
+export function addHairSpikes(kit, D, pal, bind, { n = 9, len = 1, lift = 1, color = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX - 0.006 * hs;
+  const hy = D.headCY;
+  const col = color || pal.hair;
+  for (let i = 0; i < n; i++) {
+    const t = n > 1 ? i / (n - 1) : 0.5;
+    const th = lerp(1.0, TAU - 1.0, t); // from one temple over the back to the other, the face left clear
+    const c = Math.cos(th);
+    const sn = Math.sin(th);
+    const wob = 0.8 + 0.4 * hash(i, 7, 3);
+    const base = [hx + c * 0.062 * hs, hy + (0.074 - 0.018 * Math.abs(c + 0.2)) * hs, sn * 0.058 * hs];
+    const d = [c * 0.5 - 0.45, 1.1 * lift, sn * 0.62];
+    const dl = Math.hypot(...d);
+    const L = 0.19 * hs * len * wob;
+    const stations = [];
+    for (let k = 0; k <= 3; k++) {
+      const u = k / 3;
+      const r = 0.026 * hs * (1 - u) ** 0.85 + 0.002;
+      stations.push(ps(base[0] + (d[0] / dl) * L * u - 0.3 * L * u * u, base[1] + (d[1] / dl) * L * u, base[2] + (d[2] / dl) * L * u, r, r * 0.9));
+    }
+    kit.loft(stations, { ref: [1, 0, 0], rings: 4, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: [0.012 * hs, 0.01 * hs], color: col, mat: 'hair', bind: bind.head, paint: (o, x, y, z, u) => mul(o, 0.88 + 0.2 * u) });
+  }
+}
+
+/**
+ * A chonmage: the hair drawn up and tied at the crown, the tail folded forward over the top of the head
+ * (a samurai's). opts: band (the cord at the tie), size. The hair cap under it is the outfit's to add.
+ */
+export function addChonmage(kit, D, pal, bind, { band = null, size = 1 } = {}) {
+  const hs = D.hs;
+  const k = hs * size;
+  const x0 = D.headX - 0.02 * hs;
+  const y0 = D.headCY + 0.1 * hs;
+  // w: the width across (Z), t: the thickness in the plane of the curve
+  const at = (dx, dy, w, t) => ps(x0 + dx * k, y0 + dy * k, 0, w * k, t * k);
+  kit.loft([at(0, -0.014, 0.034, 0.032), at(-0.002, 0.012, 0.03, 0.028), at(0.004, 0.032, 0.027, 0.024), at(0.024, 0.047, 0.026, 0.019), at(0.048, 0.05, 0.025, 0.015), at(0.07, 0.042, 0.02, 0.011)], {
+    ref: [0, 0, 1], rings: 9, sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: [0.012 * k, 0.012 * k], color: pal.hair, mat: 'hair', bind: bind.head,
+    paint: (o, x, y, z, u) => mul(o, 0.86 + 0.24 * Math.abs(Math.sin(z * 150 / (hs || 1))) + 0.1 * u),
+  });
+  if (band) kit.loft([vs(y0 - 0.006 * k, 0.034 * k, 0.034 * k, x0), vs(y0 + 0.016 * k, 0.03 * k, 0.03 * k, x0)], { sides: 12, start: null, end: null, color: band, mat: 'trim', bind: bind.head });
+}
+
+/**
+ * A jingasa: the foot soldier's lacquered war hat, a low cone with a shallow curve to its sides and a wide
+ * brim at the brow, a ring of metal at the rim and a badge on the front. opts: color, rim, crest (the badge's
+ * color), size.
+ */
+export function addJingasa(kit, D, pal, bind, { color, rim, crest = null, size = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const R = 0.25 * hs * size;
+  const y0 = hy + 0.036 * hs;
+  const H = 0.19 * hs;
+  const cx = hx - 0.004 * hs;
+  const n = 6;
+  const prof = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const r = R * (1 - t) ** 1.25 + 0.004 * hs;
+    prof.push(vs(y0 + t * H + 0.014 * hs * (1 - t) ** 2, r * 0.98, r, cx));
+  }
+  kit.loft(prof, { rings: 6, sides: 22, start: null, end: 'round', capRings: 2, capDepth: 0.01 * hs, color, mat: 'lacquer', bind: bind.head, paint: gradY(y0, y0 + H, 0.82, 1.14) });
+  // the rim, a rolled band of metal, and a gold knob at the apex
+  kit.loft([vs(y0 - 0.006 * hs, R * 0.985, R * 1.003, cx), vs(y0 + 0.012 * hs, R * 0.96, R * 0.975, cx)], { sides: 22, start: null, end: null, color: rim, mat: 'gold', bind: bind.head });
+  kit.loft([vs(y0 + H - 0.004 * hs, 0.012 * hs, 0.012 * hs, cx), vs(y0 + H + 0.016 * hs, 0.011 * hs, 0.011 * hs, cx), vs(y0 + H + 0.028 * hs, 0.003 * hs, 0.003 * hs, cx)],
+    { rings: 3, sides: 6, start: null, end: 'round', capDepth: 0.004 * hs, color: rim, mat: 'gold', bind: bind.head });
+  if (crest) {
+    // a round badge on the front slope, facing out along it
+    const t = 0.3;
+    const r = R * (1 - t) ** 1.25;
+    const al = Math.atan2(R, H);
+    const fx = cx + r * 0.99;
+    const fy = y0 + t * H + 0.014 * hs * (1 - t) ** 2;
+    const d = [Math.sin(al), Math.cos(al)];
+    kit.loft([ps(fx - d[0] * 0.003 * hs, fy - d[1] * 0.003 * hs, 0, 0.034 * hs, 0.034 * hs), ps(fx + d[0] * 0.006 * hs, fy + d[1] * 0.006 * hs, 0, 0.034 * hs, 0.034 * hs)],
+      { ref: [0, 0, 1], sides: 12, start: 'flat', end: 'flat', color: crest, mat: 'painted', bind: bind.head });
+  }
+}
+
+/**
+ * A kabuto, the warrior's helmet: a ribbed iron bowl with a gold ring at the crown, a brow band, a small peak,
+ * a neck guard of flared lames laced in the unit's color (open at the face, its corners turned back), and the
+ * kuwagata: two gold horns springing from the brow in a V. opts: steel (the plate), trim (gold), lace, horns
+ * (false: none), tall (scale of the horns).
+ */
+export function addKabuto(kit, D, pal, bind, { steel, trim, lace, horns = true, tall = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.012 * hs;
+  const dome = [
+    vs(hy + 0.0 * hs, 0.098 * hs + g, 0.087 * hs + g, hx),
+    vs(hy + 0.035 * hs, 0.103 * hs + g, 0.091 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.072 * hs, 0.097 * hs + g, 0.086 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.103 * hs, 0.074 * hs + g, 0.068 * hs + g, hx - 0.006 * hs),
+    vs(hy + 0.122 * hs, 0.04 * hs + g, 0.037 * hs + g, hx - 0.007 * hs),
+  ];
+  // the bowl: ribbed, the ribs running up to the ring at the crown
+  kit.loft(dome, {
+    rings: 6, sides: 20, start: null, end: 'round', capRings: 2, capDepth: 0.014 * hs, color: steel, mat: 'iron', bind: bind.head,
+    warp: (p, a, u) => {
+      const k = 0.0055 * hs * Math.sin(a * 10) * smoothstep(0.05, 0.4, u);
+      p[0] += Math.cos(a) * k;
+      p[2] += Math.sin(a) * k;
+    },
+    paint: gradY(hy, hy + 0.13 * hs, 0.8, 1.18),
+  });
+  kit.loft([vs(hy + 0.12 * hs, 0.026 * hs, 0.024 * hs, hx - 0.007 * hs), vs(hy + 0.134 * hs, 0.03 * hs, 0.028 * hs, hx - 0.007 * hs), vs(hy + 0.146 * hs, 0.012 * hs, 0.011 * hs, hx - 0.007 * hs)],
+    { rings: 3, sides: 10, start: null, end: 'round', capDepth: 0.006 * hs, color: trim, mat: 'gold', bind: bind.head });
+  // the brow band, gold
+  kit.loft([vs(hy + 0.016 * hs, 0.099 * hs + g + 0.004, 0.088 * hs + g + 0.004, hx), vs(hy + 0.05 * hs, 0.104 * hs + g + 0.004, 0.092 * hs + g + 0.004, hx - 0.002 * hs)],
+    { sides: 20, start: null, end: null, color: trim, mat: 'gold', bind: bind.head });
+  // the peak over the brow
+  kit.sheet(6, 2, (u, v, out) => {
+    const th = (u - 0.5) * 2.3;
+    const r = 1 + 0.5 * v;
+    out[0] = hx + Math.cos(th) * (0.104 * hs + g + 0.005) * r;
+    out[1] = hy + (0.054 + 0.012 * v) * hs;
+    out[2] = Math.sin(th) * (0.092 * hs + g + 0.005) * (1 + 0.2 * v);
+  }, { thick: 0.006 * hs, color: shade(steel, 0.9), inner: shade(steel, 0.7), bind: bind.head, flip: -1 });
+  // the neck guard: stacked lames, each wider than the last, the lowest edge of each laced; the front of
+  // every ring is drawn up to the brow so the face stays open
+  const wrap2 = (a) => (a > PI ? a - TAU : a);
+  for (let i = 0; i < 3; i++) {
+    const yt = hy + (0.014 - 0.04 * i) * hs;
+    const flare = 0.016 * i * hs;
+    const rx = 0.106 * hs + g + flare;
+    const rz = 0.095 * hs + g + flare;
+    const cx = hx - (0.004 + 0.012 * i) * hs;
+    kit.loft([vs(yt, rx, rz, cx), vs(yt - 0.046 * hs, rx * 1.1, rz * 1.12, cx - 0.01 * hs)], {
+      rings: 2, sides: 20, start: null, end: null, color: i % 2 ? shade(steel, 0.88) : steel, mat: 'iron', bind: bind.head,
+      warp: (p, a) => { const k = smoothstep(0.95, 1.75, Math.abs(wrap2(a))); p[1] = lerp(hy + 0.012 * hs, p[1], k); },
+      paint: (o, x, y, z, u) => { if (u > 0.66) recolor(o, lace, 0.95); },
+    });
+  }
+  // the turned-back corners at the front of the guard, a small plate each side
+  for (const side of [1, -1]) {
+    kit.sheet(2, 2, (u0, v, out) => {
+      const u = side > 0 ? u0 : 1 - u0; // the outer face looks along u x v: run u the other way on the left
+      out[0] = hx + (0.04 - 0.03 * u + 0.02 * v) * hs;
+      out[1] = hy + (0.012 - 0.06 * v) * hs;
+      out[2] = side * (0.098 + 0.03 * u + 0.012 * v) * hs;
+    }, { thick: 0.006 * hs, color: shade(steel, 0.95), inner: shade(lace, 0.8), bind: bind.head });
+  }
+  if (!horns) return;
+  // the kuwagata: two broad flat horns in a V, gold crescents facing the front, curving up and out
+  const fx = hx + 0.1 * hs;
+  const fy = hy + 0.06 * hs;
+  for (const side of [1, -1]) {
+    const M = new THREE.Matrix4().compose(
+      new THREE.Vector3(fx, fy, side * 0.01 * hs),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(side * 0.58, -side * PI / 2, 0)),
+      new THREE.Vector3(1, 1, 1),
+    );
+    kit.placed(M, (k) => {
+      const t = tall * hs;
+      k.slab([[-0.008, 0.0], [0.026, 0.0], [0.05, 0.045], [0.064, 0.1], [0.062, 0.15], [0.046, 0.195], [0.02, 0.228], [0.004, 0.2], [0.012, 0.15], [0.004, 0.1], [-0.004, 0.05]].map(([x, y]) => [x * hs, y * t]),
+        { depth: 0.011 * hs, bevel: 0.0035 * hs, color: trim, mat: 'gold', bind: bind.head, paint: gradY(0, 0.23 * t, 0.86, 1.1) });
+    });
+  }
+  // the badge between the horns' feet
+  kit.loft([ps(fx - 0.004 * hs, fy + 0.004 * hs, 0, 0.022 * hs, 0.022 * hs), ps(fx + 0.01 * hs, fy + 0.004 * hs, 0, 0.022 * hs, 0.022 * hs)],
+    { ref: [0, 1, 0], sides: 10, start: 'flat', end: 'flat', color: trim, mat: 'gold', glow: 0.15, bind: bind.head });
+}
+
+/**
+ * The priest's cap (eboshi): a tall black lacquered cap standing up from the brow, narrowing, its top leaning
+ * forward, tied under the chin with a cord. opts: color (lacquer), cord.
+ */
+export function addEboshi(kit, D, pal, bind, { color, cord } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.006 * hs;
+  const y0 = hy + 0.05 * hs;
+  const lean = (h) => 0.12 * h * h;
+  kit.loft([
+    vs(y0, 0.1 * hs + g, 0.088 * hs + g, hx - 0.002 * hs),
+    vs(y0 + 0.05 * hs, 0.078 * hs, 0.082 * hs, hx - 0.004 * hs),
+    vs(y0 + 0.11 * hs, 0.05 * hs, 0.076 * hs, hx + lean(0.11) * hs),
+    vs(y0 + 0.17 * hs, 0.04 * hs, 0.07 * hs, hx + lean(0.17) * hs),
+    vs(y0 + 0.215 * hs, 0.036 * hs, 0.056 * hs, hx + lean(0.215) * hs + 0.006 * hs),
+  ], { rings: 8, sides: 18, start: null, end: 'round', capRings: 2, capDepth: 0.018 * hs, color, mat: 'lacquer', bind: bind.head, paint: gradY(y0, y0 + 0.22 * hs, 0.85, 1.25) });
+  // the band at the foot, and the cord that ties it: from the temples down under the chin
+  kit.loft([vs(y0 - 0.003 * hs, 0.1 * hs + g + 0.003, 0.088 * hs + g + 0.003, hx - 0.002 * hs), vs(y0 + 0.02 * hs, 0.1 * hs + g + 0.002, 0.088 * hs + g + 0.002, hx - 0.002 * hs)],
+    { sides: 18, start: null, end: null, color: shade(color, 1.5), mat: 'lacquer', bind: bind.head });
+  if (cord) {
+    for (const side of [1, -1]) {
+      kit.loft([ps(hx - 0.004 * hs, y0 + 0.004 * hs, side * (0.094 * hs + g), 0.005 * hs), ps(hx + 0.01 * hs, hy - 0.04 * hs, side * 0.1 * hs, 0.0045 * hs), ps(hx + 0.052 * hs, hy - 0.098 * hs, side * 0.05 * hs, 0.0045 * hs), ps(hx + 0.06 * hs, hy - 0.112 * hs, side * 0.01 * hs, 0.004 * hs)],
+        { ref: [1, 0, 0], rings: 6, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: cord, mat: 'cloth', bind: bind.head });
+    }
+  }
+}
+
+/**
+ * The tengu's tokin: a small black hexagonal box of lacquer worn on the brow, leaning forward, tied round the head
+ * with a cord that hangs in two tails at the back. opts: color, cord.
+ */
+export function addTokin(kit, D, pal, bind, { color, cord } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const y0 = hy + 0.085 * hs;
+  const fx = hx + 0.062 * hs;
+  const rows = [[0, 0.046, 0.04, 0], [0.01, 0.05, 0.044, 0.002], [0.06, 0.044, 0.038, 0.018], [0.072, 0.034, 0.03, 0.022]];
+  kit.loft(rows.map(([h, rx, rz, dx]) => vs(y0 + h * hs, rx * hs, rz * hs, fx + dx * hs)), { rings: 4, sides: 6, start: 'flat', end: 'flat', color, mat: 'lacquer', bind: bind.head, paint: gradY(y0, y0 + 0.075 * hs, 0.9, 1.2) });
+  const c = cord || color;
+  const rx = 0.1 * hs + 0.011 * hs;
+  const rz = 0.088 * hs + 0.011 * hs;
+  kit.loft([vs(y0 - 0.026 * hs, rx, rz, hx - 0.002 * hs), vs(y0 - 0.014 * hs, rx + 0.001, rz + 0.001, hx - 0.002 * hs)], { sides: 20, start: null, end: null, color: c, mat: 'cloth', bind: bind.head });
+  for (const side of [1, -1]) {
+    kit.loft([ps(hx - 0.1 * hs, y0 - 0.02 * hs, side * 0.008 * hs, 0.005 * hs), ps(hx - 0.118 * hs, y0 - 0.08 * hs, side * 0.02 * hs, 0.0045 * hs), ps(hx - 0.124 * hs, y0 - 0.15 * hs, side * 0.03 * hs, 0.004 * hs)],
+      { ref: [0, 0, 1], rings: 4, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: c, mat: 'cloth', bind: bind.head });
+  }
+}
+
+/**
+ * A headband (hachimaki) round the brow, knotted at the back with two tails hanging. opts: color, tails (false: none).
+ */
+export function addHeadband(kit, D, pal, bind, { color, tails = true } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.004 * hs;
+  const y0 = hy + 0.046 * hs;
+  const rx = 0.1 * hs + g;
+  const rz = 0.088 * hs + g;
+  kit.loft([vs(y0, rx, rz, hx - 0.002 * hs), vs(y0 + 0.016 * hs, rx + 0.001, rz + 0.001, hx - 0.002 * hs), vs(y0 + 0.03 * hs, rx, rz, hx - 0.002 * hs)],
+    { rings: 3, sides: 22, start: null, end: null, color, mat: 'cloth', bind: bind.head });
+  if (!tails) return;
+  for (const [side, drop] of [[1, 0.16], [-1, 0.2]]) {
+    kit.sheet(2, 4, (u, v, out) => {
+      out[0] = hx - rx - 0.004 * hs - 0.03 * hs * v;
+      out[1] = y0 + 0.012 * hs - drop * hs * v;
+      out[2] = side * (0.012 + 0.03 * v) * hs + (0.5 - u) * 0.026 * hs * (1 + v);
+    }, { thick: 0.004 * hs, color, inner: shade(color, 0.85), bind: bind.hair });
+  }
 }
