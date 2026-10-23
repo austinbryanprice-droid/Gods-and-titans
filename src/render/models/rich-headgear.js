@@ -1391,3 +1391,50 @@ export function addTlalocMask(kit, D, pal, bind, { ring, fang, lip = null } = {}
       { ref: [1, 0, 0], rings: 4, sides: 6, start: null, end: 'round', capRings: 1, capDepth: 0.004 * hs, color: fang, mat: 'bone', bind: bind.head });
   }
 }
+
+/**
+ * A stag's antlers, the druid's: on each side a beam that rises from the brow, out and up, curving back in toward its end,
+ * a tine forward at its foot and others forking up from it, the end forked; over a band across the brow. opts: color (the
+ * antler), band (the band's color; none: no band), size (scale of the antlers), tines (how many a side besides the fork, up to 3), mat.
+ */
+export function addAntlers(kit, D, pal, bind, { color, band = null, size = 1, tines = 3, mat = 'bone' } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  if (band) {
+    const g = 0.011 * hs + 0.006 * hs;
+    const y0 = hy + 0.046 * hs;
+    const rx = 0.1 * hs + g;
+    const rz = 0.088 * hs + g;
+    kit.loft([vs(y0, rx, rz, hx - 0.002 * hs), vs(y0 + 0.014 * hs, rx + 0.002, rz + 0.002, hx - 0.002 * hs), vs(y0 + 0.028 * hs, rx, rz, hx - 0.002 * hs)],
+      { rings: 3, sides: 22, start: null, end: null, color: band, mat: 'leather', bind: bind.head });
+  }
+  const beam = [[-0.004, 0.066, 0.056, 0.0158], [-0.012, 0.108, 0.092, 0.0138], [-0.03, 0.165, 0.122, 0.0112], [-0.056, 0.235, 0.132, 0.0088], [-0.076, 0.305, 0.12, 0.0062], [-0.086, 0.35, 0.102, 0.0036]];
+  const list = [
+    { i: 1, d: [0.85, 0.5, 0.15], L: 0.075 }, // the brow tine, forward over the face
+    { i: 2, d: [0.45, 0.85, 0.3], L: 0.085 },
+    { i: 3, d: [0.05, 0.95, 0.35], L: 0.1 },
+  ].slice(0, Math.min(3, tines));
+  list.push({ i: 4, d: [0.3, 1, 0.4], L: 0.075 }); // the fork at the end
+  const wide = Math.sqrt(size);
+  for (const side of [1, -1]) {
+    const pt = ([dx, dy, dz]) => [hx + dx * hs, hy + dy * hs * size, side * dz * hs * wide];
+    kit.loft(beam.map((b) => { const q = pt(b); return ps(q[0], q[1], q[2], b[3] * hs, b[3] * hs); }), {
+      ref: [1, 0, 0], rings: 9, sides: 6, start: 'round', end: 'round', capDepth: [0.012 * hs, 0.004 * hs], color, mat, bind: bind.head, paint: gradY(hy + 0.06 * hs, hy + 0.36 * hs * size, 0.78, 1.08),
+    });
+    for (const t of list) {
+      const b = beam[t.i];
+      const base = pt(b);
+      const d = [t.d[0], t.d[1], t.d[2] * side];
+      const dl = Math.hypot(...d);
+      const L = t.L * hs * size;
+      const st = [];
+      for (let k = 0; k <= 3; k++) {
+        const u = k / 3;
+        const r = b[3] * hs * 0.72 * (1 - u) ** 0.8 + 0.0025 * hs;
+        st.push(ps(base[0] + (d[0] / dl) * L * u, base[1] + (d[1] / dl) * L * u + 0.35 * L * u * u, base[2] + (d[2] / dl) * L * u, r, r));
+      }
+      kit.loft(st, { ref: [1, 0, 0], rings: 4, sides: 5, start: null, end: 'round', capRings: 1, capDepth: 0.006 * hs, color, mat, bind: bind.head, paint: gradY(base[1], base[1] + L, 0.82, 1.1) });
+    }
+  }
+}

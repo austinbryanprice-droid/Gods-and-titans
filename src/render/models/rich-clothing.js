@@ -5,8 +5,8 @@
 import * as THREE from 'three';
 import { shadeC, TEAM } from './unit-geo.js';
 import { vs, ps, B, smoothstep } from './rich-kit.js';
-import { torsoStations, torsoRing, legRing, ringAt, legStations, legFrom } from './rich-body.js';
-import { clamp, lerp, hash, mul, dye, gradY, paints, recolor, quilt } from './rich-paint.js';
+import { torsoStations, torsoRing, legRing, ringAt, legStations, legFrom, armStations } from './rich-body.js';
+import { clamp, lerp, hash, mul, dye, gradY, paints, recolor, quilt, tartan, mailSheen } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -35,9 +35,8 @@ export function addTunic(kit, D, color, bind, hem, opts = {}) {
   });
 }
 
-export function addBelt(kit, D, pal, bind, color = pal.leather, buckle = pal.accentMetal, mat = 'leather') {
+export function addBelt(kit, D, pal, bind, color = pal.leather, buckle = pal.accentMetal, mat = 'leather', g = 0.02) {
   const y = (f) => D.hipY + (D.shoulderY - D.hipY) * f;
-  const g = 0.02;
   kit.loft([vs(y(0.03), D.depth * 0.52 + g, D.waistW * 0.56 + g), vs(y(0.13), D.depth * 0.5 + g, D.waistW * 0.52 + g)],
     { sides: 14, rings: 3, start: null, end: null, color, mat, bind: bind.torso });
   // buckle
@@ -118,8 +117,8 @@ export function addFurMantle(kit, D, pal, bind, { paint = null } = {}) {
     { rings: 6, sides: 16, start: null, end: null, color: shadeC(fur, 0.92), mat: 'fur', bind: bind.torso, warp: tuft(2), paint: paints((o, x, y, z, u) => mul(o, lerp(1.0, 0.8, u)), paint) });
 }
 
-/** A cape down the back. opts: len (scale of the length, 1 reaches the knees), wide (scale of the width), paint (more color work over the cloth), mat (its surface class). */
-export function addCape(kit, D, color, hemColor, lining, bind, { len: lenK = 1, wide = 1, paint = null, mat = undefined } = {}) {
+/** A cape down the back. opts: len (scale of the length, 1 reaches the knees), wide (scale of the width), paint (more color work over the cloth), mat (its surface class), cells ([across, down]: the grid a check or a pattern needs to show). */
+export function addCape(kit, D, color, hemColor, lining, bind, { len: lenK = 1, wide = 1, paint = null, mat = undefined, cells = [7, 9] } = {}) {
   const top = D.shoulderY + 0.005;
   const len = ((D.shoulderY - 0.05) - 0.12) * lenK;
   const w0 = D.chestW * 0.78 * wide;
@@ -132,11 +131,11 @@ export function addCape(kit, D, color, hemColor, lining, bind, { len: lenK = 1, 
     out[1] = top - v * len;
     out[2] = z;
   };
-  kit.sheet(7, 9, fn, {
+  kit.sheet(cells[0], cells[1], fn, {
     thick: 0.007, color, inner: lining, bind: bind.cape, paint: paints(gradY(top - len, top, 0.82, 1.0), paint), mat,
   });
   // a trim band along the hem
-  kit.sheet(7, 1, (u, v, out) => {
+  kit.sheet(cells[0], 1, (u, v, out) => {
     fn(u, 0.9 + 0.1 * v, out);
   }, { thick: 0.008, color: hemColor, inner: hemColor, bind: bind.cape });
 }
@@ -246,36 +245,40 @@ export function addGreaves(kit, D, pal, bind, color, trim) {
 
 /**
  * A drape across the chest from one shoulder to the opposite hip, close over the body (a himation
- * worn over bare skin). side: 1 from the left shoulder to the right hip, -1 the other way.
+ * worn over bare skin). side: 1 from the left shoulder to the right hip, -1 the other way. opts: width, paint (more color work
+ * over the cloth: a check), cells ([across, along]: the grid it is built on).
  */
-export function addDrape(kit, D, bind, color, trim, { side = 1, width = 0.2 } = {}) {
+export function addDrape(kit, D, bind, color, trim, { side = 1, width = 0.2, paint = null, cells = [6, 16] } = {}) {
   const fn = (u, v, out) => {
     const th = lerp(-1.3, 1.45, v) * side;
-    const f = lerp(1.04, 0.14, v) + (u - 0.5) * width;
+    // (worn from the other shoulder the strip runs the other way round: its across direction turns with it, or its inner face shows)
+    const f = lerp(1.04, 0.14, v) + ((side > 0 ? u : 1 - u) - 0.5) * width;
     const r = torsoRing(D, clamp(f, 0.02, 1.07), 0.024 + 0.004 * Math.sin(v * PI * 3 + u * 2.4));
     out[0] = r.dx + r.rx * Math.cos(th);
     out[1] = r.y;
     out[2] = r.rz * Math.sin(th);
   };
-  kit.sheet(6, 16, fn, {
+  kit.sheet(cells[0], cells[1], fn, {
     thick: 0.008, color, inner: shadeC(color, 0.82), bind: bind.torso,
     paint: (o, x, y, z, u, a) => {
       mul(o, 0.9 + 0.1 * Math.sin(a * PI));
       if (trim && (u < 0.1 || u > 0.9)) dye(o, trim, 0.9);
+      if (paint) paint(o, x, y, z, u, a);
     },
   });
 }
 
 /**
  * A short cape (chlamys): a collar of the same cloth over both shoulders, the cape itself down the
- * back to the thighs, a clasp at the throat. clasp: the metal of the clasp.
+ * back to the thighs, a clasp at the throat. clasp: the metal of the clasp. opts: paint (more color work over the cloth), len and
+ * wide (the cape's length and width), cells (the cape's grid).
  */
-export function addChlamys(kit, D, color, hemColor, lining, bind, clasp) {
+export function addChlamys(kit, D, color, hemColor, lining, bind, clasp, { paint = null, len = 0.62, wide = 0.9, cells = [7, 9] } = {}) {
   const K = D.k;
   const sh = D.shoulderY;
-  addCape(kit, D, color, hemColor, lining, bind, { len: 0.62, wide: 0.9 });
+  addCape(kit, D, color, hemColor, lining, bind, { len, wide, paint, cells });
   kit.loft([vs(sh + 0.03, 0.068 * K, 0.1 * K, -0.004), vs(sh + 0.006, 0.104 * K, 0.172 * K, -0.011), vs(sh - 0.034, 0.114 * K, 0.212 * K, -0.013)], {
-    rings: 5, sides: 16, start: null, end: null, color, bind: bind.torso, paint: (o, x, y, z, u) => mul(o, lerp(1.04, 0.86, u)),
+    rings: 5, sides: 16, start: null, end: null, color, bind: bind.torso, paint: paints((o, x, y, z, u) => mul(o, lerp(1.04, 0.86, u)), paint),
   });
   if (clasp) {
     const x = 0.066 * K + 0.026;
@@ -1126,5 +1129,140 @@ export function addLegBands(kit, D, bind, { knee = null, ankle = null, mat = 'cl
     const st = legStations(D, side, 0.011);
     if (knee) kit.loft([ringAt(st, k - 0.052, 0.008), ringAt(st, k - 0.016, 0.008)], { sides: 12, start: null, end: null, color: knee, mat, bind: bind.leg[side] });
     if (ankle) kit.loft([ringAt(st, D.ankleY + 0.034, 0.008), ringAt(st, D.ankleY + 0.07, 0.008)], { sides: 12, start: null, end: null, color: ankle, mat, bind: bind.leg[side] });
+  }
+}
+
+/** A band round the top of each upper arm (`upper`) and a cuff at each wrist (`wrist`): colors or team colors; `mat` their surface class. */
+export function addArmBands(kit, D, bind, { upper = null, wrist = null, mat = 'gold' } = {}) {
+  const w = D.shoulderY - 0.02 - D.upper - D.fore;
+  for (const side of [1, -1]) {
+    const bd = bind.arm[side];
+    const z = side * D.shoulderZ;
+    if (upper) {
+      const y = D.shoulderY - 0.02 - D.upper * 0.42;
+      kit.loft([vs(y - 0.016, D.armR * 1.06 + 0.012, D.armR * 1.03 + 0.012, 0, z), vs(y + 0.016, D.armR * 1.07 + 0.012, D.armR * 1.04 + 0.012, 0, z)],
+        { sides: 12, start: null, end: null, color: upper, mat, bind: bd });
+    }
+    if (wrist) {
+      kit.loft([vs(w + 0.012, D.armR * 0.66 + 0.009, D.armR * 0.64 + 0.009, 0, z), vs(w + D.fore * 0.5, D.armR * 0.86 + 0.009, D.armR * 0.84 + 0.009, 0.002, z)],
+        { sides: 12, rings: 3, start: null, end: null, color: wrist, mat, bind: bd });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Celtic dress: the torc, the penannular brooch, the mail shirt, the check of the trews
+// ---------------------------------------------------------------------------
+
+/** A little ball (a terminal, a stud, a stone) at `p`: a short loft with round ends. */
+function bead(kit, p, r, opts) {
+  kit.loft([ps(p[0] - r * 0.1, p[1], p[2], r), ps(p[0] + r * 0.1, p[1], p[2], r)], { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capRings: 2, capDepth: r, ...opts });
+}
+
+/**
+ * A torc, the Celts' neck ring: a thick rope of gold in an open ring about the base of the neck, resting a little lower at the
+ * throat, a round knob at each end of the gap. opts: color, big (scale of the rope), mat, f (height on the torso, as for torsoRing),
+ * gap (the opening at the throat, in radians).
+ */
+export function addTorc(kit, D, bind, { color, big = 1, mat = 'gold', f = 1.07, gap = 0.3 } = {}) {
+  const K = D.k;
+  const r = 0.0105 * big * K;
+  const ring = torsoRing(D, f, 0.012 * K + r);
+  const n = 18;
+  const at = (th) => [ring.dx + ring.rx * Math.cos(th), ring.y - 0.014 * K * (0.5 + 0.5 * Math.cos(th)), ring.rz * Math.sin(th)];
+  const path = [];
+  for (let i = 0; i <= n; i++) path.push(at(lerp(gap, TAU - gap, i / n)));
+  kit.loft(path.map((q) => ps(q[0], q[1], q[2], r, r)), {
+    ref: [0, 1, 0], rings: n, sides: 6, start: null, end: null, color, mat, bind: bind.torso,
+    paint: (o, x, y, z, u, a) => mul(o, 0.82 + 0.3 * Math.abs(Math.sin(u * 54 + a * TAU))), // the twist of the rope
+  });
+  for (const th of [gap, TAU - gap]) bead(kit, at(th), r * 1.75, { color, mat, bind: bind.torso });
+}
+
+/**
+ * A penannular brooch, the Celts' cloak pin: an open ring of metal with a knob at each end of the gap and a long pin
+ * across it, set on the breast at angle `th` about the torso (the face is 0, a positive angle toward +z), the gap upward.
+ * opts: color, gem (a stone set at the foot of the ring), size, f (height on the torso), th, mat, at ({ c, n }: its center and the
+ * way it faces, where a surface of its own carries it).
+ */
+export function addBrooch(kit, D, bind, { color, gem = null, size = 1, f = 0.95, th = -0.95, mat = 'gold', at: spot = null } = {}) {
+  const K = D.k;
+  const R = 0.03 * size * K;
+  const tr = 0.0058 * size * K;
+  let n;
+  let c;
+  if (spot) {
+    // set on a surface of its own (a cloak's collar): its center and the way it faces
+    const l = Math.hypot(...spot.n);
+    n = spot.n.map((q) => q / l);
+    c = [...spot.c];
+  } else {
+    const g = torsoRing(D, f, 0.006);
+    const nx = Math.cos(th) / g.rx;
+    const nz = Math.sin(th) / g.rz;
+    const nl = Math.hypot(nx, nz) || 1;
+    n = [nx / nl, 0, nz / nl];
+    c = [g.dx + g.rx * Math.cos(th) + n[0] * (tr + 0.004), g.y, g.rz * Math.sin(th) + n[2] * (tr + 0.004)];
+  }
+  const sl = Math.hypot(n[2], n[0]) || 1;
+  const side = [n[2] / sl, 0, -n[0] / sl];
+  const at = (a, r = R, lift = 0) => [c[0] + side[0] * Math.sin(a) * r + n[0] * lift, c[1] + Math.cos(a) * r, c[2] + side[2] * Math.sin(a) * r + n[2] * lift];
+  const gap = 0.42;
+  const m = 14;
+  const path = [];
+  for (let i = 0; i <= m; i++) path.push(at(lerp(gap, TAU - gap, i / m)));
+  kit.loft(path.map((q) => ps(q[0], q[1], q[2], tr, tr)), { ref: n, rings: m, sides: 6, start: null, end: null, color, mat, bind: bind.torso });
+  for (const a of [gap, TAU - gap]) bead(kit, at(a), tr * 1.9, { color, mat, bind: bind.torso });
+  // the pin: from the foot of the ring across it and out over the gap
+  const a0 = at(PI, R * 0.78, tr * 1.6);
+  const a1 = at(0, R * 1.5, tr * 1.6);
+  kit.loft([ps(a0[0], a0[1], a0[2], 0.0034 * size * K), ps(a1[0], a1[1], a1[2], 0.0022 * size * K)], { ref: side, sides: 5, start: 'round', end: 'round', capDepth: 0.003, color, mat, bind: bind.torso });
+  if (gem) bead(kit, at(PI, R, 0), tr * 2.1, { color: gem, mat: 'gem', glow: 0.35, bind: bind.torso });
+}
+
+/**
+ * A mail shirt (lorica hamata): rings of iron from the neck to the thigh, flaring at the hem, short sleeves to the elbow,
+ * its rows flecked so the light catches them unevenly. opts: color (the iron), sleeves (false: none), hem (how far below the hip it hangs),
+ * trim (a band of leather or bronze at the hem and the sleeve ends), mat.
+ */
+export function addMailShirt(kit, D, bind, { color, sleeves = true, hem = 0.17, trim = null, mat = 'metal' } = {}) {
+  const span = D.shoulderY - D.hipY;
+  const n = 20;
+  const below = hem / (span * 1.06 + hem);
+  const st = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const f = lerp(-hem / span, 1.05, t);
+    const flare = t < below ? 0.05 * ((below - t) / below) ** 1.3 : 0;
+    const r = torsoRing(D, f, 0.017 + flare);
+    st.push(vs(r.y, r.rx, r.rz, r.dx));
+  }
+  kit.loft(st, { rings: n + 1, sides: 18, start: null, end: null, color, mat, bind: bind.skirt, paint: paints(gradY(D.hipY - hem, D.shoulderY, 0.8, 1.06), mailSheen(0.03, 0.14)) });
+  if (trim) {
+    const r0 = torsoRing(D, -hem / span, 0.017 + 0.05);
+    const r1 = torsoRing(D, -hem / span + 0.07, 0.017 + 0.045);
+    kit.loft([vs(r0.y - 0.002, r0.rx, r0.rz, r0.dx), vs(r1.y, r1.rx, r1.rz, r1.dx)], { sides: 18, start: null, end: null, color: trim, mat: 'leather', bind: bind.skirt });
+  }
+  if (!sleeves) return;
+  for (const side of [1, -1]) {
+    const st2 = armStations(D, side, 0.015, 'elbow');
+    kit.loft(st2, { rings: 6, sides: 12, start: null, end: 'round', capRings: 2, capDepth: 0.016, color, mat, bind: bind.arm[side], paint: paints(gradY(D.shoulderY - 0.02 - D.upper, D.shoulderY, 0.82, 1.04), mailSheen(0.03, 0.14)) });
+    if (trim) {
+      const e = st2[0];
+      kit.loft([vs(e.c[1] - 0.004, e.rx + 0.004, e.rz + 0.004, e.c[0], e.c[2]), vs(e.c[1] + 0.022, e.rx + 0.006, e.rz + 0.006, e.c[0], e.c[2])], { sides: 12, start: null, end: null, color: trim, mat: 'leather', bind: bind.arm[side] });
+    }
+  }
+}
+
+/**
+ * Trews (bracae), the Celts' snug trousers, woven in a check: from the ankle (or `from`) to the hip. opts: color, hue (the warp
+ * bands' color: see tartan), cell (the check's repeat), k (how much the weft darkens it), mat.
+ */
+export function addTrews(kit, D, bind, { color, hue = null, cell = 0.1, k = 0.72, from = null, mat = 'cloth' } = {}) {
+  for (const side of [1, -1]) {
+    kit.loft(legFrom(D, side, 0.011, from ?? D.ankleY - 0.012), {
+      rings: 13, sides: 12, start: null, end: null, color, mat, bind: bind.leg[side],
+      paint: paints(gradY(0.2, D.hipY, 0.88, 1), tartan({ cell, hue, k, cx: 0, cz: side * D.hipZ, r: D.legR })),
+    });
   }
 }

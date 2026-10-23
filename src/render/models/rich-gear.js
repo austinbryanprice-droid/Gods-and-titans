@@ -50,9 +50,9 @@ export function grip(kit, y0, y1, r, color, bands = 4) {
   });
 }
 
-function sword(kit, pal, s, { flame = false } = {}) {
-  const steel = flame ? mixC(pal.accentMetal, '#ff9a3a', 0.4) : pal.accentMetal;
-  const fitting = flame ? shadeC(pal.darkMetal, 0.9) : shadeC(pal.accentMetal, 0.78);
+function sword(kit, pal, s, { flame = false, blade = null, fitting: fit = null } = {}) {
+  const steel = flame ? mixC(pal.accentMetal, '#ff9a3a', 0.4) : blade || pal.accentMetal;
+  const fitting = flame ? shadeC(pal.darkMetal, 0.9) : fit || shadeC(pal.accentMetal, 0.78);
   grip(kit, -0.115 * s, 0.075 * s, 0.02 * s, pal.leather, 4);
   // pommel
   kit.loft([ps(0, -0.12 * s, 0, 0.028 * s), ps(0, -0.138 * s, 0, 0.03 * s), ps(0, -0.152 * s, 0, 0.022 * s)], {
@@ -293,6 +293,120 @@ function club(kit, pal, s, { color = null, studs = null, kanabo = false } = {}) 
     kit.loft([ps(dx * r * 0.85, y, dz * r * 0.85, 0.015 * s), ps(dx * (r + 0.045 * s), y + 0.012 * s, dz * (r + 0.045 * s), 0.003 * s)], {
       ref: [0, 1, 0], sides: 5, rings: 2, start: null, end: 'round', capDepth: 0.01 * s, color: stud, mat: 'bone',
     });
+  }
+}
+
+/**
+ * A double-bitted axe, the long-handled one of the Celts' raiders: a haft with a wrapped grip and an iron-shod butt, an iron
+ * block at its top, and to each side of the block a broad blade with a horn at either end of its edge. opts: shaftColor, metal (the blades').
+ */
+function doubleAxe(kit, pal, s, { shaftColor = null, metal = null } = {}) {
+  const shaft = shaftColor || pal.wood;
+  const head = metal || pal.accentMetal;
+  const iron = shadeC(pal.darkMetal, 1.15);
+  kit.loft([ps(0, -0.12 * s, 0, 0.022 * s), ps(0, 0.1 * s, 0, 0.0195 * s), ps(0, 0.4 * s, 0, 0.018 * s), ps(0, 0.66 * s, 0, 0.0185 * s)], {
+    ref: [1, 0, 0], rings: 10, sides: 8, start: 'round', end: 'round', capDepth: 0.01 * s, color: shaft, mat: 'wood', paint: grain(0.1),
+  });
+  grip(kit, -0.1 * s, 0.12 * s, 0.0235 * s, pal.leather, 5);
+  kit.loft([ps(0, -0.115 * s, 0, 0.027 * s), ps(0, -0.15 * s, 0, 0.026 * s), ps(0, -0.175 * s, 0, 0.012 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: 'round', capDepth: 0.01 * s, color: iron, mat: 'iron',
+  });
+  // the iron block the blades are set on, a band at each end of it
+  const y0 = 0.56 * s;
+  kit.loft([ps(0, y0 - 0.06 * s, 0, 0.033 * s, 0.032 * s), ps(0, y0 + 0.06 * s, 0, 0.033 * s, 0.032 * s)], { ref: [1, 0, 0], sides: 10, start: 'round', end: 'round', capDepth: 0.012 * s, color: iron, mat: 'iron' });
+  for (const dy of [-0.05, 0.05]) {
+    kit.loft([ps(0, y0 + (dy - 0.008) * s, 0, 0.036 * s, 0.035 * s), ps(0, y0 + (dy + 0.008) * s, 0, 0.036 * s, 0.035 * s)], { ref: [1, 0, 0], sides: 10, start: null, end: null, color: shadeC(head, 0.7), mat: 'metal' });
+  }
+  const half = [[0.03, 0.055], [0.09, 0.088], [0.15, 0.14], [0.205, 0.178], [0.238, 0.1], [0.248, 0.0], [0.238, -0.1], [0.205, -0.178], [0.15, -0.14], [0.09, -0.088], [0.03, -0.055]];
+  for (const dir of [1, -1]) {
+    const pts = half.map(([x, y]) => [dir * x * s, y0 + y * s]);
+    if (dir < 0) pts.reverse();
+    kit.slab(pts, {
+      depth: 0.024 * s, bevel: 0.009 * s, color: head, mat: 'metal',
+      paint: (o, x, y, z, u) => mul(o, 0.84 + 0.32 * sstep(0.5, 1, dir > 0 ? u : 1 - u)),
+    });
+  }
+}
+
+/**
+ * A torch, Brigid's: a stave of dark wood leaning a little outward, a head of pitch-soaked rags bound in iron at its top, and a flame
+ * above it with two smaller tongues at its sides (the flame flickers: the piece it is in must be driven as a flame, see rich-humanoid.js).
+ */
+function torch(kit, pal, s) {
+  const wood = shadeC(pal.wood, 0.85);
+  const pitch = withMat('#33261a', 'cloth');
+  const f = pal.fire;
+  const h = pal.fireHot;
+  kit.placed(new THREE.Matrix4().makeRotationZ(-0.3), () => {
+    kit.loft([ps(0, -0.2 * s, 0, 0.02 * s), ps(0, 0.1 * s, 0, 0.022 * s), ps(0, 0.3 * s, 0, 0.02 * s), ps(0, 0.42 * s, 0, 0.019 * s)], {
+      ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.009 * s, color: wood, mat: 'wood', paint: grain(0.1),
+    });
+    grip(kit, -0.1 * s, 0.1 * s, 0.0245 * s, pal.leather, 4);
+    // the head: rags wound thick about the stave, bound in iron
+    kit.loft([ps(0, 0.38 * s, 0, 0.022 * s), ps(0, 0.41 * s, 0, 0.034 * s), ps(0, 0.46 * s, 0, 0.041 * s), ps(0, 0.51 * s, 0, 0.034 * s), ps(0, 0.53 * s, 0, 0.018 * s)], {
+      ref: [1, 0, 0], rings: 8, sides: 10, start: null, end: 'round', capDepth: 0.012 * s, color: pitch, mat: 'cloth',
+      paint: (o, x, y, z, u) => mul(o, 0.8 + 0.3 * Math.abs(Math.sin(u * 30))),
+    });
+    for (const y of [0.405, 0.495]) {
+      kit.loft([ps(0, (y - 0.008) * s, 0, 0.036 * s), ps(0, (y + 0.008) * s, 0, 0.036 * s)], { ref: [1, 0, 0], sides: 10, start: null, end: null, color: shadeC(pal.darkMetal, 1.1), mat: 'iron' });
+    }
+    const tongue = (x0, z0, len, r, lean) => {
+      const st = [];
+      for (let i = 0; i < 5; i++) {
+        const t = i / 4;
+        const rr = r * (1 - t) ** 0.85 + 0.003 * s;
+        st.push(ps(x0 + lean[0] * len * t * t, 0.52 * s + len * t, z0 + lean[1] * len * t * t, rr, rr * 0.85));
+      }
+      kit.loft(st, {
+        ref: [1, 0, 0], rings: 6, sides: 6, start: 'round', end: 'round', capRings: 3, capDepth: [r * 0.5, len * 0.08], color: pal.fire, mat: 'gem', glow: 0.95, flicker: { base: [x0, 0.52 * s, z0], k: 0.35 },
+        paint: (o, x, y, z, u) => {
+          const k = u * u;
+          o.r = f.r + (h.r - f.r) * k;
+          o.g = f.g + (h.g - f.g) * k;
+          o.b = f.b + (h.b - f.b) * k;
+        },
+      });
+    };
+    tongue(0, 0, 0.19 * s, 0.034 * s, [-0.05 * s, 0]);
+    tongue(0.014 * s, 0.018 * s, 0.11 * s, 0.02 * s, [0.0, 0.05 * s]);
+    tongue(-0.012 * s, -0.02 * s, 0.09 * s, 0.018 * s, [-0.03 * s, -0.05 * s]);
+  });
+}
+
+/**
+ * A druid's staff: a gnarled stave of oak with a golden crescent at its top (the sickle moon) cradling a pearl of mistletoe, a
+ * spray of two oak leaves at its foot. opts: shaftColor.
+ */
+function druidStaff(kit, pal, s, { shaftColor = null } = {}) {
+  const wood = shaftColor || pal.wood;
+  const gold = pal.accentMetal;
+  kit.loft([ps(0, -0.5 * s, 0, 0.02 * s), ps(0, -0.2 * s, 0, 0.0235 * s), ps(0, 0.15 * s, 0, 0.022 * s), ps(0, 0.4 * s, 0, 0.0245 * s), ps(0, 0.56 * s, 0, 0.0215 * s)], {
+    ref: [1, 0, 0], rings: 10, sides: 8, start: 'round', end: null, capDepth: 0.009 * s, color: wood, mat: 'wood',
+    warp: (p, a, u) => {
+      // knots and a slow bend along the stave
+      const k = Math.max(0, Math.sin(u * 13 + a * 2.1)) ** 3 * 0.01 * s;
+      p[0] += Math.cos(a) * k + 0.012 * s * Math.sin(u * 5);
+      p[2] += Math.sin(a) * k;
+    },
+    paint: grain(0.12),
+  });
+  grip(kit, -0.1 * s, 0.1 * s, 0.0255 * s, pal.leather, 4);
+  // the crescent: an arc of gold open upward, thick at its belly, its horns drawn out fine
+  const R = 0.085 * s;
+  const cy = 0.66 * s;
+  const arc = [];
+  for (let i = 0; i <= 12; i++) {
+    const a = lerp(-2.45, 2.45, i / 12);
+    const k = 1 - Math.abs(a) / 2.6;
+    arc.push(ps(Math.sin(a) * R, cy - Math.cos(a) * R, 0, (0.006 + 0.014 * k) * s, (0.006 + 0.014 * k) * s));
+  }
+  kit.loft(arc, { ref: [0, 0, 1], rings: 12, sides: 8, start: 'round', end: 'round', capDepth: 0.004 * s, color: gold, mat: 'gold' });
+  kit.loft([ps(0, 0.55 * s, 0, 0.0215 * s), ps(0, 0.58 * s, 0, 0.03 * s), ps(0, cy - R - 0.004 * s, 0, 0.022 * s)], { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: null, color: gold, mat: 'gold' });
+  kit.loft([ps(0, cy - 0.026 * s, 0, 0.028 * s), ps(0, cy, 0, 0.03 * s), ps(0, cy + 0.026 * s, 0, 0.028 * s)], {
+    ref: [1, 0, 0], rings: 5, sides: 10, start: 'round', end: 'round', capDepth: 0.02 * s, color: withMat('#f4efe0', 'gem'), mat: 'gem', glow: 0.35,
+  });
+  for (const j of [1, -1]) {
+    feather(kit, [0.0, -0.2 * s, j * 0.02 * s], [j * 0.7, -0.3, 0.5], [0, 1, 0], 0.11 * s, 0.032 * s, { color: withMat('#4f7a34', 'cloth'), tip: null, mat: 'cloth', rows: 4, shape: 0.5, cup: 0.2, thick: 0.003 });
   }
 }
 
@@ -620,18 +734,22 @@ function yue(kit, pal, s, { shaftColor = null } = {}) {
 /**
  * Add weapon `id` to `kit` in the grip frame (origin = palm, +Y along the weapon, blade
  * width along X, thickness along Z), like the low-poly addWeapon. opts.glowBlade: a flaming
- * blade; opts.runes: the runic glow color of a god's hammer.
+ * blade; opts.runes: the runic glow color of a god's hammer. The double axe and the torch are built here but not in
+ * RICH_WEAPONS: a pantheon's outfit asks for them (gear returns { build: true }), so those pantheons that use them
+ * with the low-poly models keep them.
  */
 export function richWeapon(kit, pal, id, s, opts = {}) {
   switch (id) {
-    case 'sword': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else sword(kit, pal, s, { flame: !!opts.glowBlade }); return true;
+    case 'sword': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else sword(kit, pal, s, { flame: !!opts.glowBlade, blade: opts.blade || null, fitting: opts.fitting || null }); return true;
     case 'katana': katana(kit, pal, s); return true;
     case 'axe': if (opts.axe === 'yue') yue(kit, pal, s, opts); else axe(kit, pal, s, opts); return true;
     case 'hammer': hammer(kit, pal, s, { glow: opts.runes || null }); return true;
-    case 'spear': spear(kit, pal, s, { runes: opts.runes || null }); return true;
+    case 'spear': spear(kit, pal, s, { runes: opts.runes || null, shaftColor: opts.shaftColor || null }); return true;
     case 'club': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else club(kit, pal, s, opts); return true;
     case 'bow': if (opts.crossbow) crossbow(kit, pal, s, opts); else bow(kit, pal, s, opts); return true;
-    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else staff(kit, pal, s, opts); return true;
+    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else if (opts.staff === 'druid') druidStaff(kit, pal, s, opts); else staff(kit, pal, s, opts); return true;
+    case 'double_axe': doubleAxe(kit, pal, s, opts); return true;
+    case 'torch': torch(kit, pal, s); return true;
     case 'halberd': halberd(kit, pal, s, opts); return true;
     default: return false;
   }
@@ -647,6 +765,8 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
  *   rim         the rim color (default the unit's metal);  dish: how deep the face is;  dy: moves it down the arm
  *   puffs       5: balls of down on the face, one in the middle and four about it, puffColor their color (the sun god's shield)
  *   fringe      { n, colors, tip, len }: feathers hanging from the lower rim (the Mexica's chimalli)
+ *   band        a band of metal inset all round the face, its outer edge at that fraction of the radius (bandColor: its color, default the rim's)
+ *   roundels    [{ y, k, color, mat }]: studs down the face, y as a fraction of its half height from the middle, k their radius as a fraction of the half width
  */
 export function richShield(ctx, D, style = {}) {
   const { pal } = ctx;
@@ -698,6 +818,23 @@ export function richShield(ctx, D, style = {}) {
     kit.loft([ring(k, z0 - dish * 0.35), ring(k * 0.98, z0 - dish * 0.5 - 0.004), ring(k * 0.5, z0 - dish - 0.004)], {
       ref: [1, 0, 0], rings: 5, sides, start: 'round', end: 'round', capDepth: [0.004, 0.006], color: colorOf(style.disc.color, 0.95),
     });
+  }
+  // the dish's surface in depth, at radial fraction r (the face is a cone from the rim in toward the boss)
+  const faceZ = (r) => (r >= 0.62 ? z0 - 0.012 - (dish - 0.012) * ((0.97 - Math.min(r, 0.97)) / 0.35) : z0 - dish - dish * 0.45 * (1 - r / 0.62) ** 2);
+  if (style.band) {
+    // a band of metal inset all round the face
+    const k = style.band;
+    kit.loft([ring(k, faceZ(k) - 0.003), ring(k - 0.045, faceZ(k - 0.045) - 0.003)], { ref: [1, 0, 0], sides, start: null, end: null, color: style.bandColor ? colorOf(style.bandColor) : rim, mat: style.rimMat });
+  }
+  if (style.roundels) {
+    // studs of enamel and metal in a row down the face
+    for (const r of style.roundels) {
+      const yy = cy + r.y * H;
+      const rr = Math.abs(r.y);
+      const zf = faceZ(rr);
+      const k = (r.k ?? 0.1) * W;
+      kit.loft([ps(0, yy, zf - 0.002, k, k), ps(0, yy, zf - 0.008, k * 0.94, k * 0.94)], { ref: [1, 0, 0], sides: 12, start: 'round', end: 'round', capDepth: 0.006, color: colorOf(r.color || 'metal', 1), mat: r.mat });
+    }
   }
   // the rim, a rolled edge all round
   kit.loft([ring(1.035, z0 + 0.004), ring(1.035, z0 - 0.02)], { ref: [1, 0, 0], sides, start: null, end: null, color: rim, mat: style.rimMat });

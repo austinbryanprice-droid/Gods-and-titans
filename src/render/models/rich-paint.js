@@ -104,6 +104,28 @@ export const featherRows = ({ pitch = 0.04, per = 14, cx = 0, cz = 0, dark = 0.7
   else mul(o, light - (light - 0.92) * Math.min(1, (edge - 0.3) / 0.7));
 };
 
+/**
+ * Tartan, the Celts' woven check: two sets of bands crossing at right angles, repeating every `cell`. The warp bands (up and
+ * down) turn the cloth to `hue` (a plain color; none: they darken it like the weft), the weft bands (across) darken it by `k`,
+ * and where they cross it is the darkest. About a limb or a garment the warp bands follow the arc at radius `r` round the
+ * vertical axis through (cx, cz); `flat` runs them along z instead, over a hanging sheet. `band`: the share of a repeat a band takes.
+ */
+export const tartan = ({ cell = 0.1, hue = null, k = 0.72, cx = 0, cz = 0, r = 0.06, flat = false, band = 0.42 } = {}) => (o, x, y, z) => {
+  const s = (flat ? z : Math.atan2(z - cz, x - cx) * r) / cell;
+  const t = y / cell;
+  if (s - Math.floor(s) < band) {
+    if (hue) dye(o, hue, 0.92);
+    else mul(o, k);
+  }
+  if (t - Math.floor(t) < band) mul(o, k);
+};
+
+/** Ring mail: a flecked, uneven sheen (rows of rings catch the light one way and the next another). */
+export const mailSheen = (cell = 0.03, k = 0.2) => (o, x, y, z) => {
+  const row = Math.floor(y / cell);
+  mul(o, 1 - k * 0.5 + k * 0.4 * hash(row, Math.round(z * 40), Math.round(x * 40)) - (row & 1) * k * 0.3);
+};
+
 /** Several paints in a row. */
 export const paints = (...fns) => (o, x, y, z, u, a) => {
   for (const f of fns) if (f) f(o, x, y, z, u, a);

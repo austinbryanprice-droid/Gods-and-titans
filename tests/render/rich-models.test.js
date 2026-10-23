@@ -20,11 +20,15 @@ const {
   buildUnitModel, getUnitModelInfo, preloadUnitModels, clearUnitModelCache, getUnitMaterial,
 } = await import('../../src/render/models/unit-models.js');
 const { richSupported, buildRichTemplate, RICH_PANTHEONS } = await import('../../src/render/models/rich-humanoid.js');
-const { BONE_COUNT, B, MeshKit, ps } = await import('../../src/render/models/rich-kit.js');
+const { BONE_COUNT, B, MeshKit, ps, humanoidSpec } = await import('../../src/render/models/rich-kit.js');
 const { outfitFor, LAYERS } = await import('../../src/render/models/rich-outfits.js');
 const { RICH_ARMS, RICH_OFFHANDS } = await import('../../src/render/models/rich-arms.js');
 const { RICH_WEAPONS } = await import('../../src/render/models/rich-gear.js');
-const { jaguarSpots, quilt, featherRows } = await import('../../src/render/models/rich-paint.js');
+const { jaguarSpots, quilt, featherRows, tartan, mailSheen } = await import('../../src/render/models/rich-paint.js');
+const { richDims, makeBinds } = await import('../../src/render/models/rich-body.js');
+const { addDrape } = await import('../../src/render/models/rich-clothing.js');
+const { unitContext } = await import('../../src/render/models/unit-bodies.js');
+const { TEAM } = await import('../../src/render/models/unit-geo.js');
 const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
 const { unitLook } = await import('../../src/render/models/unit-looks.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
@@ -59,6 +63,7 @@ const hindu = (id) => looks(UNITS[id] || MORTALS[id], 'hindu');
 const japanese = (id) => looks(UNITS[id] || MORTALS[id], 'japanese');
 const chinese = (id) => looks(UNITS[id] || MORTALS[id], 'chinese');
 const aztec = (id) => looks(UNITS[id] || MORTALS[id], 'aztec');
+const celtic = (id) => looks(UNITS[id] || MORTALS[id], 'celtic');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
@@ -72,6 +77,8 @@ const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amatera
 const CHINESE = ['worshipper', 'warrior', 'archer', 'priest', 'chinese_sun_wukong', 'chinese_guan_yu', 'chinese_chang_e', 'chinese_pangu', 'chinese_monkey_clone', 'chinese_clay_warrior', 'chinese_crossbowman'];
 // every Aztec unit on the humanoid body (Quetzalcoatl, Cipactli, the jaguar spirit, the ahuizotl and Xiuhcoatl keep their low-poly models)
 const AZTEC = ['worshipper', 'warrior', 'archer', 'priest', 'aztec_huitzilopochtli', 'aztec_tezcatlipoca', 'aztec_tlaloc', 'aztec_tlaloque', 'aztec_eagle_warrior'];
+// every Celtic unit on the humanoid and giant bodies (the hound, the banshee, the headless horseman and the crow keep their low-poly models)
+const CELTIC = ['worshipper', 'warrior', 'archer', 'priest', 'celtic_the_dagda', 'celtic_the_morrigan', 'celtic_lugh', 'celtic_brigid', 'celtic_balor', 'celtic_woad_raider'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -751,7 +758,6 @@ test('the Aztecs dress their own way: the loincloth, quilted armor, feathers and
   assert.equal(typeof az.skinPaint, 'function', 'the gods\' faces are painted over their skin');
   assert.equal(typeof az.shield, 'function', 'the sun god\'s shield is not the soldiers\'');
   assert.ok(RICH_PANTHEONS.has('aztec'), 'the Aztec players get the new characters');
-  assert.ok(!RICH_PANTHEONS.has('celtic'), 'and the Celts, not yet, do not');
 });
 
 test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look; Quetzalcoatl, the crocodile, the jaguar, the ahuizotl and the fire serpent stay low-poly', () => {
@@ -924,6 +930,429 @@ test('Aztec mortals, gods and helpers carry the team\'s color on their cloth, pl
 test('the Aztec gods, mortals and the eagle warrior animate every state without a NaN', () => {
   for (const id of AZTEC) {
     const m = buildUnitModel(aztec(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('the Celts dress their own way: tartan, mail, a pinned plaid cloak, torcs and a red-haired people', () => {
+  const base = outfitFor('norse');
+  const celt = outfitFor('celtic');
+  for (const layer of LAYERS) assert.equal(typeof celt[layer], 'function', `the Celtic ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(celt[layer], base[layer], `the Celts dress their ${layer} their own way`);
+  assert.equal(typeof celt.palette, 'function', 'the people\'s hair is red, straw or white');
+  assert.equal(typeof celt.gear, 'function', 'a double axe, a torch and a druid\'s staff are styled');
+  assert.equal(typeof celt.skinPaint, 'function', 'the raiders\' woad and the Morrigan\'s kohl are painted over their skin');
+  assert.equal(typeof celt.shield, 'function', 'the tall oval shield is not the shared round one');
+  assert.ok(RICH_PANTHEONS.has('celtic'), 'the Celtic players get the new characters');
+  assert.ok(!RICH_PANTHEONS.has('mesopotamian'), 'and the Mesopotamians, not yet, do not');
+});
+
+test('every Celtic humanoid, the giant and the Woad Raider are dressed in the Celtic look; the hound, the banshee, the headless rider, the crow and the ram stay low-poly', () => {
+  for (const id of CELTIC) assert.ok(richSupported(celtic(id)), `${id} is supported`);
+  for (const id of ['celtic_cu_sith', 'celtic_banshee', 'celtic_dullahan', 'celtic_battle_crow', 'battering_ram']) assert.ok(!richSupported(celtic(id)), `${id} stays low-poly`);
+  // a Celtic warrior is not an Aztec one
+  assert.notEqual(buildRichTemplate(celtic('warrior')).triangles, buildRichTemplate(aztec('warrior')).triangles);
+  assert.notEqual(buildRichTemplate(celtic('priest')).triangles, buildRichTemplate(aztec('priest')).triangles);
+});
+
+test('the Celts carry what they are known by: a sword and the tall shield, a bow, a druid\'s staff, a club, spears, a torch, a double axe, a mace', () => {
+  const names = (id) => buildRichTemplate(celtic(id)).rich.attach.filter((x) => !x.tool).map((x) => x.name).sort();
+  assert.deepEqual(names('warrior'), ['shield', 'weaponR'], 'a sword and a shield');
+  assert.deepEqual(names('archer'), ['weaponL'], 'a bow');
+  assert.deepEqual(names('priest'), ['weaponR'], 'a staff');
+  assert.deepEqual(names('celtic_woad_raider'), ['weaponR'], 'a double axe');
+  assert.deepEqual(names('celtic_the_dagda'), ['weaponR'], 'the club');
+  assert.deepEqual(names('celtic_the_morrigan'), ['raven', 'weaponR'], 'a spear and the raven on her shoulder');
+  assert.deepEqual(names('celtic_lugh'), ['weaponR'], 'the spear');
+  assert.deepEqual(names('celtic_brigid'), ['flameCrown', 'weaponR'], 'a torch under a crown of flame');
+  assert.deepEqual(names('celtic_balor'), ['weaponR'], 'a mace');
+  assert.deepEqual(names('worshipper'), [], 'the worshippers\' tools are not held items');
+});
+
+test('the Celts hold their things their own way: a double axe, a torch, an oak staff with a crescent, a tall oval shield', () => {
+  // the same unit under another people's outfit holds the shared item
+  const shared = (id) => ({ ...celtic(id), pantheon: 'norse', lookOf: 'norse' });
+  // the double axe and the torch are built by the rich gear for the Celts only (no other outfit asks for them), the others keep the low-poly ones
+  assert.ok(!RICH_WEAPONS.has('double_axe') && !RICH_WEAPONS.has('torch'));
+  const axe = pieceSize(celtic('celtic_woad_raider'), 'weaponR');
+  const plainAxe = pieceSize(shared('celtic_woad_raider'), 'weaponR');
+  assert.ok(axe.x > plainAxe.x * 1.4, `a long haft (${axe.x.toFixed(2)} against ${plainAxe.x.toFixed(2)})`);
+  assert.ok(axe.y > plainAxe.y * 1.1, 'and broader blades');
+  assert.ok(pieceTris(celtic('celtic_woad_raider'), 'weaponR') > pieceTris(shared('celtic_woad_raider'), 'weaponR') + 400, 'two horned blades on an iron block, a wrapped grip');
+  const torch = pieceSize(celtic('celtic_brigid'), 'weaponR');
+  const plainTorch = pieceSize(shared('celtic_brigid'), 'weaponR');
+  assert.ok(torch.x > plainTorch.x * 1.3, `a long stave (${torch.x.toFixed(2)} against ${plainTorch.x.toFixed(2)})`);
+  assert.ok(pieceTris(celtic('celtic_brigid'), 'weaponR') > pieceTris(shared('celtic_brigid'), 'weaponR') + 400, 'a head of rags bound in iron and three tongues of flame');
+  // the druid's staff: a crescent of gold at its head, twice as broad as the plain staff's
+  const staff = pieceSize(celtic('priest'), 'weaponR');
+  const plainStaff = pieceSize(shared('priest'), 'weaponR');
+  assert.ok(staff.y > plainStaff.y * 1.5, `the crescent (${staff.y.toFixed(2)} against ${plainStaff.y.toFixed(2)})`);
+  // the shield: a tall oval, with a band and two studs of bronze in its face; the shared one is round
+  const shield = pieceSize(celtic('warrior'), 'shield');
+  const plain = pieceSize(shared('warrior'), 'shield');
+  assert.ok(shield.y > shield.x * 1.5, `taller than it is wide (${shield.y.toFixed(2)} by ${shield.x.toFixed(2)})`);
+  assert.ok(plain.x > plain.y * 0.95, 'the shared one is as wide as it is tall');
+  assert.ok(pieceTris(celtic('warrior'), 'shield') > pieceTris(shared('warrior'), 'shield') + 300, 'the band and the studs are geometry');
+  // Balor's mace is black iron, darker than the shared one
+  const lum = (u, name) => {
+    const c = buildRichTemplate(u).rich.attach.find((a) => a.name === name).geo.attributes.color.array;
+    let sum = 0;
+    for (let i = 0; i < c.length; i += 3) sum += 0.2126 * c[i] + 0.7152 * c[i + 1] + 0.0722 * c[i + 2];
+    return sum / (c.length / 3);
+  };
+  assert.ok(lum(celtic('celtic_balor'), 'weaponR') < lum(shared('celtic_balor'), 'weaponR') * 0.6, 'black iron');
+});
+
+test('the Celtic gear styles: what the outfit asks the gear builder for', () => {
+  const celt = outfitFor('celtic');
+  const at = (id, item) => celt.gear({ unit: { id } }, { id: item });
+  assert.equal(at('celtic_woad_raider', 'double_axe').build, true, 'the double axe is built by the rich gear');
+  assert.equal(at('celtic_brigid', 'torch').build, true, 'and the torch');
+  assert.equal(at('priest', 'staff').staff, 'druid', 'the staff of a druid');
+  assert.ok(at('celtic_the_dagda', 'club').studs, 'the club studded with iron');
+  const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  assert.ok(lum(at('celtic_the_morrigan', 'spear').shaftColor) < lum(at('celtic_lugh', 'spear').shaftColor) * 0.5, 'the Morrigan\'s spear is black ash, Lugh\'s the pale one');
+  assert.equal(at('celtic_balor', 'mace').color, at('celtic_balor', 'mace').color);
+  assert.equal(at('celtic_balor', 'bow'), null, 'the rest are as shared');
+});
+
+/** The dressing environment of a unit's own size, with an empty kit: for the pieces of clothing and regalia on their own. */
+function dressing(unit) {
+  const ctx = unitContext(unit);
+  const D = richDims(ctx, unit.visual.body === 'giant' ? 'giant' : 'humanoid');
+  const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, {});
+  const bind = makeBinds(spec, D);
+  const kit = new MeshKit(spec, { sides: 12, rings: 1 });
+  return { ctx, D, spec, bind, kit, pal: ctx.pal, E: { D, pal: ctx.pal, spec, ctx } };
+}
+
+const boxOf = (geo) => {
+  geo.computeBoundingBox();
+  return geo.boundingBox;
+};
+
+test('a torc is an open ring of rope about the neck with a knob at each end of the gap at the throat', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addTorc } = await import('../../src/render/models/rich-clothing.js');
+  const { kit, D, bind } = dressing(celtic('celtic_the_dagda'));
+  addTorc(kit, D, bind, { color: withMat('#dfb54a', 'gold'), big: 1 });
+  const geo = kit.build({ ground: 1 });
+  const b = boxOf(geo);
+  assert.ok(b.min.y > D.shoulderY - 0.06 && b.max.y < D.shoulderY + 0.1, `about the base of the neck (y ${b.min.y.toFixed(2)} to ${b.max.y.toFixed(2)}, shoulders at ${D.shoulderY.toFixed(2)})`);
+  assert.ok(b.max.z - b.min.z > 0.2 && b.max.z - b.min.z < 0.5, 'a ring, not a collar');
+  // the gap: between the two knobs, nothing in front of the throat (the face is +x)
+  const pos = geo.attributes.position.array;
+  const cx = (b.min.x + b.max.x) / 2;
+  let front = 0;
+  let knobs = 0;
+  for (let i = 0; i < pos.length; i += 3) {
+    if (pos[i] > cx + 0.05 && Math.abs(pos[i + 2]) < 0.008) front++;
+    if (pos[i] > cx + 0.05 && Math.abs(pos[i + 2]) < 0.045) knobs++;
+  }
+  assert.equal(front, 0, 'open at the throat');
+  assert.ok(knobs > 20, 'a knob at each end of the gap');
+  assert.ok(geo.userData.triangles > 150 && geo.userData.triangles < 600, `a rope of a few hundred triangles (${geo.userData.triangles})`);
+  // a bigger torc is a thicker rope on a ring of the same neck
+  const thick = dressing(celtic('celtic_the_dagda'));
+  addTorc(thick.kit, thick.D, thick.bind, { color: withMat('#dfb54a', 'gold'), big: 1.7 });
+  const bt = boxOf(thick.kit.build({ ground: 1 }));
+  assert.ok(bt.max.y - bt.min.y > b.max.y - b.min.y + 0.01, 'the rope is thicker');
+});
+
+test('a penannular brooch pins the cloak at the shoulder: a small open ring with a pin across it, a gem at its foot if it has one', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addBrooch } = await import('../../src/render/models/rich-clothing.js');
+  const make = (opts) => {
+    const { kit, D, bind } = dressing(celtic('warrior'));
+    addBrooch(kit, D, bind, { color: withMat('#b87a3c', 'gold'), ...opts });
+    return kit.build({ ground: 1 });
+  };
+  const plain = make({});
+  const gem = make({ gem: withMat('#3a6ad0', 'gem') });
+  const size = boxOf(plain).getSize(new THREE.Vector3());
+  assert.ok(Math.max(size.x, size.y, size.z) < 0.1 && Math.max(size.x, size.y, size.z) > 0.03, `a brooch is a few centimeters across (${size.toArray().map((v) => v.toFixed(3))})`);
+  assert.ok(gem.userData.triangles > plain.userData.triangles + 20, 'the stone is a bead of its own');
+  const big = boxOf(make({ size: 1.6 })).getSize(new THREE.Vector3());
+  assert.ok(Math.max(big.x, big.y, big.z) > Math.max(size.x, size.y, size.z) * 1.3, 'size scales it');
+  // set on a surface of its own (a cloak's collar): its center is where it was asked
+  const at = make({ at: { c: [0.05, 1.2, 0.15], n: [0, 0, 1] } });
+  const c = boxOf(at).getCenter(new THREE.Vector3());
+  assert.ok(Math.abs(c.x - 0.05) < 0.03 && Math.abs(c.y - 1.2) < 0.03 && Math.abs(c.z - 0.15) < 0.04, `set at the point given (${c.toArray().map((v) => v.toFixed(3))})`);
+});
+
+test('a mail shirt hangs from the neck below the hip, flares at its hem and its sleeves end at the elbow', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addMailShirt } = await import('../../src/render/models/rich-clothing.js');
+  const make = (opts) => {
+    const { kit, D, bind } = dressing(celtic('warrior'));
+    addMailShirt(kit, D, bind, { color: withMat('#8b949e', 'metal'), ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const bare = make({ sleeves: false, hem: 0.16 });
+  const sleeved = make({ sleeves: true, hem: 0.16, trim: withMat('#6a4528', 'leather') });
+  const b = boxOf(bare.geo);
+  assert.ok(b.min.y < bare.D.hipY - 0.1, `it hangs below the hip (${b.min.y.toFixed(2)} against ${bare.D.hipY.toFixed(2)})`);
+  assert.ok(b.max.y > bare.D.shoulderY - 0.02, 'from the shoulders');
+  const pos = bare.geo.attributes.position.array;
+  const half = (y0, y1) => {
+    let w = 0;
+    for (let i = 0; i < pos.length; i += 3) if (pos[i + 1] > y0 && pos[i + 1] < y1) w = Math.max(w, Math.abs(pos[i + 2]));
+    return w;
+  };
+  assert.ok(half(b.min.y, b.min.y + 0.03) > half(bare.D.hipY + 0.02, bare.D.hipY + 0.05) + 0.015, 'the hem flares out');
+  assert.ok(boxOf(sleeved.geo).max.z > b.max.z + 0.03, 'the sleeves reach out over the arms');
+  assert.ok(sleeved.geo.userData.triangles > bare.geo.userData.triangles + 100);
+  // the sleeves stop at the elbow
+  const elbow = sleeved.D.shoulderY - 0.02 - sleeved.D.upper;
+  const sp = sleeved.geo.attributes.position.array;
+  let lowest = Infinity;
+  for (let k = 0; k < sp.length; k += 3) if (Math.abs(sp[k + 2]) > b.max.z + 0.005) lowest = Math.min(lowest, sp[k + 1]);
+  assert.ok(lowest > elbow - 0.02 && lowest < elbow + 0.1, `the sleeve ends at the elbow (${lowest.toFixed(2)} against ${elbow.toFixed(2)})`);
+});
+
+test('trews are woven in a check from the ankle to the hip', async () => {
+  const { addTrews } = await import('../../src/render/models/rich-clothing.js');
+  const { kit, D, bind } = dressing(celtic('warrior'));
+  addTrews(kit, D, bind, { color: TEAM(0.92, 'cloth'), hue: new THREE.Color('#2f6b3a'), cell: 0.1, from: D.ankleY + 0.036 });
+  const geo = kit.build({ ground: 1 });
+  const b = boxOf(geo);
+  assert.ok(b.min.y < D.ankleY + 0.05 && b.max.y > D.hipY - 0.02, `from the ankle (${b.min.y.toFixed(2)}) to the hip (${b.max.y.toFixed(2)})`);
+  // the check: some of the cloth is the team's color, some the green of the bands, some in between
+  const fx = geo.attributes.aFx.array;
+  const col = geo.attributes.color.array;
+  let team = 0;
+  let green = 0;
+  for (let i = 0; i < fx.length / 4; i++) {
+    if (fx[i * 4] > 0) team++;
+    else if (col[i * 3 + 1] > col[i * 3] * 1.3 && col[i * 3 + 1] > col[i * 3 + 2] * 1.3) green++;
+  }
+  const n = fx.length / 4;
+  assert.ok(team > n * 0.1 && green > n * 0.1, `team ${team}, green ${green} of ${n}`);
+});
+
+test('antlers rise from the brow, a tine at a time, over a band; Brigid\'s flame crown and the Morrigan\'s raven are rigid pieces that ride the head and the chest', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addAntlers } = await import('../../src/render/models/rich-headgear.js');
+  const { addFlameCrown, addRaven } = await import('../../src/render/models/rich-regalia.js');
+  const make = (opts) => {
+    const { kit, D, pal, bind } = dressing(celtic('priest'));
+    addAntlers(kit, D, pal, bind, { color: withMat('#ebe3cf', 'bone'), ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const a3 = make({ tines: 3 });
+  const a0 = make({ tines: 0 });
+  assert.ok(a3.geo.userData.triangles > a0.geo.userData.triangles + 40, 'the tines are geometry');
+  assert.ok(boxOf(a3.geo).max.y > a3.D.headCY + 0.2 * a3.D.hs, 'the antlers stand above the head');
+  assert.ok(Math.abs(boxOf(a3.geo).min.z + boxOf(a3.geo).max.z) < 0.01, 'a stag\'s pair, even on both sides');
+  const banded = make({ band: withMat('#6a4528', 'leather') });
+  assert.ok(banded.geo.userData.triangles > make({}).geo.userData.triangles + 20, 'a band across the brow');
+  assert.ok(boxOf(make({ size: 1.5 }).geo).max.y > boxOf(a3.geo).max.y + 0.03, 'size scales them');
+  // the flame crown: more tongues, more flame; rides the head and flickers
+  const { E } = dressing(celtic('celtic_brigid'));
+  const nine = addFlameCrown(E, { tongues: 9 });
+  const five = addFlameCrown(E, { tongues: 5 });
+  assert.equal(nine.bone, B.head);
+  assert.ok(nine.flicker && nine.geo.morphAttributes.position, 'the flames flicker');
+  assert.ok(nine.geo.userData.triangles > five.geo.userData.triangles + 100);
+  // the raven: perched on the shoulder it is asked for, small
+  const left = addRaven(dressing(celtic('celtic_the_morrigan')).E, { side: -1 });
+  const right = addRaven(dressing(celtic('celtic_the_morrigan')).E, { side: 1 });
+  assert.equal(left.bone, B.chest);
+  assert.ok(boxOf(left.geo).getCenter(new THREE.Vector3()).z < -0.1 && boxOf(right.geo).getCenter(new THREE.Vector3()).z > 0.1, 'on the left shoulder or the right');
+  const bird = boxOf(left.geo).getSize(new THREE.Vector3());
+  assert.ok(Math.max(bird.x, bird.y, bird.z) < 0.5 && Math.max(bird.x, bird.y, bird.z) > 0.15, `a bird on a shoulder (${bird.toArray().map((v) => v.toFixed(2))})`);
+  assert.ok(!left.flicker, 'a bird does not flicker');
+});
+
+test('the gods and the druid wear their regalia: a stag\'s antlers, a crown of rays, a crown of feathers; the torc and the mail show on the body', () => {
+  const shared = (id) => ({ ...celtic(id), pantheon: 'norse', lookOf: 'norse' });
+  const box = (u) => bodyBox(buildRichTemplate(u));
+  assert.ok(box(celtic('priest')).max.y > box(shared('priest')).max.y + 0.2, 'the druid\'s antlers');
+  assert.ok(box(celtic('celtic_lugh')).max.y > box(shared('celtic_lugh')).max.y + 0.08, 'Lugh\'s crown of rays');
+  assert.ok(box(celtic('celtic_the_morrigan')).max.y > box(shared('celtic_the_morrigan')).max.y + 0.06, 'the Morrigan\'s feathers');
+  // the tails of the raiders' hair and the plaid down a warrior's back reach behind the unit
+  assert.ok(box(celtic('warrior')).min.x < box(shared('warrior')).min.x - 0.05, 'a cloak hangs down the warrior\'s back');
+  // every Celtic unit is built from more than the shared look (the dress, the torc, the cloak): none is plainer
+  for (const id of CELTIC) {
+    assert.ok(buildRichTemplate(celtic(id)).rich.geo.userData.triangles > buildRichTemplate(shared(id)).rich.geo.userData.triangles, `${id} is dressed in more than the shared look`);
+  }
+  // Brigid's crown of flame and her torch flicker; nothing else of the Celts' does
+  const flick = (id) => buildRichTemplate(celtic(id)).rich.attach.filter((a) => a.flicker).map((a) => a.name).sort();
+  assert.deepEqual(flick('celtic_brigid'), ['flameCrown', 'weaponR']);
+  for (const id of CELTIC.filter((x) => x !== 'celtic_brigid')) assert.deepEqual(flick(id), [], `${id}: no flames`);
+});
+
+test('the woad: the raiders\' skin is painted in bands of blue, the Morrigan\'s eyes are blacked, nobody else is painted', () => {
+  const celt = outfitFor('celtic');
+  const D = { hs: 1, headX: 0.02, headCY: 1.5, shoulderY: 1.3, upper: 0.3, fore: 0.28, shoulderZ: 0.2 };
+  const E = (id, more = {}) => ({ ctx: { unit: { id }, cls: 'infantry', worker: false, ex: new Set(more.armor ? ['armor'] : []) }, worker: false, armor: false, D, ...more });
+  const base = { r: 0.5, g: 0.4, b: 0.3, team: 0 };
+  const at = (paint, x, y, z) => {
+    const o = { ...base };
+    paint(o, x, y, z);
+    return o;
+  };
+  for (const id of ['warrior', 'archer', 'priest', 'celtic_the_dagda', 'celtic_lugh', 'celtic_brigid', 'celtic_balor']) assert.equal(celt.skinPaint(E(id, { armor: id === 'warrior' })), null, `${id} is not painted`);
+  assert.equal(celt.skinPaint(E('worshipper', { worker: true, ctx: { unit: { id: 'worshipper' }, cls: 'worker', worker: true, ex: new Set() } })), null, 'nor is a worshipper');
+  const woad = celt.skinPaint(E('celtic_woad_raider'));
+  const blue = (o) => o.b > o.r * 3 && o.b > 0.2;
+  const skin = (o) => o.r > 0.4 && o.r > o.b;
+  // the face: fair, a band of woad across the eyes, stripes down the cheeks
+  assert.ok(blue(at(woad, D.headX + 0.1, D.headCY + 0.01, 0)), 'the band across the eyes');
+  assert.ok(skin(at(woad, D.headX + 0.1, D.headCY + 0.07, 0)), 'a fair forehead');
+  assert.ok(blue(at(woad, D.headX + 0.1, D.headCY - 0.06, 0.04)), 'a stripe down the cheek');
+  assert.ok(skin(at(woad, D.headX + 0.1, D.headCY - 0.06, 0.049)), 'and fair skin between the stripes');
+  assert.ok(skin(at(woad, D.headX - 0.05, D.headCY + 0.01, 0)), 'no paint on the back of the head');
+  // the body: wavy bands of blue about the chest, the forearms blue to the elbow, the hands bare
+  assert.ok(blue(at(woad, 0.1, 1.0, 0)) && skin(at(woad, 0.1, 1.06, 0)), 'bands of woad and of skin');
+  assert.ok(blue(at(woad, 0, 0.85, 0.2)), 'the forearm is blue');
+  assert.ok(skin(at(woad, 0, 0.6, 0.2)), 'the hand is not');
+  const kohl = celt.skinPaint(E('celtic_the_morrigan'));
+  assert.ok(at(kohl, D.headX + 0.1, D.headCY + 0.01, 0).r < 0.1, 'black across her eyes');
+  assert.deepEqual(at(kohl, D.headX + 0.1, D.headCY + 0.07, 0), base, 'and nothing above');
+  assert.deepEqual(at(kohl, D.headX + 0.1, D.headCY + 0.01, 0.2), base, 'or on her ears');
+  assert.deepEqual(at(kohl, D.headX - 0.05, D.headCY + 0.01, 0), base, 'or behind');
+});
+
+test('tartan is a woven check: bands of the warp and the weft, darkest where they cross; mail is a flecked, uneven sheen', () => {
+  const stat = (paint, team = 0) => {
+    let dark = 0;
+    let n = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 40; j++) {
+        for (let k = 0; k < 10; k++) {
+          const o = { r: 1, g: 1, b: 1, team };
+          paint(o, i * 0.0173, j * 0.0171, (k - 5) * 0.0169);
+          const v = team ? o.team : o.r;
+          n++;
+          if (v < 0.97) dark++;
+          min = Math.min(min, v);
+          max = Math.max(max, v);
+          if (!team) assert.ok(o.r === o.g && o.g === o.b, 'a shade, not a tint');
+        }
+      }
+    }
+    return { share: dark / n, min, max };
+  };
+  const check = stat(tartan({ cell: 0.1, k: 0.7 }));
+  assert.ok(check.share > 0.6 && check.share < 0.85, `most of the cloth is in a band of one set or the other (${check.share.toFixed(2)})`);
+  assert.ok(Math.abs(check.min - 0.49) < 1e-9 && check.max === 1, 'darkest where the two cross');
+  const teamCheck = stat(tartan({ cell: 0.1, k: 0.7 }), 1);
+  assert.ok(Math.abs(teamCheck.min - 0.49) < 1e-9 && teamCheck.max === 1, 'on team colored cloth the team\'s color is what is scaled');
+  // flat: the warp bands run along z, the same at any x; about a limb they follow the arc, which changes with x
+  const flat = tartan({ cell: 0.1, flat: true });
+  const arc = tartan({ cell: 0.1 });
+  const val = (paint, x, y, z) => {
+    const o = { r: 1, g: 1, b: 1, team: 0 };
+    paint(o, x, y, z);
+    return o.r;
+  };
+  assert.equal(val(flat, 0.01, 0.07, 0.02), val(flat, 0.5, 0.07, 0.02), 'a hanging sheet is woven across z only');
+  assert.notEqual(val(arc, 0.01, 0.07, 0.02), val(arc, 0.5, 0.07, 0.02), 'a limb\'s bands follow its arc');
+  // hue: the warp bands are of that color (a team painted vertex turns plain there)
+  const green = new THREE.Color('#2f6b3a');
+  const band = tartan({ cell: 0.1, flat: true, hue: green, band: 0.5 });
+  const g1 = { r: 1, g: 1, b: 1, team: 0 };
+  band(g1, 0, 0.07, 0.02);
+  assert.ok(g1.g > g1.r * 1.5 && g1.g > g1.b * 1.5, 'the warp band is green');
+  const g2 = { r: 1, g: 1, b: 1, team: 1 };
+  band(g2, 0, 0.07, 0.02);
+  assert.equal(g2.team, 0);
+  assert.equal(g2.g, green.g, 'a team painted vertex in a green band is the green');
+  const g3 = { r: 1, g: 1, b: 1, team: 1 };
+  band(g3, 0, 0.07, 0.07);
+  assert.equal(g3.team, 1, 'and in the gap between bands it keeps the team\'s color');
+  // mail: every ring a little darker than a flat plate, the rows alternating
+  const mail = stat(mailSheen(0.03, 0.2));
+  assert.ok(mail.max < 1 && mail.min > 0.7 && mail.share > 0.5, `an uneven sheen (${mail.min.toFixed(2)} to ${mail.max.toFixed(2)})`);
+  const rowMean = (row) => {
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < 60; i++) {
+      for (let j = 0; j < 20; j++) {
+        const o = { r: 1, g: 1, b: 1, team: 0 };
+        mailSheen(0.03, 0.2)(o, i * 0.011, (row + 0.5) * 0.03, j * 0.013);
+        sum += o.r;
+        n++;
+      }
+    }
+    return sum / n;
+  };
+  assert.ok(Math.abs(rowMean(2) - rowMean(3)) > 0.03, 'the next row of rings catches the light the other way');
+});
+
+test('a drape across the chest is worn from either shoulder with its outer face out: the shawls and slings of the Celts, a Hindu goddess\'s pallu', () => {
+  for (const side of [1, -1]) {
+    const { kit, D, bind } = dressing(celtic('worshipper'));
+    addDrape(kit, D, bind, TEAM(1, 'cloth'), null, { side, width: 0.4 });
+    const geo = kit.build({ ground: 1 });
+    const pos = geo.attributes.position.array;
+    const idx = geo.index.array;
+    const fx = geo.attributes.aFx.array;
+    // the outer face of the strip is the team's color, its inner face a plain grey
+    let outward = 0;
+    let faces = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]];
+      if (!(fx[a * 4] > 0 && fx[b * 4] > 0 && fx[c * 4] > 0)) continue;
+      const p = (i) => new THREE.Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+      const [pa, pb, pc] = [p(a), p(b), p(c)];
+      const n = pb.clone().sub(pa).cross(pc.clone().sub(pa));
+      const m = pa.clone().add(pb).add(pc).multiplyScalar(1 / 3);
+      faces++;
+      if (n.x * m.x + n.z * m.z > 0) outward++;
+    }
+    assert.ok(faces > 100, `side ${side}: the strip has faces (${faces})`);
+    assert.ok(outward > faces * 0.95, `side ${side}: its team colored face looks outward (${outward} of ${faces})`);
+  }
+});
+
+test('Celtic mortals, gods and helpers carry the team\'s color in their plaid, trews, kilts and shields; the gold and the iron keep their own', () => {
+  for (const [id, share] of [['worshipper', 0.07], ['warrior', 0.1], ['archer', 0.02], ['priest', 0.02], ['celtic_the_dagda', 0.012], ['celtic_the_morrigan', 0.03], ['celtic_lugh', 0.012], ['celtic_brigid', 0.025], ['celtic_balor', 0.012], ['celtic_woad_raider', 0.05]]) {
+    const fx = buildRichTemplate(celtic(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    let metal = 0;
+    for (let i = 0; i < fx.length; i += 4) {
+      if (fx[i] > 0) team++;
+      if (fx[i + 3] > 0.3) metal++;
+    }
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+    if (id === 'celtic_lugh') assert.ok(metal > n * 0.12, `${id}: gold vertices ${metal} of ${n}`);
+    if (id === 'warrior') assert.ok(metal > n * 0.1, `${id}: iron vertices ${metal} of ${n}`);
+  }
+  // a warrior's shield face is the team's color, under its band of bronze
+  const shield = buildRichTemplate(celtic('warrior')).rich.attach.find((a) => a.name === 'shield');
+  const fx = shield.geo.attributes.aFx.array;
+  let team = 0;
+  for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) team++;
+  assert.ok(team > fx.length / 4 * 0.2, `the shield's face is team painted (${team} of ${fx.length / 4})`);
+});
+
+test('the people of the Celts are red-haired, the archers fair, the druid white and the raiders limed; the gods keep their own', () => {
+  const celt = outfitFor('celtic');
+  const pal = { hair: new THREE.Color('#222222'), skin: new THREE.Color('#d9a678'), primary: new THREE.Color('#b08a5a') };
+  const hairOf = (unit, mortal = true) => celt.palette(pal, { mortal, unit: { id: unit.id }, worker: !!unit.worker, cls: unit.cls || 'infantry', ex: new Set(unit.armor ? ['armor'] : []) }).hair;
+  const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const worker = hairOf({ id: 'worshipper', worker: true, cls: 'worker' });
+  const warrior = hairOf({ id: 'warrior', armor: true });
+  const druid = hairOf({ id: 'priest', cls: 'support' });
+  const raider = hairOf({ id: 'celtic_woad_raider', armor: true });
+  assert.ok(warrior.r > warrior.g * 1.5 && warrior.r > warrior.b * 2, 'red hair');
+  assert.ok(worker.r > worker.b * 2, 'the workers\' is red too');
+  assert.ok(lum(druid) > 0.6, 'a white beard and hair');
+  assert.ok(lum(raider) > 0.4 && raider.r > raider.b * 1.5, 'limed straw');
+  assert.equal(celt.palette(pal, { mortal: false, unit: { id: 'celtic_lugh' }, ex: new Set() }), pal, 'a god\'s palette is the unit\'s own');
+  assert.equal(pal.hair.getHexString(), '222222', 'the shared palette itself is not touched');
+});
+
+test('the Celtic gods, mortals and the raider animate every state without a NaN', () => {
+  for (const id of CELTIC) {
+    const m = buildUnitModel(celtic(id), PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();
