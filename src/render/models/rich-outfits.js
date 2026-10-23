@@ -14,8 +14,9 @@ import {
   addTunic, addBelt, addCuirass, addPauldrons, addFurMantle, addCape,
 } from './rich-clothing.js';
 import {
-  addHairCap, addLongHair, addBeard, addHood, addHornedHelm, addHornPair,
+  addHairCap, addLongHair, addBeard, addHood, addHornedHelm, addHornPair, addHelmet, addWingedHelm, addTiara,
 } from './rich-headgear.js';
+import { addSpikes, addJewelry, addFeatherCloak, addChains } from './rich-regalia.js';
 import { gradY } from './rich-paint.js';
 
 /** Forged black iron (a fire giant's armor). */
@@ -141,21 +142,35 @@ function head(E) {
   const { kit, D, ctx, v, pal, bind, ex, lava, worker } = E;
   const gear = v.headgear;
   const hoodColor = ctx.mortal ? (worker ? pal.secondary : shadeC(pal.primary, ctx.cls === 'support' ? 0.95 : 0.8)) : pal.secondary;
+  const steel = pal.accentMetal;
+  const trim = shadeC(steel, 0.7);
   if (gear === 'hood') addHood(kit, D, pal, bind, hoodColor, pal.secondary);
-  else if (gear === 'horned_helmet') addHornedHelm(kit, D, pal, bind, pal.accentMetal, shadeC(pal.accentMetal, 0.7), pal.horn);
+  else if (gear === 'horned_helmet') addHornedHelm(kit, D, pal, bind, steel, trim, pal.horn);
+  else if (gear === 'helmet') addHelmet(kit, D, pal, bind, { steel, trim, crest: 'fin', crestColor: ctx.mortal ? pal.primary : TEAM(1) });
+  else if (gear === 'winged_helmet') addWingedHelm(kit, D, pal, bind, { steel, trim, feather: pal.white, tip: null });
   else if (lava) {
     // a fire giant has no hair: its mane is flame (flameMane), over great swept horns
     addHornPair(kit, D, bind, mixC(pal.bone, '#2a1814', 0.35), 0, 1.15);
   } else {
     addHairCap(kit, D, pal, bind);
     if (gear === 'horns') addHornPair(kit, D, bind, pal.horn, 0.012 * D.hs);
+    if (gear === 'tiara') addTiara(kit, D, pal, bind, { metal: steel, gem: pal.secondary });
   }
   // hair peeking out under a hood or helmet is left to the beard and long hair
   if (ex.has('long_hair') && gear !== 'hood') addLongHair(kit, D, pal, bind);
   if (ex.has('beard')) addBeard(kit, D, pal, bind, lava);
 }
 
-const DEFAULT = { legs, torso, arms, armor: armorLayer, cloaks, head };
+/** What gods and creatures wear on top: spikes, collars and earrings, feather cloaks, chains. */
+function extras(E) {
+  const { ex } = E;
+  if (ex.has('spikes')) addSpikes(E);
+  if (ex.has('jewelry')) addJewelry(E);
+  if (ex.has('feather_cloak')) addFeatherCloak(E);
+  if (ex.has('chains')) addChains(E);
+}
+
+const DEFAULT = { legs, torso, arms, armor: armorLayer, cloaks, head, extras };
 
 /** Pantheon files register their overrides here (rich-outfits-<pantheon>.js, imported below). */
 export const OUTFITS = {};
@@ -165,4 +180,4 @@ export function outfitFor(pantheon) {
   return { ...DEFAULT, ...(OUTFITS[pantheon] || {}) };
 }
 
-export const LAYERS = ['legs', 'torso', 'arms', 'armor', 'cloaks', 'head'];
+export const LAYERS = ['legs', 'torso', 'arms', 'armor', 'cloaks', 'head', 'extras'];

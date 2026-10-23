@@ -289,3 +289,22 @@ export function addBoots(kit, D, pal, bind, color, cuff) {
     }
   }
 }
+
+/**
+ * The torso's ring at height fraction f (0 at the hip, 1 at the shoulder line, up to about 1.09
+ * at the neck base), with clearance g: { y, rx, rz, dx }, interpolated between the torso stations so
+ * collars, straps and pendants sit on the body without sinking in.
+ */
+export function torsoRing(D, f, g = 0) {
+  const st = torsoStations(D, g);
+  const y = D.hipY + (D.shoulderY - D.hipY) * f;
+  for (let i = 0; i + 1 < st.length; i++) {
+    const a = st[i];
+    const b = st[i + 1];
+    if (y <= b.c[1] || i + 2 === st.length) {
+      const t = clamp((y - a.c[1]) / (b.c[1] - a.c[1] || 1e-9));
+      return { y, rx: lerp(a.rx, b.rx, t), rz: lerp(a.rz, b.rz, t), dx: lerp(a.c[0], b.c[0], t) };
+    }
+  }
+  return { y, rx: st[0].rx, rz: st[0].rz, dx: 0 };
+}

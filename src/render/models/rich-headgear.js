@@ -4,6 +4,7 @@
 import { shadeC } from './unit-geo.js';
 import { vs, ps, smoothstep } from './rich-kit.js';
 import { clamp, lerp, gradY, paints } from './rich-paint.js';
+import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -104,7 +105,11 @@ export function addHood(kit, D, pal, bind, color, trim) {
   void trim;
 }
 
-export function addHornedHelm(kit, D, pal, bind, steel, trim, horn) {
+/**
+ * The shell of a helmet: dome, brow band, nasal and cheek guards, weighted to the head bone.
+ * opts: nasal, cheeks (both default on), neck (a flared guard over the nape), g (extra clearance).
+ */
+export function helmShell(kit, D, bind, steel, trim, { nasal = true, cheeks = true, neck = false } = {}) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
@@ -120,15 +125,100 @@ export function addHornedHelm(kit, D, pal, bind, steel, trim, horn) {
   // brow band
   kit.loft([vs(hy + 0.016 * hs, 0.099 * hs + g + 0.004, 0.088 * hs + g + 0.004, hx), vs(hy + 0.052 * hs, 0.103 * hs + g + 0.004, 0.092 * hs + g + 0.004, hx - 0.002 * hs)],
     { sides: 16, start: null, end: null, color: trim, bind: bind.head });
-  // nose guard
-  kit.loft([ps(hx + 0.095 * hs, hy + 0.045 * hs, 0, 0.007 * hs, 0.011 * hs), ps(hx + 0.108 * hs, hy - 0.002 * hs, 0, 0.007 * hs, 0.011 * hs), ps(hx + 0.108 * hs, hy - 0.042 * hs, 0, 0.007 * hs, 0.013 * hs)],
-    { ref: [1, 0, 0], sides: 6, capDepth: 0.006 * hs, color: steel, bind: bind.head });
-  // cheek guards hint
-  for (const side of [1, -1]) {
-    kit.loft([ps(hx + 0.01 * hs, hy - 0.002 * hs, side * 0.094 * hs, 0.05 * hs, 0.01 * hs), ps(hx + 0.01 * hs, hy - 0.05 * hs, side * 0.088 * hs, 0.04 * hs, 0.008 * hs)],
-      { ref: [1, 0, 0], sides: 8, capDepth: 0.008 * hs, color: shadeC(steel, 0.9), bind: bind.head });
+  if (nasal) {
+    kit.loft([ps(hx + 0.095 * hs, hy + 0.045 * hs, 0, 0.007 * hs, 0.011 * hs), ps(hx + 0.108 * hs, hy - 0.002 * hs, 0, 0.007 * hs, 0.011 * hs), ps(hx + 0.108 * hs, hy - 0.042 * hs, 0, 0.007 * hs, 0.013 * hs)],
+      { ref: [1, 0, 0], sides: 6, capDepth: 0.006 * hs, color: steel, bind: bind.head });
   }
+  if (cheeks) {
+    for (const side of [1, -1]) {
+      kit.loft([ps(hx + 0.01 * hs, hy - 0.002 * hs, side * 0.094 * hs, 0.05 * hs, 0.01 * hs), ps(hx + 0.01 * hs, hy - 0.05 * hs, side * 0.088 * hs, 0.04 * hs, 0.008 * hs)],
+        { ref: [1, 0, 0], sides: 8, capDepth: 0.008 * hs, color: shadeC(steel, 0.9), bind: bind.head });
+    }
+  }
+  if (neck) {
+    // a flared neck guard over the nape
+    kit.loft([vs(hy + 0.012 * hs, 0.1 * hs + g, 0.09 * hs + g, hx), vs(hy - 0.045 * hs, 0.112 * hs + g, 0.104 * hs + g, hx - 0.012 * hs), vs(hy - 0.085 * hs, 0.128 * hs + g, 0.118 * hs + g, hx - 0.026 * hs)],
+      { rings: 4, sides: 20, start: null, end: null, color: shadeC(steel, 0.88), bind: bind.head,
+        // open at the face: the front of the flare folds back up to the brow band
+        warp: (p, a) => { const k = smoothstep(1.05, 1.75, Math.abs(wrap(a))); p[1] = lerp(hy + 0.012 * hs, p[1], k); } });
+  }
+  return g;
+}
+
+export function addHornedHelm(kit, D, pal, bind, steel, trim, horn) {
+  const g = helmShell(kit, D, bind, steel, trim);
   addHornPair(kit, D, bind, horn, g);
+}
+
+/**
+ * A helmet with a crest: 'fin' (a team-colored fin from brow to nape, readable from the game
+ * camera), 'brush' (a tall horsehair brush), 'none'. opts: steel, trim, crestColor, neck.
+ */
+export function addHelmet(kit, D, pal, bind, { steel, trim, crest = 'fin', crestColor, neck = false, nasal = true, cheeks = true } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  helmShell(kit, D, bind, steel, trim, { nasal, cheeks, neck });
+  if (crest === 'fin') {
+    const o = [
+      [hx + 0.066 * hs, hy + 0.095 * hs], [hx + 0.058 * hs, hy + 0.14 * hs], [hx + 0.02 * hs, hy + 0.19 * hs], [hx - 0.03 * hs, hy + 0.2 * hs],
+      [hx - 0.078 * hs, hy + 0.165 * hs], [hx - 0.112 * hs, hy + 0.098 * hs], [hx - 0.1 * hs, hy + 0.074 * hs], [hx - 0.055 * hs, hy + 0.1 * hs], [hx + 0.01 * hs, hy + 0.108 * hs],
+    ];
+    kit.slab(o, { depth: 0.024 * hs, bevel: 0.008 * hs, color: crestColor, mat: 'painted', bind: bind.head, paint: gradY(hy + 0.08 * hs, hy + 0.2 * hs, 0.86, 1.08) });
+  } else if (crest === 'brush') {
+    const o = [
+      [hx + 0.07 * hs, hy + 0.092 * hs], [hx + 0.064 * hs, hy + 0.16 * hs], [hx + 0.03 * hs, hy + 0.235 * hs], [hx - 0.03 * hs, hy + 0.27 * hs], [hx - 0.1 * hs, hy + 0.252 * hs],
+      [hx - 0.16 * hs, hy + 0.19 * hs], [hx - 0.19 * hs, hy + 0.1 * hs], [hx - 0.185 * hs, hy + 0.01 * hs], [hx - 0.15 * hs, hy + 0.06 * hs], [hx - 0.09 * hs, hy + 0.096 * hs], [hx + 0.0, hy + 0.108 * hs],
+    ];
+    kit.slab(o, {
+      depth: 0.03 * hs, bevel: 0.01 * hs, color: crestColor, mat: 'hair', bind: bind.head,
+      paint: (o2, x, y, z, u, a) => {
+        // bristles: bands radiating from the base of the brush
+        const k = 0.88 + 0.16 * Math.sin((u * 36 + a * 7) + Math.sin(a * 11));
+        o2.team ? (o2.team *= k) : ((o2.r *= k), (o2.g *= k), (o2.b *= k));
+      },
+    });
+  }
+}
+
+/** A helmet with feathered wings at the temples (a god's), the feathers swept up and back and splayed out. */
+export function addWingedHelm(kit, D, pal, bind, { steel, trim, feather: fcol, tip }) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  helmShell(kit, D, bind, steel, trim);
+  const g = 0.012 * hs;
+  for (const side of [1, -1]) {
+    const root = [hx - 0.012 * hs, hy + 0.055 * hs, side * (0.094 * hs + g)];
+    const fan = [[0.34, 0.2], [0.55, 0.23], [0.78, 0.2], [1.0, 0.16]];
+    fan.forEach(([a, len], i) => {
+      // a swept fan: back and up, each feather splayed outward more than the one before it
+      const dir = [-Math.cos(a * 1.35) * 0.9, Math.sin(a * 1.35), side * (0.28 + 0.12 * i)];
+      feather(kit, root, dir, [0.2, 0.55, side * 1], len * hs, 0.034 * hs, { color: fcol, tip, bind: bind.head, bend: [-0.02 * hs, -0.015 * hs, side * 0.02 * hs], thick: 0.0026 * hs });
+    });
+  }
+}
+
+/** A circlet over the brow with a raised leaf and a gem at the front (a goddess's). */
+export function addTiara(kit, D, pal, bind, { metal, gem, height = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.007 * hs;
+  kit.loft([vs(hy + 0.058 * hs, 0.098 * hs + g, 0.087 * hs + g, hx - 0.002 * hs), vs(hy + 0.078 * hs, 0.097 * hs + g, 0.086 * hs + g, hx - 0.003 * hs)],
+    { sides: 20, start: null, end: null, color: metal, mat: 'gold', bind: bind.head });
+  // the raised leaf at the front, a gem at its foot
+  const fx = hx + 0.1 * hs + 0.011 * hs;
+  kit.loft([ps(fx, hy + 0.062 * hs, 0, 0.0045 * hs, 0.016 * hs), ps(fx + 0.002 * hs, hy + 0.1 * hs * height, 0, 0.004 * hs, 0.011 * hs), ps(fx + 0.003 * hs, hy + 0.135 * hs * height, 0, 0.003 * hs, 0.003 * hs)],
+    { ref: [1, 0, 0], rings: 5, sides: 6, start: null, end: 'round', capDepth: 0.004 * hs, color: metal, mat: 'gold', bind: bind.head });
+  kit.loft([ps(fx + 0.003 * hs, hy + 0.066 * hs, 0, 0.007 * hs, 0.012 * hs), ps(fx + 0.0065 * hs, hy + 0.068 * hs, 0, 0.0075 * hs, 0.0125 * hs)],
+    { ref: [1, 0, 0], sides: 8, start: 'round', end: 'round', capDepth: 0.005 * hs, color: gem, mat: 'gem', glow: 0.7, bind: bind.head });
+  // two small side leaves
+  for (const side of [1, -1]) {
+    const z = side * 0.034 * hs;
+    kit.loft([ps(fx - 0.004 * hs, hy + 0.062 * hs, z, 0.0035 * hs, 0.01 * hs), ps(fx - 0.003 * hs, hy + 0.088 * hs * height, z * 1.15, 0.003 * hs, 0.006 * hs), ps(fx - 0.002 * hs, hy + 0.103 * hs * height, z * 1.3, 0.002 * hs, 0.002 * hs)],
+      { ref: [1, 0, 0], rings: 4, sides: 6, start: null, end: 'round', capDepth: 0.003 * hs, color: metal, mat: 'gold', bind: bind.head });
+  }
 }
 
 /** Curved horns out of the temples, sweeping up and forward (bare-headed horned units, and on a helmet). */

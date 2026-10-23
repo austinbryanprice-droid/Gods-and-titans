@@ -4,6 +4,7 @@
 // skeleton can show that rigid parts cannot: the spine bending through its length, the
 // head riding steady above a leaning body, feet rolling flat, weight shifting, breathing,
 // the strike's wind-up and lunge, and cloth and hair that lag and swing after the body.
+import * as THREE from 'three';
 import { B, syncRich } from './rich-kit.js';
 
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
@@ -13,6 +14,11 @@ const smooth01 = (x) => {
 };
 
 const K = { w: 0, h: 0, r: 0 };
+const _q = new THREE.Quaternion();
+const _r = new THREE.Quaternion();
+const AX_X = new THREE.Vector3(1, 0, 0);
+const AX_Y = new THREE.Vector3(0, 1, 0);
+const AX_Z = new THREE.Vector3(0, 0, 1);
 
 /** Wind-up / strike / recover envelopes of an attack phase 0..1 (all zero without one), written into the shared K. */
 function strike(ap, bow) {
@@ -107,6 +113,57 @@ export function applyRich(m, P, state, t, dt) {
   b[B.hair1].rotation.set(0, 0, -0.1 - 0.35 * fl + 0.05 * Math.sin(phi * 2 + 0.5) * gait - lean * 0.2);
   b[B.hair2].rotation.set(0, 0, -0.08 - 0.3 * fl + 0.09 * Math.sin(phi * 2 - 0.4) * gait + 0.03 * Math.sin(t * 1.5 + seed));
 
+  if (b.length > B.wingR1) poseWings(m, b, P, state, t, phi, seed);
+
   // the bones are outside the scene graph: bring their matrices, the skin and the riding pieces up to date once, here
   syncRich(R);
+}
+
+/**
+ * Wings (winged units only, bones past the 23 of the body): rigid feather sheets on two bones a
+ * side. A grounded unit standing about folds them down its back (P.fold, which the pose blend
+ * eases in and out); they breathe a little at rest, hang half open walking, spread to cast, and
+ * beat in the air, the outer bone trailing the inner one. The right wing spans +Z, the left is
+ * its mirror: the same flap, sweep and roll with the signs that mirror them.
+ */
+function poseWings(m, b, P, state, t, phi, seed) {
+  const air = m.air;
+  const fold = P.fold || 0;
+  const rate = m.moving ? 8.5 : 5;
+  let flap;
+  let lag;
+  if (air) {
+    flap = 0.15 + 0.7 * Math.sin(t * rate + seed);
+    lag = 0.1 + 0.55 * Math.sin(t * rate + seed - 0.9);
+  } else if (state === 'cast') {
+    flap = 0.45 + 0.1 * Math.sin(t * 6);
+    lag = 0.35 + 0.12 * Math.sin(t * 6 - 0.7);
+  } else if (m.moving) {
+    flap = -0.2 + 0.25 * Math.sin(phi * 2);
+    lag = -0.15 + 0.2 * Math.sin(phi * 2 - 0.8);
+  } else {
+    flap = -0.3 + 0.06 * Math.sin(t * 1.4 + seed);
+    lag = -0.25 + 0.05 * Math.sin(t * 1.4 + seed - 0.6);
+  }
+  // folded: swept back along the body, rolled so the feathers hang, drooping at the tip;
+  // open: spread, a little swept (flap about the forward axis, sweep about the vertical one)
+  const sweep1 = 0.1 + fold * 1.15;
+  const roll1 = fold * 1.15;
+  const droop = fold * 0.42;
+  const sweep2 = 0.12 + fold * 0.1;
+  const a1 = flap * (1 - fold) - 0.1 * fold;
+  const a2 = (lag - flap) * (1 - fold * 0.8);
+  for (const side of [1, -1]) {
+    const w1 = b[side > 0 ? B.wingR1 : B.wingL1];
+    const w2 = b[side > 0 ? B.wingR2 : B.wingL2];
+    // roll about the span first, then flap, sweep back, and droop (the last about the lateral axis)
+    _q.setFromAxisAngle(AX_Z, droop);
+    _r.setFromAxisAngle(AX_Y, -side * sweep1);
+    _q.multiply(_r);
+    _r.setFromAxisAngle(AX_X, -side * a1);
+    _q.multiply(_r);
+    _r.setFromAxisAngle(AX_Z, roll1);
+    w1.quaternion.copy(_q.multiply(_r));
+    w2.rotation.set(-side * a2, -side * sweep2, 0);
+  }
 }

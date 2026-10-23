@@ -11,12 +11,12 @@ import { MeshKit, humanoidSpec, B, ps } from './rich-kit.js';
 import { RICH_WEAPONS, richWeapon, handFrame, finishGear } from './rich-gear.js';
 import { richDims, makeBinds, lavaSkin, addHeadAndNeck, addHands } from './rich-body.js';
 import { outfitFor, LAYERS } from './rich-outfits.js';
-import { flameMane, flamePieces } from './rich-regalia.js';
+import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.js';
 import { mul } from './rich-paint.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns']);
-const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara']);
+const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains']);
 
 /**
  * The pantheons whose units are drawn with the rich characters in play. The Norse are the
@@ -58,9 +58,9 @@ function heldPiece(ctx, P, side, item, sizeK = 1) {
   else if (item.kind === 'offhand') grip = id === 'lantern' ? 'hang' : 'fwd';
   if (grip === 'fist') return null;
   const size = P.weaponSize * sizeK;
-  if (item.kind === 'weapon' && RICH_WEAPONS.has(id)) {
+  if ((item.kind === 'weapon' || item.kind === 'bow') && RICH_WEAPONS.has(id)) {
     const kit = new MeshKit(null, { sides: 10 });
-    richWeapon(kit, pal, id, size, { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && id === 'hammer' ? pal.glow : null });
+    richWeapon(kit, pal, id, size, { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null });
     return finishGear(kit, handFrame(P, side, grip));
   }
   b.frame([0.01, handY, side * 0.005], gripRotation(grip), 1, () => {
@@ -118,7 +118,8 @@ export function buildRichTemplate(unitType, detail = 1) {
   const { v, pal, ex } = ctx;
   const name = v.body === 'giant' ? 'giant' : 'humanoid';
   const D = richDims(ctx, name);
-  const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 });
+  const wings = ex.has('wings') ? wingLayout(D, (ctx.unit.air ? 0.7 : 0.6) * D.k) : null;
+  const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, wings ? { wing: wings } : {});
   const bind = makeBinds(spec, D);
   const lava = ex.has('flames') && D.bare; // a fire giant: dark crust, glowing veins, iron plates
   const sides = name === 'giant' ? 20 : ctx.grand ? 14 : 12;
@@ -134,6 +135,7 @@ export function buildRichTemplate(unitType, detail = 1) {
     robe: ex.has('skirt') && (worker || ctx.cls === 'support' || (ctx.grand && !armor)),
     tunicColor: ctx.tunic || pal.primary,
     pantheon: ctx.unit.lookOf || ctx.unit.pantheon || null,
+    attach: [], // rigid pieces the layers add (flames, wings ...), riding bones
   };
 
   addHeadAndNeck(kit, D, pal, ctx, bind, E.skinPaint);
@@ -145,7 +147,8 @@ export function buildRichTemplate(unitType, detail = 1) {
 
   // rigid pieces
   const items = humanoidItems(v);
-  const attach = [];
+  const attach = [...E.attach];
+  if (wings) attach.push(...wingPieces(ctx, D, spec, wings));
   const P = D;
   const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right) : null;
   if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece });

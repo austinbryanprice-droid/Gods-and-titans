@@ -29,7 +29,8 @@ const { PLAYER_COLORS } = await import('../../src/config.js');
 // the low-poly ones (unit-models.test.js) are untouched. At the game's default zoom a unit is
 // ~60 px tall, so these are for the close zoom levels; mortals dominate an army, and a player
 // fields one or two gods and a titan.
-const RICH_BUDGET = { mortal: 8500, god: 9000, titan: 14000, creature: 8500, minion: 8500 };
+// (a winged creature carries ~1.5k triangles of feathers; a giant creature is built denser)
+const RICH_BUDGET = { mortal: 8500, god: 9000, titan: 14000, creature: 10500, minion: 8500 };
 const STATES = ['idle', 'move', 'attack', 'gather', 'return', 'build', 'pray', 'cast', 'dead'];
 
 const looks = (u, pantheon) => unitLook(u, pantheon);
@@ -47,6 +48,7 @@ function allTypes() {
 
 const norse = (id) => looks(UNITS[id] || MORTALS[id], 'norse');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
+const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -73,10 +75,10 @@ test('the rich builder dresses humanoids and giants and leaves everything else l
   const rich = types.filter(richSupported);
   assert.ok(rich.length >= 20, `only ${rich.length} supported`);
   for (const id of SAMPLE) assert.ok(richSupported(norse(id)), `${id} is part of the sample`);
-  // a ram, an animal, a winged helmet or a multi-headed body keep their low-poly model
+  // a ram, an animal or a multi-headed body keep their low-poly model
   assert.ok(!richSupported(norse('battering_ram')));
   assert.ok(!richSupported(norse('norse_wolf_of_fenrir')));
-  assert.ok(!richSupported(norse('norse_odin')));
+  assert.ok(!richSupported(norse('norse_raven')));
   assert.ok(!richSupported({ id: 'x', class: 'creature', visual: { body: 'hydra', head: 'serpent', heads: 5, extras: [] } }));
   for (const u of types.filter((t) => !richSupported(t)).slice(0, 12)) {
     const info = getUnitModelInfo(u, 'rich');
@@ -112,18 +114,84 @@ test('every supported unit builds a valid skinned mesh inside the rich budget', 
     // standing height stays near the low-poly model's (the sim's selection and shadows are sized for it)
     const base = getUnitModelInfo(u, 'base').height;
     const rich = getUnitModelInfo(u, 'rich').height;
-    assert.ok(rich > base * 0.7 && rich < base * 1.5, `${u.id}: rich height ${rich.toFixed(2)} vs base ${base.toFixed(2)}`);
+    // (a raised offhand, an orb or a lantern, makes the low-poly model measure taller than the standing rich one)
+    assert.ok(rich > base * 0.6 && rich < base * 1.5, `${u.id}: rich height ${rich.toFixed(2)} vs base ${base.toFixed(2)}`);
   }
 });
 
 test('rich characters animate every state without a NaN, through the same pose keys', () => {
-  for (const id of SAMPLE) {
+  for (const id of [...SAMPLE, ...FINISHED]) {
     const u = norse(id);
     const m = buildUnitModel(u, PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();
   }
+});
+
+test('the Norse gods, creatures and elite soldiers are dressed too: helmets, wings, spikes, staffs and bows', () => {
+  for (const id of FINISHED) assert.ok(richSupported(norse(id)), `${id} is supported`);
+  const odin = buildRichTemplate(norse('norse_odin'));
+  assert.ok(odin.rich.attach.some((a) => a.name === 'weaponR'), 'Odin carries his spear');
+  const troll = buildRichTemplate(norse('norse_frost_troll'));
+  assert.ok(troll.triangles > buildRichTemplate(norse('warrior')).triangles, 'a frost troll with its ice spikes is the heavier model');
+  const archer = buildRichTemplate(norse('archer'));
+  assert.ok(archer.rich.attach.some((a) => a.name === 'weaponL'), 'the bow rides the left hand');
+});
+
+test('winged units grow four wing bones and four feather pieces; the body skin never uses them', () => {
+  const m = buildUnitModel(norse('norse_valkyrie'), PLAYER_COLORS[0], { detail: 'rich' });
+  assert.equal(m.rich.bones.length, BONE_COUNT + 4);
+  for (const name of ['wingR1', 'wingR2', 'wingL1', 'wingL2']) {
+    const piece = m.root.getObjectByName(name);
+    assert.ok(piece && piece.isMesh && !piece.isSkinnedMesh, `${name} is a rigid piece`);
+    assert.equal(m.rich.mounts.find((x) => x.obj === piece.parent)?.bone, B[name]);
+  }
+  const tpl = buildRichTemplate(norse('norse_valkyrie'));
+  const idx = tpl.rich.geo.attributes.skinIndex.array;
+  for (let i = 0; i < idx.length; i++) assert.ok(idx[i] < BONE_COUNT, 'the body is not skinned to the wings');
+  // a unit without wings keeps the 23 bone rig
+  const plain = buildUnitModel(norse('norse_odin'), PLAYER_COLORS[0], { detail: 'rich' });
+  assert.equal(plain.rich.bones.length, BONE_COUNT);
+  m.dispose();
+  plain.dispose();
+});
+
+test('wings fold down the back of a grounded unit standing about, and open to cast, walk or fly', () => {
+  const grounded = { ...norse('norse_valkyrie'), id: 'test_grounded_valkyrie', air: false };
+  const m = buildUnitModel(grounded, PLAYER_COLORS[0], { detail: 'rich' });
+  const b = m.rich.bones;
+  const wrist = new THREE.Vector3();
+  const at = () => {
+    m.root.updateMatrixWorld(true);
+    return wrist.setFromMatrixPosition(b[B.wingR2].matrixWorld).clone();
+  };
+  for (let i = 0; i < 90; i++) m.animate('idle', i / 30, 1 / 30, {});
+  const folded = at();
+  for (let i = 0; i < 90; i++) m.animate('cast', 4 + i / 30, 1 / 30, {});
+  const open = at();
+  assert.ok(open.z > folded.z + 0.2, `the cast spreads the wings (z ${folded.z.toFixed(2)} -> ${open.z.toFixed(2)})`);
+  assert.ok(folded.x < open.x - 0.15, `the folded wing lies back along the body (x ${folded.x.toFixed(2)} vs ${open.x.toFixed(2)})`);
+  // the left wing mirrors the right one: the same turn with the signs of a reflection across the body's plane
+  for (const [r, l] of [[B.wingR1, B.wingL1], [B.wingR2, B.wingL2]]) {
+    const qr = b[r].quaternion;
+    const ql = b[l].quaternion;
+    assert.ok(Math.abs(ql.x + qr.x) < 1e-6 && Math.abs(ql.y + qr.y) < 1e-6 && Math.abs(ql.z - qr.z) < 1e-6 && Math.abs(ql.w - qr.w) < 1e-6, 'the wings are mirror images');
+  }
+  // a flier beats them: the tip rises and falls
+  const flier = buildUnitModel(norse('norse_valkyrie'), PLAYER_COLORS[0], { detail: 'rich' });
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < 60; i++) {
+    flier.animate('idle', i / 30, 1 / 30, {});
+    flier.root.updateMatrixWorld(true);
+    const y = new THREE.Vector3().setFromMatrixPosition(flier.rich.bones[B.wingR2].matrixWorld).y;
+    lo = Math.min(lo, y);
+    hi = Math.max(hi, y);
+  }
+  assert.ok(hi - lo > 0.2, `the wingbeat moves the wrist (${(hi - lo).toFixed(2)})`);
+  m.dispose();
+  flier.dispose();
 });
 
 test('the bones follow the pose: a strike lifts the arm and a stride swings the legs', () => {
