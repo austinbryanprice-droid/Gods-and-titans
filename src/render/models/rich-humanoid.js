@@ -26,7 +26,7 @@ const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skir
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec', 'celtic']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec', 'celtic', 'mesopotamian']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {

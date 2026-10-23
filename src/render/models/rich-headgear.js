@@ -1438,3 +1438,221 @@ export function addAntlers(kit, D, pal, bind, { color, band = null, size = 1, ti
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Mesopotamian headgear: the pointed helmet, the horned crown, the curled beard, the bun at the nape
+// ---------------------------------------------------------------------------
+
+/**
+ * The pointed helmet of a Mesopotamian soldier: a tall cone of metal on a brow band, leaning back a little toward its point, a
+ * ridge up the front, plates over the ears and a flap over the nape (a team color works for it). opts: steel, trim (the band and
+ * the ridge), flap (the flap's color; none: no flap), tall (scale of the cone's height).
+ */
+export function addConeHelm(kit, D, pal, bind, { steel, trim, flap = null, tall = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.012 * hs;
+  const T = tall;
+  const cone = [
+    vs(hy, 0.097 * hs + g, 0.086 * hs + g, hx),
+    vs(hy + 0.04 * hs, 0.102 * hs + g, 0.09 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.09 * hs * T, 0.09 * hs + g, 0.081 * hs + g, hx - 0.008 * hs),
+    vs(hy + 0.15 * hs * T, 0.066 * hs + g, 0.06 * hs + g, hx - 0.02 * hs),
+    vs(hy + 0.21 * hs * T, 0.036 * hs + g, 0.034 * hs + g, hx - 0.036 * hs),
+    vs(hy + 0.262 * hs * T, 0.01 * hs, 0.01 * hs, hx - 0.05 * hs),
+  ];
+  kit.loft(cone, { rings: 9, sides: 16, start: null, end: 'round', capRings: 2, capDepth: 0.01 * hs, color: steel, mat: 'metal', bind: bind.head, paint: gradY(hy, hy + 0.27 * hs * T, 0.8, 1.14) });
+  // the brow band, and the ridge from the band up the front to the point
+  kit.loft([vs(hy + 0.012 * hs, 0.099 * hs + g + 0.004, 0.088 * hs + g + 0.004, hx), vs(hy + 0.05 * hs, 0.103 * hs + g + 0.004, 0.092 * hs + g + 0.004, hx - 0.002 * hs)],
+    { sides: 16, start: null, end: null, color: trim, mat: 'gold', bind: bind.head });
+  kit.loft(cone.slice(1).map((s) => ps(s.c[0] + s.rx + 0.003 * hs, s.c[1], 0, 0.006 * hs, 0.0075 * hs)), {
+    ref: [0, 0, 1], rings: 5, sides: 6, start: null, end: null, color: trim, mat: 'gold', bind: bind.head,
+  });
+  // plates over the ears
+  for (const side of [1, -1]) {
+    kit.loft([ps(hx + 0.004 * hs, hy - 0.002 * hs, side * 0.094 * hs, 0.046 * hs, 0.01 * hs), ps(hx + 0.004 * hs, hy - 0.058 * hs, side * 0.088 * hs, 0.038 * hs, 0.008 * hs)],
+      { ref: [1, 0, 0], sides: 8, capDepth: 0.008 * hs, color: shadeC(steel, 0.9), mat: 'metal', bind: bind.head });
+  }
+  if (flap) {
+    // a flap of cloth over the nape, open at the face
+    kit.loft([vs(hy + 0.012 * hs, 0.1 * hs + g, 0.09 * hs + g, hx), vs(hy - 0.06 * hs, 0.114 * hs + g, 0.106 * hs + g, hx - 0.014 * hs), vs(hy - 0.125 * hs, 0.134 * hs + g, 0.122 * hs + g, hx - 0.03 * hs)], {
+      rings: 4, sides: 20, start: null, end: null, color: flap, mat: 'cloth', bind: bind.head, paint: gradY(hy - 0.125 * hs, hy + 0.012 * hs, 0.84, 1.02),
+      warp: (p, a) => {
+        const k = smoothstep(1.05, 1.75, Math.abs(wrap(a)));
+        p[1] = lerp(hy + 0.012 * hs, p[1], k);
+      },
+    });
+  }
+}
+
+/**
+ * The horned crown of a god: a cap standing on the brow, `tiers` pairs of bull's horns one over another, each wound out from the
+ * front of the cap to the side and lifting off it at the tip, the lowest the longest, a ring of metal between the tiers and a disc
+ * on the top. opts: cap (the cap's color), horn (the horns' color), trim (the rings and the disc), tiers, tall (scale of a tier's
+ * height), star (the color of an eight-pointed star on the front: Ishtar's), hornMat (the horns' surface class), horns (false: a plain
+ * cap, a priest's).
+ */
+export function addHornedTiara(kit, D, pal, bind, { cap, horn, trim, tiers = 3, tall = 1, star = null, hornMat = 'gold', horns = true } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.012 * hs;
+  const tier = 0.034 * hs * tall;
+  const y0 = hy + 0.04 * hs;
+  const H = tier * tiers + 0.01 * hs;
+  const rx = (y) => (0.1 - 0.02 * ((y - y0) / H)) * hs + g;
+  const rz = (y) => (0.089 - 0.018 * ((y - y0) / H)) * hs + g;
+  const ring = (y, r = 0.004 * hs) => vs(y, rx(y) + r, rz(y) + r, hx - 0.004 * hs);
+  // the cap, from the brow to a rounded top
+  kit.loft([ring(y0 - 0.024 * hs, 0.007 * hs), ring(y0 + H * 0.5, 0.007 * hs), ring(y0 + H, 0.007 * hs)], {
+    rings: 4, sides: 20, start: null, end: 'round', capRings: 2, capDepth: 0.016 * hs, color: cap, mat: 'cloth', bind: bind.head, paint: gradY(y0, y0 + H, 0.86, 1.06),
+  });
+  // rings of metal at the foot, between the tiers and at the top
+  for (let i = 0; i <= tiers; i++) {
+    const y = y0 + i * tier + (i === tiers ? 0.004 * hs : 0);
+    kit.loft([ring(y - 0.005 * hs, 0.012 * hs), ring(y + 0.005 * hs, 0.012 * hs)], { sides: 20, start: null, end: null, color: trim, mat: 'gold', bind: bind.head });
+  }
+  // the horns: each a tube from the front quarter of the cap round to its side, standing off it more and more, its tip lifting
+  for (let i = 0; horns && i < tiers; i++) {
+    const y = y0 + tier * (i + 0.5);
+    const big = 1 - 0.16 * i;
+    for (const side of [1, -1]) {
+      const st = [];
+      const n = 6;
+      for (let j = 0; j <= n; j++) {
+        const t = j / n;
+        const th = 0.55 + t * 0.9;
+        const out = (0.01 + 0.075 * t ** 1.2) * hs * big;
+        const x = hx - 0.004 * hs + (rx(y) + out) * Math.cos(th);
+        const z = side * (rz(y) + out) * Math.sin(th);
+        const rise = 0.09 * hs * big * t ** 2;
+        const r = (0.021 - 0.017 * t ** 0.8) * hs * (0.8 + 0.2 * big);
+        st.push(ps(x, y + rise, z, r, r));
+      }
+      kit.loft(st, { ref: [0, 1, 0], rings: n, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: [0.01 * hs, 0.004 * hs], color: horn, mat: hornMat, bind: bind.head });
+    }
+  }
+  // the disc on the top, and a knob
+  const yt = y0 + H + 0.012 * hs;
+  kit.loft([vs(yt, rx(y0 + H) * 0.8, rz(y0 + H) * 0.8, hx - 0.004 * hs), vs(yt + 0.008 * hs, rx(y0 + H) * 0.7, rz(y0 + H) * 0.7, hx - 0.004 * hs)],
+    { sides: 16, start: 'flat', end: 'round', capRings: 2, capDepth: 0.006 * hs, color: trim, mat: 'gold', bind: bind.head });
+  if (star) {
+    // an eight-pointed star on the front of the second tier
+    const ys = y0 + tier * Math.min(tiers - 1, 1.5) + 0.01 * hs;
+    const R = 0.04 * hs;
+    const xf = hx - 0.004 * hs + rx(ys) + 0.012 * hs;
+    kit.loft([ps(xf, ys, 0, R, R), ps(xf + 0.007 * hs, ys, 0, R * 0.92, R * 0.92)], {
+      ref: [0, 1, 0], sides: 32, start: 'round', end: 'round', capRings: 1, capDepth: 0.005 * hs, color: star, mat: 'gold', glow: 0.55, bind: bind.head,
+      warp: (p, a) => {
+        const k = 0.42 + 0.58 * Math.abs(Math.cos(a * 4)) ** 1.4;
+        p[1] = ys + (p[1] - ys) * k;
+        p[2] *= k;
+      },
+    });
+  }
+}
+
+/**
+ * The Assyrian beard: squared off, broad, in rows of tight curls from the lip to the chest. opts: len (scale of its length),
+ * wide (scale of its breadth), rows (of curls), color (a shade that lets the curls show: black hair is too dark to read).
+ */
+export function addCurledBeard(kit, D, pal, bind, { len = 1, wide = 1, rows = 4, color = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const L = len;
+  kit.loft([
+    ps(hx + 0.068 * hs, hy - 0.05 * hs, 0, 0.03 * hs, 0.072 * hs * wide, 3),
+    ps(hx + 0.084 * hs, hy - 0.1 * hs, 0, 0.042 * hs, 0.076 * hs * wide, 3),
+    ps(hx + 0.088 * hs, hy - (0.1 + 0.07 * L) * hs, 0, 0.046 * hs, 0.074 * hs * wide, 3),
+    ps(hx + 0.08 * hs, hy - (0.1 + 0.13 * L) * hs, 0, 0.04 * hs, 0.062 * hs * wide, 3),
+    ps(hx + 0.07 * hs, hy - (0.1 + 0.18 * L) * hs, 0, 0.022 * hs, 0.034 * hs * wide, 3),
+  ], {
+    ref: [1, 0, 0], rings: rows * 3 + 2, sides: 12, start: 'round', end: 'round', capDepth: [0.02 * hs, 0.022 * hs], color: color || pal.hair, mat: 'hair', bind: bind.head,
+    warp: (p, a, u) => {
+      const k = 0.017 * hs * Math.max(0, Math.sin(u * rows * TAU - 1.2)) ** 1.3 * smoothstep(0.05, 0.25, u);
+      p[0] += Math.cos(a) * k;
+      p[2] += Math.sin(a) * k;
+    },
+    paint: (o, x, y, z, u) => mul(o, 0.64 + 0.54 * Math.max(0, Math.sin(u * rows * TAU - 1.2))),
+  });
+}
+
+/**
+ * The head of a fish worn as a hood, the apkallu's: a cap over the skull and down the nape with the snout out over the brow and a
+ * pale lip under it, an eye bulging at each temple and a crest of spines along the top. opts: color (the scales), belly (the lip),
+ * fin (the crest; a team color works), eye.
+ */
+export function addFishHood(kit, D, pal, bind, { color, belly, fin, eye = '#f3efe0' } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.013 * hs;
+  const cap = [
+    vs(hy - 0.11 * hs, 0.112 * hs + g, 0.1 * hs + g, hx - 0.026 * hs),
+    vs(hy - 0.04 * hs, 0.108 * hs + g, 0.098 * hs + g, hx - 0.014 * hs),
+    vs(hy + 0.02 * hs, 0.108 * hs + g, 0.098 * hs + g, hx - 0.008 * hs),
+    vs(hy + 0.064 * hs, 0.102 * hs + g, 0.092 * hs + g, hx - 0.01 * hs),
+    vs(hy + 0.102 * hs, 0.08 * hs + g, 0.074 * hs + g, hx - 0.014 * hs),
+    vs(hy + 0.13 * hs, 0.044 * hs + g, 0.042 * hs + g, hx - 0.016 * hs),
+  ];
+  kit.loft(cap, {
+    rings: 9, sides: 18, start: null, end: 'round', capDepth: 0.012 * hs, color, mat: 'painted', bind: bind.head,
+    warp: (p, a) => {
+      // the lower edge: up over the brow, hanging at the cheeks, long at the nape
+      const line = hy + 0.052 * hs - 0.17 * hs * smoothstep(0.55, 1.7, Math.abs(wrap(a)));
+      if (p[1] < line) p[1] = line;
+    },
+    paint: (o, x, y, z, u) => mul(o, 0.8 + 0.26 * ((u * 7) % 1)),
+  });
+  // the snout over the brow, blunt and broad, and the lip under it
+  kit.loft([
+    ps(hx + 0.02 * hs, hy + 0.09 * hs, 0, 0.04 * hs, 0.074 * hs),
+    ps(hx + 0.07 * hs, hy + 0.086 * hs, 0, 0.04 * hs, 0.078 * hs),
+    ps(hx + 0.115 * hs, hy + 0.076 * hs, 0, 0.032 * hs, 0.066 * hs),
+    ps(hx + 0.145 * hs, hy + 0.062 * hs, 0, 0.018 * hs, 0.04 * hs),
+  ], { ref: [0, 1, 0], rings: 5, sides: 10, start: null, end: 'round', capRings: 2, capDepth: 0.016 * hs, color, mat: 'painted', bind: bind.head });
+  kit.loft([ps(hx + 0.05 * hs, hy + 0.052 * hs, 0, 0.01 * hs, 0.07 * hs), ps(hx + 0.128 * hs, hy + 0.044 * hs, 0, 0.007 * hs, 0.044 * hs)],
+    { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.006 * hs, color: belly, mat: 'trim', bind: bind.head });
+  // an eye at each temple: a pale ball with a dark pupil
+  for (const side of [1, -1]) {
+    knob(kit, [hx + 0.035 * hs, hy + 0.076 * hs, side * 0.108 * hs], 0.017 * hs, { color: eye, mat: 'bone', bind: bind.head });
+    knob(kit, [hx + 0.04 * hs, hy + 0.076 * hs, side * 0.12 * hs], 0.009 * hs, { color: '#1b1814', mat: 'gem', bind: bind.head });
+  }
+  // the fin along the top: a row of spines from the snout's root over the crown to the nape, swept back
+  const n = 10;
+  kit.sheet(n, 1, (u, j, out) => {
+    const phi = lerp(1.3, 2.85, u);
+    const spike = Math.round(u * n) % 2 ? 1 : 0.5;
+    const h = (0.012 + 0.03 * Math.sin(PI * u) ** 0.8) * hs * spike * j;
+    const R = 0.108 * hs + g;
+    const bx = hx - 0.016 * hs + Math.cos(phi) * R;
+    const by = hy + 0.028 * hs + Math.sin(phi) * 0.108 * hs;
+    out[0] = bx + (Math.cos(phi) * 0.6 - Math.sin(phi) * 0.8) * h;
+    out[1] = by + (Math.sin(phi) * 0.6 + Math.cos(phi) * 0.8) * h;
+    out[2] = 0;
+  }, { thick: 0.004 * hs, color: fin, inner: fin, bind: bind.head });
+}
+
+/** Hair rolled up at the nape in rows of curls, the Assyrian way (under a headband or bare). opts: size (its scale). */
+export function addNapeBun(kit, D, pal, bind, { size = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const rows = 3;
+  kit.loft([
+    ps(hx - 0.1 * hs, hy + 0.03 * hs, 0, 0.026 * hs * size, 0.07 * hs * size),
+    ps(hx - 0.122 * hs, hy - 0.02 * hs, 0, 0.034 * hs * size, 0.085 * hs * size),
+    ps(hx - 0.13 * hs, hy - 0.08 * hs, 0, 0.036 * hs * size, 0.082 * hs * size),
+    ps(hx - 0.118 * hs, hy - 0.13 * hs, 0, 0.026 * hs * size, 0.06 * hs * size),
+  ], {
+    ref: [1, 0, 0], rings: rows * 3 + 1, sides: 12, start: 'round', end: 'round', capDepth: 0.02 * hs, color: pal.hair, mat: 'hair', bind: bind.head,
+    warp: (p, a, u) => {
+      const k = 0.008 * hs * Math.max(0, Math.sin(u * rows * TAU - 0.8));
+      p[0] += Math.cos(a) * k;
+      p[2] += Math.sin(a) * k;
+    },
+    paint: (o, x, y, z, u) => mul(o, 0.74 + 0.34 * Math.max(0, Math.sin(u * rows * TAU - 0.8))),
+  });
+}

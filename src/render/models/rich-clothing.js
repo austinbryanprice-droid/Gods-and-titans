@@ -246,9 +246,10 @@ export function addGreaves(kit, D, pal, bind, color, trim) {
 /**
  * A drape across the chest from one shoulder to the opposite hip, close over the body (a himation
  * worn over bare skin). side: 1 from the left shoulder to the right hip, -1 the other way. opts: width, paint (more color work
- * over the cloth: a check), cells ([across, along]: the grid it is built on).
+ * over the cloth: a check), cells ([across, along]: the grid it is built on), fringe ({ color, len, n }: tassels hanging from its
+ * lower edge).
  */
-export function addDrape(kit, D, bind, color, trim, { side = 1, width = 0.2, paint = null, cells = [6, 16] } = {}) {
+export function addDrape(kit, D, bind, color, trim, { side = 1, width = 0.2, paint = null, cells = [6, 16], fringe = null } = {}) {
   const fn = (u, v, out) => {
     const th = lerp(-1.3, 1.45, v) * side;
     // (worn from the other shoulder the strip runs the other way round: its across direction turns with it, or its inner face shows)
@@ -266,6 +267,18 @@ export function addDrape(kit, D, bind, color, trim, { side = 1, width = 0.2, pai
       if (paint) paint(o, x, y, z, u, a);
     },
   });
+  if (fringe) {
+    // tassels along the lower edge, from just below the shoulder to the hip
+    const low = side > 0 ? 0 : 1;
+    const n = fringe.n ?? 14;
+    const at = [];
+    const q = [0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      fn(low, lerp(0.22, 1, (i + 0.5) / n), q);
+      at.push([q[0], q[1] - 0.006, q[2]]);
+    }
+    addFringe(kit, bind.torso, at, { len: fringe.len ?? 0.05, color: fringe.color ?? trim ?? color, mat: fringe.mat, r: fringe.r });
+  }
 }
 
 /**
@@ -1264,5 +1277,167 @@ export function addTrews(kit, D, bind, { color, hue = null, cell = 0.1, k = 0.72
       rings: 13, sides: 12, start: null, end: null, color, mat, bind: bind.leg[side],
       paint: paints(gradY(0.2, D.hipY, 0.88, 1), tartan({ cell, hue, k, cx: 0, cz: side * D.hipZ, r: D.legR })),
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mesopotamian dress: the fleece skirt in tiers (kaunakes), tassels, the coat of scale
+// ---------------------------------------------------------------------------
+
+/** A row of rounded tufts or scales round a ring: 0 where two meet, 1 in the middle of each; `fr` is the way round, in tufts. */
+const tuftShape = (fr) => Math.sin(PI * (fr - Math.floor(fr))) ** 0.8;
+
+/**
+ * Tassels: a short strand hanging from each point of `at` ([x, y, z]), tapering to its tip, `len` long, weighted by the
+ * bind function `bd`. opts: len, color, r (the strand's thickness at its root), mat.
+ */
+export function addFringe(kit, bd, at, { len = 0.05, color, r = 0.0062, mat = 'cloth' } = {}) {
+  for (const p of at) {
+    kit.loft([ps(p[0], p[1], p[2], r, r), ps(p[0], p[1] - len, p[2], r * 0.35, r * 0.35)], { ref: [1, 0, 0], sides: 3, start: null, end: null, color, mat, bind: bd });
+  }
+}
+
+/**
+ * The kaunakes, the Sumerians' skirt of fleece: tiers of woolly flounces from the waist down, each hanging over the one below
+ * and ending in a row of rounded tufts, shaded darker where it lies under the tier above. opts: color (and color2 for every
+ * second tier), tiers, len (1 reaches the ankle, 0.5 the knee), flare (how far it stands out), tufts (in the top row, one more
+ * a tier lower), depth (how far a tuft hangs), mat. Returns the lowest row ({ y0, rx, rz }) so a border can go on.
+ */
+export function addKaunakes(kit, D, bind, { color, color2 = null, tiers = 3, len = 1, flare = 1, tufts = 10, depth = 0.034, mat = 'fur' } = {}) {
+  const waist = torsoRing(D, 0.12, 0.012);
+  const yTop = waist.y;
+  const yEnd = lerp(D.hipY - 0.05, D.ankleY + 0.06, clamp(len, 0, 1.15));
+  const reach = D.hipY - 0.04 - (D.ankleY + 0.05);
+  // the half widths of the skirt at height y: hugging the hips, opening toward the ankles
+  const wide = (y) => {
+    const t = clamp((D.hipY - 0.04 - y) / reach);
+    return [D.depth * 0.5 + 0.045 + 0.08 * flare * t, D.waistW * 0.5 + 0.055 + 0.09 * flare * t];
+  };
+  for (let i = 0; i < tiers; i++) {
+    const yb = lerp(yTop, yEnd, (i + 1) / tiers);
+    const ya = i === 0 ? yTop : lerp(yTop, yEnd, i / tiers) + 0.03;
+    const ym = (yb + ya) / 2;
+    const lip = 0.016 + 0.004 * i;
+    const [bx, bz] = wide(yb);
+    const [mx, mz] = wide(ym);
+    const [tx, tz] = wide(ya);
+    const nT = tufts + i;
+    const st = [
+      vs(yb, bx + lip, bz + lip),
+      vs(ym, mx + 0.012, mz + 0.012),
+      i === 0 ? vs(yTop, waist.rx + 0.014, waist.rz + 0.014, waist.dx) : vs(ya, tx + 0.002, tz + 0.002),
+    ];
+    const c = i % 2 && color2 ? color2 : i % 2 ? shade(color, 0.92) : color;
+    kit.loft(st, {
+      rings: 3, sides: nT * 4, start: null, end: null, color: c, mat, bind: bind.skirt,
+      warp: (p, a, u) => {
+        const fr = (a / TAU) * nT + 0.5;
+        const sh = tuftShape(fr);
+        const cs = Math.cos(a);
+        const sn = Math.sin(a);
+        if (u < 0.01) {
+          // the foot: tufts hanging, each its own length
+          p[1] -= depth * (0.74 + 0.5 * hash(Math.floor(fr), i, 3)) * sh;
+          p[0] += cs * 0.01 * sh;
+          p[2] += sn * 0.01 * sh;
+        } else if (u < 0.9) {
+          // a ridge up from every tuft
+          p[0] += cs * 0.0075 * sh;
+          p[2] += sn * 0.0075 * sh;
+        }
+      },
+      paint: (o, x, y, z, u, a) => {
+        const sh = tuftShape(a * nT + 0.5);
+        mul(o, (0.7 + 0.3 * (1 - u)) * (0.84 + 0.16 * sh));
+      },
+    });
+  }
+  const [rx, rz] = wide(yEnd);
+  return { y0: yEnd, rx, rz };
+}
+
+/**
+ * A cloak of fish skin down the back, the apkallu's: the fish's body from the shoulders, fattest below the shoulder blades,
+ * narrowing to the tail between the knees and spreading to a forked tail fin at the hem. The body is rows of overlapping
+ * scales, each strip cut into points along its lower edge. opts: color (the scales), belly (their underside), fin (the tail; a team
+ * color works), len (scale of the length, 1 reaches the ankles), rows.
+ */
+export function addFishCloak(kit, D, bind, { color, belly, fin, len: lenK = 1, rows = 7 } = {}) {
+  const top = D.shoulderY + 0.005;
+  const len = (top - (D.ankleY + 0.04)) * lenK;
+  const w0 = D.chestW * 0.74;
+  const wMax = D.chestW * 1.28;
+  const stalk = 0.085;
+  const finW = 0.32;
+  // the fish's breadth, from the shoulders (v 0) to the end of the tail (v 1)
+  const breadth = (v) => lerp(lerp(w0, wMax, smoothstep(0, 0.22, v)), stalk, smoothstep(0.22, 0.76, v)) + (finW - stalk) * smoothstep(0.8, 1, v);
+  const px = (v) => -D.chestD * 0.52 - 0.01 - 0.08 * v - 0.12 * v * v;
+  const py = (v) => top - v * len;
+  const vEnd = 0.8;
+  const dv = vEnd / rows;
+  for (let i = 0; i < rows; i++) {
+    const va = i * dv;
+    const vb = va + dv * 1.7;
+    const nu = 2 * Math.max(1, Math.round(breadth(vb) / 0.07));
+    kit.sheet(nu, 1, (u, j, out) => {
+      const v = lerp(va, vb, j);
+      out[0] = px(v) - 0.0015 * (rows - i);
+      out[1] = py(v) - (j ? 0.018 * (Math.round(u * nu) % 2) : 0);
+      out[2] = (0.5 - u) * breadth(v);
+    }, {
+      thick: 0.005, color: i % 2 ? shade(color, 0.93) : color, inner: belly, bind: bind.cape, mat: 'painted',
+      paint: (o, x, y, z, u, j) => mul(o, (0.78 + 0.26 * j) * lerp(0.88, 1.04, (y - py(1)) / len)),
+    });
+  }
+  // the dorsal fin: a ridge of spines down the middle of the back
+  kit.sheet(1, 14, (u, v, out) => {
+    const t = v * vEnd;
+    out[0] = px(t) - 0.0015 * rows - 0.004 - 0.022 * (Math.round(v * 14) % 2);
+    out[1] = py(t);
+    out[2] = (0.5 - u) * 0.026;
+  }, { thick: 0.004, color: fin, inner: shade(fin, 0.85), bind: bind.cape, mat: 'cloth' });
+  // the tail fin: a fan with a V cut in its end
+  const vt = vEnd - dv * 0.3;
+  kit.sheet(8, 4, (u, j, out) => {
+    const v = lerp(vt, 1, j);
+    out[0] = px(v) - 0.002;
+    out[1] = py(v) + 0.08 * smoothstep(0.88, 1, v) * (1 - Math.abs(2 * u - 1));
+    out[2] = (0.5 - u) * breadth(v);
+  }, { thick: 0.005, color: fin, inner: shade(fin, 0.85), bind: bind.cape, mat: 'cloth', paint: (o, x, y, z, u) => mul(o, 0.86 + 0.14 * Math.cos(u * 8 * PI)) });
+}
+
+/**
+ * A coat of scale: rows of small overlapping scales from the shoulders to below the hip, each row a flounce whose foot is cut
+ * into rounded scales and which lies over the row below, the rows alternating in shade. opts: color, rows, hem (how far
+ * below the hip it hangs), scales (round the body, in a row), mat, trim (a rolled edge at the hem).
+ */
+export function addScaleCoat(kit, D, bind, { color, trim = null, rows = 6, hem = 0.1, scales = 12, mat = 'metal' } = {}) {
+  const span = D.shoulderY - D.hipY;
+  const f0 = -hem / span;
+  const g = 0.018;
+  const flare = (f) => 0.05 * clamp(-f / (-f0 || 1)) ** 1.2;
+  for (let i = 0; i < rows; i++) {
+    const fa = lerp(f0, 1.0, i / rows);
+    const fb = Math.min(lerp(f0, 1.0, (i + 1.6) / rows), 1.07);
+    const ra = torsoRing(D, fa, g + 0.016 + flare(fa));
+    const rb = torsoRing(D, fb, g + flare(fb));
+    kit.loft([vs(ra.y, ra.rx, ra.rz, ra.dx), vs(rb.y, rb.rx, rb.rz, rb.dx)], {
+      rings: 2, sides: scales * 3, start: null, end: null, color: i % 2 ? shade(color, 0.9) : color, mat, bind: bind.skirt,
+      warp: (p, a, u) => {
+        if (u > 0.01) return;
+        const sh = tuftShape((a / TAU) * scales + 0.5);
+        p[1] -= 0.02 * sh;
+        p[0] += Math.cos(a) * 0.006 * sh;
+        p[2] += Math.sin(a) * 0.006 * sh;
+      },
+      paint: (o, x, y, z, u, a) => {
+        const sh = tuftShape(a * scales + 0.5);
+        mul(o, (0.82 + 0.2 * (1 - u)) * (0.9 + 0.16 * sh));
+      },
+    });
+  }
+  if (trim) {
+    const r0 = torsoRing(D, f0, g + 0.022 + flare(f0));
+    kit.loft([vs(r0.y - 0.022, r0.rx + 0.004, r0.rz + 0.004, r0.dx), vs(r0.y + 0.008, r0.rx, r0.rz, r0.dx)], { sides: 24, start: null, end: null, color: trim, mat: 'leather', bind: bind.skirt });
   }
 }

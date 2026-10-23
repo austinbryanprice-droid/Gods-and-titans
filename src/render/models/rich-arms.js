@@ -160,9 +160,16 @@ function ankh(kit, pal, s, { color = null } = {}) {
   kit.loft(loop, { ref: [0, 0, 1], sides: 8, start: 'round', end: 'round', capDepth: 0.009 * s, color: gold, mat: 'gold', glow: 0.1 });
 }
 
-/** A gada: a long rod ending in a great ribbed ball with a spike on top, in the unit's gold (Hanuman's, the royal champions'). */
-function mace(kit, pal, s, { color = null } = {}) {
+/**
+ * A gada: a long rod ending in a great ribbed ball with a spike on top, in the unit's gold (Hanuman's, the royal champions').
+ * opts: color, head ('pear': the Mesopotamian mace, a smooth pear-shaped head set with rows of studs, no spike).
+ */
+function mace(kit, pal, s, { color = null, head = null } = {}) {
   const metal = color || pal.accentMetal;
+  if (head === 'pear') {
+    pearMace(kit, pal, s, metal);
+    return;
+  }
   kit.loft(along([[-0.2, 0.017], [-0.1, 0.0205], [0.3, 0.0185], [0.58, 0.0175]], s), {
     ref: [1, 0, 0], rings: 5, sides: 7, start: 'round', end: null, capRings: 2, capDepth: 0.008 * s, color: shadeC(metal, 0.78), mat: 'metal',
   });
@@ -183,6 +190,36 @@ function mace(kit, pal, s, { color = null } = {}) {
   kit.loft(along([[0.87, 0.028], [0.935, 0.016], [1.03, 0.002]], s), {
     ref: [1, 0, 0], rings: 4, sides: 6, start: null, end: 'round', capRings: 2, capDepth: 0.01 * s, color: shadeC(metal, 0.9), mat: 'gold',
   });
+}
+
+/** The Mesopotamian mace: a rod with a pear-shaped head of metal, wide toward its top, set with two rows of studs (the war god's). */
+function pearMace(kit, pal, s, metal) {
+  kit.loft(along([[-0.2, 0.017], [-0.1, 0.0205], [0.3, 0.0185], [0.55, 0.0175]], s), {
+    ref: [1, 0, 0], rings: 5, sides: 7, start: 'round', end: null, capRings: 2, capDepth: 0.008 * s, color: shadeC(metal, 0.78), mat: 'metal',
+  });
+  grip(kit, -0.1 * s, 0.12 * s, 0.0235 * s, pal.leather, 5);
+  kit.loft(along([[-0.185, 0.02], [-0.215, 0.034], [-0.255, 0.022]], s), { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: 'round', capRings: 2, capDepth: 0.014 * s, color: metal, mat: 'gold' });
+  kit.loft(along([[0.5, 0.0185], [0.54, 0.034], [0.585, 0.024]], s), { ref: [1, 0, 0], rings: 4, sides: 10, start: null, end: null, color: metal, mat: 'gold' });
+  // the head: narrow at the rod, swelling to its greatest girth two thirds up, then closing in to a flat crown
+  const prof = [[0.58, 0.024], [0.625, 0.05], [0.7, 0.074], [0.79, 0.09], [0.87, 0.088], [0.925, 0.066], [0.955, 0.036]];
+  kit.loft(along(prof, s), {
+    ref: [1, 0, 0], rings: 9, sides: 14, start: null, end: 'round', capRings: 2, capDepth: 0.008 * s, color: metal, mat: 'metal',
+    paint: (o, x, y, z, u) => mul(o, 0.82 + 0.26 * Math.sin(u * PI)),
+  });
+  // two rows of studs, short cones standing out of the head
+  const stud = (y, r0, n, off) => {
+    for (let i = 0; i < n; i++) {
+      const a = (i + off) / n * TAU;
+      const c = Math.cos(a);
+      const sn = Math.sin(a);
+      kit.loft([ps(c * r0 * s, y * s, sn * r0 * s, 0.014 * s), ps(c * (r0 + 0.03) * s, y * s, sn * (r0 + 0.03) * s, 0.0025 * s)], {
+        ref: [0, 1, 0], sides: 4, start: null, end: 'round', capRings: 1, capDepth: 0.004 * s, color: shadeC(metal, 1.1), mat: 'gold',
+      });
+    }
+  };
+  stud(0.725, 0.072, 7, 0);
+  stud(0.83, 0.088, 7, 0.5);
+  kit.loft(along([[0.945, 0.03], [0.975, 0.024], [1.0, 0.004]], s), { ref: [1, 0, 0], rings: 3, sides: 8, start: null, end: 'round', capRings: 1, capDepth: 0.01 * s, color: metal, mat: 'gold' });
 }
 
 /** A chakra: a disk standing in the forward-and-up plane on a short rod, a hub with spokes, a glowing inner ring and an outer rim set with slanting teeth (Vishnu's Sudarshana). */

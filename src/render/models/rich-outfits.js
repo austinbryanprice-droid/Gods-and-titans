@@ -15,11 +15,12 @@ import { JAPANESE } from './rich-outfits-japanese.js';
 import { CHINESE } from './rich-outfits-chinese.js';
 import { AZTEC } from './rich-outfits-aztec.js';
 import { CELTIC } from './rich-outfits-celtic.js';
+import { MESOPOTAMIAN } from './rich-outfits-mesopotamian.js';
 
 export { LAYERS };
 
 /** Pantheon id -> its overrides. */
-export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN, hindu: HINDU, japanese: JAPANESE, chinese: CHINESE, aztec: AZTEC, celtic: CELTIC };
+export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN, hindu: HINDU, japanese: JAPANESE, chinese: CHINESE, aztec: AZTEC, celtic: CELTIC, mesopotamian: MESOPOTAMIAN };
 
 /** The layer functions (and shield style, or the function that makes one) for a pantheon. */
 export function outfitFor(pantheon) {
