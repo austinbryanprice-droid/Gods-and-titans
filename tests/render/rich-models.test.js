@@ -21,6 +21,7 @@ const {
 } = await import('../../src/render/models/unit-models.js');
 const { richSupported, buildRichTemplate } = await import('../../src/render/models/rich-humanoid.js');
 const { BONE_COUNT, B } = await import('../../src/render/models/rich-kit.js');
+const { outfitFor, LAYERS } = await import('../../src/render/models/rich-outfits.js');
 const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
 const { unitLook } = await import('../../src/render/models/unit-looks.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
@@ -47,8 +48,11 @@ function allTypes() {
 }
 
 const norse = (id) => looks(UNITS[id] || MORTALS[id], 'norse');
+const greek = (id) => looks(UNITS[id] || MORTALS[id], 'greek');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
+// every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
+const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek_athena', 'greek_poseidon', 'greek_hades', 'greek_kronos', 'greek_cyclops', 'greek_hoplite'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -137,6 +141,80 @@ test('the Norse gods, creatures and elite soldiers are dressed too: helmets, win
   assert.ok(troll.triangles > buildRichTemplate(norse('warrior')).triangles, 'a frost troll with its ice spikes is the heavier model');
   const archer = buildRichTemplate(norse('archer'));
   assert.ok(archer.rich.attach.some((a) => a.name === 'weaponL'), 'the bow rides the left hand');
+});
+
+test('a pantheon overrides only the layers it dresses differently; the rest is the default look', () => {
+  const base = outfitFor('norse');
+  const greekOutfit = outfitFor('greek');
+  for (const layer of LAYERS) assert.equal(typeof greekOutfit[layer], 'function', `the Greek ${layer} layer`);
+  for (const layer of ['legs', 'torso', 'arms', 'armor', 'cloaks', 'head']) assert.notEqual(greekOutfit[layer], base[layer], `the Greeks dress their ${layer} their own way`);
+  assert.equal(greekOutfit.extras, base.extras, 'jewelry, spikes and chains are shared');
+  assert.ok(greekOutfit.shield && !base.shield, 'the Greeks carry a hoplon, not the default round shield');
+  assert.equal(outfitFor('a-people-without-an-outfit').torso, base.torso, 'a pantheon with no outfit wears the default look');
+});
+
+test('every Greek humanoid and giant is dressed in the Greek look, the beasts and shades stay low-poly', () => {
+  for (const id of GREEK) assert.ok(richSupported(greek(id)), `${id} is supported`);
+  for (const id of ['greek_pegasus', 'greek_centaur', 'greek_cerberus', 'greek_shade', 'battering_ram']) assert.ok(!richSupported(greek(id)), `${id} stays low-poly`);
+  // the same shared mortal is dressed by its own people: a Greek warrior is not a Norse one
+  const a = buildRichTemplate(greek('warrior'));
+  const b = buildRichTemplate(norse('warrior'));
+  assert.notEqual(a.triangles, b.triangles);
+  assert.notEqual(a.rich.attach.find((x) => x.shield).geo.attributes.position.count, b.rich.attach.find((x) => x.shield).geo.attributes.position.count);
+});
+
+test('the Greek gods carry what they are known by and the hoplites a round bronze-rimmed hoplon', () => {
+  const names = (id) => buildRichTemplate(greek(id)).rich.attach.map((x) => x.name).sort();
+  assert.deepEqual(names('greek_zeus'), ['weaponR'], 'a lightning bolt in the right hand');
+  assert.deepEqual(names('greek_poseidon'), ['weaponL', 'weaponR'], 'a trident, and a conch in the other hand');
+  assert.deepEqual(names('greek_athena'), ['shield', 'weaponR'], 'a spear and a shield');
+  assert.deepEqual(names('greek_hades'), ['weaponR'], 'a scepter');
+  assert.deepEqual(names('greek_kronos'), ['weaponR'], 'a scythe');
+  assert.deepEqual(names('greek_hoplite'), ['shield', 'weaponR']);
+  // the hoplon is round, larger and deeper than the Norse shield
+  const hoplon = buildRichTemplate(greek('greek_hoplite')).rich.attach.find((x) => x.shield).geo;
+  const round = buildRichTemplate(norse('norse_einherjar')).rich.attach.find((x) => x.shield).geo;
+  for (const g of [hoplon, round]) g.computeBoundingBox();
+  const size = (g) => g.boundingBox.getSize(new THREE.Vector3());
+  assert.ok(Math.abs(size(hoplon).x - size(hoplon).y) < size(hoplon).x * 0.03, 'the hoplon is a disc');
+  assert.ok(size(hoplon).x > size(round).x * 1.1 && size(hoplon).z > size(round).z, 'a bigger, deeper shield');
+});
+
+test('Greek mortals wear team-colored linen under bronze that keeps its own color', () => {
+  for (const id of ['worshipper', 'greek_hoplite']) {
+    const fx = buildRichTemplate(greek(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    let metal = 0;
+    for (let i = 0; i < fx.length; i += 4) {
+      if (fx[i] > 0) team++;
+      if (fx[i + 3] > 0.3) metal++;
+    }
+    const n = fx.length / 4;
+    assert.ok(team > n * 0.06, `${id}: team-colored vertices ${team} of ${n}`);
+    if (id === 'greek_hoplite') assert.ok(metal > n * 0.04, `${id}: metal vertices ${metal} of ${n}`);
+  }
+});
+
+test('the Greek gods, mortals and giants animate every state without a NaN', () => {
+  for (const id of GREEK) {
+    const m = buildUnitModel(greek(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('a third eye on a god adds the eye on the brow, and a giant\'s is its one great eye', () => {
+  const zeus = greek('greek_zeus');
+  // (the same id: a god's dress is chosen by name; buildRichTemplate does not cache)
+  const withEye = { ...zeus, visual: { ...zeus.visual, extras: [...zeus.visual.extras, 'third_eye'] } };
+  assert.ok(richSupported(withEye));
+  assert.ok(buildRichTemplate(withEye).triangles > buildRichTemplate(zeus).triangles, 'the forehead eye is extra geometry');
+  const cyclops = greek('greek_cyclops');
+  assert.ok(richSupported(cyclops));
+  const tpl = buildRichTemplate(cyclops);
+  finite(tpl.rich.geo.attributes.position.array, 'cyclops');
+  assert.ok(tpl.triangles <= RICH_BUDGET.creature);
 });
 
 test('winged units grow four wing bones and four feather pieces; the body skin never uses them', () => {

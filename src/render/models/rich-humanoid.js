@@ -4,26 +4,26 @@
 // `visual` the low-poly bodies read (unit-bodies.js) and the same palette, so a unit keeps
 // its colors, team-colored cloth and gear; units whose look it cannot dress yet
 // (richSupported) keep the low-poly model.
-import { PartBuilder, TEAM, shadeC, bakeAO } from './unit-geo.js';
+import { PartBuilder, bakeAO } from './unit-geo.js';
 import { addWeapon, addOffhand, addTool, WEAPON_INFO, OFFHAND_ELBOW, gripRotation } from './unit-parts.js';
 import { unitContext, humanoidItems, holdsAloft } from './unit-bodies.js';
-import { MeshKit, humanoidSpec, B, ps } from './rich-kit.js';
-import { RICH_WEAPONS, richWeapon, handFrame, finishGear } from './rich-gear.js';
+import { MeshKit, humanoidSpec, B } from './rich-kit.js';
+import { RICH_WEAPONS, richWeapon, richShield, handFrame, finishGear } from './rich-gear.js';
+import { RICH_ARMS, RICH_OFFHANDS, richArm } from './rich-arms.js';
 import { richDims, makeBinds, lavaSkin, addHeadAndNeck, addHands } from './rich-body.js';
 import { outfitFor, LAYERS } from './rich-outfits.js';
 import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.js';
-import { mul } from './rich-paint.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara']);
-const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown']);
+const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye']);
 
 /**
  * The pantheons whose units are drawn with the rich characters in play. The Norse are the
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
@@ -58,9 +58,12 @@ function heldPiece(ctx, P, side, item, sizeK = 1) {
   else if (item.kind === 'offhand') grip = id === 'lantern' ? 'hang' : 'fwd';
   if (grip === 'fist') return null;
   const size = P.weaponSize * sizeK;
-  if ((item.kind === 'weapon' || item.kind === 'bow') && RICH_WEAPONS.has(id)) {
+  const built = item.kind === 'offhand' ? RICH_OFFHANDS.has(id) : (item.kind === 'weapon' || item.kind === 'bow') && (RICH_WEAPONS.has(id) || RICH_ARMS.has(id));
+  if (built) {
     const kit = new MeshKit(null, { sides: 10 });
-    richWeapon(kit, pal, id, size, { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null });
+    const opts = { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null };
+    if (RICH_WEAPONS.has(id)) richWeapon(kit, pal, id, size, opts);
+    else richArm(kit, pal, id, size, opts);
     return finishGear(kit, handFrame(P, side, grip));
   }
   b.frame([0.01, handY, side * 0.005], gripRotation(grip), 1, () => {
@@ -71,37 +74,6 @@ function heldPiece(ctx, P, side, item, sizeK = 1) {
   });
   const g = finishPiece(b);
   if (g) g.translate(0, P.upper + P.fore, 0); // arm frame (shoulder) to the hand bone (wrist)
-  return g;
-}
-
-/** A round shield on the left forearm: team-painted face, iron rim and boss. */
-function shieldPiece(ctx, D) {
-  const { pal } = ctx;
-  const kit = new MeshKit(null, { sides: 20 });
-  const R = 0.2 * (D.weaponSize > 1 ? 0.92 : 1);
-  const z0 = -(D.armR + 0.05);
-  const iron = shadeC(pal.darkMetal, 1.1);
-  const rim = pal.accentMetal;
-  // lofts run along the shield's axis (the sideways axis): u = a vertical-ish radius, the path points outward
-  const face = [
-    ps(0, -D.fore * 0.5 + 0, z0 + 0.0, R * 0.98, R * 0.98),
-    ps(0, -D.fore * 0.5 + 0, z0 - 0.012, R * 0.97, R * 0.97),
-    ps(0, -D.fore * 0.5 + 0, z0 - 0.03, R * 0.62, R * 0.62),
-  ];
-  kit.loft(face, { ref: [1, 0, 0], rings: 6, sides: 22, start: 'round', end: 'round', capDepth: [0.006, 0.03], color: TEAM(0.9, 'painted'), bind: null,
-    paint: (o, x, y, z, u, a) => {
-      // painted wedges alternate with the plain face
-      const k = Math.floor((a * 8) % 2);
-      if (k === 1) mul(o, 0.72);
-    } });
-  kit.loft([ps(0, -D.fore * 0.5, z0 + 0.004, R * 1.03, R * 1.03), ps(0, -D.fore * 0.5, z0 - 0.02, R * 1.03, R * 1.03)],
-    { ref: [1, 0, 0], sides: 22, start: null, end: null, color: rim, bind: null });
-  kit.loft([ps(0, -D.fore * 0.5, z0 - 0.02, R * 0.24, R * 0.24), ps(0, -D.fore * 0.5, z0 - 0.04, R * 0.2, R * 0.2), ps(0, -D.fore * 0.5, z0 - 0.058, R * 0.06, R * 0.06)],
-    { ref: [1, 0, 0], rings: 5, sides: 14, start: null, end: 'round', capDepth: 0.014, color: iron, bind: null });
-  const g = kit.build({ ground: 0, strength: 0.3 });
-  g.deleteAttribute('skinIndex');
-  g.deleteAttribute('skinWeight');
-  // the elbow bone's frame: the forearm hangs below it
   return g;
 }
 
@@ -153,7 +125,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right) : null;
   if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece });
   if (items.left.kind === 'offhand' && items.left.id === 'shield') {
-    attach.push({ name: 'shield', bone: B.foreL, geo: shieldPiece(ctx, P), shield: true });
+    attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, outfit.shield || {}), shield: true });
   } else if (items.left.kind !== 'none') {
     const left = heldPiece(ctx, P, -1, items.left);
     if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left });
