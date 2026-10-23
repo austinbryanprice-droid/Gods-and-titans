@@ -16,15 +16,15 @@ import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.j
 import { BEAST_HEADS } from './rich-heads.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers']);
-const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent']);
+const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms']);
 
 /**
  * The pantheons whose units are drawn with the rich characters in play. The Norse are the
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {

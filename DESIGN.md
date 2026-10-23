@@ -925,7 +925,7 @@ per-frame budget, so a revealed army appears over a few frames.
   beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
   `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
   motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
-  in play (the Norse, then the Greeks, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
+  in play (the Norse, then the Greeks, the Egyptians, the Hindus, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
   pins the choice for tools. The bones live outside the scene graph (detached bind mode): `applyRich`
   ends with `syncRich`, and rigid pieces (weapon, shield, tools, flames, cargo, wings) ride mounts
   (`mountOn`), so the pose costs nothing on frames where a unit does not animate. Winged units get
@@ -938,9 +938,17 @@ per-frame budget, so a revealed army appears over a few frames.
   (`rich-outfit-default.js`, the Norse; `rich-outfits-greek.js`: chiton, peplos, himation, muscle
   cuirass, pteruges, greaves, sandals, laurels, crowns, the hoplon; `rich-outfits-egyptian.js`: pleated
   shendyt kilts with an apron, the beaded usekh collar, corselets, the gods' sheath dress, mummy
-  wraps over dried skin (`outfit.skinPaint`), the nemes, the double crown, a tall hide shield).
-  Animal heads the kit builds (`BEAST_HEADS`: the jackal, the falcon) live in `rich-heads.js` and are
-  skinned to the head bone like a human one; any other beast head keeps a unit out of `richSupported`.
+  wraps over dried skin (`outfit.skinPaint`), the nemes, the double crown, a tall hide shield;
+  `rich-outfits-hindu.js`: dhotis with a team-colored border, the char-aina with steel plates, a
+  tiger-skin wrap, saris, garlands, the topknot, crescent and tiered kirita crowns, the arch of
+  flames behind a god's head (`addPrabhavali`: a rigid flickering piece on the head bone), the mace,
+  the discus, the drum and a lotus). Gods with more than two arms carry the extra two pairs as one rigid
+  piece on the chest bone (`extraArmsPiece` in `rich-regalia.js`: each hand holds an item the arm
+  builders already make, moved into place with `MeshKit.placed`); such units get a separate
+  triangle allowance (`multi_arms` in the test).
+  Animal heads the kit builds (`BEAST_HEADS`: the jackal, the falcon, the monkey) live in
+  `rich-heads.js` and are skinned to the head bone like a human one; any other beast head keeps a
+  unit out of `richSupported`.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

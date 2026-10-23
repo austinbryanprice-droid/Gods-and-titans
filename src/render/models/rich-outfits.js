@@ -6,11 +6,12 @@
 import { DEFAULT, LAYERS } from './rich-outfit-default.js';
 import { GREEK } from './rich-outfits-greek.js';
 import { EGYPTIAN } from './rich-outfits-egyptian.js';
+import { HINDU } from './rich-outfits-hindu.js';
 
 export { LAYERS };
 
 /** Pantheon id -> its overrides. */
-export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN };
+export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN, hindu: HINDU };
 
 /** The layer functions (and shield style) for a pantheon. */
 export function outfitFor(pantheon) {

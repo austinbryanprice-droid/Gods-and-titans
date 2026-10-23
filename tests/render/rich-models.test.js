@@ -20,7 +20,7 @@ const {
   buildUnitModel, getUnitModelInfo, preloadUnitModels, clearUnitModelCache, getUnitMaterial,
 } = await import('../../src/render/models/unit-models.js');
 const { richSupported, buildRichTemplate } = await import('../../src/render/models/rich-humanoid.js');
-const { BONE_COUNT, B } = await import('../../src/render/models/rich-kit.js');
+const { BONE_COUNT, B, MeshKit, ps } = await import('../../src/render/models/rich-kit.js');
 const { outfitFor, LAYERS } = await import('../../src/render/models/rich-outfits.js');
 const { RICH_ARMS, RICH_OFFHANDS } = await import('../../src/render/models/rich-arms.js');
 const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
@@ -33,6 +33,8 @@ const { PLAYER_COLORS } = await import('../../src/config.js');
 // fields one or two gods and a titan.
 // (a winged creature carries ~1.5k triangles of feathers; a giant creature is built denser)
 const RICH_BUDGET = { mortal: 8500, god: 9000, titan: 14000, creature: 10500, minion: 8500 };
+// four more arms and what they carry (a trident, a chakra, a mace, a lotus ...) are ~4k triangles of their own
+const MULTI_ARMS = 4000;
 const STATES = ['idle', 'move', 'attack', 'gather', 'return', 'build', 'pray', 'cast', 'dead'];
 
 const looks = (u, pantheon) => unitLook(u, pantheon);
@@ -51,11 +53,14 @@ function allTypes() {
 const norse = (id) => looks(UNITS[id] || MORTALS[id], 'norse');
 const greek = (id) => looks(UNITS[id] || MORTALS[id], 'greek');
 const egyptian = (id) => looks(UNITS[id] || MORTALS[id], 'egyptian');
+const hindu = (id) => looks(UNITS[id] || MORTALS[id], 'hindu');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
 const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek_athena', 'greek_poseidon', 'greek_hades', 'greek_kronos', 'greek_cyclops', 'greek_hoplite'];
 const EGYPTIAN = ['worshipper', 'warrior', 'archer', 'priest', 'egyptian_ra', 'egyptian_anubis', 'egyptian_isis', 'egyptian_set', 'egyptian_mummy', 'egyptian_chariot_archer'];
+// every Hindu unit on the humanoid body (the elephant, the monkey soldier and the naga keep their low-poly models)
+const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hindu_vishnu', 'hindu_durga', 'hindu_hanuman', 'hindu_garuda', 'hindu_kshatriya'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -97,7 +102,7 @@ test('every supported unit builds a valid skinned mesh inside the rich budget', 
   for (const u of allTypes().filter(richSupported)) {
     const tpl = buildRichTemplate(u);
     const g = tpl.rich.geo;
-    const budget = RICH_BUDGET[klass(u)];
+    const budget = RICH_BUDGET[klass(u)] + (u.visual.extras.includes('multi_arms') ? MULTI_ARMS : 0);
     assert.ok(tpl.triangles > 800, `${u.id}: suspiciously few triangles`);
     assert.ok(tpl.triangles <= budget, `${u.id}: ${tpl.triangles} triangles > ${budget}`);
     assert.ok(tpl.meshes <= 12, `${u.id}: ${tpl.meshes} meshes`);
@@ -305,6 +310,141 @@ test('the mummy is dark dried skin under pale bandage, and its eyes glow', () =>
 test('the Egyptian gods, mortals and the dead animate every state without a NaN', () => {
   for (const id of EGYPTIAN) {
     const m = buildUnitModel(egyptian(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('the Hindus dress their own way: dhotis, quilted coats, garlands and gods with many arms', () => {
+  const base = outfitFor('norse');
+  const hin = outfitFor('hindu');
+  for (const layer of LAYERS) assert.equal(typeof hin[layer], 'function', `the Hindu ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(hin[layer], base[layer], `the Hindus dress their ${layer} their own way`);
+  assert.ok(hin.shield && hin.shield !== outfitFor('egyptian').shield, 'a round dhal of their own');
+  assert.equal(typeof hin.skinPaint, 'function', 'Hanuman\'s fur is painted on the bare skin');
+});
+
+test('every Hindu humanoid is dressed in the Hindu look, the elephant, the monkey soldier and the naga stay low-poly', () => {
+  for (const id of HINDU) assert.ok(richSupported(hindu(id)), `${id} is supported`);
+  for (const id of ['hindu_airavata', 'hindu_vanara', 'hindu_naga', 'battering_ram']) assert.ok(!richSupported(hindu(id)), `${id} stays low-poly`);
+  // only the monkey head the kit builds is let through, and only the extras it can dress
+  const hanuman = hindu('hindu_hanuman');
+  assert.ok(!richSupported({ ...hanuman, visual: { ...hanuman.visual, head: 'gorilla' } }));
+  assert.ok(!richSupported({ ...hanuman, visual: { ...hanuman.visual, extras: [...hanuman.visual.extras, 'rider'] } }));
+  // a Hindu warrior is not an Egyptian one
+  assert.notEqual(buildRichTemplate(hindu('warrior')).triangles, buildRichTemplate(egyptian('warrior')).triangles);
+});
+
+test('the Hindu gods carry what they are known by: a chakra, a mace, a damaru, a lotus and the extra arms', () => {
+  const names = (id) => buildRichTemplate(hindu(id)).rich.attach.map((x) => x.name).sort();
+  assert.deepEqual(names('hindu_shiva'), ['extraArms', 'prabhavali', 'weaponL', 'weaponR'], 'a trident, a damaru, four more arms and the arch of flames');
+  assert.deepEqual(names('hindu_vishnu'), ['extraArms', 'prabhavali', 'weaponL', 'weaponR'], 'a chakra, a conch, four more arms and the arch of flames');
+  assert.deepEqual(names('hindu_durga'), ['extraArms', 'prabhavali', 'shield', 'weaponR'], 'a sword and shield, four more arms and the arch of flames');
+  assert.deepEqual(names('hindu_hanuman'), ['prabhavali', 'weaponR'], 'a mace and the arch of flames');
+  assert.deepEqual(names('hindu_garuda'), ['wingL1', 'wingL2', 'wingR1', 'wingR2'], 'his wings');
+  assert.deepEqual(names('hindu_kshatriya'), ['shield', 'weaponR'], 'a mace and a dhal');
+  assert.deepEqual(names('warrior'), ['shield', 'weaponR']);
+  for (const id of ['mace', 'discus']) assert.ok(RICH_ARMS.has(id), `the ${id} is built`);
+  for (const id of ['drum', 'lotus', 'flame', 'shell']) assert.ok(RICH_OFFHANDS.has(id), `the ${id} is built`);
+});
+
+test('a many-armed god\'s extra arms are one rigid piece on the chest bone, reaching wider than the body', () => {
+  for (const [id, pairs] of [['hindu_shiva', 2], ['hindu_vishnu', 2], ['hindu_durga', 2]]) {
+    const tpl = buildRichTemplate(hindu(id));
+    const arms = tpl.rich.attach.find((a) => a.name === 'extraArms');
+    assert.equal(arms.bone, B.chest, `${id}: the extra arms ride the chest`);
+    assert.ok(!arms.geo.attributes.skinIndex, `${id}: a rigid piece`);
+    arms.geo.computeBoundingBox();
+    const size = arms.geo.boundingBox.getSize(new THREE.Vector3());
+    // the body's own shoulders span ~0.5 (scale 1): the raised and the held-out hands reach beyond them
+    assert.ok(size.z > 0.62, `${id}: the arms span ${size.z.toFixed(2)}`);
+    assert.ok(arms.geo.userData.triangles > 300 * pairs, `${id}: ${arms.geo.userData.triangles} triangles for ${pairs} pairs of arms`);
+  }
+  // no extra arms without the extra
+  const shiva = hindu('hindu_shiva');
+  const plain = buildRichTemplate({ ...shiva, visual: { ...shiva.visual, extras: shiva.visual.extras.filter((e) => e !== 'multi_arms') } });
+  assert.ok(!plain.rich.attach.some((a) => a.name === 'extraArms'));
+});
+
+test('the Hindu gods stand before an arch of flames: a rigid flickering piece on the head, behind the face', () => {
+  for (const id of ['hindu_shiva', 'hindu_vishnu', 'hindu_durga', 'hindu_hanuman']) {
+    const tpl = buildRichTemplate(hindu(id));
+    const halo = tpl.rich.attach.find((a) => a.name === 'prabhavali');
+    assert.equal(halo.bone, B.head, `${id}: the arch rides the head`);
+    assert.ok(halo.flicker, `${id}: the flames flicker`);
+    assert.ok(!halo.geo.attributes.skinIndex, `${id}: a rigid piece`);
+    assert.ok(halo.geo.morphAttributes.position, `${id}: with a flicker morph`);
+    halo.geo.computeBoundingBox();
+    const size = halo.geo.boundingBox.getSize(new THREE.Vector3());
+    assert.ok(size.z > 0.4 && size.z > size.x * 3, `${id}: an arch wider than the head and thin front to back (${size.x.toFixed(2)} x ${size.z.toFixed(2)})`);
+    assert.ok(halo.geo.boundingBox.max.x < 0.02, `${id}: behind the face`);
+    assert.ok(halo.geo.userData.triangles < 450, `${id}: ${halo.geo.userData.triangles} triangles for the arch`);
+  }
+  // the people and Garuda have none
+  for (const id of ['worshipper', 'warrior', 'archer', 'priest', 'hindu_kshatriya', 'hindu_garuda']) {
+    assert.ok(!buildRichTemplate(hindu(id)).rich.attach.some((a) => a.name === 'prabhavali'), `${id} has no arch`);
+  }
+});
+
+test('a piece modelled in its own frame is placed in the kit by a matrix', () => {
+  const kit = new MeshKit(null, { sides: 8 });
+  kit.loft([ps(0, 0, 0, 0.1), ps(0, 1, 0, 0.1)], { ref: [1, 0, 0] });
+  const before = kit.count;
+  const m = new THREE.Matrix4().compose(new THREE.Vector3(5, 0, 0), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2), new THREE.Vector3(1, 1, 1));
+  kit.placed(m, (k) => k.loft([ps(0, 0, 0, 0.1), ps(0, 1, 0, 0.1)], { ref: [0, 0, 1] }));
+  const g = kit.build({ ao: false });
+  const pos = g.attributes.position.array;
+  let maxX = -Infinity;
+  let maxXBefore = -Infinity;
+  for (let i = 0; i < kit.count; i++) {
+    if (i < before) maxXBefore = Math.max(maxXBefore, pos[i * 3]);
+    else maxX = Math.max(maxX, pos[i * 3]);
+  }
+  assert.ok(maxXBefore < 0.2, 'what was built before stays where it was');
+  assert.ok(Math.abs(maxX - 6) < 0.15, `the placed pole turned from +Y to +X and moved 5 along it (${maxX.toFixed(2)})`);
+  finite(g.attributes.normal.array, 'placed normals');
+});
+
+test('Hanuman has a monkey\'s head, a long tail and fur on his skin', () => {
+  const h = hindu('hindu_hanuman');
+  const human = buildRichTemplate({ ...h, visual: { ...h.visual, head: 'human' } });
+  const monkey = buildRichTemplate(h);
+  assert.notEqual(monkey.triangles, human.triangles, 'a muzzle is not a face');
+  const noTail = buildRichTemplate({ ...h, visual: { ...h.visual, extras: h.visual.extras.filter((e) => e !== 'tail') } });
+  assert.ok(monkey.triangles > noTail.triangles + 200, 'the tail is geometry');
+  // the tail rises behind the pelvis: the skinned mesh reaches further back than without it
+  const back = (t) => {
+    const pos = t.rich.geo.attributes.position.array;
+    let min = Infinity;
+    for (let i = 0; i < pos.length; i += 3) min = Math.min(min, pos[i]);
+    return min;
+  };
+  assert.ok(back(monkey) < back(noTail) - 0.05, 'a tail behind the body');
+  // the fur breaks the skin color up: streaks of lighter and darker orange on the bare arms
+  const col = monkey.rich.geo.attributes.color.array;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < col.length; i += 3) {
+    const l = col[i] + col[i + 1] + col[i + 2];
+    if (col[i] > col[i + 2] * 2) { lo = Math.min(lo, l); hi = Math.max(hi, l); }
+  }
+  assert.ok(hi > lo * 1.15, `fur streaks: ${lo.toFixed(2)} to ${hi.toFixed(2)}`);
+});
+
+test('Hindu mortals and gods carry the team\'s color on their cloth, the metal keeps its own', () => {
+  for (const [id, share] of [['worshipper', 0.04], ['warrior', 0.08], ['archer', 0.015], ['priest', 0.015], ['hindu_shiva', 0.012], ['hindu_vishnu', 0.012], ['hindu_durga', 0.012], ['hindu_hanuman', 0.05], ['hindu_kshatriya', 0.09]]) {
+    const fx = buildRichTemplate(hindu(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) team++;
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+  }
+});
+
+test('the Hindu gods, mortals and Garuda animate every state without a NaN', () => {
+  for (const id of HINDU) {
+    const m = buildUnitModel(hindu(id), PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();

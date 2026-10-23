@@ -4,7 +4,7 @@
 import { shadeC, tintC } from './unit-geo.js';
 import { vs, ps, smoothstep } from './rich-kit.js';
 import { torsoRing } from './rich-body.js';
-import { clamp, lerp, gradY, paints, recolor } from './rich-paint.js';
+import { clamp, lerp, gradY, paints, recolor, mul } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
@@ -548,4 +548,138 @@ export function addPlumes(kit, D, pal, bind, { band, colors, n = 5, len = 0.2, w
       color: colors[i % colors.length], tip, bind: bind.head, bend: [-0.03 * hs, 0, s * 0.02 * hs], rows: 5, thick: 0.003 * hs,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Hindu headgear: the topknot, the matted bun with its crescent, the tiered kirita
+// ---------------------------------------------------------------------------
+
+/**
+ * A topknot: the hair gathered into a bun on the crown, bound at its neck with a cord. opts: band (the
+ * cord's color), size (scale of the bun). The hair cap under it is the outfit's to add (a shaved head has none).
+ */
+export function addTopknot(kit, D, pal, bind, { band = null, size = 1 } = {}) {
+  const hs = D.hs;
+  const k = hs * size;
+  const x = D.headX - 0.014 * hs;
+  const y0 = D.headCY + 0.104 * hs;
+  const at = (y, rx, rz = rx) => ps(x - 0.004 * k * (y / 0.1), y0 + y * k, 0, rx * k, rz * k);
+  kit.loft([at(-0.01, 0.034), at(0.012, 0.04), at(0.036, 0.052), at(0.062, 0.05), at(0.088, 0.034), at(0.106, 0.012)], {
+    ref: [1, 0, 0], rings: 6, sides: 12, start: 'round', end: 'round', capRings: 2, capDepth: [0.012 * k, 0.016 * k], color: pal.hair, mat: 'hair', bind: bind.head,
+    warp: (p, a, u) => {
+      // strands wound round the bun
+      const s = 0.0045 * k * Math.sin(a * 5 + u * 9) * Math.sin(u * PI);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: gradY(y0, y0 + 0.11 * k, 0.84, 1.08),
+  });
+  if (band) {
+    kit.loft([at(0.0, 0.037), at(0.016, 0.039)], { sides: 12, start: null, end: null, color: band, mat: 'trim', bind: bind.head });
+  }
+}
+
+/**
+ * Matted hair coiled into a tall bun on the crown with a crescent moon set in its front (the god of
+ * the ascetics'): the coil winds round and narrows to a tip. opts: moon (the crescent's color), band (the cord
+ * round the coil's foot).
+ */
+export function addCrescent(kit, D, pal, bind, { moon, band, metal } = {}) {
+  const hs = D.hs;
+  const x = D.headX - 0.016 * hs;
+  const y0 = D.headCY + 0.1 * hs;
+  const at = (y, r, dx = 0) => ps(x + dx * hs, y0 + y * hs, 0, r * hs, r * 0.94 * hs);
+  kit.loft([at(-0.01, 0.06), at(0.03, 0.074, -0.004), at(0.08, 0.07, -0.01), at(0.13, 0.054, -0.014), at(0.17, 0.03, -0.016), at(0.2, 0.006, -0.016)], {
+    ref: [1, 0, 0], rings: 10, sides: 14, start: 'round', end: 'round', capRings: 2, capDepth: [0.014 * hs, 0.012 * hs], color: pal.hair, mat: 'hair', bind: bind.head,
+    warp: (p, a, u) => {
+      // coils: a rope wound round the bun, rising as it goes
+      const s = 0.012 * hs * Math.sin(a - u * 19) * Math.sin(u * PI) ** 0.6;
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: (o, x2, y, z, u, a) => mul(o, 0.8 + 0.34 * (0.5 + 0.5 * Math.sin(a - u * 19)) * 0.9 + 0.1 * u),
+  });
+  kit.loft([at(0.0, 0.064), at(0.016, 0.066)], { sides: 14, start: null, end: null, color: band, mat: 'trim', bind: bind.head });
+  // the crescent: a horned moon in the frontal plane against the front of the coil, tips up
+  const cx = x + 0.07 * hs;
+  const cy = y0 + 0.095 * hs;
+  const R = 0.056 * hs;
+  const pts = [];
+  const n = 11;
+  for (let i = 0; i < n; i++) {
+    const u = i / (n - 1);
+    const b = (u - 0.5) * 2 * 2.1;
+    const w = Math.sin(u * PI) ** 0.75;
+    pts.push(ps(cx - 0.01 * hs * Math.cos(b), cy - R * Math.cos(b), R * Math.sin(b), 0.007 * hs * (0.3 + w), 0.0175 * hs * (0.08 + w)));
+  }
+  kit.loft(pts, { ref: [1, 0, 0], sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: moon, mat: 'gem', glow: 0.6, bind: bind.head });
+  void metal;
+}
+
+/**
+ * A kirita: a crown of gold in tiers, each stepped out at its foot and narrower than the one below,
+ * fluted, with a band of gems at the brow and a finial. opts: metal, trim (the ledges), gem, tiers,
+ * height (scale of every tier), lift (head scales: raises it clear of a third eye), flat (a king's lower
+ * crown: how much the tiers narrow by, 0.82 default).
+ */
+export function addKirita(kit, D, pal, bind, { metal, trim, gem, tiers = 3, height = 1, lift = 0, narrow = 0.8 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.008 * hs;
+  const y0 = hy + (0.05 + lift) * hs;
+  const rx = 0.1 * hs + g;
+  const rz = 0.088 * hs + g;
+  const cx = hx - 0.002 * hs;
+  const band = 0.03;
+  const rows = [[0, 1.0], [band, 1.012]];
+  const ledges = [];
+  let h = band;
+  let sc = 1;
+  for (let i = 0; i < tiers; i++) {
+    rows.push([h + 0.005, sc * 1.07]);
+    ledges.push([h + 0.005, sc * 1.07]);
+    h += 0.064 * height;
+    rows.push([h, sc * narrow]);
+    sc *= narrow * 1.04;
+  }
+  // the dome that closes the top
+  rows.push([h + 0.02 * height, sc * 0.62]);
+  rows.push([h + 0.036 * height, sc * 0.22]);
+  const tilt = 0.05;
+  const X = (hh, s) => cx - tilt * hh * hs;
+  const stations = rows.map(([hh, s]) => vs(y0 + hh * hs, rx * s, rz * s, X(hh)));
+  const top = y0 + (h + 0.036 * height) * hs;
+  kit.loft(stations, {
+    sides: 16, start: null, end: 'round', capRings: 2, capDepth: 0.008 * hs, color: metal, mat: 'gold', bind: bind.head,
+    warp: (p, a, u) => {
+      // flutes up the tiers
+      const s = 0.0042 * hs * Math.sin(a * 8) * smoothstep(0.12, 0.3, u);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: gradY(y0, top, 0.8, 1.12),
+  });
+  // the ledges, a gold roll at the foot of each tier, and the rim of the band
+  for (const [hh, s] of ledges) {
+    kit.loft([vs(y0 + (hh - 0.008) * hs, rx * s * 1.012, rz * s * 1.012, X(hh)), vs(y0 + (hh + 0.012) * hs, rx * s * 1.0, rz * s * 1.0, X(hh))],
+      { sides: 16, start: null, end: null, color: trim, mat: 'gold', glow: 0.1, bind: bind.head });
+  }
+  kit.loft([vs(y0 - 0.003 * hs, rx * 1.014, rz * 1.014, cx), vs(y0 + 0.01 * hs, rx * 1.018, rz * 1.018, cx)], { sides: 16, start: null, end: null, color: trim, mat: 'gold', bind: bind.head });
+  // gems set round the front half of the band, a larger one at the middle
+  const gems = 5;
+  for (let i = 0; i < gems; i++) {
+    const t = ((i / (gems - 1)) - 0.5) * 2.5;
+    const big = i === (gems - 1) / 2;
+    const r = (big ? 0.0105 : 0.0072) * hs;
+    const gx = cx + Math.cos(t) * rx * 1.022;
+    const gz = Math.sin(t) * rz * 1.022;
+    const y = y0 + band * 0.5 * hs;
+    kit.loft([ps(gx, y, gz, r, r * 1.1), ps(gx + Math.cos(t) * 0.007 * hs, y, gz + Math.sin(t) * 0.007 * hs, r * 0.9, r)],
+      { ref: [0, 1, 0], sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: gem, mat: 'gem', glow: 0.7, bind: bind.head });
+  }
+  // the finial: a bud of gold on the top
+  const fx = X(h + 0.036 * (height));
+  kit.loft([ps(fx, top - 0.004 * hs, 0, 0.011 * hs), ps(fx, top + 0.014 * hs, 0, 0.0125 * hs), ps(fx, top + 0.04 * hs, 0, 0.0035 * hs)],
+    { ref: [1, 0, 0], rings: 3, sides: 6, start: null, end: 'round', capRings: 2, capDepth: 0.008 * hs, color: trim, mat: 'gold', glow: 0.15, bind: bind.head });
 }
