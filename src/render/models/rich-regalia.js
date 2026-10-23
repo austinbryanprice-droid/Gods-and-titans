@@ -333,6 +333,31 @@ export function addPibo(E, { color, trim = null } = {}) {
   }
 }
 
+/**
+ * The great fan of quetzal plumes standing up behind a god's shoulders (the Mexica's quetzalapanecayotl): a long row fanned out from a
+ * point between the shoulder blades, each plume leaning back, and a shorter row in front of it, riding the chest. opts: colors (the long
+ * plumes', cycled), inner (the short row's), tip (their ends), n (plumes in the long row), len (scale of the length).
+ */
+export function addQuetzalBack(E, { colors, inner = null, tip = null, n = 9, len = 1 } = {}) {
+  const { kit, D } = E;
+  const bind = E.bind.chest;
+  const K = D.k;
+  const x0 = -D.chestD * 0.5 - 0.034;
+  const y0 = D.shoulderY - 0.05;
+  const fan = (count, L, w, cols, dx, spread) => {
+    for (let i = 0; i < count; i++) {
+      const k = count > 1 ? i / (count - 1) : 0.5;
+      const a = (k - 0.5) * 2 * spread; // from straight up, out to either side
+      const sn = Math.sin(a);
+      feather(kit, [x0 + dx, y0, 0], [-0.2 - 0.22 * Math.abs(sn), Math.cos(a), sn], [1, 0.2, 0], L * K * (1 - 0.16 * Math.abs(sn)), w * K, {
+        color: cols[i % cols.length], tip, bind, bend: [-0.05 * K, 0, sn * 0.04 * K], rows: 5, thick: 0.004,
+      });
+    }
+  };
+  fan(n, 0.5 * len, 0.05, colors, 0, 1.28);
+  if (inner) fan(Math.max(3, n - 2), 0.34 * len, 0.046, [inner].flat(), 0.014, 1.12);
+}
+
 // ---------------------------------------------------------------------------
 // wings (rigid pieces on four extra bones)
 // ---------------------------------------------------------------------------

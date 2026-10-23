@@ -925,7 +925,7 @@ per-frame budget, so a revealed army appears over a few frames.
   beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
   `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
   motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
-  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
+  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, the Aztecs, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
   pins the choice for tools. The bones live outside the scene graph (detached bind mode): `applyRich`
   ends with `syncRich`, and rigid pieces (weapon, shield, tools, flames, cargo, wings) ride mounts
   (`mountOn`), so the pose costs nothing on frames where a unit does not animate. Winged units get
@@ -954,7 +954,17 @@ per-frame budget, so a revealed army appears over a few frames.
   soldier's plumed helm; the mingguang cuirass with its round mirrors, pteruges and tunjian shoulder
   beasts; wide sleeves and the pibo ribbons of the goddess; a tiger-skin wrap; four kaoqi pennants on
   poles for the generals; the halberd (ji) and the crescent-bladed guandao, a repeating crossbow, the
-  Ruyi staff, the yue axe, a crane-feather fan and a lantern). Gods with more than two arms carry the extra two pairs as one rigid
+  Ruyi staff, the yue axe, a crane-feather fan and a lantern; `rich-outfits-aztec.js`: the maxtlatl
+  (`addMaxtlatl`: a loincloth with an apron before and behind, bordered, the hem checked) and a cloak
+  knotted over one shoulder for the people, the quilted ichcahuipilli (`quilt` paint) under a crown of
+  plumes for the soldiers, the priest's long robe under the quetzal-feather fan (`addQuetzalFan`), the
+  Eagle Warrior's feathered suit (`featherRows` paint) under the eagle's head (`addEagleHelm`), the sun
+  god's hummingbird helm (`addHummingbirdHelm`) and feathered kilt, the Smoking Mirror's jaguar pelt
+  (`jaguarSpots` paint) and obsidian mirror, Tlaloc's goggles and fangs (`addTlalocMask`) with a fan of
+  plumes at his back (`addQuetzalBack`); the macuahuitl (`rich-gear.js`: a flat paddle with obsidian
+  teeth on both edges, built for a club or a sword), a chimalli with a fringe of feathers (and the sun
+  god's five balls of down), a clay jar of rain; an outfit's `shield` may be a function of the unit
+  as well as a style object). Gods with more than two arms carry the extra two pairs as one rigid
   piece on the chest bone (`extraArmsPiece` in `rich-regalia.js`: each hand holds an item the arm
   builders already make, moved into place with `MeshKit.placed`); such units get a separate
   triangle allowance (`multi_arms` in the test).

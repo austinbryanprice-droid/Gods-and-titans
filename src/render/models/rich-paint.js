@@ -59,6 +59,51 @@ export const gradY = (y0, y1, k0, k1) => (o, x, y) => mul(o, lerp(k0, k1, clamp(
 /** A fur coat: streaks of lighter and darker hair over a surface (a monkey's), a speckle of tufts between. */
 export const furStreaks = (o, x, y, z) => mul(o, 0.88 + 0.16 * Math.abs(Math.sin(z * 85 + x * 55 + y * 9)) + 0.08 * hash(Math.round(x * 60), Math.round(y * 45), Math.round(z * 60)));
 
+/** A jaguar's coat: rosettes (a dark ring about a tawny middle) at the nearest of a jittered point in each cell of a grid `cell` wide. */
+export const jaguarSpots = (cell = 0.05) => (o, x, y, z) => {
+  const px = x / cell;
+  const py = y / cell;
+  const pz = z / cell;
+  const ix = Math.floor(px);
+  const iy = Math.floor(py);
+  const iz = Math.floor(pz);
+  let d = 9;
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      for (let k = -1; k <= 1; k++) {
+        const cx = ix + i;
+        const cy = iy + j;
+        const cz = iz + k;
+        d = Math.min(d, Math.hypot(cx + hash(cx, cy, cz) - px, cy + hash(cy, cz, cx) - py, cz + hash(cz, cx, cy) - pz));
+      }
+    }
+  }
+  if (d < 0.17) mul(o, 0.8);
+  else if (d < 0.3) mul(o, 0.3);
+};
+
+/** Quilting: lines of stitching on a diamond grid `cell` wide, a shade darker than the cotton. */
+export const quilt = (cell = 0.05, k = 0.8) => (o, x, y, z) => {
+  const a = (y + z) / cell;
+  const b = (y - z) / cell;
+  if (Math.min(Math.abs(a - Math.round(a)), Math.abs(b - Math.round(b))) < 0.1) mul(o, k);
+};
+
+/**
+ * Rows of overlapping feathers laid round a limb or a body about the vertical axis through (cx, cz): `per` feathers a row,
+ * rows `pitch` high, the lower edge of each feather rounded, a shade darker where one overlaps the next.
+ */
+export const featherRows = ({ pitch = 0.04, per = 14, cx = 0, cz = 0, dark = 0.7, light = 1.1 } = {}) => (o, x, y, z) => {
+  const row = y / pitch;
+  const i = Math.floor(row);
+  const f = row - i;
+  const col = (Math.atan2(z - cz, x - cx) / (2 * Math.PI)) * per + (i & 1) * 0.5;
+  const c = col - Math.floor(col);
+  const edge = f + 0.34 * (1 - (1 - Math.abs(2 * c - 1) ** 2));
+  if (edge < 0.3) mul(o, dark);
+  else mul(o, light - (light - 0.92) * Math.min(1, (edge - 0.3) / 0.7));
+};
+
 /** Several paints in a row. */
 export const paints = (...fns) => (o, x, y, z, u, a) => {
   for (const f of fns) if (f) f(o, x, y, z, u, a);

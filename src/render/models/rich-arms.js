@@ -404,20 +404,33 @@ function lantern(kit, pal, size) {
 /**
  * The sacred mirror: a round (eight-sided) bronze disc in a gold rim on a lacquered handle, its face a
  * glowing silver the goddess holds up to the light, the back a gold boss. The face looks along the grip's +X.
+ * opts.obsidian: the smoking mirror, a disc of black glass in a gold rim with smoke curling up from it.
  */
-function mirror(kit, pal, s) {
+function mirror(kit, pal, s, { obsidian = false } = {}) {
   const gold = pal.accentMetal;
-  const R = 0.118 * s;
+  const R = (obsidian ? 0.098 : 0.118) * s;
   const cy = 0.27 * s;
   grip(kit, -0.07 * s, 0.14 * s, 0.0195 * s, shadeC(pal.secondary, 0.9), 4);
   kit.loft(along([[0.13, 0.021], [0.16, 0.026], [0.19, 0.02], [0.225, 0.014]], s), { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: null, color: gold, mat: 'gold' });
   // the rim, a rolled band round the disc
-  kit.loft([ps(-0.014 * s, cy, 0, R * 1.1, R * 1.1), ps(0.016 * s, cy, 0, R * 1.1, R * 1.1)], { ref: [0, 1, 0], sides: 8, start: null, end: null, color: gold, mat: 'gold', glow: 0.12 });
+  kit.loft([ps(-0.014 * s, cy, 0, R * 1.1, R * 1.1), ps(0.016 * s, cy, 0, R * 1.1, R * 1.1)], { ref: [0, 1, 0], sides: obsidian ? 14 : 8, start: null, end: null, color: gold, mat: 'gold', glow: 0.12 });
   // the face: glowing, a little inside the rim
   kit.loft([ps(0.008 * s, cy, 0, R * 0.96, R * 0.96), ps(0.019 * s, cy, 0, R * 0.96, R * 0.96)], {
-    ref: [0, 1, 0], sides: 8, start: 'flat', end: 'flat', color: tintC(pal.glow, 0.55), mat: 'gem', glow: 1,
+    ref: [0, 1, 0], sides: obsidian ? 14 : 8, start: 'flat', end: 'flat', color: obsidian ? mixC('#0a090e', pal.glow, 0.06) : tintC(pal.glow, 0.55), mat: obsidian ? 'gloss' : 'gem', glow: obsidian ? 0.12 : 1,
     paint: (o, x, y, z, u, a) => mul(o, 0.94 + 0.12 * Math.abs(Math.cos(a * TAU * 4))),
   });
+  if (obsidian) {
+    // smoke curling up from the rim: three slender wisps, thinning as they rise
+    const smoke = mixC('#2a2236', pal.glow, 0.35);
+    [[-0.5, 0.0, 0.14], [0.0, 0.07, 0.2], [0.5, -0.04, 0.16]].forEach(([dz, dx, rise], i) => {
+      const pts = [];
+      for (let k = 0; k <= 4; k++) {
+        const t = k / 4;
+        pts.push(ps((0.012 + dx * Math.sin(t * 5 + i) * t) * s, cy + R * 1.04 + rise * t * s, dz * R * (1 + 0.5 * t) + Math.sin(t * 6 + i * 2) * 0.03 * s * t, (0.0095 * (1 - t) + 0.0015) * s));
+      }
+      kit.loft(pts, { ref: [1, 0, 0], rings: 5, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * s, color: smoke, mat: 'gem', glow: 0.4 });
+    });
+  }
   // the back: a boss and a ring of bosses
   kit.loft([ps(-0.012 * s, cy, 0, R * 0.9, R * 0.9), ps(-0.02 * s, cy, 0, R * 0.7, R * 0.7), ps(-0.026 * s, cy, 0, R * 0.2, R * 0.2)], {
     ref: [0, 1, 0], sides: 8, start: null, end: 'round', capRings: 1, capDepth: 0.006 * s, color: shadeC(gold, 0.88), mat: 'gold',
@@ -439,6 +452,35 @@ function jewel(kit, pal, s) {
   });
 }
 
+/**
+ * A pot hung from the hand (along the grip's +Y, down when the elbow is bent): by its neck, a clay jar of the rain god's helpers (opts.jar),
+ * a round belly under a flared mouth painted in bands, the water glowing in its mouth; or an iron cauldron on a ring handle with the brew
+ * glowing in it. opts: color (the clay), band (the painted bands).
+ */
+function cauldron(kit, pal, s, { jar = false, color = null, band = null } = {}) {
+  const glow = tintC(pal.glow, 0.3);
+  if (jar) {
+    const clay = color || mixC(pal.primary, '#b9693a', 0.6);
+    const paintBand = band || pal.secondary;
+    kit.loft(along([[0.0, 0.036], [0.012, 0.03], [0.05, 0.027], [0.1, 0.06], [0.17, 0.092], [0.25, 0.08], [0.32, 0.044], [0.345, 0.018]], s), {
+      ref: [1, 0, 0], rings: 10, sides: 12, start: null, end: 'round', capRings: 2, capDepth: 0.014 * s, color: clay, mat: 'painted',
+      paint: (o, x, y, z, u) => {
+        const yy = y / s;
+        if ((yy > 0.13 && yy < 0.155) || (yy > 0.21 && yy < 0.232)) dye(o, paintBand, 0.9);
+        mul(o, 0.86 + 0.24 * Math.sin(u * PI));
+      },
+    });
+    kit.loft(along([[-0.014, 0.036], [0.0, 0.039]], s), { ref: [1, 0, 0], sides: 12, start: null, end: null, color: shadeC(paintBand, 0.9), mat: 'painted' });
+    kit.loft(along([[-0.004, 0.027], [0.0, 0.027]], s), { ref: [1, 0, 0], sides: 12, start: 'flat', end: null, color: glow, mat: 'gem', glow: 1 });
+    return;
+  }
+  const iron = pal.darkMetal;
+  kit.loft(along([[0.0, 0.1], [0.012, 0.112], [0.07, 0.128], [0.15, 0.1], [0.2, 0.05], [0.215, 0.02]], s), { ref: [1, 0, 0], rings: 8, sides: 14, start: null, end: 'round', capDepth: 0.012 * s, color: iron, mat: 'iron' });
+  kit.loft(along([[-0.006, 0.104], [0.012, 0.116]], s), { ref: [1, 0, 0], sides: 14, start: null, end: null, color: shadeC(iron, 0.8), mat: 'iron' });
+  kit.loft(along([[0.004, 0.092], [0.01, 0.092]], s), { ref: [1, 0, 0], sides: 14, start: 'flat', end: null, color: glow, mat: 'gem', glow: 1 });
+  for (const side of [1, -1]) kit.loft([ps(0, 0.005 * s, side * 0.1 * s, 0.016 * s), ps(0, -0.07 * s, side * 0.06 * s, 0.01 * s), ps(0, -0.1 * s, 0, 0.01 * s)], { ref: [1, 0, 0], rings: 6, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.006 * s, color: iron, mat: 'iron' });
+}
+
 /** A drumstick (bachi): a straight turned stick of dark wood, the end that strikes ringed in gold and charged with a glow (the thunder god's). */
 function bachi(kit, pal, s) {
   kit.loft(along([[-0.12, 0.0165], [0.0, 0.0185], [0.16, 0.0205], [0.34, 0.024], [0.4, 0.0225]], s), {
@@ -452,7 +494,7 @@ function bachi(kit, pal, s) {
 }
 
 /** The weapons built here, by the visual's weapon id. */
-const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.82, opts), mace, discus, fan, drum: bachi };
+const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.82, opts), mace, discus, fan, drum: bachi, cauldron };
 export const RICH_ARMS = new Set(Object.keys(ARMS));
 
 /** The offhand items built here, by the visual's offhand id (lotus and flame are only carried by the extra hands of many-armed gods). */

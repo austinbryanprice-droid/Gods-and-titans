@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { shadeC, TEAM } from './unit-geo.js';
 import { vs, ps, B, smoothstep } from './rich-kit.js';
 import { torsoStations, torsoRing, legRing, ringAt, legStations, legFrom } from './rich-body.js';
-import { clamp, lerp, hash, mul, dye, gradY, paints, recolor } from './rich-paint.js';
+import { clamp, lerp, hash, mul, dye, gradY, paints, recolor, quilt } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -101,7 +101,8 @@ export function addPauldrons(kit, D, pal, bind, color, trim, trimGlow = 0, { sid
   }
 }
 
-export function addFurMantle(kit, D, pal, bind) {
+/** The fur collar over the shoulders. opts.paint: more color work over the fur (a jaguar's rosettes). */
+export function addFurMantle(kit, D, pal, bind, { paint = null } = {}) {
   const sh = D.shoulderY;
   const K = D.k;
   const fur = pal.fur;
@@ -112,13 +113,13 @@ export function addFurMantle(kit, D, pal, bind) {
     p[0] += (n - 0.5) * 0.006;
   };
   kit.loft([vs(sh + 0.032, 0.07 * K, 0.1 * K, -0.004), vs(sh + 0.008, 0.108 * K, 0.17 * K, -0.012), vs(sh - 0.04, 0.12 * K, 0.215 * K, -0.014)],
-    { rings: 6, sides: 16, start: null, end: null, color: fur, mat: 'fur', bind: bind.torso, warp: tuft(1), paint: (o, x, y, z, u) => mul(o, lerp(1.08, 0.84, u)) });
+    { rings: 6, sides: 16, start: null, end: null, color: fur, mat: 'fur', bind: bind.torso, warp: tuft(1), paint: paints((o, x, y, z, u) => mul(o, lerp(1.08, 0.84, u)), paint) });
   kit.loft([vs(sh - 0.006, 0.1 * K, 0.16 * K, -0.012), vs(sh - 0.05, 0.122 * K, 0.208 * K, -0.014), vs(sh - 0.1, 0.108 * K, 0.19 * K, -0.012)],
-    { rings: 6, sides: 16, start: null, end: null, color: shadeC(fur, 0.92), mat: 'fur', bind: bind.torso, warp: tuft(2), paint: (o, x, y, z, u) => mul(o, lerp(1.0, 0.8, u)) });
+    { rings: 6, sides: 16, start: null, end: null, color: shadeC(fur, 0.92), mat: 'fur', bind: bind.torso, warp: tuft(2), paint: paints((o, x, y, z, u) => mul(o, lerp(1.0, 0.8, u)), paint) });
 }
 
-/** A cape down the back. opts: len (scale of the length, 1 reaches the knees), wide (scale of the width). */
-export function addCape(kit, D, color, hemColor, lining, bind, { len: lenK = 1, wide = 1 } = {}) {
+/** A cape down the back. opts: len (scale of the length, 1 reaches the knees), wide (scale of the width), paint (more color work over the cloth), mat (its surface class). */
+export function addCape(kit, D, color, hemColor, lining, bind, { len: lenK = 1, wide = 1, paint = null, mat = undefined } = {}) {
   const top = D.shoulderY + 0.005;
   const len = ((D.shoulderY - 0.05) - 0.12) * lenK;
   const w0 = D.chestW * 0.78 * wide;
@@ -132,7 +133,7 @@ export function addCape(kit, D, color, hemColor, lining, bind, { len: lenK = 1, 
     out[2] = z;
   };
   kit.sheet(7, 9, fn, {
-    thick: 0.007, color, inner: lining, bind: bind.cape, paint: paints(gradY(top - len, top, 0.82, 1.0)),
+    thick: 0.007, color, inner: lining, bind: bind.cape, paint: paints(gradY(top - len, top, 0.82, 1.0), paint), mat,
   });
   // a trim band along the hem
   kit.sheet(7, 1, (u, v, out) => {
@@ -1029,4 +1030,101 @@ export function addWrapSkirt(kit, D, bind, { color, len = 0.8, flare = 1, teeth 
     },
     paint: paints(gradY(yb - depth, D.hipY, 0.8, 1), mark),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Aztec dress: the loincloth, the quilted cotton armor, the cords bound about a leg
+// ---------------------------------------------------------------------------
+
+/**
+ * The maxtlatl: a loincloth of cotton tied about the waist (a belt with a knot at the hip), its two ends falling as a long apron
+ * in front and a shorter one behind, each bordered along its sides and hem in a stepped fret. opts: color, border (default the
+ * cloth's own, a shade darker), band (the belt's color), len (scale of the fall), knot (false: no knot at the hip), mark (a paint
+ * laid over the cloth before the border: a jaguar's rosettes), mat (the cloth's surface class).
+ */
+export function addMaxtlatl(kit, D, bind, { color, border = null, band = null, len = 1, knot = true, mark = null, mat = undefined } = {}) {
+  const K = D.k;
+  const t0 = torsoRing(D, 0.0, 0.028);
+  const t1 = torsoRing(D, 0.15, 0.022);
+  const bc = band || color;
+  kit.loft([vs(t0.y, t0.rx, t0.rz, t0.dx), vs((t0.y + t1.y) / 2, (t0.rx + t1.rx) / 2 + 0.003, (t0.rz + t1.rz) / 2 + 0.003, (t0.dx + t1.dx) / 2), vs(t1.y, t1.rx, t1.rz, t1.dx)],
+    { sides: 20, rings: 3, start: null, end: null, color: bc, mat: 'cloth', bind: bind.torso });
+  const bd = border || shade(color, 0.7);
+  const top = t0.y + 0.01;
+  const bw = 0.014 * K; // the border along the sides
+  const hemAt = 0.8; // where the border at the foot starts, as a fraction of the fall
+  for (const dir of [1, -1]) {
+    const drop = (dir > 0 ? 0.3 : 0.21) * len;
+    const x0 = dir > 0 ? t0.dx + t0.rx + 0.008 : t0.dx - t0.rx - 0.008;
+    const x1 = dir * 0.1;
+    // the apron's surface: c across it (before the direction), v down its fall
+    const surf = (c, v, out) => {
+      out[0] = lerp(x0, x1, Math.min(1, v * 1.6)) + dir * 0.012 * v;
+      out[1] = top - v * drop;
+      out[2] = c * dir;
+    };
+    const half = (v) => lerp(0.064, 0.086, v) * K;
+    // the cloth, then the border as strips of their own (a color that changes on a vertex blurs): up each side, and across the foot
+    kit.sheet(2, 5, (u, v, out) => surf((u - 0.5) * 2 * (half(v * hemAt) - bw), v * hemAt, out), {
+      thick: 0.006, color, inner: shade(color, 0.82), bind: bind.skirt, mat,
+      paint: (o, x, y, z, u, a) => {
+        mul(o, 0.94 + 0.08 * Math.sin(u * PI * 3));
+        if (mark) mark(o, x, y, z, u, a);
+      },
+    });
+    for (const side of [1, -1]) {
+      kit.sheet(1, 5, (u, v, out) => {
+        const w = half(v * hemAt);
+        surf(lerp(side > 0 ? w - bw : -w, side > 0 ? w : -(w - bw), u), v * hemAt, out);
+      }, { thick: 0.006, color: bd, inner: shade(bd, 0.82), bind: bind.skirt });
+    }
+    kit.sheet(6, 1, (u, v, out) => surf((u - 0.5) * 2 * half(lerp(hemAt, 1, v)), lerp(hemAt, 1, v), out), {
+      thick: 0.006, color: bd, inner: shade(bd, 0.82), bind: bind.skirt,
+      // squares of the cloth stepping along it
+      paint: (o, x, y, z, u) => { if (Math.round(u * 6) % 2) mul(o, 0.74); },
+    });
+  }
+  if (!knot) return;
+  // the knot at the left hip, its two ends hanging a little way
+  const k = torsoRing(D, 0.07, 0.036);
+  const th = 0.72;
+  const x = k.dx + k.rx * Math.cos(th);
+  const z = k.rz * Math.sin(th);
+  kit.loft([ps(x, k.y, z, 0.022, 0.026), ps(x + 0.01, k.y - 0.003, z + 0.004, 0.015, 0.018)], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capDepth: 0.01, color: shade(bc, 0.9), mat: 'cloth', bind: bind.skirt });
+  for (const [dz, drop] of [[-0.012, 0.15], [0.018, 0.11]]) {
+    kit.sheet(2, 4, (u, v, out) => {
+      out[0] = x + 0.016 + 0.012 * v;
+      out[1] = k.y - 0.01 - drop * v;
+      out[2] = z + dz * v + (u - 0.5) * 0.034;
+    }, { thick: 0.005, color, inner: shade(color, 0.8), bind: bind.skirt });
+  }
+}
+
+/**
+ * The ichcahuipilli: a sleeveless tunic of quilted cotton from the throat to the thigh (the quilting a diamond grid of stitching),
+ * a band of trim at the neck and a hem of the same trim with a scalloped fringe below it. opts: color, trim, hem (how far it
+ * hangs below the hip), cell (the quilting's size), mat (the cotton's surface class).
+ */
+export function addIchcahuipilli(kit, D, bind, { color, trim, hem = 0.12, cell = 0.05, mat = 'cloth' } = {}) {
+  addTunic(kit, D, color, bind, hem, { mat, paint: quilt(cell, 0.66) });
+  const a = torsoRing(D, 1.03, 0.022);
+  const b = torsoRing(D, 1.1, 0.014);
+  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs(b.y, b.rx * 0.93, b.rz * 0.93, b.dx)], { sides: 20, start: null, end: null, color: trim, mat: 'trim', bind: bind.torso });
+  const y0 = D.hipY - hem;
+  kit.loft([vs(y0 - 0.006, D.depth * 0.62 + 0.026, D.waistW * 0.66 + 0.026), vs(y0 + 0.026, D.depth * 0.62 + 0.02, D.waistW * 0.66 + 0.02)], {
+    sides: 28, start: null, end: null, color: trim, mat: 'trim', bind: bind.torso,
+    warp: (p, ang, u) => { if (u < 0.02) p[1] -= 0.014 * Math.abs(((ang / TAU) * 14) % 1 - 0.5) * 2; },
+  });
+}
+
+/**
+ * Cords bound round the leg: a band below the knee (`knee`) and an anklet (`ankle`), each a color or a team color.
+ */
+export function addLegBands(kit, D, bind, { knee = null, ankle = null, mat = 'cloth' } = {}) {
+  const k = D.hipY - D.thigh;
+  for (const side of [1, -1]) {
+    const st = legStations(D, side, 0.011);
+    if (knee) kit.loft([ringAt(st, k - 0.052, 0.008), ringAt(st, k - 0.016, 0.008)], { sides: 12, start: null, end: null, color: knee, mat, bind: bind.leg[side] });
+    if (ankle) kit.loft([ringAt(st, D.ankleY + 0.034, 0.008), ringAt(st, D.ankleY + 0.07, 0.008)], { sides: 12, start: null, end: null, color: ankle, mat, bind: bind.leg[side] });
+  }
 }
