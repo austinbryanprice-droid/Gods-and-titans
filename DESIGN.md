@@ -925,11 +925,17 @@ per-frame budget, so a revealed army appears over a few frames.
   beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
   `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
   motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
-  in play (the Norse sample); `setUnitDetail('rich' | 'base' | 'auto')` pins the choice for tools. The
-  bones live outside the scene graph (detached bind mode): `applyRich` ends with `syncRich`, and rigid
-  pieces (weapon, shield, tools, flames, cargo) ride mounts (`mountOn`), so the pose costs nothing on
-  frames where a unit does not animate. Test budgets for the tier are separate
-  (`tests/render/rich-models.test.js`); the low-poly budgets are unchanged.
+  in play (the Norse first, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
+  pins the choice for tools. The bones live outside the scene graph (detached bind mode): `applyRich`
+  ends with `syncRich`, and rigid pieces (weapon, shield, tools, flames, cargo, wings) ride mounts
+  (`mountOn`), so the pose costs nothing on frames where a unit does not animate. Winged units get
+  four more bones (`B.wingR1` .. `B.wingL2`, 27 in all) carrying rigid feather pieces; the body skin
+  never uses them. The builder is split by what it dresses: `rich-body.js` (anatomy), `rich-clothing.js`,
+  `rich-headgear.js`, `rich-feathers.js`, `rich-regalia.js` (wings, spikes, jewelry, feather cloaks,
+  chains, flames), `rich-gear.js` (weapons) and `rich-outfits.js`, where each pantheon registers only
+  the layers (legs, torso, arms, armor, cloaks, head, extras) in which its people dress differently
+  from the default. Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
+  low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
   `spawnProjectile({ kind, el, from: {x, y, h}, to: {x, y, h}, flight })`,
   `spawnEffect({ el, shape, x, y, r, fx, fy, points, duration })`, `spawnHit({ x, y, h, el })`,

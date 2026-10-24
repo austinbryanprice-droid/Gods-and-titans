@@ -386,7 +386,7 @@ function sharedAssets() {
 // ---------------------------------------------------------------------------
 
 function templateKey(unitType) {
-  return `${unitType.id}|${unitType.class}|${unitType.air ? 1 : 0}|${JSON.stringify(unitType.visual || {})}`;
+  return `${unitType.id}|${unitType.class}|${unitType.air ? 1 : 0}|${unitType.lookOf || ''}|${JSON.stringify(unitType.visual || {})}`;
 }
 
 /** Whether a unit type is drawn with the rich skinned builder at this detail ('rich' | 'base'). */

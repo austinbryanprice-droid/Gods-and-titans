@@ -36,16 +36,20 @@ export const B = {
   upperR: 6, foreR: 7, handR: 8, upperL: 9, foreL: 10, handL: 11,
   thighR: 12, shinR: 13, footR: 14, thighL: 15, shinL: 16, footL: 17,
   cape1: 18, cape2: 19, cape3: 20, hair1: 21, hair2: 22,
+  // a winged build (humanoidSpec with opts.wing) adds an inner and an outer wing segment per
+  // side, riding the chest: rigid wing pieces hang from them (the body skin never uses them)
+  wingR1: 23, wingR2: 24, wingL1: 25, wingL2: 26,
 };
 export const BONE_NAMES = Object.keys(B);
-export const BONE_COUNT = BONE_NAMES.length;
-const PARENT = [-1, 0, 1, 2, 3, 4, 3, 6, 7, 3, 9, 10, 1, 12, 13, 1, 15, 16, 3, 18, 19, 5, 21];
+/** Bones of the standard rig; a winged build has four more (B.wingR1 .. B.wingL2). */
+export const BONE_COUNT = 23;
+const PARENT = [-1, 0, 1, 2, 3, 4, 3, 6, 7, 3, 9, 10, 1, 12, 13, 1, 15, 16, 3, 18, 19, 5, 21, 3, 23, 3, 25];
 
 /**
  * Bone rest positions (model space, bind pose) for a humanoid build.
  * d: { hipY, hipZ, thigh, ankleY, shoulderY, shoulderZ, upper, fore, neckY, headY, headX, shoulderDrop }
  */
-export function humanoidSpec(d) {
+export function humanoidSpec(d, opts = {}) {
   const sh = d.shoulderY - (d.shoulderDrop ?? 0.02);
   const span = d.shoulderY - d.hipY;
   const pos = [
@@ -62,7 +66,12 @@ export function humanoidSpec(d) {
     [-0.08, d.shoulderY - 0.01, 0], [-0.1, d.shoulderY - 0.17, 0], [-0.1, d.shoulderY - 0.34, 0],
     [d.headX - d.headRad * 0.55, d.headY + d.headRad * 0.5, 0], [d.headX - d.headRad * 0.9, d.headY - d.headRad * 0.4, 0],
   ];
-  return { d, pos, parent: PARENT };
+  // wings: opts.wing = { root: [x, y, z], wrist: [x, y, z] } of the right wing (the left mirrors it)
+  if (opts.wing) {
+    const { root, wrist } = opts.wing;
+    pos.push(root, wrist, [root[0], root[1], -root[2]], [wrist[0], wrist[1], -wrist[2]]);
+  }
+  return { d, pos, parent: PARENT.slice(0, pos.length) };
 }
 
 /** A fresh set of Bone objects in the bind pose (parents first; the root is returned too). */

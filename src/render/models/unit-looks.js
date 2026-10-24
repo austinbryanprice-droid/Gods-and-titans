@@ -20,7 +20,8 @@ export function unitLook(unitType, pantheonId) {
   if (!dressed || dressed.base !== unitType) {
     const { colors, ...rest } = look;
     const visual = { ...unitType.visual, ...rest, colors: { ...unitType.visual.colors, ...colors } };
-    dressed = { base: unitType, def: { ...unitType, visual } };
+    // lookOf: whose look this is, for the rich outfits (rich-outfits.js), which dress by pantheon
+    dressed = { base: unitType, def: { ...unitType, visual, lookOf: pantheonId } };
     DRESSED.set(key, dressed);
   }
   return dressed.def;
