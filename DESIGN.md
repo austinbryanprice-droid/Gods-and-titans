@@ -1116,7 +1116,9 @@ per-frame budget, so a revealed army appears over a few frames.
   wings of the gods, over a green tail of lapped feathers with a fan of quetzal plumes at its tip. The pose code is
   `applyRich`'s (the `naga` case of `unit-anim.js` calls it when the model is rich) plus a `serpent` style of `poseTail`:
   every bone yaws about the vertical by `sin(wavePhase - 0.8 i + seed) (0.05 + 0.03 i) sweep`, so a wave runs down the chain
-  and grows toward the tip, small when the naga stands and twice as wide (`m.tailMove` eased in) when it glides.
+  and grows toward the tip, small when the naga stands and twice as wide (`m.tailMove` eased in) when it glides. A dead
+  naga's tail lies straight (`m.tailLie` eases to 1 and the bones blend toward `straighteningYaws`): the rig rolls onto its
+  side, and an S on the ground would half bury and leave the tip floating.
   Costs: 5.6k triangles for the Naga (a creature, budget 10.5k), 8.7k for Nuwa and 9.0k for Quetzalcoatl (gods, budget
   9k: Quetzalcoatl has 12 triangles left, his wings alone are 1.5k).
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
