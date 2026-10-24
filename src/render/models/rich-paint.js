@@ -82,6 +82,34 @@ export const jaguarSpots = (cell = 0.05) => (o, x, y, z) => {
   else if (d < 0.3) mul(o, 0.3);
 };
 
+/**
+ * Solid spots (a hyena's): a dark blotch about the nearest of a jittered point in each cell of a grid `cell` wide, `size` of a
+ * cell in radius, its edge feathered; the color is scaled by `k`, or mixed toward `dark` (a { r, g, b }) when that is given.
+ */
+export const spots = (cell = 0.06, size = 0.26, k = 0.42, dark = null) => (o, x, y, z) => {
+  const px = x / cell;
+  const py = y / cell;
+  const pz = z / cell;
+  const ix = Math.floor(px);
+  const iy = Math.floor(py);
+  const iz = Math.floor(pz);
+  let d = 9;
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      for (let m = -1; m <= 1; m++) {
+        const cx = ix + i;
+        const cy = iy + j;
+        const cz = iz + m;
+        d = Math.min(d, Math.hypot(cx + hash(cx, cy, cz) - px, cy + hash(cy, cz, cx) - py, cz + hash(cz, cx, cy) - pz));
+      }
+    }
+  }
+  const t = d < size ? 1 : d < size + 0.09 ? 1 - (d - size) / 0.09 : 0;
+  if (!t) return;
+  if (dark) tint(o, dark, t * (1 - k));
+  else mul(o, lerp(1, k, t));
+};
+
 /** Quilting: lines of stitching on a diamond grid `cell` wide, a shade darker than the cotton. */
 export const quilt = (cell = 0.05, k = 0.8) => (o, x, y, z) => {
   const a = (y + z) / cell;

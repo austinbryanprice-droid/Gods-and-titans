@@ -6,8 +6,10 @@
 // worn across the chest like a bandolier, with the sling in his fist. The gods wear a crown of horns, one pair over
 // another: Marduk the lapis blue of Babylon, Ishtar crimson with the star of her planet and wings, Enki in the colors of
 // the water with streams running from his shoulders, Nergal in black iron with a lion's pelt and a studded mace. The
-// apkallu wears the skin of a fish. The team's color is the shawl, the cloak, the flap of the helmet, a headband, the face
-// of the shield and the apkallu's crest and tail. Overrides only the layers where the Mesopotamians dress differently from
+// apkallu wears the skin of a fish. The Ugallu, the lion-headed storm demon of Tiamat's brood, is a tawny beast on a man's
+// body with the talons of an eagle for feet, a mane about his head and shoulders, a skirt of dark fleece, a shawl in the team's
+// color and silver at his arms and his mace. The team's color is the shawl, the cloak, the flap of the helmet, a headband, the
+// face of the shield and the apkallu's crest and tail. Overrides only the layers where the Mesopotamians dress differently from
 // the default (rich-outfit-default.js).
 import { TEAM, shadeC, mixC, withMat } from './unit-geo.js';
 import { torsoStations, armStations, addBoots, addBareLegs, addSandals, bootTop } from './rich-body.js';
@@ -18,6 +20,8 @@ import {
   addHairCap, addLongHair, addHeadband, addHornPair, addConeHelm, addHornedTiara, addCurledBeard, addNapeBun, addFishHood,
 } from './rich-headgear.js';
 import { addWaterStreams } from './rich-regalia.js';
+import { addBeastLegs, addTalonFeet, addBeastTail, addLionMane } from './rich-beast.js';
+import { furStreaks } from './rich-paint.js';
 import { vs } from './rich-kit.js';
 import { DEFAULT } from './rich-outfit-default.js';
 
@@ -25,6 +29,7 @@ const GOLD = withMat('#dfb54a', 'gold');
 const BRONZE = withMat('#b87a3c', 'gold');
 const COPPER = withMat('#b9693a', 'gold');
 const IRON = withMat('#8b949e', 'metal');
+const SILVER = withMat('#c4c9d0', 'metal');
 const BLACK_IRON = withMat('#2b2a30', 'metal');
 const LEATHER = withMat('#6a4528', 'leather');
 const IVORY = withMat('#e8dfc4', 'bone');
@@ -53,6 +58,7 @@ const NAMED = {
   mesopotamian_nergal: 'nergal',
   mesopotamian_apkallu: 'apkallu',
   mesopotamian_slinger: 'slinger',
+  mesopotamian_ugallu: 'ugallu',
 };
 
 /** The dress of a unit: worker, warrior, archer, priest, or a god's, the minion's or the elite's own. */
@@ -108,6 +114,11 @@ export function legs(E) {
       // bare legs, sandals
       addBareLegs(kit, D, bind, skin, skinPaint);
       addSandals(kit, D, pal, bind, { skin, skinPaint, strap: LEATHER, sole: shade(LEATHER, 0.8) });
+      break;
+    case 'ugallu':
+      // fur on the thigh, the shank thin and scaled like a bird's, the feet an eagle's with claws of silver
+      addBeastLegs(E, { color: skin, paint: skinPaint, lower: 0.74 });
+      addTalonFeet(E, { color: shade(skin, 0.8), claw: SILVER, clawMat: 'metal' });
       break;
     case 'warrior':
     case 'nergal':
@@ -187,6 +198,12 @@ export function torso(E) {
       addKaunakes(kit, D, bind, { color: withMat('#efe7d0', 'fur'), color2: shade(FLEECE, 0.92), tiers: 3, len: 1, flare: 1, tufts: 9 });
       addWaistBelt(kit, D, bind, shade(pal.primary, 0.9), GOLD);
       break;
+    case 'ugallu':
+      // a bare furred chest over a skirt of dark fleece, a broad belt of leather and silver
+      kit.loft(torsoStations(D), { rings: 11, start: null, end: 'round', color: skin, bind: bind.torso, paint: skinPaint });
+      addKaunakes(kit, D, bind, { color: withMat(pal.primary, 'fur'), color2: shade(pal.primary, 0.84), tiers: 2, len: 0.5, flare: 0.9, tufts: 9, depth: 0.03 });
+      addBelt(kit, D, pal, bind, shade(LEATHER, 0.8), SILVER, 'leather', 0.045);
+      break;
     default:
       DEFAULT.torso(E);
   }
@@ -199,13 +216,13 @@ export function torso(E) {
 export function arms(E) {
   const { kit, D, bind, skin, skinPaint } = E;
   const dress = dressOf(E);
-  if (['worker', 'slinger', 'marduk', 'ishtar', 'nergal'].includes(dress)) {
+  if (['worker', 'slinger', 'marduk', 'ishtar', 'nergal', 'ugallu'].includes(dress)) {
     // bare arms, bands of metal about them
     for (const side of [1, -1]) {
       kit.loft(armStations(D, side), { rings: 8, start: null, end: 'round', capRings: 2, capDepth: 0.022, color: skin, bind: bind.arm[side], paint: skinPaint });
     }
     const grand = dress === 'marduk' || dress === 'ishtar';
-    addArmBands(kit, D, bind, { upper: grand ? GOLD : dress === 'nergal' ? BRONZE : COPPER, wrist: dress === 'worker' ? null : grand ? GOLD : BRONZE });
+    addArmBands(kit, D, bind, { upper: dress === 'ugallu' ? SILVER : grand ? GOLD : dress === 'nergal' ? BRONZE : COPPER, wrist: dress === 'worker' ? null : dress === 'ugallu' ? SILVER : grand ? GOLD : BRONZE });
     return;
   }
   DEFAULT.arms(E);
@@ -250,6 +267,9 @@ export function cloaks(E) {
       break;
     case 'slinger':
       shawl(E, { side: -1, width: 0.3 });
+      break;
+    case 'ugallu':
+      shawl(E, { side: -1, width: 0.34, trim: SILVER, fringe: SILVER });
       break;
     case 'priest':
       shawl(E, { side: 1, width: 0.4, len: 0.05 });
@@ -334,6 +354,9 @@ export function head(E) {
       addLongHair(kit, D, pal, bind);
       addCurledBeard(kit, D, pal, bind, { len: 1.05, wide: 1.05, color: beard });
       break;
+    case 'ugallu':
+      // the head is a lion's: no hair, no cap (the mane is the extras')
+      break;
     case 'apkallu':
       // the head of a fish over the head of the sage, the crest in the team's color
       addFishHood(kit, D, pal, bind, { color: FISH, belly: FISH_BELLY, fin: TEAM(0.95, 'cloth') });
@@ -349,9 +372,19 @@ export function head(E) {
 // ---------------------------------------------------------------------------
 
 export function extras(E) {
-  const { ex } = E;
+  const { ex, pal } = E;
   if (dressOf(E) === 'enki') addWaterStreams(E, { color: AQUA });
-  DEFAULT.extras({ ...E, ex: new Set([...ex]) });
+  if (dressOf(E) === 'ugallu') {
+    // the mane of a lion over the head and the shoulders, a lion's tail with its tuft
+    if (ex.has('mane')) addLionMane(E, { color: shade(pal.skin, 0.6), dark: shade(pal.skin, 0.4), tip: shade(pal.skin, 0.22) });
+    if (ex.has('tail')) addBeastTail(E, { kind: 'lion', tip: shade(pal.skin, 0.3), len: 0.74 });
+  }
+  DEFAULT.extras({ ...E, ex: new Set([...ex].filter((e) => e !== 'mane' && e !== 'tail')) });
+}
+
+/** The fur of the Ugallu: a streak of lighter and darker hair over every bare surface of the body. */
+export function skinPaint(E) {
+  return E.v.body === 'beast_biped' ? furStreaks : null;
 }
 
 /**
@@ -381,4 +414,4 @@ export function shield() {
   };
 }
 
-export const MESOPOTAMIAN = { legs, torso, arms, armor: armorLayer, cloaks, head, extras, gear, palette, shield };
+export const MESOPOTAMIAN = { legs, torso, arms, armor: armorLayer, cloaks, head, extras, gear, palette, skinPaint, shield };

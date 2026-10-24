@@ -13,14 +13,16 @@ import { RICH_ARMS, RICH_OFFHANDS, richArm } from './rich-arms.js';
 import { richDims, makeBinds, lavaSkin, addHeadAndNeck, addHands } from './rich-body.js';
 import { outfitFor, LAYERS } from './rich-outfits.js';
 import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.js';
+import { batWingPieces } from './rich-beast-wings.js';
 import { BEAST_HEADS } from './rich-heads.js';
 import { creatureSupported, buildCreatureTemplate } from './rich-creatures.js';
 
-const RICH_BODIES = new Set(['humanoid', 'giant']);
-/** Upright beasts (the body beast_biped: a monkey king and his clones) are dressed on the humanoid rig by the pantheons listed here; the others keep their low-poly beasts. */
-const RICH_BEAST_BIPEDS = new Set(['chinese']);
+/** The bodies the humanoid rig dresses: people, giants and the upright beasts (the monkeys, the lion-headed demon, the winged horror, the were-hyena). */
+const RICH_BODIES = new Set(['humanoid', 'giant', 'beast_biped']);
+/** The beasts with the heads of these stand as tall and as slim as people (a monkey does); the rest are built on the hunched, broad-shouldered beast profile. */
+const UPRIGHT_BEASTS = new Set(['monkey']);
 const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress', 'antlers', 'flame', 'veil']);
-const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring']);
+const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring', 'mane']);
 
 /**
  * The pantheons whose units are drawn with the rich characters in play: all ten, each after its
@@ -36,7 +38,7 @@ export function richSupported(unitType) {
   if (!v) return false;
   if (creatureSupported(unitType)) return true;
   const body = v.body || 'humanoid';
-  if (!RICH_BODIES.has(body) && !(body === 'beast_biped' && RICH_BEAST_BIPEDS.has(unitType.pantheon))) return false;
+  if (!RICH_BODIES.has(body)) return false;
   if (((v.head || 'human') !== 'human' && !BEAST_HEADS.has(v.head)) || (v.heads || 1) !== 1) return false;
   if (!RICH_HEADGEAR.has(v.headgear || 'none')) return false;
   return (v.extras || []).every((e) => RICH_EXTRAS.has(e));
@@ -68,6 +70,8 @@ function heldPiece(ctx, P, side, item, sizeK = 1, style = null) {
   else if (item.kind === 'bow') grip = 'bow';
   else if (item.kind === 'offhand') grip = id === 'lantern' ? 'hang' : 'fwd';
   if (grip === 'fist') return null;
+  // (a beast's claws are its hands': the outfit builds them on the hand, rich-beast.js)
+  if (id === 'claws' && ctx.v.body === 'beast_biped') return null;
   const size = P.weaponSize * sizeK;
   // (style.build: the pantheon's outfit builds this weapon with rich-gear.js although it is not one of RICH_WEAPONS: the double axe, the torch)
   const built = item.kind === 'offhand' ? RICH_OFFHANDS.has(id) : (item.kind === 'weapon' || item.kind === 'bow') && (RICH_WEAPONS.has(id) || RICH_ARMS.has(id) || !!(style && style.build));
@@ -101,7 +105,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   if (creatureSupported(unitType)) return buildCreatureTemplate(unitType);
   const ctx = unitContext(unitType);
   const { v, pal, ex } = ctx;
-  const name = v.body === 'giant' ? 'giant' : 'humanoid';
+  const name = v.body === 'giant' ? 'giant' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
   const D = richDims(ctx, name);
   const wings = ex.has('wings') ? wingLayout(D, (ctx.unit.air ? 0.7 : 0.6) * D.k) : null;
   const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, wings ? { wing: wings } : {});
@@ -140,7 +144,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   // rigid pieces
   const items = humanoidItems(v);
   const attach = [...E.attach];
-  if (wings) attach.push(...wingPieces(ctx, D, spec, wings));
+  if (wings) attach.push(...(v.body === 'beast_biped' ? batWingPieces : wingPieces)(ctx, D, spec, wings));
   const P = D;
   // (the hand is asked about too: a drummer holds the drum in one and the stick in the other)
   const styleOf = (item, side) => (outfit.gear ? outfit.gear(ctx, item, side) : null);
@@ -161,7 +165,7 @@ export function buildRichTemplate(unitType, detail = 1) {
     rightElbow: (WEAPON_INFO[v.weapon] || WEAPON_INFO.none).elbow,
     // a crossbow is carried level before the body, the elbow square; a bow hangs at the side
     leftElbow: leftStyle && leftStyle.crossbow ? 1 : v.weapon === 'bow' ? 0.15 : v.weapon === 'claws' ? 0.3 : OFFHAND_ELBOW[v.offhand] ?? 0.25,
-    stride: name === 'giant' ? 1.1 : 1.25,
+    stride: name === 'giant' ? 1.1 : name === 'beast_biped' ? 1.0 : 1.25,
     heavy: name === 'giant',
     holdAloft: holdsAloft(v),
   };

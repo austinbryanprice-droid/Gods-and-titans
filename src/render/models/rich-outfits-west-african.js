@@ -9,10 +9,13 @@
 // horns. Shango goes bare-chested in red and white under the beaded crown of the kings of Oyo with its veil, his double axe on its
 // staff in his hand; Oya wears wine red, a tall head tie, a wrapper of nine colors and nine copper bangles on each arm, and
 // carries the horsetail whisk; Ogun a skirt of palm fibre and black iron, a cutlass in his hand; Anansi kente and gold, four more
-// arms and a gold spider on his breast; the Aziza leaves. The people's skin is a deep brown and their hair black. The team's
-// color is the tunic, the smock, the cape, the face of the shield, a strip of the kente, the priest's cap and the front of his
-// robe, the lining of the leopard's skin, Ogun's bands and the Aziza's sash. Overrides only the layers where the West Africans
-// dress differently from the default (rich-outfit-default.js).
+// arms and a gold spider on his breast; the Aziza leaves. The Sasabonsam, the forest horror, is gaunt, on long thin legs with
+// iron hooks for toes, iron claws and the leathery wings of a bat; the Bultungin, the were-hyena, goes on its paws in a spotted
+// coat under a crest of dark hair, with claws of bone and a ragged cloth in the team's color about its loins. The people's skin
+// is a deep brown and their hair black. The team's color is the tunic, the smock, the cape, the face of the shield, a strip of
+// the kente, the priest's cap and the front of his robe, the lining of the leopard's skin, Ogun's bands, the Aziza's sash and
+// the rags of the Sasabonsam and the Bultungin. Overrides only the layers where the West Africans dress differently from the
+// default (rich-outfit-default.js).
 import { TEAM, shadeC, mixC, withMat } from './unit-geo.js';
 import { torsoStations, torsoRing, armStations, addBoots, addBareLegs, addSandals } from './rich-body.js';
 import {
@@ -23,13 +26,15 @@ import {
   addHairCap, addLongHair, addBeard, helmShell, addLaurel, addFillet, addHeadWrap, addBeadedCrown, addHornedCap, addFila, addRaffiaCrest,
 } from './rich-headgear.js';
 import { addJewelry, extraArmsPiece, addQuiver, addSpiderPendant } from './rich-regalia.js';
-import { kente, kenteAt, mudcloth, jaguarSpots, mul, recolor, lerp } from './rich-paint.js';
+import { kente, kenteAt, mudcloth, jaguarSpots, spots, furStreaks, mul, recolor, lerp } from './rich-paint.js';
+import { addBeastLegs, addTalonFeet, addPaws, addClaws, addBeastTail, addHyenaCrest } from './rich-beast.js';
 import { DEFAULT } from './rich-outfit-default.js';
 
 const GOLD = withMat('#dcae3a', 'gold');
 const BRASS = withMat('#b98a3e', 'gold');
 const COPPER = withMat('#c0703c', 'gold');
 const DARK_IRON = withMat('#3a3c42', 'metal');
+const IRON = withMat('#aab0b8', 'metal');
 const LEATHER = withMat('#6a4528', 'leather');
 const DARK_LEATHER = withMat('#3a2618', 'leather');
 const RED_LEATHER = withMat('#8e2e1c', 'leather');
@@ -79,6 +84,8 @@ const NAMED = {
   west_african_anansi: 'anansi',
   west_african_aziza: 'aziza',
   west_african_dart_hunter: 'hunter',
+  west_african_bultungin: 'bultungin',
+  west_african_sasabonsam: 'sasabonsam',
 };
 const PEOPLE = ['worker', 'warrior', 'archer', 'priest', 'hunter'];
 
@@ -137,18 +144,21 @@ const panels = (red, white, n) => (o, x, y, z) => {
 /** The veins of a leaf: a light rib every so often round a garment of leaves. */
 const leafVeins = (o, x, y, z) => mul(o, 0.86 + 0.24 * Math.abs(Math.sin(Math.atan2(z, x) * 6 + y * 18)));
 
-/** Bare skin over the chest and belly. */
-function bareTorso(E) {
-  E.kit.loft(torsoStations(E.D), { rings: 11, start: null, end: 'round', color: E.skin, bind: E.bind.torso, paint: E.skinPaint });
+/** Bare skin over the chest and belly (`more`: sides and rings of its own, a pattern in the coat needs more vertices). */
+function bareTorso(E, more = null) {
+  E.kit.loft(torsoStations(E.D), { rings: 11, start: null, end: 'round', color: E.skin, bind: E.bind.torso, paint: E.skinPaint, ...more });
 }
 
 /** Bare arms. */
-function bareArms(E) {
+function bareArms(E, more = null) {
   const { kit, D, bind, skin, skinPaint } = E;
   for (const side of [1, -1]) {
-    kit.loft(armStations(D, side), { rings: 8, start: null, end: 'round', capRings: 2, capDepth: 0.022, color: skin, bind: bind.arm[side], paint: skinPaint });
+    kit.loft(armStations(D, side), { rings: 8, start: null, end: 'round', capRings: 2, capDepth: 0.022, color: skin, bind: bind.arm[side], paint: skinPaint, ...more });
   }
 }
+
+/** The were-hyena's spotted coat is a pattern in the vertex colors: its body is built with the rings and sides to show it. */
+const SPOTTED = { torso: { sides: 24, rings: 16 }, arms: { sides: 16, rings: 11 }, legs: 16 };
 
 /** A wrapper of kente from the waist, `len` (1 reaches the knee), its strips running up and down, banded across. */
 function wrapper(E, { colors, len = 1, flare = 1, strip = 0.09, block = 0.075 }) {
@@ -218,6 +228,16 @@ export function legs(E) {
       sandals(DARK_LEATHER, shade(LEATHER, 0.7), 1);
       addLegBands(kit, D, bind, { knee: DARK_LEATHER, mat: 'leather' });
       break;
+    case 'sasabonsam':
+      // long thin legs of dark hide, the feet hooks of iron
+      addBeastLegs(E, { color: skin, paint: skinPaint, lower: 0.62 });
+      addTalonFeet(E, { color: shade(skin, 0.85), claw: IRON, clawMat: 'metal', k: 1.12 });
+      break;
+    case 'bultungin':
+      // a hyena's hind legs in the spotted coat, on broad paws with heavy claws of bone
+      addBeastLegs(E, { color: skin, paint: skinPaint, lower: 0.84, sides: SPOTTED.legs });
+      addPaws(E, { color: shade(skin, 0.7), claw: pal.accent, paint: skinPaint });
+      break;
     default:
       addBareLegs(kit, D, bind, skin, skinPaint);
       sandals(LEATHER);
@@ -278,6 +298,18 @@ export function torso(E) {
       bareTorso(E);
       wrapper(E, { colors: ANANSI_KENTE, len: 1.3, flare: 1.05 });
       break;
+    case 'sasabonsam':
+      // a gaunt bare chest, a rag of the team's color about the loins
+      bareTorso(E);
+      addWrapSkirt(kit, D, bind, { color: TEAM(0.62, 'cloth'), len: 0.42, flare: 1.05, teeth: 7, depth: 0.07, sides: 30 });
+      addWaistBelt(kit, D, bind, DARK_LEATHER, IRON, 'leather');
+      break;
+    case 'bultungin':
+      // the coat bare over the chest, a ragged cloth in the team's color about the loins on a belt of hide hung with bones
+      bareTorso(E, SPOTTED.torso);
+      addWrapSkirt(kit, D, bind, { color: TEAM(0.85, 'cloth'), len: 0.5, flare: 1.1, teeth: 9, depth: 0.065, sides: 36 });
+      addWaistBelt(kit, D, bind, DARK_LEATHER, COWRIE, 'leather');
+      break;
     case 'aziza':
       // a bodice and a skirt of leaves
       addTunic(kit, D, LEAF_DARK, bind, 0.02, { paint: leafVeins });
@@ -322,6 +354,17 @@ export function arms(E) {
     case 'aziza':
       bareArms(E);
       addArmBands(kit, D, bind, { upper: BEAD_GOLD, mat: 'lacquer' });
+      break;
+    case 'sasabonsam':
+      // long claws of iron, a band of iron on each arm
+      bareArms(E);
+      addArmBands(kit, D, bind, { upper: IRON, wrist: IRON, mat: 'metal' });
+      addClaws(E, { color: IRON, len: 1.1, r: 0.9 });
+      break;
+    case 'bultungin':
+      // long claws of bone on the hands
+      bareArms(E, SPOTTED.arms);
+      addClaws(E, { color: E.pal.accent, len: 1.2, r: 1.1 });
       break;
     case 'priest':
       // the agbada's wide sleeves over the forearms, edged in green
@@ -436,6 +479,13 @@ export function head(E) {
       if (ex.has('long_hair')) addLongHair(kit, D, pal, bind);
       addLaurel(kit, D, pal, bind, { leaf: LEAF, per: 7, big: 1.2 });
       break;
+    case 'sasabonsam':
+      // the head is a bat's; the long black hair falls from the back of it
+      if (ex.has('long_hair')) addLongHair(kit, D, pal, bind);
+      break;
+    case 'bultungin':
+      // the head is a hyena's: no hair, no cap (the crest is the extras')
+      break;
     default:
       DEFAULT.head(E);
   }
@@ -487,12 +537,18 @@ export function extras(E) {
     case 'aziza':
       beads([BEAD_GOLD, BEAD_GREEN], 0.7, 0.01, 16);
       break;
+    case 'bultungin':
+      // a string of knuckle-bones, the crest of coarse dark hair from the nape to the small of the back, the short bushy tail
+      addGarland(kit, D, bind, { colors: [COWRIE, withMat('#d8ceb0', 'bone')], low: 0.72, r: 0.014, beads: 12, mat: 'bone' });
+      if (ex.has('mane')) addHyenaCrest(E, { color: shade(E.pal.skin, 0.5), dark: shade(E.pal.skin, 0.3), tip: shade(E.pal.skin, 0.2), size: 1.1 });
+      if (ex.has('tail')) addBeastTail(E, { kind: 'hyena', color: E.pal.skin, tip: shade(E.pal.skin, 0.25) });
+      break;
     default:
       break;
   }
   // earrings for those in jewelry (the collars are their own); the rest as the default
   if (ex.has('jewelry')) addJewelry(E, { collar: false, bands: false });
-  DEFAULT.extras({ ...E, ex: new Set([...ex].filter((e) => e !== 'jewelry' && e !== 'multi_arms')) });
+  DEFAULT.extras({ ...E, ex: new Set([...ex].filter((e) => e !== 'jewelry' && e !== 'multi_arms' && !(dress === 'bultungin' && (e === 'mane' || e === 'tail')))) });
 }
 
 /**
@@ -523,6 +579,16 @@ export function gear(ctx, item, side) {
   }
 }
 
+/** The Bultungin's coat: streaks of lighter and darker hair over the body, the dark blotches of a spotted hyena on them. */
+export function skinPaint(E) {
+  if (E.ctx.unit.id !== 'west_african_bultungin') return null;
+  const blotch = spots(0.19, 0.46, 0.04, shade(E.pal.skin, 0.05));
+  return (o, x, y, z, u, a) => {
+    furStreaks(o, x, y, z, u, a);
+    blotch(o, x, y, z);
+  };
+}
+
 /** The soldier's shield: a tall oval of hide, the team's color on its face in a cross, a boss of hide and two cowries. */
 export function shield() {
   return {
@@ -535,4 +601,4 @@ export function shield() {
   };
 }
 
-export const WEST_AFRICAN = { legs, torso, arms, armor: armorLayer, cloaks, head, extras, gear, palette, shield };
+export const WEST_AFRICAN = { legs, torso, arms, armor: armorLayer, cloaks, head, extras, gear, palette, skinPaint, shield };
