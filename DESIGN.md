@@ -1222,6 +1222,33 @@ per-frame budget, so a revealed army appears over a few frames.
   twist, arms, cape and hair that lag; the pelvis turned back against the body's pitch by 0.85 and its yaw by 0.7). 13.5k
   triangles (a titan's budget is 14k), 66 bones, three meshes (the body, the flaming arch on the head bone, the thunderbolt
   on the right hand), 0.975 times the low-poly height, a template in about 100 ms.
+  The battering ram, the siege engine every pantheon trains (the body `ram`), is the last unit to get a plan of its own
+  (`rich-ram.js`, `ramSupported`: the body `ram` with no head, headgear, weapon, offhand or extras; the pieces are in
+  `rich-ram-parts.js` and the pose in `rich-ram-anim.js`); with it every unit of every pantheon has a rich model. It is one
+  skinned mesh on 11 bones and nothing rigid: `root`; `body` (the frame: two sills that curve up at their ends, four cross
+  beams, an A-frame at each end, the ridge pole with a band of iron at each frame, a gabled roof of stitched hides in the
+  team's colour over four battens, and the banner's pole with a finial in the pantheon's metal); `log` (a log of bark with
+  the end grain showing at its butt, four bands of iron and the iron ram's head in the pantheon's metal: a flared socket, a
+  skull with a high brow and a blunt muzzle, and a horn coiled about each cheek); `ropeA` and `ropeB` (a V of two ropes
+  each, hung from the ridge to the eyes on the log's bands); `axleF` and `axleB` (an axle and its two wheels: an iron tire, a
+  felloe, six spokes and a hub with a cap of metal; they are children of the root, so the frame rides above them); and
+  `flag1` to `flag4` (a chain along the swallow-tailed cloth in the team's colour). The two roof panels (`hideRoof`) are
+  laid on a surface puffed between the battens, with scalloped hems rolled over a rope (`hemRoll`), a coarse darker layer
+  under the outer one and a trim in the pantheon's accent along the hem; the paint (a tone for each hide, a mottle,
+  creases at the battens, a darker join under the ridge) only scales the team's colour, so the roof stays the owner's colour
+  from above (56% of the top-down silhouette, against 64% for the low-poly ram). A pantheon dresses the same body in its own
+  metal, timbers and trim, as the low-poly ram is dressed. The template keeps `kind: 'ram'` (so `animateModel` still picks the
+  ram's pose) with `rich.plan = 'ram'` and the rig `{ wheelR }`. The pose keys of the low-poly rig stay the source of truth:
+  the `ram` case of `unit-anim.js` integrates `m.wheelAngle` from the speed and blends the log's stroke `lx` as before, then
+  hands a rich ram to `applyCreature` (`applyRam`). The wheels turn with the angle; the frame rides its axles (rising 0.008
+  with each turn and rocking a little: a bone's local position is its rest offset from its parent, so a pose that moves one
+  adds to the rest); the log hangs from the ridge on a pendulum (both pairs of ropes rotate about the ridge by
+  asin(0.8 lx / 0.28) and the log moves on the circle to (L sin t, L (1 - cos t)), so it is drawn back and up in the wind-up,
+  thrown forward and up in the blow, rocks on the bumps, drifts a little when it stands and slumps forward when the ram is
+  wrecked); and the banner ripples down its four bones (a little when standing, slack when dead). The log's head and horns
+  clear the end frames at every angle of the swing (the posts stand wide at the log's height and the tie is above its arc;
+  a test sweeps them). 6.8k triangles (a mortal's budget is 8.5k), 11 bones, one mesh, 1.03 times the low-poly height, a
+  template in about 60 ms (110 cold).
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

@@ -84,10 +84,8 @@ test('the centaurs are built by the rich builder on the humanoid rig and a horse
   assert.ok(!richSupported(withVisual(centaur, (v) => ({ extras: [...v.extras, 'wings'] }))), 'wings are not built for a horse');
   assert.ok(richSupported(withVisual(centaur, (v) => ({ extras: [...v.extras, 'cape'] }))), 'a cape is');
   assert.ok(richSupported(withVisual(dullahan, () => ({ head: 'human' }))), 'the Dullahan with a head of his own is dressed too');
-  // the others that stay low-poly are not centaurs
-  for (const [pantheon, id] of [['greek', 'battering_ram']]) {
-    assert.ok(!richSupported(unitLook(UNITS[id], pantheon)), `${id} stays low-poly`);
-  }
+  // the others are not centaurs: the battering ram has a plan of its own (rich-ram.test.js)
+  assert.ok(!centaurSupported(unitLook(UNITS.battering_ram, 'greek').visual), 'the ram is no centaur');
 });
 
 test('every centaur is dressed by its own people and builds a horse where a person\'s legs would be', () => {

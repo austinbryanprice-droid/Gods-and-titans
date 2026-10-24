@@ -124,13 +124,12 @@ function runStates(model, label) {
   }
 }
 
-test('the rich builder dresses humanoids and giants and leaves everything else low-poly', () => {
+test('the rich builder dresses every unit it has a body plan for and leaves a body it has none for low-poly', () => {
   const types = allTypes();
   const rich = types.filter(richSupported);
   assert.ok(rich.length >= 20, `only ${rich.length} supported`);
   for (const id of SAMPLE) assert.ok(richSupported(norse(id)), `${id} is part of the sample`);
-  // a ram or a hydra with wings (the plan builds none) keep their low-poly model
-  assert.ok(!richSupported(norse('battering_ram')));
+  // a hydra with wings (the plan builds none) keeps its low-poly model
   assert.ok(!richSupported({ id: 'x', class: 'creature', visual: { body: 'hydra', head: 'serpent', heads: 5, extras: ['wings'] } }));
   for (const u of types.filter((t) => !richSupported(t)).slice(0, 12)) {
     const info = getUnitModelInfo(u, 'rich');
@@ -202,9 +201,8 @@ test('a pantheon overrides only the layers it dresses differently; the rest is t
   assert.equal(outfitFor('a-people-without-an-outfit').torso, base.torso, 'a pantheon with no outfit wears the default look');
 });
 
-test('every Greek humanoid and giant is dressed in the Greek look, the ram stays low-poly', () => {
+test('every Greek humanoid and giant is dressed in the Greek look', () => {
   for (const id of GREEK) assert.ok(richSupported(greek(id)), `${id} is supported`);
-  assert.ok(!richSupported(greek('battering_ram')), 'the battering ram stays low-poly');
   // the same shared mortal is dressed by its own people: a Greek warrior is not a Norse one
   const a = buildRichTemplate(greek('warrior'));
   const b = buildRichTemplate(norse('warrior'));
@@ -276,9 +274,8 @@ test('the Egyptians dress their own way: kilts, corselets, collars and a wrapped
   assert.equal(base.skinPaint, undefined, 'no other people does');
 });
 
-test('every Egyptian humanoid is dressed in the Egyptian look, the ram stays low-poly (the scarab has a body plan of its own: rich-insects.test.js)', () => {
+test('every Egyptian humanoid is dressed in the Egyptian look (the scarab has a body plan of its own: rich-insects.test.js)', () => {
   for (const id of EGYPTIAN) assert.ok(richSupported(egyptian(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) assert.ok(!richSupported(egyptian(id)), `${id} stays low-poly`);
   // only the animal heads the kit builds (the jackal's, the falcon's ...) are let through
   const anubis = egyptian('egyptian_anubis');
   assert.ok(!richSupported({ ...anubis, visual: { ...anubis.visual, head: 'gorilla' } }));
@@ -366,9 +363,8 @@ test('the Hindus dress their own way: dhotis, quilted coats, garlands and gods w
   assert.equal(typeof hin.skinPaint, 'function', 'Hanuman\'s fur is painted on the bare skin');
 });
 
-test('every Hindu humanoid and the Vanara are dressed in the Hindu look, and so is the rider of the elephant; the ram stays low-poly', () => {
+test('every Hindu humanoid and the Vanara are dressed in the Hindu look, and so is the rider of the elephant', () => {
   for (const id of [...HINDU, 'hindu_vanara', 'hindu_airavata']) assert.ok(richSupported(hindu(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) assert.ok(!richSupported(hindu(id)), `${id} stays low-poly`);
   // only the monkey head the kit builds is let through, and only the extras it can dress
   const hanuman = hindu('hindu_hanuman');
   assert.ok(!richSupported({ ...hanuman, visual: { ...hanuman.visual, head: 'gorilla' } }));
@@ -503,9 +499,8 @@ test('the Japanese dress their own way: kosode and hakama, laced armor, tiger sk
   assert.ok(!base.palette && !base.gear, 'the other peoples keep the shared palette and the shared items');
 });
 
-test('every Japanese humanoid and giant is dressed in the Japanese look, the ram stays low-poly', () => {
+test('every Japanese humanoid and giant is dressed in the Japanese look', () => {
   for (const id of JAPANESE) assert.ok(richSupported(japanese(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) assert.ok(!richSupported(japanese(id)), `${id} stays low-poly`);
   // only the crow's and the demon's heads the kit builds are let through
   const tengu = japanese('japanese_tengu');
   assert.ok(!richSupported(withVisual(tengu, () => ({ head: 'gorilla' }))));
@@ -627,7 +622,6 @@ test('the Chinese dress their own way: crossed jackets, mirror armor, a round ti
 
 test('every Chinese humanoid, giant and upright monkey is dressed in the Chinese look', () => {
   for (const id of CHINESE) assert.ok(richSupported(chinese(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) assert.ok(!richSupported(chinese(id)), `${id} stays low-poly`);
   // an upright monkey stands on the humanoid's proportions, whoever's outfit it wears: the Hindu monkey soldier is dressed the same way
   const monkey = chinese('chinese_monkey_clone');
   assert.equal(monkey.visual.body, 'beast_biped');
@@ -767,7 +761,6 @@ test('the Aztecs dress their own way: the loincloth, quilted armor, feathers and
 
 test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look', () => {
   for (const id of AZTEC) assert.ok(richSupported(aztec(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) assert.ok(!richSupported(aztec(id)), `${id} stays low-poly`);
   // an Aztec warrior is not a Chinese one
   assert.notEqual(buildRichTemplate(aztec('warrior')).triangles, buildRichTemplate(chinese('warrior')).triangles);
   assert.notEqual(buildRichTemplate(aztec('priest')).triangles, buildRichTemplate(chinese('priest')).triangles);
@@ -953,9 +946,8 @@ test('the Celts dress their own way: tartan, mail, a pinned plaid cloak, torcs a
   assert.ok(RICH_PANTHEONS.has('celtic'), 'the Celtic players get the new characters');
 });
 
-test('every Celtic humanoid, the giant and the Woad Raider are dressed in the Celtic look; the ram stays low-poly', () => {
+test('every Celtic humanoid, the giant and the Woad Raider are dressed in the Celtic look', () => {
   for (const id of CELTIC) assert.ok(richSupported(celtic(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) assert.ok(!richSupported(celtic(id)), `${id} stays low-poly`);
   // a Celtic warrior is not an Aztec one
   assert.notEqual(buildRichTemplate(celtic('warrior')).triangles, buildRichTemplate(aztec('warrior')).triangles);
   assert.notEqual(buildRichTemplate(celtic('priest')).triangles, buildRichTemplate(aztec('priest')).triangles);
@@ -1374,11 +1366,8 @@ test('the Mesopotamians dress their own way: kaunakes, fringed shawls, scale coa
   assert.ok(RICH_PANTHEONS.has('mesopotamian'), 'the Mesopotamian players get the new characters');
 });
 
-test('every Mesopotamian humanoid, the apkallu, the Slinger, the Ugallu and the scorpion man are dressed in the Mesopotamian look; the ram stays low-poly', () => {
+test('every Mesopotamian humanoid, the apkallu, the Slinger, the Ugallu and the scorpion man are dressed in the Mesopotamian look', () => {
   for (const id of [...MESOPOTAMIAN, 'mesopotamian_ugallu', 'mesopotamian_scorpion_man']) assert.ok(richSupported(mesopotamian(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) {
-    assert.ok(!richSupported(mesopotamian(id)), `${id} stays low-poly`);
-  }
   // a Mesopotamian warrior is not a Celtic one
   assert.notEqual(buildRichTemplate(mesopotamian('warrior')).triangles, buildRichTemplate(celtic('warrior')).triangles);
   assert.notEqual(buildRichTemplate(mesopotamian('priest')).triangles, buildRichTemplate(celtic('priest')).triangles);
@@ -1748,11 +1737,8 @@ test('the West Africans dress their own way: kente, mud cloth, the war smock hun
   for (const p of PANTHEON_LIST) assert.ok(RICH_PANTHEONS.has(p.id), `the ${p.id} players get the new characters`);
 });
 
-test('every West African humanoid, the Aziza, the Dart Hunter, the Sasabonsam and the Bultungin are dressed in the West African look; the ram stays low-poly', () => {
+test('every West African humanoid, the Aziza, the Dart Hunter, the Sasabonsam and the Bultungin are dressed in the West African look', () => {
   for (const id of [...WEST_AFRICAN, 'west_african_sasabonsam', 'west_african_bultungin']) assert.ok(richSupported(westAfrican(id)), `${id} is supported`);
-  for (const id of ['battering_ram']) {
-    assert.ok(!richSupported(westAfrican(id)), `${id} stays low-poly`);
-  }
   // a West African warrior is not a Mesopotamian one
   assert.notEqual(buildRichTemplate(westAfrican('warrior')).triangles, buildRichTemplate(mesopotamian('warrior')).triangles);
   assert.notEqual(buildRichTemplate(westAfrican('priest')).triangles, buildRichTemplate(mesopotamian('priest')).triangles);
@@ -2346,10 +2332,10 @@ test('detail picks the rich model on request and keeps the low-poly one by defau
   const body = rich.root.getObjectByName('body');
   assert.ok(body && body.isSkinnedMesh);
   assert.equal(body.skeleton.bones.length, BONE_COUNT);
-  // a unit the rich builder cannot dress yet stays low-poly even on high
-  const ram = buildUnitModel(norse('battering_ram'), PLAYER_COLORS[0], { detail: 'rich' });
-  assert.equal(ram.rich, null);
-  for (const m of [base, rich, ram]) m.dispose();
+  // a unit the rich builder cannot dress (here a giant with a dragon's head, which no kit builds) stays low-poly even on high
+  const odd = buildUnitModel(withVisual(norse('norse_thor'), () => ({ head: 'dragon' })), PLAYER_COLORS[0], { detail: 'rich' });
+  assert.equal(odd.rich, null);
+  for (const m of [base, rich, odd]) m.dispose();
   const a = getUnitModelInfo(warrior, 'base');
   const b = getUnitModelInfo(warrior, 'rich');
   assert.ok(!a.rich && b.rich);

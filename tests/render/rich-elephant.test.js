@@ -89,8 +89,8 @@ test('Airavata is an elephant under a person: the plan dresses him, a body plan 
   // the rider is dressed by his pantheon's outfit: one that has none for him keeps the low-poly model
   assert.ok(richSupported({ ...airavata, lookOf: 'hindu' }));
   assert.ok(!richSupported({ ...airavata, lookOf: 'norse' }), 'no Norse elephant is dressed');
-  // the others that stay low-poly are not elephants
-  assert.ok(!richSupported(unitLook(UNITS.battering_ram, 'greek')), 'the ram stays low-poly');
+  // the others are not elephants: the battering ram has a plan of its own (rich-ram.test.js)
+  assert.ok(!elephantSupported(unitLook(UNITS.battering_ram, 'greek').visual), 'the ram is no elephant');
 });
 
 test('the person on Airavata is dressed by his own people and the elephant is built where a person\'s legs would be', () => {
