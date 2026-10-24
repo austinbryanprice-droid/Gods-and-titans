@@ -27,6 +27,7 @@
       real=1               only data units (drops the synthetic test units from the filter result)
       looks=1              also show the shared mortals as each pantheon dresses them (data/pantheons/<id>.js looks), in that pantheon's row
       pitch=56             camera pitch in degrees
+      detail=rich          the rich skinned humanoids (high / ultra) instead of the low-poly models (default base)
   -->
   <script type="importmap">
   {
@@ -84,6 +85,7 @@
     const film = Q.has('film') ? Q.get('film').split(',').map(Number).filter((x) => Number.isFinite(x)) : null;
     const sheet = Q.get('sheet') === '1' || !!film;
     const pitchDeg = Number(Q.get('pitch') || 56);
+    const detail = Q.get('detail') === 'rich' ? 'rich' : 'base';
 
     // ---- controls ----
     const ui = { state: document.getElementById('state'), filter: document.getElementById('filter'), team: document.getElementById('team'), zoom: document.getElementById('zoom') };
@@ -245,7 +247,7 @@
       const color = teamQ === 'mix' || stress ? PLAYER_COLORS[i % PLAYER_COLORS.length] : PLAYER_COLORS[Number(teamQ) % PLAYER_COLORS.length];
       let model;
       try {
-        model = buildUnitModel(p.u, color);
+        model = buildUnitModel(p.u, color, { detail });
       } catch (e) {
         console.error('build failed', p.u.id, e);
         return;
@@ -257,7 +259,7 @@
       if (showLabels && !stress) {
         const el = document.createElement('div');
         el.className = `lbl ${p.u.class}`;
-        const info = getUnitModelInfo(p.u);
+        const info = getUnitModelInfo(p.u, detail);
         el.textContent = `${p.u.name}`;
         el.title = `${p.u.id} • ${info.triangles} tris • ${info.meshes} meshes • h ${info.height.toFixed(2)}`;
         labelsEl.appendChild(el);
@@ -462,7 +464,7 @@
       return true;
     };
     window.galleryModels = models;
-    window.galleryInfo = () => models.map((m) => ({ id: m.p.u.id, ...getUnitModelInfo(m.p.u) }));
+    window.galleryInfo = () => models.map((m) => ({ id: m.p.u.id, ...getUnitModelInfo(m.p.u, detail) }));
 
     if (sheet) layoutSheet();
     if (film) window.renderFilm = renderFilm;

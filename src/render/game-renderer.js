@@ -15,6 +15,7 @@ import { rankName, RANK_COLORS } from '../data/ranks.js';
 import { wallConnections } from '../data/walls.js';
 import { buildUnitModel, preloadUnitModels, clearUnitModelCache, AIR_HOVER_HEIGHT } from './models/unit-models.js';
 import { unitLook } from './models/unit-looks.js';
+import { RICH_PANTHEONS } from './models/rich-humanoid.js';
 import { buildBuildingModel, buildGoldMineModel, setBuildingTime, clearBuildingCaches, setBuildingDetail, pruneBuildingCaches } from './models/building-models.js';
 import { createForest, createDecor, decorOffOutcrops } from './models/props.js';
 import { createGroundCover } from './models/ground-cover.js';
@@ -280,6 +281,8 @@ export class GameRenderer {
 
     // ---- entity views
     this.units = new Map(); // id → UnitView
+    this.unitDetailMode = 'auto'; // 'auto' (by quality) | 'rich' | 'base': tools and tests pin it
+    this.unitDetailBuilt = this.detailKey(); // what the unit views were built from
     this.buildings = new Map(); // id → BuildingView
     this.wallTiles = new Map(); // wallKey(owner, tx, ty) → 1 a wall segment stands there, 2 a tower that joined the wall
     this.mines = new Map(); // id → MineView
@@ -471,22 +474,27 @@ export class GameRenderer {
   }
 
   preload() {
-    const types = [];
+    const types = { rich: [], base: [] }; // by the detail each is drawn at
     const pantheons = new Set();
     for (const p of this.setup.players || []) if (p && p.pantheon) pantheons.add(p.pantheon);
     for (const p of this.vs.players || []) if (p && p.pantheon) pantheons.add(p.pantheon);
     for (const u of Object.values(UNITS)) {
       if (u.pantheon) {
-        if (pantheons.has(u.pantheon)) types.push(u);
+        if (pantheons.has(u.pantheon)) types[this.detailFor(u.pantheon)].push(u);
         continue;
       }
       // the shared mortals, as each pantheon in the match dresses them
-      if (!pantheons.size) types.push(u);
-      for (const id of pantheons) types.push(unitLook(u, id));
+      if (!pantheons.size) types[this.detailFor(null)].push(u);
+      for (const id of pantheons) types[this.detailFor(id)].push(unitLook(u, id));
     }
-    for (const e of this.vs.entities.values()) if (e.k === 'u' && UNITS[e.t]) types.push(unitLook(UNITS[e.t], this.pantheonOf(e.o)));
+    for (const e of this.vs.entities.values()) {
+      if (e.k !== 'u' || !UNITS[e.t]) continue;
+      const id = this.pantheonOf(e.o);
+      types[this.detailFor(id)].push(unitLook(UNITS[e.t], id));
+    }
     try {
-      preloadUnitModels(types);
+      preloadUnitModels(types.base, 'base');
+      preloadUnitModels(types.rich, 'rich');
     } catch (err) {
       console.error('[render] preload failed', err);
     }
@@ -524,14 +532,16 @@ export class GameRenderer {
         const fades = rel !== 'own' && rel !== 'ally' ? new Set() : null;
         for (const u of Object.values(UNITS)) {
           if (!u.visual || (u.pantheon && u.pantheon !== p.pantheon)) continue;
-          const m = buildUnitModel(unitLook(u, p.pantheon), color);
+          const m = buildUnitModel(unitLook(u, p.pantheon), color, { detail: this.detailFor(p.pantheon) });
           add(m);
           if (!fades) continue;
           // the see-through variants enemy units use while fading at the vision edge
           m.root.traverse((o) => {
             if (!o.isMesh || fades.has(o.material)) return;
             fades.add(o.material);
-            const f = new THREE.Mesh(o.geometry, this.fadeMats.get(o.material, FADE_LEVELS >> 1));
+            const mat = this.fadeMats.get(o.material, FADE_LEVELS >> 1);
+            const f = o.isSkinnedMesh ? new THREE.SkinnedMesh(o.geometry, mat) : new THREE.Mesh(o.geometry, mat);
+            if (f.isSkinnedMesh) f.bind(o.skeleton, o.bindMatrix);
             f.position.copy(o.position);
             group.add(f);
           });
@@ -651,6 +661,46 @@ export class GameRenderer {
     this.refreshBuildingDetail(Q.detail);
     const cast = this.unitsCastShadows();
     for (const v of this.units.values()) v.setCastShadow(cast);
+    this.refreshUnitDetail();
+  }
+
+  /**
+   * Unit model detail of the quality tier: the rich skinned humanoids (rich-humanoid.js) on
+   * high and ultra, the low-poly models everywhere else, unless a tool pinned it with setUnitDetail.
+   */
+  unitDetail() {
+    if (this.unitDetailMode !== 'auto') return this.unitDetailMode;
+    return this.quality === 'high' || this.quality === 'ultra' ? 'rich' : 'base';
+  }
+
+  /** The detail for the units of a player of `pantheonId`: the new characters only where a pantheon has them (RICH_PANTHEONS), all of them when a tool pinned 'rich'. */
+  detailFor(pantheonId) {
+    const d = this.unitDetail();
+    return d === 'rich' && this.unitDetailMode === 'auto' && !RICH_PANTHEONS.has(pantheonId) ? 'base' : d;
+  }
+
+  /** What the unit views depend on: the tier's detail, and whether the pantheon gate applies to it. */
+  detailKey() {
+    const d = this.unitDetail();
+    return d === 'rich' && this.unitDetailMode === 'auto' ? 'rich-gated' : d;
+  }
+
+  /** Pin the unit model detail ('rich' | 'base') or release it ('auto'). */
+  setUnitDetail(mode) {
+    this.unitDetailMode = mode === 'rich' || mode === 'base' ? mode : 'auto';
+    this.refreshUnitDetail();
+  }
+
+  /** Rebuild the unit views when the detail they were built at no longer matches (the next frame recreates them). */
+  refreshUnitDetail() {
+    const key = this.detailKey();
+    if (key === this.unitDetailBuilt) return;
+    this.unitDetailBuilt = key;
+    for (const v of this.units.values()) v.dispose();
+    this.units.clear();
+    for (const v of this.dying) v.dispose();
+    this.dying.length = 0;
+    this.preload();
   }
 
   /** Rebuild the standing buildings' models when the quality changes their detail level (building-core.js Kit). */
@@ -1378,7 +1428,8 @@ export class GameRenderer {
     if (!def || !def.visual) return null;
     let model;
     try {
-      model = buildUnitModel(unitLook(def, this.pantheonOf(e.o)), this.colorOf(e.o));
+      const pantheon = this.pantheonOf(e.o);
+      model = buildUnitModel(unitLook(def, pantheon), this.colorOf(e.o), { detail: this.detailFor(pantheon) });
     } catch (err) {
       console.error('[render] unit model failed', e.t, err);
       return null;

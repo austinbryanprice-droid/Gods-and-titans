@@ -919,6 +919,17 @@ per-frame budget, so a revealed army appears over a few frames.
   (`createForest(mapData, heightFn)` → `{ object3d, fell(tx, ty) }`), `createDecor(mapData, heightFn)`;
   `src/render/models/ground-cover.js` exports `createGroundCover(mapData, heightFn, { quality })`
   (instanced grass and flowers, none on low).
+- Rich characters (high / ultra only; `GameRenderer.unitDetail()` / `detailFor(pantheon)`): humanoids and
+  giants with a human head (`richSupported(unitType)`, `src/render/models/rich-humanoid.js`) are one
+  skinned mesh on a 23-bone rig instead of rigid low-poly parts: lofted smooth bodies, layered garments,
+  beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
+  `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
+  motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
+  in play (the Norse sample); `setUnitDetail('rich' | 'base' | 'auto')` pins the choice for tools. The
+  bones live outside the scene graph (detached bind mode): `applyRich` ends with `syncRich`, and rigid
+  pieces (weapon, shield, tools, flames, cargo) ride mounts (`mountOn`), so the pose costs nothing on
+  frames where a unit does not animate. Test budgets for the tier are separate
+  (`tests/render/rich-models.test.js`); the low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
   `spawnProjectile({ kind, el, from: {x, y, h}, to: {x, y, h}, flight })`,
   `spawnEffect({ el, shape, x, y, r, fx, fy, points, duration })`, `spawnHit({ x, y, h, el })`,

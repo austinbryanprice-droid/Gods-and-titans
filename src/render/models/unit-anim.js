@@ -2,6 +2,7 @@
 // rotations plus morph-target joints (knees, elbows, wing flaps, waves).
 // animateModel(model, state, t, dt, extra) is called once per frame.
 import { KNEE_SAMPLES, WING_SAMPLES } from './unit-bodies.js';
+import { applyRich } from './rich-anim.js';
 
 const PI = Math.PI;
 const D90 = PI / 2;
@@ -617,6 +618,12 @@ export function animateModel(m, state, t, dt, ex) {
       humanoidPose(m, T, state, t, ex);
       T.fold = restingWings(m, state);
       blendPose(m, T, dt, 20);
+      if (m.rich) {
+        // the skinned rich body: bones in place of rigid parts and morph hinges
+        applyRich(m, m.cur, state, t, dt);
+        for (const f of m.rich.flames) inf(f, 'fl', flick);
+        break;
+      }
       applyHumanoid(m, m.cur);
       const torso = m.parts.torso;
       if (torso) {
