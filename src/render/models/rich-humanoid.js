@@ -21,8 +21,10 @@ import { nagaBones, addNagaBinds } from './rich-naga.js';
 import { centaurSupported, centaurFrame, raiseDims, addCentaurBones, addPalmBone, settle } from './rich-centaur.js';
 import { scorpionSupported, scorpionFrame, addScorpionBones } from './rich-scorpion.js';
 import { SCORPION_OUTFITS } from './rich-scorpion-outfits.js';
+import { elephantSupported, elephantFrame, addElephantBones, riderContext } from './rich-elephant.js';
+import { ELEPHANT_OUTFITS } from './rich-elephant-outfits.js';
 
-/** The bodies the humanoid rig dresses: people, giants, the upright beasts (the monkeys, the lion-headed demon, the winged horror, the were-hyena), the spirits (a wisp below the waist) and the nagas (a serpent's tail); the centaurs and the scorpion men (a person on an animal's body) have their own paths below. */
+/** The bodies the humanoid rig dresses: people, giants, the upright beasts (the monkeys, the lion-headed demon, the winged horror, the were-hyena), the spirits (a wisp below the waist) and the nagas (a serpent's tail); the centaurs, the scorpion men and the person on an elephant's back (a person on an animal's body) have their own paths below. */
 const RICH_BODIES = new Set(['humanoid', 'giant', 'beast_biped', 'spirit', 'naga']);
 /** The beasts with the heads of these stand as tall and as slim as people (a monkey does); the rest are built on the hunched, broad-shouldered beast profile. */
 const UPRIGHT_BEASTS = new Set(['monkey']);
@@ -46,6 +48,8 @@ export function richSupported(unitType) {
   if (body === 'centaur') return centaurSupported(v);
   // (an insect with a person's head is a scorpion man: dressed by the outfit of his pantheon, if it has one for him)
   if (body === 'insect') return scorpionSupported(v) && !!SCORPION_OUTFITS[unitType.lookOf || unitType.pantheon];
+  // (an elephant is the animal under the person who rides it: dressed by the outfit of his pantheon, if it has one for him)
+  if (body === 'elephant') return elephantSupported(v) && !!ELEPHANT_OUTFITS[unitType.lookOf || unitType.pantheon];
   if (!RICH_BODIES.has(body)) return false;
   if (((v.head || 'human') !== 'human' && !BEAST_HEADS.has(v.head)) || (v.heads || 1) !== 1) return false;
   if (!RICH_HEADGEAR.has(v.headgear || 'none')) return false;
@@ -112,17 +116,20 @@ function heldPiece(ctx, P, side, item, sizeK = 1, style = null) {
  */
 export function buildRichTemplate(unitType, detail = 1) {
   if (creatureSupported(unitType)) return buildCreatureTemplate(unitType);
-  const ctx = unitContext(unitType);
+  const base = unitContext(unitType);
+  const elephant = base.v.body === 'elephant';
+  // (the person on an elephant's back is dressed from a unit of his own: the head, the crown and the weapon of the person, not the elephant's)
+  const ctx = elephant ? riderContext(base, (ELEPHANT_OUTFITS[base.unit.lookOf || base.unit.pantheon] || {}).rider) : base;
   const { v, pal, ex } = ctx;
   const spirit = v.body === 'spirit';
   const naga = v.body === 'naga';
   const centaur = v.body === 'centaur';
   const scorpion = v.body === 'insect';
-  const name = v.body === 'giant' ? 'giant' : spirit ? 'spirit' : naga ? 'naga' : centaur ? 'centaur' : scorpion ? 'scorpion' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
+  const name = v.body === 'giant' ? 'giant' : spirit ? 'spirit' : naga ? 'naga' : centaur ? 'centaur' : scorpion ? 'scorpion' : elephant ? 'rider' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
   const D = richDims(ctx, name);
   // (a centaur: the person stands on the horse's back, raised to it; the horse is built in the same frame, rich-centaur.js; a scorpion man
-  // stands on the scorpion's carapace in the same way, rich-scorpion.js)
-  const F = centaur ? centaurFrame(D) : scorpion ? scorpionFrame(D) : null;
+  // stands on the scorpion's carapace in the same way, rich-scorpion.js; the person on an elephant sits in its howdah, rich-elephant.js)
+  const F = centaur ? centaurFrame(D) : scorpion ? scorpionFrame(D) : elephant ? elephantFrame(D, base.v) : null;
   if (F) raiseDims(D, F.lift);
   const wings = ex.has('wings') ? wingLayout(D, (ctx.unit.air ? 0.7 : 0.6) * D.k) : null;
   const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, {
@@ -130,6 +137,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   });
   if (centaur) addCentaurBones(spec, F);
   if (scorpion) addScorpionBones(spec, F);
+  if (elephant) addElephantBones(spec, F);
   const bind = makeBinds(spec, D);
   if (spirit) addWispBinds(spec, D, bind);
   if (naga) addNagaBinds(spec, D, bind);
@@ -150,6 +158,7 @@ export function buildRichTemplate(unitType, detail = 1) {
     attach: [], // rigid pieces the layers add (flames, wings ...), riding bones
     horse: centaur ? F : null, // a centaur's horse: its build, layout and where the person stands on it
     scorpion: scorpion ? F : null, // a scorpion man's scorpion: where the person stands on it
+    elephant: elephant ? F : null, // the elephant under the person: where he sits on it, its heads
   };
 
   // a pantheon's outfit may recolor the palette (the people's black hair, their skin) and paint the bare skin itself
@@ -203,6 +212,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   if (spirit) rig.float = 0.12; // a spirit drifts this far above the ground (as the low-poly spirit does)
   if (centaur) Object.assign(rig, { legLen: F.Q.leg, bodyY: F.Lay.cy, sprawl: false, stride: F.Q.leg * 3.2 + F.Q.L * 0.6, gait: 'gallop', plan: 'centaur' });
   if (scorpion) Object.assign(rig, { legLen: 0.14, bodyY: 0.16, sprawl: true, stride: 0.9, humanTop: true, gait: 'walk', plan: 'scorpion' });
+  if (elephant) Object.assign(rig, { legLen: 0.6, bodyY: 0.6, sprawl: false, stride: 1.3, humanTop: true, gait: 'walk', elephant: true, plan: 'elephant' });
   if (worker) {
     rig.tools = ['pick', 'axe', 'hammer'];
     for (const id of rig.tools) attach.push({ name: `tool_${id}`, bone: B.handR, geo: heldPiece(ctx, P, 1, { kind: 'tool', id }), tool: id });
@@ -213,8 +223,8 @@ export function buildRichTemplate(unitType, detail = 1) {
   for (const a of attach) if (!a.tool || a.tool === 'pick') triangles += a.geo.userData.triangles ?? a.geo.attributes.position.count / 3;
   return {
     // (a spirit or a naga keeps its kind, so the animation keeps its float or its sway, its lean and its raised arms; ghost: the translucent material)
-    kind: spirit ? 'spirit' : naga ? 'naga' : centaur ? 'centaur' : scorpion ? 'insect' : 'humanoid',
-    rich: { spec, geo, attach, dims: D, carryAt: spec.pos[B.chest], ghost: spirit, ...(F ? { plan: centaur ? 'centaur' : 'scorpion', ix: spec.ix } : {}) }, parts: [], rig,
+    kind: spirit ? 'spirit' : naga ? 'naga' : centaur ? 'centaur' : scorpion ? 'insect' : elephant ? 'quadruped' : 'humanoid',
+    rich: { spec, geo, attach, dims: D, carryAt: spec.pos[B.chest], ghost: spirit, ...(F ? { plan: centaur ? 'centaur' : scorpion ? 'scorpion' : 'elephant', ix: spec.ix } : {}) }, parts: [], rig,
     triangles, meshes: 1 + attach.filter((a) => !a.tool || a.tool === 'pick').length,
   };
 }

@@ -8,6 +8,7 @@ import { syncRich } from './rich-kit.js';
 import { TAIL_KEYS, HEAD_KEYS } from './rich-creature-kit.js';
 import { applyCentaur } from './rich-centaur-anim.js';
 import { applyInsect, applyScorpion } from './rich-insect-anim.js';
+import { applyElephant } from './rich-elephant-anim.js';
 
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const smooth01 = (x) => {
@@ -51,6 +52,7 @@ export function applyCreature(m, P, state, t, dt) {
     case 'centaur': applyCentaur(m, R, P, state, t, dt); break;
     case 'insect': applyInsect(m, R, P, state, t); break;
     case 'scorpion': applyScorpion(m, R, P, state, t, dt); break;
+    case 'elephant': applyElephant(m, R, P, state, t, dt); break;
     default: break;
   }
   syncRich(R);

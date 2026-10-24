@@ -71,7 +71,7 @@ const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherj
 // every Greek unit on the humanoid and giant bodies (the creatures have body plans of their own, rich-creatures.test.js; the centaur is a person on a horse: rich-centaurs.test.js, the shade is a spirit: rich-spirits.test.js)
 const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek_athena', 'greek_poseidon', 'greek_hades', 'greek_kronos', 'greek_cyclops', 'greek_hoplite'];
 const EGYPTIAN = ['worshipper', 'warrior', 'archer', 'priest', 'egyptian_ra', 'egyptian_anubis', 'egyptian_isis', 'egyptian_set', 'egyptian_mummy', 'egyptian_chariot_archer'];
-// every Hindu unit on the humanoid body (the elephant keeps its low-poly model; the naga has a serpent's tail for legs: rich-nagas.test.js)
+// every Hindu unit on the humanoid body (the elephant has a rider and a plan of its own: rich-elephant.test.js; the naga has a serpent's tail for legs: rich-nagas.test.js)
 const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hindu_vishnu', 'hindu_durga', 'hindu_hanuman', 'hindu_garuda', 'hindu_kshatriya'];
 // every Japanese unit on the humanoid and giant bodies (the great serpent, the foxes and the fox spirits keep their low-poly models)
 const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amaterasu', 'japanese_susanoo', 'japanese_raijin', 'japanese_inari', 'japanese_tengu', 'japanese_oni', 'japanese_samurai'];
@@ -366,9 +366,9 @@ test('the Hindus dress their own way: dhotis, quilted coats, garlands and gods w
   assert.equal(typeof hin.skinPaint, 'function', 'Hanuman\'s fur is painted on the bare skin');
 });
 
-test('every Hindu humanoid and the Vanara are dressed in the Hindu look, the elephant stays low-poly', () => {
-  for (const id of [...HINDU, 'hindu_vanara']) assert.ok(richSupported(hindu(id)), `${id} is supported`);
-  for (const id of ['hindu_airavata', 'battering_ram']) assert.ok(!richSupported(hindu(id)), `${id} stays low-poly`);
+test('every Hindu humanoid and the Vanara are dressed in the Hindu look, and so is the rider of the elephant; the ram stays low-poly', () => {
+  for (const id of [...HINDU, 'hindu_vanara', 'hindu_airavata']) assert.ok(richSupported(hindu(id)), `${id} is supported`);
+  for (const id of ['battering_ram']) assert.ok(!richSupported(hindu(id)), `${id} stays low-poly`);
   // only the monkey head the kit builds is let through, and only the extras it can dress
   const hanuman = hindu('hindu_hanuman');
   assert.ok(!richSupported({ ...hanuman, visual: { ...hanuman.visual, head: 'gorilla' } }));
