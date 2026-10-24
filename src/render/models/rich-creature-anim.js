@@ -126,14 +126,16 @@ function applyQuadruped(m, R, P, state, t) {
   const sway = Math.sin(t * 0.5 + seed * 1.9);
   const s = moving ? Math.sin(phi) : 0;
   const alpha = P.bRz;
+  // a sprawling lizard's trunk wags from side to side as it walks, well past a beast's (the yaw of the hips, spine and chest below)
+  const wag = m.rig.sprawl ? 2.4 : 1;
 
   // body: bob and lunge on the root, a roll and a side shift while running; the pitch bends the spine, so
   // the hind legs stay planted while the front of the beast rises and falls
   q.root.position.set(P.bX, P.bY, 0.012 * s * gait);
   q.root.rotation.set(P.bRx + 0.02 * s * gait, 0, 0);
-  q.hips.rotation.set(0, -0.05 * s * gait, 0.012 * breath * idle);
-  q.spine.rotation.set(0, 0.06 * s * gait, alpha * 0.45 - 0.02 * lunge + 0.01 * breath * idle);
-  q.chest.rotation.set(0, 0.05 * s * gait, alpha * 0.55 + 0.03 * wind);
+  q.hips.rotation.set(0, -0.05 * s * gait * wag, 0.012 * breath * idle);
+  q.spine.rotation.set(0, 0.06 * s * gait * wag, alpha * 0.45 - 0.02 * lunge + 0.01 * breath * idle);
+  q.chest.rotation.set(0, 0.05 * s * gait * wag, alpha * 0.55 + 0.03 * wind);
   const pitchB = q.hips.rotation.z;
   const pitchF = pitchB + q.spine.rotation.z + q.chest.rotation.z;
 
