@@ -359,6 +359,13 @@ export const PROFILES = {
     upper: 0.185, fore: 0.17, armR: 0.044, handR: 0.048, headR: 0.122, headY: 1.03, headX: 0.012,
     padR: 0.075, lean: -0.08, bare: false, weaponSize: 1,
   },
+  // (a centaur's torso rises from a horse's back: a person's build exactly, the low-poly torso is built on it and the rich one is set on the horse's withers, rich-centaur.js; it has no legs of its own)
+  centaur: {
+    hipY: 0.5, hipZ: 0.085, thigh: 0.245, legR: 0.056, footL: 0.15, footH: 0.06,
+    waistW: 0.25, chestW: 0.36, depth: 0.17, chestD: 0.21, shoulderY: 0.86, shoulderZ: 0.2,
+    upper: 0.185, fore: 0.17, armR: 0.044, handR: 0.048, headR: 0.122, headY: 1.0, headX: 0.012,
+    padR: 0.075, lean: 0, bare: false, weaponSize: 1,
+  },
   // (a naga's torso rises from a serpent's tail: the waist sits a little lower than a person's and the head with it; below the hip it has the tail, not legs)
   naga: {
     hipY: 0.46, hipZ: 0.085, thigh: 0.245, legR: 0.056, footL: 0.15, footH: 0.06,
@@ -1297,7 +1304,7 @@ function quadTemplate(ctx) {
 
   // centaur: human torso rises from the front (merged into the body mesh)
   const torsoBase = [Q.L * 0.36, cy + Q.H * 0.25, 0];
-  const CP = { ...PROFILES.humanoid };
+  const CP = { ...PROFILES.centaur };
   if (centaur) {
     if (ctx.grand) CP.chestW *= 1.08;
     body.frame(torsoBase, [0, 0, 0], 1, () => buildTorso(ctx, CP, { noHips: true, into: body }));

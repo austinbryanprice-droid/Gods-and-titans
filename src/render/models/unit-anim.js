@@ -506,7 +506,11 @@ function quadPose(m, T, state, t) {
   T.fold = !air && !moving && state !== 'attack' && state !== 'cast' && state !== 'dead' ? 1 : 0;
   quadLegs(m, T, rig.gait, phi, 0, false);
   const breath = Math.sin(t * 1.7 + m.seed);
-  if (state === 'dead') return;
+  if (state === 'dead') {
+    // (the arms keep the pose they had; a centaur first seen dead has not written the arms' keys yet)
+    if (m.kind === 'centaur' && T.aRz === undefined) restArms(T, rig);
+    return;
+  }
   if (air) {
     // legs tucked, paddling
     quadLegs(m, T, 'walk', t * 3, 0.15, true);

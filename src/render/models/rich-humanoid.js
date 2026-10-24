@@ -18,6 +18,7 @@ import { BEAST_HEADS } from './rich-heads.js';
 import { creatureSupported, buildCreatureTemplate } from './rich-creatures.js';
 import { wispBones, addWispBinds, ghostly } from './rich-spirit.js';
 import { nagaBones, addNagaBinds } from './rich-naga.js';
+import { centaurSupported, centaurFrame, raiseDims, addCentaurBones, addPalmBone, settle } from './rich-centaur.js';
 
 /** The bodies the humanoid rig dresses: people, giants, the upright beasts (the monkeys, the lion-headed demon, the winged horror, the were-hyena), the spirits (a wisp below the waist) and the nagas (a serpent's tail). */
 const RICH_BODIES = new Set(['humanoid', 'giant', 'beast_biped', 'spirit', 'naga']);
@@ -40,6 +41,7 @@ export function richSupported(unitType) {
   if (!v) return false;
   if (creatureSupported(unitType)) return true;
   const body = v.body || 'humanoid';
+  if (body === 'centaur') return centaurSupported(v);
   if (!RICH_BODIES.has(body)) return false;
   if (((v.head || 'human') !== 'human' && !BEAST_HEADS.has(v.head)) || (v.heads || 1) !== 1) return false;
   if (!RICH_HEADGEAR.has(v.headgear || 'none')) return false;
@@ -82,7 +84,8 @@ function heldPiece(ctx, P, side, item, sizeK = 1, style = null) {
     const opts = { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null, ...style };
     if (RICH_WEAPONS.has(id) || (style && style.build)) richWeapon(kit, pal, id, size, opts);
     else richArm(kit, pal, id, size, opts);
-    return finishGear(kit, handFrame(P, side, grip));
+    // (a piece with style.pivot is built in the frame of a bone of its own at the palm: it is turned by the pose, not by the hand)
+    return finishGear(kit, style && style.pivot ? null : handFrame(P, side, grip));
   }
   b.frame([0.01, handY, side * 0.005], gripRotation(grip), 1, () => {
     if (item.kind === 'weapon') addWeapon(b, pal, id, size, { glowBlade: ctx.grand && id === 'sword', lowDetail: false });
@@ -109,12 +112,17 @@ export function buildRichTemplate(unitType, detail = 1) {
   const { v, pal, ex } = ctx;
   const spirit = v.body === 'spirit';
   const naga = v.body === 'naga';
-  const name = v.body === 'giant' ? 'giant' : spirit ? 'spirit' : naga ? 'naga' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
+  const centaur = v.body === 'centaur';
+  const name = v.body === 'giant' ? 'giant' : spirit ? 'spirit' : naga ? 'naga' : centaur ? 'centaur' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
   const D = richDims(ctx, name);
+  // (a centaur: the person stands on the horse's back, raised to it; the horse is built in the same frame, rich-centaur.js)
+  const F = centaur ? centaurFrame(D) : null;
+  if (F) raiseDims(D, F.lift);
   const wings = ex.has('wings') ? wingLayout(D, (ctx.unit.air ? 0.7 : 0.6) * D.k) : null;
   const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, {
     ...(wings ? { wing: wings } : {}), ...(spirit ? { tail: wispBones(D) } : {}), ...(naga ? { tail: nagaBones(D), tailStyle: 'serpent' } : {}),
   });
+  if (F) addCentaurBones(spec, F);
   const bind = makeBinds(spec, D);
   if (spirit) addWispBinds(spec, D, bind);
   if (naga) addNagaBinds(spec, D, bind);
@@ -133,6 +141,7 @@ export function buildRichTemplate(unitType, detail = 1) {
     tunicColor: ctx.tunic || pal.primary,
     pantheon: ctx.unit.lookOf || ctx.unit.pantheon || null,
     attach: [], // rigid pieces the layers add (flames, wings ...), riding bones
+    horse: F, // a centaur's horse: its build, layout and where the person stands on it
   };
 
   // a pantheon's outfit may recolor the palette (the people's black hair, their skin) and paint the bare skin itself
@@ -151,6 +160,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   // (a spirit floats: no ground to shade its hem, and the see-through body is faint toward the hem)
   if (spirit) ghostly(kit);
   const geo = kit.build(spirit ? { ground: 0, strength: 0.6 } : {});
+  if (F) settle(geo, spec, F);
 
   // rigid pieces
   const items = humanoidItems(v);
@@ -160,6 +170,8 @@ export function buildRichTemplate(unitType, detail = 1) {
   // (the hand is asked about too: a drummer holds the drum in one and the stick in the other)
   const styleOf = (item, side) => (outfit.gear ? outfit.gear(ctx, item, side) : null);
   const leftStyle = styleOf(items.left, -1);
+  // (what a hand carries with style.pivot, the Dullahan's head, rides a bone of its own at the palm that the pose keeps upright)
+  const palm = leftStyle && leftStyle.pivot ? addPalmBone(spec, B.handL, [0.01, -P.handR * 0.55, -0.005], 'carry') : null;
   const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right, 1)) : null;
   // (a held piece with a flame in it, a torch, flickers like the flames on a fire giant)
   const flickers = (g) => (g.morphAttributes.position ? { flicker: true } : {});
@@ -168,7 +180,7 @@ export function buildRichTemplate(unitType, detail = 1) {
     attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, (typeof outfit.shield === 'function' ? outfit.shield(ctx) : outfit.shield) || {}), shield: true });
   } else if (items.left.kind !== 'none') {
     const left = heldPiece(ctx, P, -1, items.left, 1, leftStyle);
-    if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left, ...flickers(left) });
+    if (left) attach.push({ name: 'weaponL', bone: palm ?? B.handL, geo: left, ...flickers(left) });
   }
   const rig = {
     hipY: P.hipY, thigh: P.thigh, lean: P.lean, shoulderY: P.shoulderY,
@@ -181,6 +193,7 @@ export function buildRichTemplate(unitType, detail = 1) {
     holdAloft: holdsAloft(v),
   };
   if (spirit) rig.float = 0.12; // a spirit drifts this far above the ground (as the low-poly spirit does)
+  if (F) Object.assign(rig, { legLen: F.Q.leg, bodyY: F.Lay.cy, sprawl: false, stride: F.Q.leg * 3.2 + F.Q.L * 0.6, gait: 'gallop', plan: 'centaur' });
   if (worker) {
     rig.tools = ['pick', 'axe', 'hammer'];
     for (const id of rig.tools) attach.push({ name: `tool_${id}`, bone: B.handR, geo: heldPiece(ctx, P, 1, { kind: 'tool', id }), tool: id });
@@ -191,7 +204,8 @@ export function buildRichTemplate(unitType, detail = 1) {
   for (const a of attach) if (!a.tool || a.tool === 'pick') triangles += a.geo.userData.triangles ?? a.geo.attributes.position.count / 3;
   return {
     // (a spirit or a naga keeps its kind, so the animation keeps its float or its sway, its lean and its raised arms; ghost: the translucent material)
-    kind: spirit ? 'spirit' : naga ? 'naga' : 'humanoid', rich: { spec, geo, attach, dims: D, carryAt: spec.pos[B.chest], ghost: spirit }, parts: [], rig,
+    kind: spirit ? 'spirit' : naga ? 'naga' : centaur ? 'centaur' : 'humanoid',
+    rich: { spec, geo, attach, dims: D, carryAt: spec.pos[B.chest], ghost: spirit, ...(F ? { plan: 'centaur', ix: spec.ix } : {}) }, parts: [], rig,
     triangles, meshes: 1 + attach.filter((a) => !a.tool || a.tool === 'pick').length,
   };
 }

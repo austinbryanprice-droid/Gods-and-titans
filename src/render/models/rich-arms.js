@@ -7,6 +7,7 @@ import { shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { grip, grain, sstep } from './rich-gear.js';
 import { featherFan } from './rich-feathers.js';
 import { mul, lerp, tint, dye } from './rich-paint.js';
+import { severedHead } from './rich-dullahan.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -447,9 +448,14 @@ function fan(kit, pal, s, { fan: style = 'ogi' } = {}) {
 
 /**
  * A palace lantern, hung from the hand by a cord: a flared gold roof, a body of glowing paper in eight ribs of gold swelling at
- * the middle, a gold rim, and a tassel of silk below. Hangs along the grip's +Y (down when the elbow is bent).
+ * the middle, a gold rim, and a tassel of silk below. Hangs along the grip's +Y (down when the elbow is bent). With opts.head the
+ * Dullahan's own head in its place (rich-dullahan.js).
  */
-function lantern(kit, pal, size) {
+function lantern(kit, pal, size, opts = {}) {
+  if (opts.head) {
+    severedHead(kit, pal, size, opts);
+    return;
+  }
   const s = size * 0.72;
   const gold = pal.accentMetal;
   const glow = tintC(pal.glow, 0.3);

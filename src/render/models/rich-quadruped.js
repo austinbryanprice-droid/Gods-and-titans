@@ -29,7 +29,7 @@ export const QUAD_BUILD_OF = { wolf: 'canine', jackal: 'canine', fox: 'fox', cat
  * angle (radians up from horizontal), head length, head pitch (absolute, nose down negative), tail length, and
  * `body`: the barrel's stations [x of L, height of H, half depth of H, half width of W] from the rump to the chest.
  */
-const BUILDS = {
+export const BUILDS = {
   canine: {
     L: 0.64, H: 0.29, W: 0.235, leg: 0.3, legR: 0.04, neck: 0.17, neckA: 0.6, head: 0.37, pitch: -0.2, tail: 0.38, gait: 'gallop', tailKind: 'bushy', neckK: 1.0,
     body: [[-0.55, 0.12, 0.3, 0.32], [-0.45, 0.08, 0.45, 0.52], [-0.28, 0.1, 0.42, 0.45], [-0.06, 0.07, 0.46, 0.44], [0.14, 0, 0.52, 0.47], [0.31, -0.04, 0.6, 0.48], [0.45, 0.04, 0.48, 0.4]],
@@ -100,7 +100,7 @@ function fanTails(tail, n) {
   return out;
 }
 
-function layout(Q, kind, o) {
+export function layout(Q, kind, o) {
   const { L, H, W, leg } = Q;
   const cy = leg + H * 0.45;
   const lz = W * 0.3;
@@ -371,8 +371,8 @@ export function buildQuadrupedTemplate(unitType, ctx) {
   };
 }
 
-/** The team's colored saddle cloth: a cloth draped over the back with a trimmed hem, hugging the barrel. */
-export function saddle(kit, Q, cy, bind, pal) {
+/** The team's colored saddle cloth: a cloth draped over the back with a trimmed hem, hugging the barrel (`dx`: the barrel's middle is that far along x in the frame the cloth is built in). */
+export function saddle(kit, Q, cy, bind, pal, dx = 0) {
   const { L } = Q;
   const len = L * 0.25;
   const x0 = -L * 0.2;
@@ -386,7 +386,7 @@ export function saddle(kit, Q, cy, bind, pal) {
     const a = (0.5 - v) * 2 * half;
     const edge = Math.abs(v - 0.5) * 2;
     const hang = 1 - 0.08 * edge * edge;
-    out[0] = x;
+    out[0] = x + dx;
     out[1] = p.y + (p.ry + g) * Math.cos(a) * hang;
     out[2] = (p.rz + g) * Math.sin(a) * hang;
   }, {
