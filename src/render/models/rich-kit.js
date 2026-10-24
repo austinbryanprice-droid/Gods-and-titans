@@ -71,7 +71,20 @@ export function humanoidSpec(d, opts = {}) {
     const { root, wrist } = opts.wing;
     pos.push(root, wrist, [root[0], root[1], -root[2]], [wrist[0], wrist[1], -wrist[2]]);
   }
-  return { d, pos, parent: PARENT.slice(0, pos.length) };
+  const parent = PARENT.slice(0, pos.length);
+  const spec = { d, pos, parent, wing: !!opts.wing };
+  // a tail (a spirit's trailing wisp, a serpent's body): opts.tail = the rest positions of a chain of bones that hangs from the
+  // pelvis, each bone the child of the one before; spec.tail says where they are in the list
+  if (opts.tail) {
+    const first = pos.length;
+    opts.tail.forEach((p, i) => {
+      pos.push(p);
+      parent.push(i ? first + i - 1 : B.pelvis);
+    });
+    spec.names = [...BONE_NAMES.slice(0, first), ...opts.tail.map((p, i) => `tail${i}`)];
+    spec.tail = { first, count: opts.tail.length };
+  }
+  return spec;
 }
 
 /**
@@ -244,13 +257,14 @@ export function resample(st, count) {
 // mesh kit
 // ---------------------------------------------------------------------------
 
-const _c = { r: 1, g: 1, b: 1, team: 0, glow: 0 };
+const _c = { r: 1, g: 1, b: 1, team: 0, glow: 0, alpha: 1 };
 const _v = new THREE.Vector3();
 
 /**
  * Surface style of a primitive. color: THREE.Color | css | TEAM(shade, mat). opts.mat overrides
  * the surface class (MATS key), opts.glow is the self-glow 0..1, opts.paint(out, x, y, z, u, a)
- * recolors per vertex (out: { r, g, b, team, glow }; u runs along the primitive, a around it).
+ * recolors per vertex (out: { r, g, b, team, glow, alpha }; u runs along the primitive, a around it). A paint that sets
+ * out.alpha below 1 makes the built mesh carry a per vertex alpha (for a transparent material: a ghost's fading hem).
  */
 function styleOf(color, opts) {
   const team = color && typeof color === 'object' && 'team' in color ? color.team : 0;
@@ -269,6 +283,8 @@ export class MeshKit {
     this.pos = [];
     this.nor = [];
     this.col = [];
+    this.alpha = []; // per vertex, 1 unless a paint fades it
+    this.fade = false; // true once a vertex is faded (or set by hand): build() then writes the alphas as the color attribute's fourth component
     this.fx = [];
     this.skin = []; // 4 indices, 4 weights per vertex
     this.idx = [];
@@ -320,8 +336,11 @@ export class MeshKit {
       _c.b = st.b;
       _c.team = st.team;
       _c.glow = st.glow;
+      _c.alpha = 1;
       if (st.paint) st.paint(_c, P[o], P[o + 1], P[o + 2], uv ? uv[i * 2] : 0, uv ? uv[i * 2 + 1] : 0);
       this.col.push(_c.r, _c.g, _c.b);
+      this.alpha.push(_c.alpha);
+      if (_c.alpha < 1) this.fade = true;
       this.fx.push(_c.team, _c.glow, st.rough, st.metal);
       // skin weights: the top four, normalized
       W.n = 0;
@@ -614,7 +633,17 @@ export class MeshKit {
       g.morphAttributes.position = [a];
       g.morphTargetsRelative = true;
     }
-    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.col), 3));
+    if (this.fade) {
+      // (four components: the material reads the fourth as the vertex's alpha)
+      const rgba = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+        rgba[i * 4] = this.col[i * 3];
+        rgba[i * 4 + 1] = this.col[i * 3 + 1];
+        rgba[i * 4 + 2] = this.col[i * 3 + 2];
+        rgba[i * 4 + 3] = this.alpha[i];
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(rgba, 4));
+    } else g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.col), 3));
     g.setAttribute('aFx', new THREE.BufferAttribute(new Float32Array(this.fx), 4));
     const skin = this.skin;
     const si = new Uint16Array(n * 4);

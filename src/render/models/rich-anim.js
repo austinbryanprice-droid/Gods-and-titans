@@ -113,10 +113,27 @@ export function applyRich(m, P, state, t, dt) {
   b[B.hair1].rotation.set(0, 0, -0.1 - 0.35 * fl + 0.05 * Math.sin(phi * 2 + 0.5) * gait - lean * 0.2);
   b[B.hair2].rotation.set(0, 0, -0.08 - 0.3 * fl + 0.09 * Math.sin(phi * 2 - 0.4) * gait + 0.03 * Math.sin(t * 1.5 + seed));
 
-  if (b.length > B.wingR1) poseWings(m, b, P, state, t, phi, seed);
+  if (R.spec.wing) poseWings(m, b, P, state, t, phi, seed);
+  if (R.spec.tail) poseTail(m, b, R.spec.tail, dt, t, seed);
 
   // the bones are outside the scene graph: bring their matrices, the skin and the riding pieces up to date once, here
   syncRich(R);
+}
+
+/**
+ * A tail (a spirit's wisp): a wave runs down the chain of bones from the hip, bending it from side to side and a little up and
+ * down, more toward the tip; a unit that moves streams it out behind (the chain hangs from the hip, so a turn back about the
+ * lateral axis lays it along the ground behind) and the wave quickens (m.wavePhase runs faster then).
+ */
+function poseTail(m, b, tail, dt, t, seed) {
+  const move = (m.tailMove = (m.tailMove ?? 0) + ((m.moving ? 1 : 0) - (m.tailMove ?? 0)) * Math.min(1, dt * 5));
+  const amp = 0.4 + 0.6 * move;
+  const w = m.wavePhase;
+  for (let i = 0; i < tail.count; i++) {
+    const side = Math.sin(w - i * 0.95 + seed) * (0.1 + 0.06 * i) * amp;
+    const up = Math.sin(w * 0.7 - i * 0.6 + seed * 2) * 0.05 * amp;
+    b[tail.first + i].rotation.set(0, side, -(i ? 0.1 : 0.2) * move + up);
+  }
 }
 
 /**

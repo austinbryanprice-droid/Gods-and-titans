@@ -242,7 +242,8 @@ export function getUnitMaterial(teamColor, morphCount = 0, ghost = false, skinne
   m.userData.uTeamColor = { value: col };
   if (ghost) {
     m.transparent = true;
-    m.opacity = 0.62;
+    // (a skinned ghost, a rich spirit, is as see-through as its vertices' alpha makes it: its eyes burn solid)
+    m.opacity = skinned ? 1 : 0.62;
     m.depthWrite = true;
   }
   m.name = `unit-${key}`;
@@ -646,13 +647,14 @@ class UnitModel {
   /** The rich body: one skinned mesh on its own bones, plus rigid pieces (weapon, shield, tools, flames) riding bones. */
   buildRichParts(tpl) {
     const R = tpl.rich;
-    const inst = instantiate(R.geo, R.spec, getUnitMaterial(this.teamColor, 0, false, true));
+    const inst = instantiate(R.geo, R.spec, getUnitMaterial(this.teamColor, 0, !!R.ghost, true));
     inst.mesh.name = 'body';
     inst.mesh.castShadow = true;
     inst.mesh.receiveShadow = true;
     this.rigGroup.add(inst.mesh);
     inst.tools = {};
     inst.flames = [];
+    inst.spec = R.spec; // (the skeleton's layout: whether it has wings, a tail)
     if (R.plan) {
       // a creature's rig (rich-creature-kit.js): bones by name, posed by plan (rich-creature-anim.js)
       inst.plan = R.plan;
