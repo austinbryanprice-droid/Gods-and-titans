@@ -4,19 +4,15 @@
 // Anything not built here keeps its low-poly model.
 import * as THREE from 'three';
 import { MeshKit, ps } from './rich-kit.js';
-import { shadeC, mixC, tintC } from './unit-geo.js';
+import { TEAM, shadeC, mixC, tintC } from './unit-geo.js';
 import { gripRotation } from './unit-parts.js';
+import { dye, mul } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
-const sstep = (a, b, x) => {
+export const sstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a || 1e-9)));
   return t * t * (3 - 2 * t);
-};
-const mul = (o, k) => {
-  o.r *= k;
-  o.g *= k;
-  o.b *= k;
 };
 
 /** Weapons the rich kit builds itself. */
@@ -41,7 +37,7 @@ export function finishGear(kit, matrix = null) {
 }
 
 /** Leather-wrapped grip: a tube along +Y with a few cord bands. */
-function grip(kit, y0, y1, r, color, bands = 4) {
+export function grip(kit, y0, y1, r, color, bands = 4) {
   const mid = (y0 + y1) / 2;
   kit.loft([ps(0, y0, 0, r * 0.95), ps(0, mid, 0, r), ps(0, y1, 0, r * 0.95)], {
     ref: [1, 0, 0], rings: 7, sides: 8, start: null, end: null, color, mat: 'leather',
@@ -166,7 +162,7 @@ function hammer(kit, pal, s, { glow = null } = {}) {
 }
 
 /** Turned wood: a gentle swell and a few pale growth rings along the grain. */
-const grain = (k = 0.1) => (o, x, y, z, u) => mul(o, 0.94 + k * Math.sin(u * 23 + y * 11));
+export const grain = (k = 0.1) => (o, x, y, z, u) => mul(o, 0.94 + k * Math.sin(u * 23 + y * 11));
 
 /** A spear: ash shaft with a wrapped grip, iron butt-spike, a socketed leaf head (opts.runes: gold bands and a glowing rune on a god's). */
 function spear(kit, pal, s, { runes = null, shaftColor = null } = {}) {
@@ -329,4 +325,93 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
     case 'staff': staff(kit, pal, s, opts); return true;
     default: return false;
   }
+}
+
+/**
+ * A shield on the left forearm, in the elbow bone's frame (the forearm hangs below it): a shallow
+ * dish with a rim, and what each people paints on and fits to it. style (all optional):
+ *   w, h        half width and height of the face (0.2 each: a round shield), n squareness (2 = an ellipse)
+ *   face        'team' (default: team painted), 'metal' (the unit's metal), 'dark' or a color; disc { k, color } a painted roundel on the face
+ *   pattern     'wedges' (default, alternating wedges) | 'rings' | 'cross' | 'stripe' | 'checker' | null
+ *   boss        'dome' (default) | 'spike' | null;  spine: a ridge up the middle;  studs: a ring of rivets
+ *   rim         the rim color (default the unit's metal);  dish: how deep the face is;  dy: moves it down the arm
+ */
+export function richShield(ctx, D, style = {}) {
+  const { pal } = ctx;
+  const S = D.weaponSize > 1 ? 0.92 : 1;
+  const W = (style.w ?? 0.2) * S;
+  const H = (style.h ?? 0.2) * S;
+  const n = style.n ?? 2;
+  const sides = style.sides ?? 22;
+  const kit = new MeshKit(null, { sides });
+  const cy = -D.fore * 0.5 - (style.dy ?? 0);
+  const z0 = -(D.armR + 0.05);
+  const dish = style.dish ?? 0.03;
+  const rim = style.rim ?? pal.accentMetal;
+  const iron = shadeC(pal.darkMetal, 1.1);
+  const colorOf = (c, shade = 0.9) => (!c || c === 'team' ? TEAM(shade, 'painted') : c === 'metal' ? pal.accentMetal : c === 'dark' ? iron : c);
+  const faceColor = colorOf(style.face);
+  const ring = (k, z) => ps(0, cy, z, W * k, H * k, n);
+  const pattern = style.pattern === undefined ? 'wedges' : style.pattern;
+  // the face in the shield's own units: r = 0 at the center, 1 at the rim
+  const radial = (x, y) => {
+    const dx = Math.abs(x / W);
+    const dy = Math.abs((y - cy) / H);
+    return n === 2 ? Math.hypot(dx, dy) : (dx ** n + dy ** n) ** (1 / n);
+  };
+  const dark = style.pattern === 'checker' || style.pattern === 'stripe' ? shadeC(pal.darkMetal, 0.8) : null;
+  kit.loft([ring(0.98, z0), ring(0.97, z0 - 0.012), ring(0.62, z0 - dish)], {
+    ref: [1, 0, 0], rings: 6, sides, start: 'round', end: 'round', capDepth: [0.006, dish], color: faceColor,
+    paint: (o, x, y, z, u, a) => {
+      const r = radial(x, y);
+      if (pattern === 'wedges') {
+        if (Math.floor((a * 8) % 2) === 1) mul(o, 0.72);
+      } else if (pattern === 'rings') {
+        mul(o, 0.8 + 0.2 * Math.cos(r * 5 * PI));
+      } else if (pattern === 'cross') {
+        const q = Math.abs(Math.abs(x / W) - Math.abs((y - cy) / H));
+        if (q < 0.16 && r < 0.95) mul(o, 0.7);
+      } else if (pattern === 'stripe') {
+        if (Math.abs(x) < W * 0.09) dye(o, dark, 1);
+        else if (Math.abs(Math.abs(x) - W * 0.5) < W * 0.04) mul(o, 0.8);
+      } else if (pattern === 'checker') {
+        const cx = Math.floor((x / W + 1) * 3);
+        const cyy = Math.floor(((y - cy) / H + 1) * 4.5);
+        if (r < 0.88 && (cx + cyy) % 2 === 0) dye(o, dark, 1);
+      }
+    },
+  });
+  if (style.disc) {
+    const k = style.disc.k;
+    kit.loft([ring(k, z0 - dish * 0.35), ring(k * 0.98, z0 - dish * 0.5 - 0.004), ring(k * 0.5, z0 - dish - 0.004)], {
+      ref: [1, 0, 0], rings: 5, sides, start: 'round', end: 'round', capDepth: [0.004, 0.006], color: colorOf(style.disc.color, 0.95),
+    });
+  }
+  // the rim, a rolled edge all round
+  kit.loft([ring(1.035, z0 + 0.004), ring(1.035, z0 - 0.02)], { ref: [1, 0, 0], sides, start: null, end: null, color: rim, mat: style.rimMat });
+  if (style.boss !== null) {
+    const spike = style.boss === 'spike';
+    kit.loft([ring(0.24, z0 - dish * 0.67), ring(0.2, z0 - dish * 1.33), ps(0, cy, z0 - (spike ? 0.1 : dish * 1.93), W * (spike ? 0.02 : 0.06), H * (spike ? 0.02 : 0.06))], {
+      ref: [1, 0, 0], rings: 5, sides: 14, start: null, end: 'round', capDepth: spike ? 0.03 : 0.014, color: iron,
+    });
+  }
+  if (style.spine) {
+    const zf = z0 - dish * 1.25;
+    kit.loft([ps(0, cy - H * 0.96, zf, W * 0.07, 0.012), ps(0, cy, zf - 0.006, W * 0.1, 0.016), ps(0, cy + H * 0.96, zf, W * 0.07, 0.012)], {
+      ref: [1, 0, 0], rings: 7, sides: 8, start: 'round', end: 'round', capDepth: 0.01, color: rim, mat: style.rimMat,
+    });
+  }
+  if (style.studs) {
+    const m = style.studs;
+    for (let i = 0; i < m; i++) {
+      const a = (i / m) * TAU;
+      const x = Math.cos(a) * W * 0.84;
+      const y = cy + Math.sin(a) * H * 0.84;
+      kit.loft([ps(x, y, z0 - dish * 0.4, 0.011), ps(x, y, z0 - dish * 0.4 - 0.012, 0.007)], { ref: [1, 0, 0], sides: 6, start: null, end: 'round', capDepth: 0.006, color: iron });
+    }
+  }
+  const g = kit.build({ ground: 0, strength: 0.3 });
+  g.deleteAttribute('skinIndex');
+  g.deleteAttribute('skinWeight');
+  return g;
 }

@@ -31,6 +31,21 @@ export const tint = (o, c, t) => {
   o.b = lerp(o.b, c.b, t);
 };
 
+/** Replace a vertex color with a fixed one, mixed in by t (a team painted vertex turns into a plain one when t is half or more). */
+export const dye = (o, c, t = 1) => {
+  if (o.team) {
+    if (t < 0.5) return;
+    o.team = 0;
+    o.r = c.r;
+    o.g = c.g;
+    o.b = c.b;
+    return;
+  }
+  o.r = lerp(o.r, c.r, t);
+  o.g = lerp(o.g, c.g, t);
+  o.b = lerp(o.b, c.b, t);
+};
+
 /** Brighten / darken by height: k0 at y0 to k1 at y1. */
 export const gradY = (y0, y1, k0, k1) => (o, x, y) => mul(o, lerp(k0, k1, clamp((y - y0) / (y1 - y0))));
 

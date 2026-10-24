@@ -3,6 +3,7 @@
 // parts themselves (head and face, neck, hands, boots) plus the station lists the garments
 // follow so a sleeve, tunic or greave hugs the limb it covers.
 import { PROFILES } from './unit-bodies.js';
+import { shadeC, mixC } from './unit-geo.js';
 import { vs, ps, B, chain, rigid, mixBind, smoothstep } from './rich-kit.js';
 import { clamp, lerp, gradY } from './rich-paint.js';
 
@@ -165,6 +166,21 @@ export function legFrom(D, side, g, y0) {
   return out;
 }
 
+/** The leg's ring at height y (between the leg stations), clearance g: the base of greaves, straps and anklets. */
+export function legRing(D, side, y, g = 0) {
+  const st = legStations(D, side, g);
+  const z = side * D.hipZ;
+  for (let i = 0; i + 1 < st.length; i++) {
+    const a = st[i];
+    const b = st[i + 1];
+    if (y <= b.c[1] || i + 2 === st.length) {
+      const t = clamp((y - a.c[1]) / (b.c[1] - a.c[1] || 1e-9));
+      return vs(y, lerp(a.rx, b.rx, t), lerp(a.rz, b.rz, t), lerp(a.c[0], b.c[0], t), z);
+    }
+  }
+  return st[0];
+}
+
 /** Arm stations from the wrist up over the shoulder. */
 export function armStations(D, side, g = 0, from = 'wrist') {
   const sh = D.shoulderY - 0.02;
@@ -183,7 +199,7 @@ export function armStations(D, side, g = 0, from = 'wrist') {
   return from === 'elbow' ? st.slice(2) : st;
 }
 
-export function faceWarp(D) {
+export function faceWarp(D, cyclops = false) {
   const hs = D.hs;
   const hy = D.headCY;
   return (p, a) => {
@@ -193,13 +209,48 @@ export function faceWarp(D) {
     // nose
     const nose = Math.exp(-((aa / 0.3) ** 2)) * Math.exp(-(((y - (hy - 0.016 * hs)) / (0.024 * hs)) ** 2));
     p[0] += 0.024 * hs * nose;
-    // brow ridge
-    p[0] += 0.009 * hs * front * front * Math.exp(-(((y - (hy + 0.03 * hs)) / (0.014 * hs)) ** 2));
-    // eye sockets
-    p[0] -= 0.006 * hs * Math.exp(-(((Math.abs(aa) - 0.42) / 0.16) ** 2)) * Math.exp(-(((y - (hy + 0.008 * hs)) / (0.014 * hs)) ** 2));
+    if (cyclops) {
+      // one heavy brow across the forehead, one deep socket under it
+      p[0] += 0.016 * hs * front * front * Math.exp(-(((y - (hy + 0.05 * hs)) / (0.016 * hs)) ** 2));
+      p[0] -= 0.008 * hs * Math.exp(-((aa / 0.34) ** 2)) * Math.exp(-(((y - (hy + 0.02 * hs)) / (0.03 * hs)) ** 2));
+    } else {
+      // brow ridge
+      p[0] += 0.009 * hs * front * front * Math.exp(-(((y - (hy + 0.03 * hs)) / (0.014 * hs)) ** 2));
+      // eye sockets
+      p[0] -= 0.006 * hs * Math.exp(-(((Math.abs(aa) - 0.42) / 0.16) ** 2)) * Math.exp(-(((y - (hy + 0.008 * hs)) / (0.014 * hs)) ** 2));
+    }
     // cheekbones
     p[0] += 0.003 * hs * Math.exp(-(((Math.abs(aa) - 0.95) / 0.3) ** 2)) * Math.exp(-(((y - (hy - 0.028 * hs)) / (0.02 * hs)) ** 2));
   };
+}
+
+/**
+ * The one great eye of a Cyclops, in the middle of the brow (fx: the face surface in front of
+ * the head's middle): a bulging white, a dark ringed iris, a black pupil, a heavy lid and brow.
+ * glowColor: a burning eye (the whole eye takes the color).
+ */
+function addCyclopsEye(kit, D, pal, bind, fx, glowColor = null) {
+  const hs = D.hs;
+  const ey = D.headCY + 0.022 * hs;
+  const white = glowColor || pal.eyeWhite;
+  const g = glowColor ? 0.9 : 0.1;
+  kit.loft([ps(fx - 0.02 * hs, ey, 0, 0.029 * hs, 0.036 * hs), ps(fx - 0.004 * hs, ey, 0, 0.028 * hs, 0.035 * hs), ps(fx + 0.004 * hs, ey, 0, 0.024 * hs, 0.03 * hs)],
+    { ref: [0, 1, 0], rings: 4, sides: 16, start: null, end: 'round', capDepth: 0.007 * hs, color: white, mat: 'gloss', glow: g, bind: bind.head });
+  const iris = glowColor ? pal.glow : mixC(pal.eye, '#8a5a1e', 0.55);
+  kit.loft([ps(fx - 0.002 * hs, ey - 0.001 * hs, 0, 0.018 * hs, 0.018 * hs), ps(fx + 0.0065 * hs, ey - 0.001 * hs, 0, 0.0165 * hs, 0.0165 * hs)],
+    { ref: [0, 1, 0], sides: 14, start: null, end: 'round', capDepth: 0.003 * hs, color: iris, mat: 'gloss', glow: glowColor ? 1 : 0, bind: bind.head });
+  kit.loft([ps(fx + 0.0065 * hs, ey - 0.001 * hs, 0, 0.009 * hs, 0.009 * hs), ps(fx + 0.0092 * hs, ey - 0.001 * hs, 0, 0.0082 * hs, 0.0082 * hs)],
+    { ref: [0, 1, 0], sides: 12, start: null, end: 'round', capDepth: 0.002 * hs, color: pal.eye, mat: 'gloss', bind: bind.head });
+  // the upper lid, and a single heavy brow of the hair color across the forehead
+  kit.loft([ps(fx - 0.006 * hs, ey + 0.03 * hs, -0.04 * hs, 0.009 * hs, 0.012 * hs), ps(fx - 0.002 * hs, ey + 0.036 * hs, 0, 0.01 * hs, 0.012 * hs), ps(fx - 0.006 * hs, ey + 0.03 * hs, 0.04 * hs, 0.009 * hs, 0.012 * hs)],
+    { ref: [1, 0, 0], rings: 6, sides: 8, start: 'round', end: 'round', capDepth: 0.008 * hs, color: shadeC(pal.skin, 0.82), mat: 'skin', bind: bind.head });
+  kit.loft([
+    ps(fx + 0.0 * hs, ey + 0.05 * hs, -0.082 * hs, 0.011 * hs, 0.012 * hs),
+    ps(fx + 0.012 * hs, ey + 0.056 * hs, -0.04 * hs, 0.012 * hs, 0.012 * hs),
+    ps(fx + 0.016 * hs, ey + 0.058 * hs, 0, 0.0125 * hs, 0.0125 * hs),
+    ps(fx + 0.012 * hs, ey + 0.056 * hs, 0.04 * hs, 0.012 * hs, 0.012 * hs),
+    ps(fx + 0.0 * hs, ey + 0.05 * hs, 0.082 * hs, 0.011 * hs, 0.012 * hs),
+  ], { ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: 'round', capDepth: 0.01 * hs, color: pal.hair, mat: 'hair', bind: bind.head });
 }
 
 export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
@@ -217,7 +268,9 @@ export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
     vs(hy + 0.112 * hs, 0.04 * hs, 0.04 * hs, hx - 0.007 * hs),
   ];
   const skin = pal.skin;
-  kit.loft(st, { rings: 12, capDepth: [0.012 * hs, 0.02 * hs], warp: faceWarp(D), color: skin, bind: bind.head, paint: skinPaint });
+  // a giant with a third eye is a Cyclops: one great eye in the middle of the forehead
+  const cyclops = ctx.v.body === 'giant' && ctx.v.extras.includes('third_eye');
+  kit.loft(st, { rings: 12, capDepth: [0.012 * hs, 0.02 * hs], warp: faceWarp(D, cyclops), color: skin, bind: bind.head, paint: skinPaint });
   // ears
   for (const side of [1, -1]) {
     kit.loft([ps(hx - 0.004 * hs, hy - 0.004 * hs, side * 0.082 * hs, 0.017 * hs, 0.027 * hs), ps(hx - 0.004 * hs, hy - 0.004 * hs, side * 0.103 * hs, 0.012 * hs, 0.022 * hs)],
@@ -228,7 +281,8 @@ export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
   // eyes: dark, slightly glossy, set well apart in their sockets
   const eye = ctx.v.extras.includes('eye_glow') && pal.eyeGlow ? pal.eyeGlow : pal.eye;
   const glow = ctx.v.extras.includes('eye_glow') ? 1 : 0;
-  for (const side of [1, -1]) {
+  if (cyclops) addCyclopsEye(kit, D, pal, bind, faceX(0), glow ? pal.eyeGlow : null);
+  else for (const side of [1, -1]) {
     const z = side * 0.041 * hs;
     kit.loft([ps(faceX(z) - 0.012 * hs, hy + 0.012 * hs, z, 0.011 * hs, 0.0155 * hs), ps(faceX(z) - 0.0015 * hs, hy + 0.012 * hs, z, 0.0095 * hs, 0.013 * hs)],
       { ref: [0, 1, 0], sides: 8, capDepth: 0.004 * hs, color: eye, mat: 'gloss', glow, bind: bind.head });
@@ -287,6 +341,48 @@ export function addBoots(kit, D, pal, bind, color, cuff) {
       kit.loft([vs(top - 0.03, e.rx + 0.003, e.rz + 0.003, e.c[0], z), vs(top + 0.012, e.rx + 0.012, e.rz + 0.012, e.c[0], z)],
         { sides: 12, start: null, end: null, color: cuff, mat: 'leather', bind: bind.leg[side] });
     }
+  }
+}
+
+/**
+ * Bare feet in sandals: the foot itself, a flat sole, a strap at the ankle and one across the
+ * instep, and `ladder` straps up the shin (laced sandals). opts: skin, skinPaint, strap, sole.
+ */
+export function addSandals(kit, D, pal, bind, { skin, skinPaint = null, strap, sole, ladder = 0 }) {
+  const r = D.legR;
+  const h = D.footH;
+  for (const side of [1, -1]) {
+    const z = side * D.hipZ;
+    const foot = rigid(side > 0 ? B.footR : B.footL);
+    kit.loft([
+      ps(-r * 0.8, h * 0.66, z, h * 0.66, r * 0.78),
+      ps(r * 0.25, h * 0.54, z, h * 0.54, r * 0.8),
+      ps(r * 1.45, h * 0.42, z, h * 0.42, r * 0.8),
+      ps(r * 2.3, h * 0.32, z, h * 0.32, r * 0.68),
+    ], { ref: [0, 1, 0], rings: 5, sides: 8, capRings: 2, capDepth: h * 0.34, color: skin, bind: foot, paint: skinPaint });
+    kit.loft([
+      ps(-r * 0.9, h * 0.11, z, h * 0.11, r * 0.84),
+      ps(r * 0.3, h * 0.11, z, h * 0.11, r * 0.88),
+      ps(r * 1.7, h * 0.11, z, h * 0.11, r * 0.84),
+      ps(r * 2.5, h * 0.1, z, h * 0.1, r * 0.66),
+    ], { ref: [0, 1, 0], rings: 4, sides: 8, capRings: 2, capDepth: h * 0.13, color: sole, mat: 'leather', bind: foot });
+    const ya = D.ankleY + 0.004;
+    kit.loft([legRing(D, side, ya, 0.006), legRing(D, side, ya + 0.018, 0.006)], { sides: 10, start: null, end: null, color: strap, mat: 'leather', bind: bind.leg[side] });
+    kit.loft([ps(r * 1.0, h * 0.5, z, h * 0.5 + 0.004, r * 0.8 + 0.004), ps(r * 1.0 + 0.016, h * 0.46, z, h * 0.46 + 0.004, r * 0.8 + 0.004)],
+      { ref: [0, 1, 0], sides: 10, start: null, end: null, color: strap, mat: 'leather', bind: foot });
+    for (let i = 0; i < ladder; i++) {
+      const y = D.ankleY + 0.05 + i * 0.045;
+      kit.loft([legRing(D, side, y, 0.005), legRing(D, side, y + 0.016, 0.005)], { sides: 10, start: null, end: null, color: strap, mat: 'leather', bind: bind.leg[side] });
+    }
+  }
+}
+
+/** The leg of a bare-legged unit: skin from a little below the ankle (so it overlaps the foot) up to the thigh, or only up to `top` under a robe. */
+export function addBareLegs(kit, D, bind, skin, skinPaint = null, top = Infinity) {
+  const r = D.legR;
+  for (const side of [1, -1]) {
+    const st = legStations(D, side).filter((s, i) => i < 2 || s.c[1] <= top);
+    kit.loft([vs(D.ankleY - 0.03, r * 0.62, r * 0.58, 0, side * D.hipZ), ...st], { rings: 9, start: null, end: top === Infinity ? null : 'round', color: skin, bind: bind.leg[side], paint: skinPaint });
   }
 }
 
