@@ -1096,6 +1096,31 @@ per-frame budget, so a revealed army appears over a few frames.
   `applyRich`'s (the `spirit` case of `unit-anim.js` keeps its float, lean and raised arms) plus `poseTail`, a wave
   that runs down the chain from `wavePhase`: it sways a still spirit and, quicker, lays the wisp back along the air
   behind a moving one. Costs: 6.2k triangles for the Shade (a minion), 7.6k for the Banshee.
+  The nagas (the Hindu Naga, Nuwa and Quetzalcoatl) stand on the humanoid skeleton too (`RICH_BODIES` takes `naga`, on a
+  `naga` profile in `unit-bodies.js`, the values the low-poly naga overrode inline) with a serpent's tail where the legs
+  would be. `humanoidSpec(d, { tail, tailStyle })` takes the same chain of tail bones as the spirits' (`spec.tail = {
+  first, count, style }`, style `wisp` or `serpent`): nine bones from the pelvis down the belly and back along the ground
+  (`nagaBones`, `rich-naga.js`), and one smooth loft of forty stations (a Catmull-Rom curve through fourteen keys, an S on
+  the ground that ends in a thin tip curling up) is skinned along them with `alongPath`. The loft's frame is the
+  diagonal `ref` (the first radius lies along the back whether the tail runs down or along the ground; a fixed up
+  vector flips where the path turns from vertical to horizontal) and the belly is kept off the ground. `nagaTail(E, o)`
+  is called by each pantheon's `legs` layer where it would build the legs: `scalesOf` paints rows of diamonds, a ridge
+  toned toward the second colour, a cream underside laid in plates and a mark of the unit's own (`dorsalDiamonds`, or
+  lapped feathers with `o.feathers`), `o.bands` puts rings of gold or of the team's colour round it at fractions of its
+  length, and `tailFan` roots a fan of feathers at the tip. `nagaWaist` is the belt that hides the seam between the torso's
+  last ring and the tail's first. Above the waist each is dressed as its people dress a person: the Naga bare-chested with
+  gold arm bands, a red sash and a golden kirita, with a cobra's head (`BEAST_HEADS` takes `serpent`: the serpents' skull
+  from `rich-reptile-heads.js` on the head bone, under a broad hood of pale ribbed skin with the spectacle on its back,
+  `rich-naga-head.js`); Nuwa in a pink tunic and wide sleeves, a jade belt, a tiara, hairpins, long hair and a red ribbon
+  over a blue tail with gold rings, a staff and a stone; Quetzalcoatl bare-chested in a plume crown and the feathered
+  wings of the gods, over a green tail of lapped feathers with a fan of quetzal plumes at its tip. The pose code is
+  `applyRich`'s (the `naga` case of `unit-anim.js` calls it when the model is rich) plus a `serpent` style of `poseTail`:
+  every bone yaws about the vertical by `sin(wavePhase - 0.8 i + seed) (0.05 + 0.03 i) sweep`, so a wave runs down the chain
+  and grows toward the tip, small when the naga stands and twice as wide (`m.tailMove` eased in) when it glides. A dead
+  naga's tail lies straight (`m.tailLie` eases to 1 and the bones blend toward `straighteningYaws`): the rig rolls onto its
+  side, and an S on the ground would half bury and leave the tip floating.
+  Costs: 5.6k triangles for the Naga (a creature, budget 10.5k), 8.7k for Nuwa and 9.0k for Quetzalcoatl (gods, budget
+  9k: Quetzalcoatl has 12 triangles left, his wings alone are 1.5k).
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

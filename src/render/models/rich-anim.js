@@ -114,21 +114,52 @@ export function applyRich(m, P, state, t, dt) {
   b[B.hair2].rotation.set(0, 0, -0.08 - 0.3 * fl + 0.09 * Math.sin(phi * 2 - 0.4) * gait + 0.03 * Math.sin(t * 1.5 + seed));
 
   if (R.spec.wing) poseWings(m, b, P, state, t, phi, seed);
-  if (R.spec.tail) poseTail(m, b, R.spec.tail, dt, t, seed);
+  if (R.spec.tail) poseTail(m, b, R.spec.tail, dt, t, seed, R.spec, state);
 
   // the bones are outside the scene graph: bring their matrices, the skin and the riding pieces up to date once, here
   syncRich(R);
 }
 
 /**
- * A tail (a spirit's wisp): a wave runs down the chain of bones from the hip, bending it from side to side and a little up and
- * down, more toward the tip; a unit that moves streams it out behind (the chain hangs from the hip, so a turn back about the
- * lateral axis lays it along the ground behind) and the wave quickens (m.wavePhase runs faster then).
+ * The turns about the vertical that lay a serpent's tail straight out behind the body: bone i turns by the heading of the segment
+ * above it less its own, so that every segment ends up heading straight back (the last bone keeps the turn of the one above).
  */
-function poseTail(m, b, tail, dt, t, seed) {
+function straighteningYaws(spec, tail) {
+  const yaws = [];
+  let above = 0;
+  for (let i = 0; i < tail.count - 1; i++) {
+    const a = spec.pos[tail.first + i];
+    const c = spec.pos[tail.first + i + 1];
+    const heading = Math.atan2(c[2] - a[2], a[0] - c[0]);
+    yaws.push(above - heading);
+    above = heading;
+  }
+  yaws.push(0);
+  return yaws;
+}
+
+/**
+ * A tail. A spirit's wisp: a wave runs down the chain of bones from the hip, bending it from side to side and a little up and
+ * down, more toward the tip; a unit that moves streams it out behind (the chain hangs from the hip, so a turn back about the
+ * lateral axis lays it along the ground behind) and the wave quickens (m.wavePhase runs faster then). A naga's tail ('serpent')
+ * lies on the ground: the same wave runs down it, from side to side only (a turn about the vertical axis at each joint, so it
+ * never leaves the ground), wider and quicker while the naga moves. A naga that dies topples about its length and lies on its
+ * side: the tail straightens as it goes down (the S of it would put half of it under the ground when the body rolls).
+ */
+function poseTail(m, b, tail, dt, t, seed, spec, state) {
   const move = (m.tailMove = (m.tailMove ?? 0) + ((m.moving ? 1 : 0) - (m.tailMove ?? 0)) * Math.min(1, dt * 5));
-  const amp = 0.4 + 0.6 * move;
   const w = m.wavePhase;
+  if (tail.style === 'serpent') {
+    const sweep = 0.45 + 0.55 * move;
+    const lie = (m.tailLie = (m.tailLie ?? 0) + ((state === 'dead' ? 1 : 0) - (m.tailLie ?? 0)) * Math.min(1, dt * 6));
+    const flat = lie > 0.001 ? (tail.flat ??= straighteningYaws(spec, tail)) : null;
+    for (let i = 0; i < tail.count; i++) {
+      const wave = Math.sin(w - i * 0.8 + seed) * (0.05 + 0.03 * i) * sweep;
+      b[tail.first + i].rotation.set(0, flat ? wave + (flat[i] - wave) * lie : wave, 0);
+    }
+    return;
+  }
+  const amp = 0.4 + 0.6 * move;
   for (let i = 0; i < tail.count; i++) {
     const side = Math.sin(w - i * 0.95 + seed) * (0.1 + 0.06 * i) * amp;
     const up = Math.sin(w * 0.7 - i * 0.6 + seed * 2) * 0.05 * amp;

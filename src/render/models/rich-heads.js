@@ -7,9 +7,10 @@ import { shadeC, mixC, withMat } from './unit-geo.js';
 import { vs, ps } from './rich-kit.js';
 import { clamp, lerp, mul, tint } from './rich-paint.js';
 import { lionHead, hyenaHead, batHead } from './rich-beast-heads.js';
+import { cobraHead } from './rich-naga-head.js';
 
 /** The head kinds built here (richSupported lets a unit with one of them through). */
-export const BEAST_HEADS = new Set(['jackal', 'falcon', 'monkey', 'bird', 'demon', 'lion', 'wolf']);
+export const BEAST_HEADS = new Set(['jackal', 'falcon', 'monkey', 'bird', 'demon', 'lion', 'wolf', 'serpent']);
 
 const INK = withMat('#16120f', 'gloss');
 const AMBER = withMat('#e6b24a', 'gloss');
@@ -401,5 +402,6 @@ export function addBeastHead(kit, D, pal, ctx, bind, skinPaint = null) {
   else if (kind === 'demon') oni(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
   else if (kind === 'lion') lionHead(kit, D, pal, bind, skinPaint);
   else if (kind === 'wolf') hyenaHead(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
+  else if (kind === 'serpent') cobraHead(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
   else jackal(kit, D, pal, bind, skinPaint, /(^|_)set$/.test(ctx.unit.id));
 }

@@ -71,13 +71,13 @@ const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherj
 // every Greek unit on the humanoid and giant bodies (the creatures have body plans of their own, rich-creatures.test.js; the centaur keeps its low-poly model, the shade is a spirit: rich-spirits.test.js)
 const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek_athena', 'greek_poseidon', 'greek_hades', 'greek_kronos', 'greek_cyclops', 'greek_hoplite'];
 const EGYPTIAN = ['worshipper', 'warrior', 'archer', 'priest', 'egyptian_ra', 'egyptian_anubis', 'egyptian_isis', 'egyptian_set', 'egyptian_mummy', 'egyptian_chariot_archer'];
-// every Hindu unit on the humanoid body (the elephant, the monkey soldier and the naga keep their low-poly models)
+// every Hindu unit on the humanoid body (the elephant keeps its low-poly model; the naga has a serpent's tail for legs: rich-nagas.test.js)
 const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hindu_vishnu', 'hindu_durga', 'hindu_hanuman', 'hindu_garuda', 'hindu_kshatriya'];
 // every Japanese unit on the humanoid and giant bodies (the great serpent, the foxes and the fox spirits keep their low-poly models)
 const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amaterasu', 'japanese_susanoo', 'japanese_raijin', 'japanese_inari', 'japanese_tengu', 'japanese_oni', 'japanese_samurai'];
-// every Chinese unit on the humanoid, giant and upright-monkey bodies (Nuwa, the lion, the phoenix and the dragon keep their low-poly models)
+// every Chinese unit on the humanoid, giant and upright-monkey bodies (the creatures have body plans of their own, rich-creatures.test.js; Nuwa has a serpent's tail for legs: rich-nagas.test.js)
 const CHINESE = ['worshipper', 'warrior', 'archer', 'priest', 'chinese_sun_wukong', 'chinese_guan_yu', 'chinese_chang_e', 'chinese_pangu', 'chinese_monkey_clone', 'chinese_clay_warrior', 'chinese_crossbowman'];
-// every Aztec unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; Quetzalcoatl keeps his low-poly model)
+// every Aztec unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; Quetzalcoatl has a serpent's tail for legs: rich-nagas.test.js)
 const AZTEC = ['worshipper', 'warrior', 'archer', 'priest', 'aztec_huitzilopochtli', 'aztec_tezcatlipoca', 'aztec_tlaloc', 'aztec_tlaloque', 'aztec_eagle_warrior'];
 // every Celtic unit on the humanoid and giant bodies (the creatures have body plans of their own, rich-creatures.test.js; the banshee is a spirit: rich-spirits.test.js; the headless horseman keeps its low-poly model)
 const CELTIC = ['worshipper', 'warrior', 'archer', 'priest', 'celtic_the_dagda', 'celtic_the_morrigan', 'celtic_lugh', 'celtic_brigid', 'celtic_balor', 'celtic_woad_raider'];
@@ -366,9 +366,9 @@ test('the Hindus dress their own way: dhotis, quilted coats, garlands and gods w
   assert.equal(typeof hin.skinPaint, 'function', 'Hanuman\'s fur is painted on the bare skin');
 });
 
-test('every Hindu humanoid and the Vanara are dressed in the Hindu look, the elephant and the naga stay low-poly', () => {
+test('every Hindu humanoid and the Vanara are dressed in the Hindu look, the elephant stays low-poly', () => {
   for (const id of [...HINDU, 'hindu_vanara']) assert.ok(richSupported(hindu(id)), `${id} is supported`);
-  for (const id of ['hindu_airavata', 'hindu_naga', 'battering_ram']) assert.ok(!richSupported(hindu(id)), `${id} stays low-poly`);
+  for (const id of ['hindu_airavata', 'battering_ram']) assert.ok(!richSupported(hindu(id)), `${id} stays low-poly`);
   // only the monkey head the kit builds is let through, and only the extras it can dress
   const hanuman = hindu('hindu_hanuman');
   assert.ok(!richSupported({ ...hanuman, visual: { ...hanuman.visual, head: 'gorilla' } }));
@@ -625,9 +625,9 @@ test('the Chinese dress their own way: crossed jackets, mirror armor, a round ti
   assert.ok(cn.shield && cn.shield.studs === undefined, 'a round shield of their own');
 });
 
-test('every Chinese humanoid, giant and upright monkey is dressed in the Chinese look, Nuwa stays low-poly', () => {
+test('every Chinese humanoid, giant and upright monkey is dressed in the Chinese look', () => {
   for (const id of CHINESE) assert.ok(richSupported(chinese(id)), `${id} is supported`);
-  for (const id of ['chinese_nuwa', 'battering_ram']) assert.ok(!richSupported(chinese(id)), `${id} stays low-poly`);
+  for (const id of ['battering_ram']) assert.ok(!richSupported(chinese(id)), `${id} stays low-poly`);
   // an upright monkey stands on the humanoid's proportions, whoever's outfit it wears: the Hindu monkey soldier is dressed the same way
   const monkey = chinese('chinese_monkey_clone');
   assert.equal(monkey.visual.body, 'beast_biped');
@@ -765,9 +765,9 @@ test('the Aztecs dress their own way: the loincloth, quilted armor, feathers and
   assert.ok(RICH_PANTHEONS.has('aztec'), 'the Aztec players get the new characters');
 });
 
-test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look; Quetzalcoatl stays low-poly', () => {
+test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look', () => {
   for (const id of AZTEC) assert.ok(richSupported(aztec(id)), `${id} is supported`);
-  for (const id of ['aztec_quetzalcoatl', 'battering_ram']) assert.ok(!richSupported(aztec(id)), `${id} stays low-poly`);
+  for (const id of ['battering_ram']) assert.ok(!richSupported(aztec(id)), `${id} stays low-poly`);
   // an Aztec warrior is not a Chinese one
   assert.notEqual(buildRichTemplate(aztec('warrior')).triangles, buildRichTemplate(chinese('warrior')).triangles);
   assert.notEqual(buildRichTemplate(aztec('priest')).triangles, buildRichTemplate(chinese('priest')).triangles);

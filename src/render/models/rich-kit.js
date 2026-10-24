@@ -73,8 +73,9 @@ export function humanoidSpec(d, opts = {}) {
   }
   const parent = PARENT.slice(0, pos.length);
   const spec = { d, pos, parent, wing: !!opts.wing };
-  // a tail (a spirit's trailing wisp, a serpent's body): opts.tail = the rest positions of a chain of bones that hangs from the
-  // pelvis, each bone the child of the one before; spec.tail says where they are in the list
+  // a tail (a spirit's trailing wisp, a naga's serpent body): opts.tail = the rest positions of a chain of bones that hangs from the
+  // pelvis, each bone the child of the one before; spec.tail says where they are in the list and how the animation moves them
+  // (opts.tailStyle: 'wisp' hangs and streams, 'serpent' lies along the ground and undulates, rich-anim.js poseTail)
   if (opts.tail) {
     const first = pos.length;
     opts.tail.forEach((p, i) => {
@@ -82,7 +83,7 @@ export function humanoidSpec(d, opts = {}) {
       parent.push(i ? first + i - 1 : B.pelvis);
     });
     spec.names = [...BONE_NAMES.slice(0, first), ...opts.tail.map((p, i) => `tail${i}`)];
-    spec.tail = { first, count: opts.tail.length };
+    spec.tail = { first, count: opts.tail.length, style: opts.tailStyle ?? 'wisp' };
   }
   return spec;
 }

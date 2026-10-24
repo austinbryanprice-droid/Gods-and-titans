@@ -15,6 +15,7 @@ import { addJewelry, addTail, addPrabhavali, extraArmsPiece } from './rich-regal
 import { BEAST_HEADS } from './rich-heads.js';
 import { gradY, mul, furStreaks } from './rich-paint.js';
 import { DEFAULT } from './rich-outfit-default.js';
+import { nagaTail, nagaWaist, dorsalDiamonds } from './rich-naga.js';
 
 const GOLD = withMat('#dfb54a', 'gold');
 const STEEL = withMat('#b3bac4', 'metal');
@@ -35,6 +36,7 @@ const GODS = {
 
 /** The garment of a unit: wrap (Shiva), pitambara (Vishnu), sari (Durga), loincloth (Hanuman, Garuda), robe (the priest), coat (armored: the soldiers) or dhoti. */
 function dressOf(E) {
+  if (E.v.body === 'naga') return 'naga';
   const god = GODS[E.ctx.unit.id];
   if (god) return god.dress;
   if (E.robe && E.ctx.cls === 'support') return 'robe';
@@ -124,9 +126,22 @@ function loincloth(E) {
   addWaistBelt(kit, D, bind, shadeC(pal.accentMetal, 0.82), pal.accentMetal);
 }
 
+/** The Naga's tail: emerald scales with a chain of gold diamonds down the back over a pale belly, rings of gold with one of the team's color between them. */
+function serpentTail(E) {
+  const { pal } = E;
+  nagaTail(E, {
+    skin: withMat(pal.skin, 'scales'), back: withMat(shadeC(pal.primary, 0.78), 'scales'), backK: 0.7, mark: dorsalDiamonds(9, withMat(pal.secondary, 'scales')),
+    bands: [[0.22, 1, GOLD, 'gold'], [0.4, 2, TEAM(1), 'cloth', 1.07], [0.58, 1, GOLD, 'gold'], [0.76, 1, GOLD, 'gold']],
+  });
+}
+
 export function legs(E) {
   const { kit, D, ctx, pal, bind, skin, skinPaint } = E;
   const dress = dressOf(E);
+  if (dress === 'naga') {
+    serpentTail(E);
+    return;
+  }
   const robed = dress === 'robe' || dress === 'sari' || dress === 'pitambara';
   const barefoot = E.v.head === 'monkey';
   const knee = D.hipY - D.thigh;
@@ -150,6 +165,11 @@ export function legs(E) {
 
 export function torso(E) {
   switch (dressOf(E)) {
+    case 'naga':
+      // a bare chest above a belt of gold with a ruby, where the body becomes the tail
+      bareTorso(E);
+      nagaWaist(E, { color: TEAM(0.95, 'cloth'), rim: GOLD, clasp: RUBY });
+      break;
     case 'robe': robe(E); break;
     case 'coat': coat(E); break;
     case 'wrap': wrap(E); break;
@@ -166,6 +186,7 @@ export function arms(E) {
   const w = D.shoulderY - 0.02 - D.upper - D.fore;
   // the Vanara's shoulders are round (his torso is too slight to hide the cut end of the tube)
   const vanara = E.v.body === 'beast_biped';
+  const naga = E.v.body === 'naga';
   for (const side of [1, -1]) {
     const bd = bind.arm[side];
     kit.loft(armStations(D, side), { rings: 8, start: null, end: vanara ? 'round' : null, capRings: 2, capDepth: 0.022, color: skin, bind: bd, paint: skinPaint });
@@ -182,7 +203,7 @@ export function arms(E) {
       }
     }
   }
-  if (vanara) addArmBands(kit, D, bind, { upper: gold, wrist: gold });
+  if (vanara || naga) addArmBands(kit, D, bind, { upper: gold, wrist: gold });
 }
 
 export function armorLayer(E) {
@@ -214,7 +235,8 @@ export function head(E) {
     addKirita(kit, D, pal, bind, { metal: gold, trim: gold, gem: RUBY, tiers: 3, height: 1 });
   } else if (gear === 'crown') {
     const prince = ctx.mortal;
-    addKirita(kit, D, pal, bind, { metal: gold, trim: gold, gem: RUBY, tiers: prince ? 1 : 2, height: prince ? 0.8 : 0.78, lift: ex.has('third_eye') ? 0.034 : 0 });
+    // (the Naga's flat cobra skull is lower than a person's: the crown sits down on it)
+    addKirita(kit, D, pal, bind, { metal: gold, trim: gold, gem: RUBY, tiers: prince ? 1 : 2, height: prince ? 0.8 : 0.78, lift: ex.has('third_eye') ? 0.034 : v.body === 'naga' ? -0.03 : 0 });
   } else if (gear === 'tiara') {
     addTiara(kit, D, pal, bind, { metal: GOLD, gem: mixC(pal.secondary, '#ff5a6a', 0.35) });
   }

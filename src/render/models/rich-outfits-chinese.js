@@ -16,10 +16,11 @@ import {
   addTrousers, addLegWraps, addAnkles, addWideSleeves, addSash, addJiaoling, addMingguang, addTunjian, addWrapSkirt,
 } from './rich-clothing.js';
 import {
-  addHairCap, addLongHair, addTopknot, addCrescent, addDouli, addScarfCap, addCnHelm, addDaoguan, addPheasantCrown, addFillet, addLongBeard, addHairpins,
+  addHairCap, addLongHair, addTopknot, addCrescent, addDouli, addScarfCap, addCnHelm, addDaoguan, addPheasantCrown, addFillet, addLongBeard, addHairpins, addTiara,
 } from './rich-headgear.js';
 import { addJewelry, addKaoqi, addPibo, addTail } from './rich-regalia.js';
 import { BEAST_HEADS } from './rich-heads.js';
+import { nagaTail, nagaWaist } from './rich-naga.js';
 import { mul, furStreaks } from './rich-paint.js';
 import { DEFAULT } from './rich-outfit-default.js';
 
@@ -54,6 +55,7 @@ const NAMED = {
   chinese_sun_wukong: 'wukong',
   chinese_guan_yu: 'guan_yu',
   chinese_chang_e: 'chang_e',
+  chinese_nuwa: 'nuwa',
   chinese_pangu: 'pangu',
   chinese_monkey_clone: 'clone',
   chinese_clay_warrior: 'clay',
@@ -92,6 +94,16 @@ function shoes(E, upper, sole = COTTON) {
 // legs
 // ---------------------------------------------------------------------------
 
+/** Nüwa's tail: sky-blue scales over a pale belly, rings of gold with one of the team's color between them. */
+function nuwaTail(E) {
+  const { pal } = E;
+  const blue = withMat(pal.primary, 'scales');
+  nagaTail(E, {
+    skin: blue, back: withMat(shade(pal.primary, 0.55), 'scales'), belly: withMat('#f4ead2', 'scales'), backK: 0.6,
+    bands: [[0.24, 1, GOLD, 'gold'], [0.4, 2, TEAM(1), 'cloth', 1.07], [0.56, 1, GOLD, 'gold'], [0.74, 1, GOLD, 'gold']],
+  });
+}
+
 export function legs(E) {
   const { kit, D, pal, bind, skin, skinPaint } = E;
   switch (dressOf(E)) {
@@ -121,6 +133,9 @@ export function legs(E) {
       break;
     case 'guan_yu':
       addBoots(kit, D, pal, bind, BLACK_LEATHER, GOLD);
+      break;
+    case 'nuwa':
+      nuwaTail(E);
       break;
     case 'priest':
     case 'chang_e':
@@ -197,6 +212,13 @@ export function torso(E) {
       addSash(kit, D, bind, { color: pal.secondary, trim: GOLD });
       break;
     }
+    case 'nuwa': {
+      // a silk bodice closed in a diagonal across the breast, the team's sash where the body becomes the tail
+      addTunic(kit, D, pal.accent, bind, 0.02);
+      addJiaoling(kit, D, bind, { color: pal.secondary, knot: GOLD });
+      nagaWaist(E, { color: TEAM(0.95, 'cloth'), rim: GOLD, clasp: JADE });
+      break;
+    }
     case 'wukong':
       // a bare furred chest under the armor, a tiger skin about the loins, a red sash
       bareTorso(E);
@@ -224,11 +246,11 @@ export function arms(E) {
   const { kit, D, pal, bind, skin, skinPaint } = E;
   const dress = dressOf(E);
   const w = D.shoulderY - 0.02 - D.upper - D.fore;
-  if (dress === 'priest' || dress === 'chang_e') {
-    addWideSleeves(kit, D, bind, { color: pal.primary, trim: pal.secondary, wide: dress === 'chang_e' ? 1.45 : 1.1 });
+  if (dress === 'priest' || dress === 'chang_e' || dress === 'nuwa') {
+    addWideSleeves(kit, D, bind, { color: dress === 'nuwa' ? pal.accent : pal.primary, trim: pal.secondary, wide: dress === 'chang_e' ? 1.45 : dress === 'nuwa' ? 1.3 : 1.1 });
     for (const side of [1, -1]) {
       kit.loft(armStations(D, side).slice(0, 3), { rings: 4, start: null, end: null, color: skin, bind: bind.arm[side], paint: skinPaint });
-      if (dress === 'chang_e') {
+      if (dress === 'chang_e' || dress === 'nuwa') {
         // a gold bangle at each wrist, showing under the sleeve
         const y = w + 0.014;
         kit.loft([vs(y, D.armR * 0.7 + 0.009, D.armR * 0.68 + 0.009, 0.001, side * D.shoulderZ), vs(y + 0.011, D.armR * 0.72 + 0.009, D.armR * 0.7 + 0.009, 0.001, side * D.shoulderZ)],
@@ -298,8 +320,8 @@ export function armorLayer(E) {
 export function cloaks(E) {
   const { kit, D, ctx, pal, bind, ex } = E;
   const dress = dressOf(E);
-  if (dress === 'chang_e') {
-    // the ribbons of the moon goddess in the team's color
+  if (dress === 'chang_e' || dress === 'nuwa') {
+    // the ribbons of the moon goddess in the team's color (Nüwa's float from her shoulders too)
     addPibo(E, { color: TEAM(0.95, 'cloth'), trim: GOLD });
     return;
   }
@@ -352,6 +374,10 @@ export function head(E) {
       addCrescent(kit, D, pal, bind, { moon: withMat(mixC(pal.accent, '#f4f6ff', 0.55), 'gem'), band: GOLD, coil: false });
       addHairpins(kit, D, pal, bind, { metal: GOLD, bead: PEARL, n: 3 });
       break;
+    case 'nuwa':
+      addTiara(kit, D, pal, bind, { metal: GOLD, gem: JADE });
+      addHairpins(kit, D, pal, bind, { metal: GOLD, bead: PEARL, n: 3 });
+      break;
     case 'wukong':
       addPheasantCrown(kit, D, pal, bind, { metal: GOLD, gem: RUBY, plume: pal.secondary, tip: mixC(pal.accent, '#fff2b0', 0.2) });
       break;
@@ -359,7 +385,7 @@ export function head(E) {
       addFillet(kit, D, pal, bind, { metal: GOLD });
   }
   // Chang'e's hair streams behind her; Guan Yu's is under his scarf and the beard is his glory
-  if (ex.has('long_hair') && !beast && dress === 'chang_e') addLongHair(kit, D, pal, bind);
+  if (ex.has('long_hair') && !beast && (dress === 'chang_e' || dress === 'nuwa')) addLongHair(kit, D, pal, bind);
 }
 
 /** What gods and the people wear on top: earrings and pearls, the monkeys' tails, Guan Yu's and Wukong's pennants, the default extras. */
@@ -384,7 +410,7 @@ export function gear(ctx, item) {
   const id = ctx.unit.id;
   if (item.id === 'halberd' && id === 'chinese_guan_yu') return { guandao: true };
   if (item.id === 'bow' && id === 'chinese_crossbowman') return { crossbow: true, magazine: true };
-  if (item.id === 'staff') return { staff: 'ruyi' };
+  if (item.id === 'staff' && id !== 'chinese_nuwa') return { staff: 'ruyi' };
   if (item.id === 'fan') return { fan: 'crane' };
   if (item.id === 'axe' && id === 'chinese_pangu') return { axe: 'yue' };
   return null;
