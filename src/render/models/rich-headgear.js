@@ -3,7 +3,8 @@
 // outfits (rich-outfits.js) choose among them.
 import { shadeC, tintC } from './unit-geo.js';
 import { vs, ps, smoothstep } from './rich-kit.js';
-import { clamp, lerp, gradY, paints } from './rich-paint.js';
+import { torsoRing } from './rich-body.js';
+import { clamp, lerp, gradY, paints, recolor } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
@@ -363,4 +364,188 @@ export function addForeheadEye(kit, D, pal, bind) {
   const y = D.headCY + 0.064 * hs;
   kit.loft([ps(fx - 0.012 * hs, y, 0, 0.024 * hs, 0.0105 * hs), ps(fx + 0.002 * hs, y, 0, 0.021 * hs, 0.0085 * hs)],
     { ref: [0, 1, 0], sides: 8, start: null, end: 'round', capDepth: 0.005 * hs, color: tintC(pal.glow, 0.25), mat: 'gem', glow: 1, bind: bind.head });
+}
+
+// ---------------------------------------------------------------------------
+// Egyptian headgear: the striped headcloth, the sun disk, the rearing cobra, plumes
+// ---------------------------------------------------------------------------
+
+/** A rearing cobra over the brow, its hood spread (the uraeus): metal, gold. x: where its front stands, if not at a human brow. */
+export function addUraeus(kit, D, bind, metal, { y = 0.066, size = 1, x = null } = {}) {
+  const hs = D.hs;
+  const k = size * hs;
+  const fx = x ?? D.headX + 0.1 * hs + 0.012 * hs;
+  const y0 = D.headCY + y * hs;
+  kit.loft([vs(y0, 0.007 * k, 0.011 * k, fx), vs(y0 + 0.022 * k, 0.006 * k, 0.018 * k, fx + 0.004 * k), vs(y0 + 0.04 * k, 0.005 * k, 0.012 * k, fx + 0.006 * k), vs(y0 + 0.052 * k, 0.0045 * k, 0.006 * k, fx + 0.007 * k)],
+    { rings: 6, sides: 10, start: 'round', end: 'round', capDepth: 0.004 * k, color: metal, mat: 'gold', bind: bind.head });
+  kit.loft([ps(fx + 0.004 * k, y0 + 0.052 * k, 0, 0.0055 * k, 0.0055 * k), ps(fx + 0.019 * k, y0 + 0.05 * k, 0, 0.0045 * k, 0.0045 * k)],
+    { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capDepth: 0.004 * k, color: metal, mat: 'gold', bind: bind.head });
+}
+
+/** A stripe ring on a head dome: a thin band of `color` at height dy over the head's middle (in head scales), hugging the dome profile. */
+function domeBand(kit, D, bind, dy, g, color, mat = undefined) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  // the head's ellipse at this height (the human skull's stations)
+  const prof = [[-0.008, 0.1, 0.088, 0], [0.035, 0.102, 0.09, -0.002], [0.072, 0.095, 0.084, -0.004], [0.1, 0.072, 0.066, -0.006], [0.112, 0.04, 0.04, -0.007]];
+  let i = 0;
+  while (i < prof.length - 2 && dy > prof[i + 1][0]) i++;
+  const t = clamp((dy - prof[i][0]) / (prof[i + 1][0] - prof[i][0]));
+  const at = (c) => lerp(prof[i][c], prof[i + 1][c], t);
+  const rx = at(1) * hs + g;
+  const rz = at(2) * hs + g;
+  const cx = hx + at(3) * hs;
+  kit.loft([vs(hy + (dy - 0.0075) * hs, rx, rz, cx), vs(hy + (dy + 0.0075) * hs, rx, rz, cx)], { sides: 22, start: null, end: null, color, mat, bind: bind.head });
+}
+
+/**
+ * The striped royal headcloth: a dome over the skull with a brow band and gold stripes, a lappet
+ * hanging in front of each shoulder and a queue down the back. opts: cloth (the main color, a team
+ * color for the people's), stripe, trim (the band), tail (the queue, off under a cape).
+ */
+export function addNemes(kit, D, pal, bind, { cloth, stripe, trim, tail = true } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.017 * hs;
+  const dome = [
+    vs(hy - 0.06 * hs, 0.088 * hs + g, 0.078 * hs + g, hx - 0.012 * hs),
+    vs(hy - 0.008 * hs, 0.1 * hs + g, 0.088 * hs + g, hx),
+    vs(hy + 0.035 * hs, 0.102 * hs + g, 0.09 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.072 * hs, 0.095 * hs + g, 0.084 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.1 * hs, 0.072 * hs + g, 0.066 * hs + g, hx - 0.006 * hs),
+    vs(hy + 0.112 * hs, 0.04 * hs + g, 0.04 * hs + g, hx - 0.007 * hs),
+  ];
+  kit.loft(dome, {
+    rings: 9, sides: 22, start: null, end: 'round', capDepth: 0.022 * hs, color: cloth, bind: bind.head,
+    warp: (p, a) => {
+      const aa = wrap(a);
+      // the front edge rides the brow, the sides drop to the ears and the back to the nape
+      const line = hy + 0.05 * hs - 0.075 * hs * smoothstep(0.5, 1.35, Math.abs(aa));
+      if (p[1] < line) p[1] = line;
+    },
+    paint: gradY(hy - 0.06 * hs, hy + 0.11 * hs, 0.86, 1.08),
+  });
+  // gold stripes across the crown and a band over the brow
+  for (const dy of [0.062, 0.082, 0.1]) domeBand(kit, D, bind, dy, g + 0.002 * hs, stripe, 'gold');
+  kit.loft([vs(hy + 0.046 * hs, 0.1 * hs + g + 0.005 * hs, 0.088 * hs + g + 0.005 * hs, hx), vs(hy + 0.058 * hs, 0.102 * hs + g + 0.005 * hs, 0.09 * hs + g + 0.005 * hs, hx - 0.002 * hs)],
+    { sides: 22, start: null, end: null, color: trim, mat: 'gold', bind: bind.head });
+  // the lappets: flat bands from the temples over the shoulders to the chest, striped along their length
+  const strip = (paintFn) => ({ ref: [1, 0, 0], rings: 7, sides: 8, start: 'round', end: 'flat', capDepth: 0.004 * hs, color: cloth, bind: bind.neck, paint: paintFn });
+  const bands = (o, x, y, z, u) => {
+    if (Math.floor(u * 8.5) % 2 === 1) recolor(o, stripe, 1);
+  };
+  for (const side of [1, -1]) {
+    const z = side * 0.098 * hs;
+    const frontAt = (y, clear) => {
+      const f = clamp((y - D.hipY) / (D.shoulderY - D.hipY), 0, 1.09);
+      const r = torsoRing(D, f, clear);
+      return r.dx + r.rx * Math.sqrt(Math.max(0, 1 - (z / r.rz) ** 2));
+    };
+    const y1 = hy - 0.1 * hs;
+    const y2 = hy - 0.19 * hs;
+    const y3 = hy - 0.29 * hs;
+    kit.loft([
+      ps(hx - 0.004 * hs, hy + 0.0 * hs, z, 0.008 * hs, 0.04 * hs),
+      ps(hx + 0.012 * hs, y1, z * 1.02, 0.008 * hs, 0.05 * hs),
+      ps(Math.max(hx + 0.03 * hs, frontAt(y2, 0.022)), y2, z * 1.0, 0.008 * hs, 0.058 * hs),
+      ps(frontAt(y3, 0.024), y3, z * 0.98, 0.008 * hs, 0.064 * hs),
+    ], strip(bands));
+  }
+  // the queue down the back
+  if (tail) {
+    const backAt = (y) => {
+      const f = clamp((y - D.hipY) / (D.shoulderY - D.hipY), 0, 1.09);
+      const r = torsoRing(D, f, 0.02);
+      return r.dx - r.rx;
+    };
+    const ys = [hy - 0.04 * hs, hy - 0.12 * hs, hy - 0.22 * hs, hy - 0.34 * hs];
+    kit.loft(ys.map((y, i) => ps(i === 0 ? hx - 0.1 * hs : Math.min(hx - 0.1 * hs, backAt(y) - 0.006), y, 0, 0.01 * hs, (0.034 - i * 0.003) * hs)),
+      { ref: [1, 0, 0], rings: 6, sides: 8, start: 'round', end: 'flat', capDepth: 0.004 * hs, color: cloth, bind: bind.neck, paint: bands });
+  }
+  addUraeus(kit, D, bind, trim);
+}
+
+/**
+ * The double crown: the red crown (a cap with a tall plate rising behind it) and the tall white crown
+ * standing in it, slim enough to stand between the ears of an animal head, a cobra at its front.
+ * opts: white, red, metal.
+ */
+export function addDoubleCrown(kit, D, pal, bind, { white, red, metal } = {}) {
+  const hs = D.hs;
+  const hy = D.headCY;
+  const cx = D.headX - 0.012 * hs;
+  kit.loft([
+    vs(hy + 0.092 * hs, 0.054 * hs, 0.046 * hs, cx),
+    vs(hy + 0.13 * hs, 0.05 * hs, 0.042 * hs, cx),
+    vs(hy + 0.18 * hs, 0.044 * hs, 0.036 * hs, cx - 0.002 * hs),
+    vs(hy + 0.215 * hs, 0.034 * hs, 0.028 * hs, cx - 0.004 * hs),
+  ], { rings: 6, sides: 18, start: null, end: 'round', capDepth: 0.012 * hs, color: red, mat: 'trim', bind: bind.head });
+  // the tall plate behind the red crown
+  kit.loft([vs(hy + 0.1 * hs, 0.011 * hs, 0.03 * hs, cx - 0.045 * hs), vs(hy + 0.2 * hs, 0.011 * hs, 0.034 * hs, cx - 0.054 * hs), vs(hy + 0.3 * hs, 0.01 * hs, 0.03 * hs, cx - 0.066 * hs), vs(hy + 0.34 * hs, 0.008 * hs, 0.02 * hs, cx - 0.072 * hs)],
+    { rings: 6, sides: 10, start: null, end: 'round', capDepth: 0.006 * hs, color: red, mat: 'trim', bind: bind.head });
+  // the white crown: a tall bulb narrow at the foot
+  kit.loft([
+    vs(hy + 0.17 * hs, 0.028 * hs, 0.023 * hs, cx),
+    vs(hy + 0.25 * hs, 0.032 * hs, 0.026 * hs, cx),
+    vs(hy + 0.33 * hs, 0.037 * hs, 0.03 * hs, cx),
+    vs(hy + 0.385 * hs, 0.036 * hs, 0.029 * hs, cx),
+    vs(hy + 0.425 * hs, 0.024 * hs, 0.02 * hs, cx),
+  ], { rings: 8, sides: 18, start: null, end: 'round', capDepth: 0.012 * hs, color: white, mat: 'trim', bind: bind.head, paint: gradY(hy + 0.17 * hs, hy + 0.43 * hs, 0.9, 1.06) });
+  // a gold band where the red crown meets the skull
+  kit.loft([vs(hy + 0.088 * hs, 0.056 * hs, 0.048 * hs, cx), vs(hy + 0.102 * hs, 0.055 * hs, 0.047 * hs, cx)], { sides: 18, start: null, end: null, color: metal, mat: 'gold', bind: bind.head });
+  addUraeus(kit, D, bind, metal, { y: 0.116, size: 0.9, x: cx + 0.05 * hs + 0.008 * hs });
+}
+
+/**
+ * A sun disk standing over the head: a glowing disc in a gold rim, cradled on the crown, with the
+ * rearing cobra at the brow. opts: disk (the glowing face), metal.
+ */
+export function addSunDisk(kit, D, pal, bind, { disk, metal, size = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const R = 0.1 * hs * size;
+  const yc = hy + 0.108 * hs + R * 0.9;
+  const cx = hx - 0.008 * hs;
+  // the cradle: a ring on the crown the disk stands in
+  kit.loft([vs(hy + 0.09 * hs, 0.06 * hs, 0.056 * hs, cx), vs(hy + 0.122 * hs, 0.05 * hs, 0.048 * hs, cx), vs(hy + 0.136 * hs, 0.034 * hs, 0.034 * hs, cx)],
+    { rings: 4, sides: 14, start: null, end: null, color: metal, mat: 'gold', bind: bind.head });
+  kit.loft([ps(cx - 0.006 * hs, yc, 0, R, R), ps(cx + 0.006 * hs, yc, 0, R, R)],
+    { ref: [0, 1, 0], sides: 26, start: 'flat', end: 'flat', color: disk, mat: 'gem', glow: 1, bind: bind.head });
+  const ring = [];
+  const n = 22;
+  for (let i = 0; i < n; i++) {
+    const t = 0.32 + (i / (n - 1)) * (TAU - 0.64);
+    ring.push(ps(cx, yc - Math.cos(t) * R * 1.02, Math.sin(t) * R * 1.02, 0.0085 * hs, 0.0085 * hs));
+  }
+  kit.loft(ring, { sides: 8, start: 'round', end: 'round', capDepth: 0.006 * hs, color: metal, mat: 'gold', glow: 0.25, bind: bind.head });
+  addUraeus(kit, D, bind, metal, { y: 0.048, size: 1.15 });
+}
+
+/**
+ * A headband with a fan of plumes standing up and back from it. opts: band (color), colors (the
+ * plumes', cycled), n, len (head scales), spread (how far the fan opens), tilt (how far it leans back).
+ */
+export function addPlumes(kit, D, pal, bind, { band, colors, n = 5, len = 0.2, width = 0.034, spread = 0.5, tilt = 0.4, tip = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.006 * hs;
+  const y0 = hy + 0.05 * hs;
+  const rx = 0.1 * hs + g;
+  const rz = 0.088 * hs + g;
+  const cx = hx - 0.002 * hs;
+  kit.loft([vs(y0, rx, rz, cx), vs(y0 + 0.014 * hs, rx + 0.002, rz + 0.002, cx), vs(y0 + 0.028 * hs, rx, rz, cx)],
+    { rings: 3, sides: 24, start: null, end: null, color: band, mat: 'trim', bind: bind.head });
+  for (let i = 0; i < n; i++) {
+    const k = n > 1 ? i / (n - 1) : 0.5;
+    const s = (k - 0.5) * 2;
+    const root = [cx - rx * 0.62, y0 + 0.02 * hs, s * rz * 0.78];
+    const dir = [-tilt - 0.15 * (1 - Math.abs(s)), 1, s * spread];
+    feather(kit, root, dir, [1, 0, s * 0.4], len * hs * (1 - 0.22 * Math.abs(s)), width * hs, {
+      color: colors[i % colors.length], tip, bind: bind.head, bend: [-0.03 * hs, 0, s * 0.02 * hs], rows: 5, thick: 0.003 * hs,
+    });
+  }
 }

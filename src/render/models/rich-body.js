@@ -6,6 +6,7 @@ import { PROFILES } from './unit-bodies.js';
 import { shadeC, mixC } from './unit-geo.js';
 import { vs, ps, B, chain, rigid, mixBind, smoothstep } from './rich-kit.js';
 import { clamp, lerp, gradY } from './rich-paint.js';
+import { BEAST_HEADS, addBeastHead } from './rich-heads.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -253,11 +254,12 @@ function addCyclopsEye(kit, D, pal, bind, fx, glowColor = null) {
   ], { ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: 'round', capDepth: 0.01 * hs, color: pal.hair, mat: 'hair', bind: bind.head });
 }
 
-export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
+/** The stations of the human head (chin to crown), which hoods, wraps and caps are built over. */
+export function headStations(D) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
-  const st = [
+  return [
     vs(hy - 0.1 * hs, 0.046 * hs, 0.04 * hs, hx + 0.03 * hs),
     vs(hy - 0.082 * hs, 0.072 * hs, 0.064 * hs, hx + 0.02 * hs),
     vs(hy - 0.05 * hs, 0.092 * hs, 0.08 * hs, hx + 0.006 * hs),
@@ -267,39 +269,49 @@ export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
     vs(hy + 0.1 * hs, 0.072 * hs, 0.066 * hs, hx - 0.006 * hs),
     vs(hy + 0.112 * hs, 0.04 * hs, 0.04 * hs, hx - 0.007 * hs),
   ];
+}
+
+export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const st = headStations(D);
   const skin = pal.skin;
-  // a giant with a third eye is a Cyclops: one great eye in the middle of the forehead
-  const cyclops = ctx.v.body === 'giant' && ctx.v.extras.includes('third_eye');
-  kit.loft(st, { rings: 12, capDepth: [0.012 * hs, 0.02 * hs], warp: faceWarp(D, cyclops), color: skin, bind: bind.head, paint: skinPaint });
-  // ears
-  for (const side of [1, -1]) {
-    kit.loft([ps(hx - 0.004 * hs, hy - 0.004 * hs, side * 0.082 * hs, 0.017 * hs, 0.027 * hs), ps(hx - 0.004 * hs, hy - 0.004 * hs, side * 0.103 * hs, 0.012 * hs, 0.022 * hs)],
-      { ref: [1, 0, 0], sides: 8, capDepth: 0.006 * hs, color: skin, bind: bind.head });
-  }
-  // the face surface in front of a point: the head ellipse at brow height, plus the brow ridge
-  const faceX = (z) => hx - 0.002 * hs + 0.102 * hs * Math.sqrt(Math.max(0, 1 - (z / (0.09 * hs)) ** 2));
-  // eyes: dark, slightly glossy, set well apart in their sockets
-  const eye = ctx.v.extras.includes('eye_glow') && pal.eyeGlow ? pal.eyeGlow : pal.eye;
-  const glow = ctx.v.extras.includes('eye_glow') ? 1 : 0;
-  if (cyclops) addCyclopsEye(kit, D, pal, bind, faceX(0), glow ? pal.eyeGlow : null);
-  else for (const side of [1, -1]) {
-    const z = side * 0.041 * hs;
-    kit.loft([ps(faceX(z) - 0.012 * hs, hy + 0.012 * hs, z, 0.011 * hs, 0.0155 * hs), ps(faceX(z) - 0.0015 * hs, hy + 0.012 * hs, z, 0.0095 * hs, 0.013 * hs)],
-      { ref: [0, 1, 0], sides: 8, capDepth: 0.004 * hs, color: eye, mat: 'gloss', glow, bind: bind.head });
-    // brow: a short arched bar of the hair color, rising toward the temple
-    kit.loft([
-      ps(faceX(side * 0.018 * hs) + 0.004 * hs, hy + 0.039 * hs, side * 0.018 * hs, 0.005 * hs, 0.0055 * hs),
-      ps(faceX(side * 0.042 * hs) + 0.006 * hs, hy + 0.043 * hs, side * 0.042 * hs, 0.0055 * hs, 0.0058 * hs),
-      ps(faceX(side * 0.066 * hs) + 0.004 * hs, hy + 0.036 * hs, side * 0.066 * hs, 0.004 * hs, 0.0045 * hs),
-    ], { ref: [1, 0, 0], rings: 5, sides: 6, capDepth: 0.004 * hs, color: pal.hair, mat: 'hair', bind: bind.head });
-  }
-  // a thin mouth under the nose (a beard, where there is one, covers it)
-  if (!ctx.v.extras.includes('beard')) {
-    kit.loft([
-      ps(faceX(-0.03 * hs) - 0.004 * hs, hy - 0.052 * hs, -0.03 * hs, 0.004 * hs, 0.004 * hs),
-      ps(faceX(0) - 0.001 * hs, hy - 0.054 * hs, 0, 0.0045 * hs, 0.004 * hs),
-      ps(faceX(0.03 * hs) - 0.004 * hs, hy - 0.052 * hs, 0.03 * hs, 0.004 * hs, 0.004 * hs),
-    ], { ref: [1, 0, 0], rings: 5, sides: 6, capDepth: 0.003 * hs, color: pal.mouth, mat: 'skin', bind: bind.head });
+  if (BEAST_HEADS.has(ctx.v.head)) addBeastHead(kit, D, pal, ctx, bind, skinPaint);
+  else {
+    // a giant with a third eye is a Cyclops: one great eye in the middle of the forehead
+    const cyclops = ctx.v.body === 'giant' && ctx.v.extras.includes('third_eye');
+    kit.loft(st, { rings: 12, capDepth: [0.012 * hs, 0.02 * hs], warp: faceWarp(D, cyclops), color: skin, bind: bind.head, paint: skinPaint });
+    // ears
+    for (const side of [1, -1]) {
+      kit.loft([ps(hx - 0.004 * hs, hy - 0.004 * hs, side * 0.082 * hs, 0.017 * hs, 0.027 * hs), ps(hx - 0.004 * hs, hy - 0.004 * hs, side * 0.103 * hs, 0.012 * hs, 0.022 * hs)],
+        { ref: [1, 0, 0], sides: 8, capDepth: 0.006 * hs, color: skin, bind: bind.head });
+    }
+    // the face surface in front of a point: the head ellipse at brow height, plus the brow ridge
+    const faceX = (z) => hx - 0.002 * hs + 0.102 * hs * Math.sqrt(Math.max(0, 1 - (z / (0.09 * hs)) ** 2));
+    // eyes: dark, slightly glossy, set well apart in their sockets
+    const eye = ctx.v.extras.includes('eye_glow') && pal.eyeGlow ? pal.eyeGlow : pal.eye;
+    const glow = ctx.v.extras.includes('eye_glow') ? 1 : 0;
+    if (cyclops) addCyclopsEye(kit, D, pal, bind, faceX(0), glow ? pal.eyeGlow : null);
+    else for (const side of [1, -1]) {
+      const z = side * 0.041 * hs;
+      kit.loft([ps(faceX(z) - 0.012 * hs, hy + 0.012 * hs, z, 0.011 * hs, 0.0155 * hs), ps(faceX(z) - 0.0015 * hs, hy + 0.012 * hs, z, 0.0095 * hs, 0.013 * hs)],
+        { ref: [0, 1, 0], sides: 8, capDepth: 0.004 * hs, color: eye, mat: 'gloss', glow, bind: bind.head });
+      // brow: a short arched bar of the hair color, rising toward the temple
+      kit.loft([
+        ps(faceX(side * 0.018 * hs) + 0.004 * hs, hy + 0.039 * hs, side * 0.018 * hs, 0.005 * hs, 0.0055 * hs),
+        ps(faceX(side * 0.042 * hs) + 0.006 * hs, hy + 0.043 * hs, side * 0.042 * hs, 0.0055 * hs, 0.0058 * hs),
+        ps(faceX(side * 0.066 * hs) + 0.004 * hs, hy + 0.036 * hs, side * 0.066 * hs, 0.004 * hs, 0.0045 * hs),
+      ], { ref: [1, 0, 0], rings: 5, sides: 6, capDepth: 0.004 * hs, color: pal.hair, mat: 'hair', bind: bind.head });
+    }
+    // a thin mouth under the nose (a beard, where there is one, covers it)
+    if (!ctx.v.extras.includes('beard')) {
+      kit.loft([
+        ps(faceX(-0.03 * hs) - 0.004 * hs, hy - 0.052 * hs, -0.03 * hs, 0.004 * hs, 0.004 * hs),
+        ps(faceX(0) - 0.001 * hs, hy - 0.054 * hs, 0, 0.0045 * hs, 0.004 * hs),
+        ps(faceX(0.03 * hs) - 0.004 * hs, hy - 0.052 * hs, 0.03 * hs, 0.004 * hs, 0.004 * hs),
+      ], { ref: [1, 0, 0], rings: 5, sides: 6, capDepth: 0.003 * hs, color: pal.mouth, mat: 'skin', bind: bind.head });
+    }
   }
   // neck
   const nk = 0.05 * D.k;
@@ -384,6 +396,22 @@ export function addBareLegs(kit, D, bind, skin, skinPaint = null, top = Infinity
     const st = legStations(D, side).filter((s, i) => i < 2 || s.c[1] <= top);
     kit.loft([vs(D.ankleY - 0.03, r * 0.62, r * 0.58, 0, side * D.hipZ), ...st], { rings: 9, start: null, end: top === Infinity ? null : 'round', color: skin, bind: bind.leg[side], paint: skinPaint });
   }
+}
+
+/**
+ * The ring of a list of stations (ascending in height: a limb's, the head's) at height y, standing off its
+ * surface by g: the base of a band, a strap or a wrap that hugs the part.
+ */
+export function ringAt(st, y, g = 0) {
+  for (let i = 0; i + 1 < st.length; i++) {
+    const a = st[i];
+    const b = st[i + 1];
+    if (y <= b.c[1] || i + 2 === st.length) {
+      const t = clamp((y - a.c[1]) / (b.c[1] - a.c[1] || 1e-9));
+      return vs(y, lerp(a.rx, b.rx, t) + g, lerp(a.rz, b.rz, t) + g, lerp(a.c[0], b.c[0], t), lerp(a.c[2], b.c[2], t));
+    }
+  }
+  return st[0];
 }
 
 /**

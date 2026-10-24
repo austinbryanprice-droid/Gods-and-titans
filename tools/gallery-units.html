@@ -11,7 +11,7 @@
       filter=greek,gods,syn-heads,zeus …   comma list: pantheon id, 'mortals', class (god/titan/creature/minion),
                                            'real' (all data units), 'synthetic' or syn-bodies|syn-heads|syn-quadheads|
                                            syn-headgear|syn-weapons|syn-offhands|syn-extras, or an id substring. Default: real.
-      focus=greek_zeus     close-up on one unit (also works with filter)
+      focus=greek_zeus     close-up on one unit: its exact id, else every id containing the text (also works with filter)
       zoom=1.5             magnify (camera distance / zoom)
       team=0..7|mix        team color (PLAYER_COLORS index), mix = cycle per unit
       facing=30            facing in degrees (sim convention, 0 = east, 90 = south toward the camera)
@@ -86,6 +86,8 @@
     const sheet = Q.get('sheet') === '1' || !!film;
     const pitchDeg = Number(Q.get('pitch') || 56);
     const detail = Q.get('detail') === 'rich' ? 'rich' : 'base';
+    const distQ = Q.has('dist') ? Number(Q.get('dist')) : null; // contact sheet: camera distance in unit-scale heights, instead of fitting the whole model
+    const aim = Q.has('aim') ? Number(Q.get('aim')) : null; // contact sheet: look at this height in unit-scale heights (1 = a humanoid's head), with zoom to close in
 
     // ---- controls ----
     const ui = { state: document.getElementById('state'), filter: document.getElementById('filter'), team: document.getElementById('team'), zoom: document.getElementById('zoom') };
@@ -163,7 +165,11 @@
       u.group === t || u.class === t || (t === 'mortals' && !u.pantheon) || u.id.toLowerCase().includes(t));
     const realOnly = Q.get('real') === '1';
     let list = stress ? [] : all.filter((u) => match(u) && (!realOnly || u.pantheon !== 'synthetic'));
-    if (focus) list = list.length ? list.filter((u) => u.id === focus || u.id.includes(focus)) : all.filter((u) => u.id.includes(focus));
+    if (focus) {
+      const pool = list.length ? list : all;
+      const exact = pool.filter((u) => u.id === focus);
+      list = exact.length ? exact : pool.filter((u) => u.id.includes(focus));
+    }
     if (stress) {
       const pool = real;
       for (let i = 0; i < stress; i++) list.push({ ...pool[(i * 7919) % pool.length], group: 'stress' });
@@ -402,11 +408,12 @@
       const { size, center } = m.bounds;
       const radius = Math.max(0.35, 0.5 * Math.hypot(size.x, size.y * 1.1, size.z));
       const halfFov = (sheetCam.fov * Math.PI) / 360;
-      const d = (radius * 0.92) / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * (cell.w / cell.h)))) / zoom;
+      const d = distQ === null ? (radius * 0.92) / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * (cell.w / cell.h)))) / zoom : distQ * (m.p.u.visual.scale || 1);
       sheetCam.aspect = cell.w / cell.h;
       sheetCam.updateProjectionMatrix();
-      sheetCam.position.set(center.x, center.y + d * Math.sin(pitch), center.z + d * Math.cos(pitch));
-      sheetCam.lookAt(center);
+      const look = aim === null ? center : center.clone().setY(aim * (m.p.u.visual.scale || 1));
+      sheetCam.position.set(look.x, look.y + d * Math.sin(pitch), look.z + d * Math.cos(pitch));
+      sheetCam.lookAt(look);
       renderer.setViewport(cx, cy, cell.w, cell.h);
       renderer.setScissor(cx, cy, cell.w - 2, cell.h - 2);
       renderer.render(scene, sheetCam);

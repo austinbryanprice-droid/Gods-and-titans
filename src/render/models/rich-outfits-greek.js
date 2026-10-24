@@ -5,10 +5,10 @@
 // robes, Athena armored over a peplos, Kronos in bronze), the Cyclops in a hide. Overrides only the
 // layers where the Greeks dress differently from the default (rich-outfit-default.js).
 import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
-import { vs, ps } from './rich-kit.js';
+import { vs } from './rich-kit.js';
 import { torsoStations, torsoRing, armStations, addSandals, addBareLegs, legStations } from './rich-body.js';
 import {
-  addTunic, addBelt, addCape, addFurMantle, addPauldrons, addMuscleCuirass, addPteruges, addGreaves, addDrape, addChlamys, addMeander,
+  addTunic, addBelt, addCape, addFurMantle, addPauldrons, addMuscleCuirass, addPteruges, addGreaves, addDrape, addChlamys, addMeander, addLongSkirt, addWaistBelt,
 } from './rich-clothing.js';
 import { addHairCap, addLongHair, addBeard, addHelmet, addLaurel, addCrown, addTallCrown } from './rich-headgear.js';
 import { gradY, hash, mul } from './rich-paint.js';
@@ -56,45 +56,6 @@ function bareTorso(E) {
   kit.loft(torsoStations(D), { rings: 11, start: null, end: 'round', color: skin, bind: bind.torso, paint: skinPaint });
 }
 
-/**
- * A long skirt to the ankles, hugging the body at the waist (clearance `top`); returns the ring at
- * its hem so a border can go on. A wrap over a bare chest needs a waistBelt over its top edge.
- */
-function longSkirt(E, color, { flare = 1, pleat = 0.008, top = 0.008 } = {}) {
-  const { kit, D, bind } = E;
-  const y0 = D.ankleY + 0.05;
-  const rx = D.depth * 0.5 + 0.1 * flare;
-  const rz = D.waistW * 0.5 + 0.11 * flare;
-  const t = torsoRing(D, 0.12, top);
-  kit.loft([
-    vs(y0, rx, rz),
-    vs(y0 + 0.12, D.depth * 0.5 + 0.075 * flare, D.waistW * 0.5 + 0.085 * flare),
-    vs(D.hipY - 0.04, D.depth * 0.5 + 0.045, D.waistW * 0.5 + 0.055),
-    vs(t.y, t.rx, t.rz, t.dx),
-  ], {
-    rings: 7, sides: 36, start: null, end: null, color, bind: bind.skirt,
-    warp: (p, a, u) => {
-      const s = Math.sin(a * 9) * pleat * (1 - u);
-      p[0] += Math.cos(a) * s;
-      p[2] += Math.sin(a) * s;
-    },
-    paint: gradY(y0, D.hipY, 0.8, 1),
-  });
-  return { y0, rx, rz };
-}
-
-/** A broad belt over the top edge of a wrap, with a round clasp at the front. */
-function waistBelt(E, color, clasp, mat = 'trim') {
-  const { kit, D, bind } = E;
-  const a = torsoRing(D, -0.04, 0.05);
-  const b = torsoRing(D, 0.2, 0.034);
-  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs(b.y, b.rx, b.rz, b.dx)], { sides: 18, rings: 3, start: null, end: null, color, mat, bind: bind.torso });
-  const m = torsoRing(D, 0.08, 0.044);
-  const r = 0.026 * D.k;
-  kit.loft([ps(m.dx + m.rx - 0.004, m.y, 0, r, r), ps(m.dx + m.rx + 0.01, m.y, 0, r * 0.85, r * 0.85)],
-    { ref: [0, 1, 0], sides: 12, start: 'round', end: 'round', capDepth: 0.006, color: clasp, mat: 'gold', bind: bind.torso });
-}
-
 /** A girdle just under the breast with a cord that hangs from it. */
 function girdle(E, color) {
   const { kit, D, bind } = E;
@@ -117,7 +78,7 @@ function robe(E) {
   const { kit, D, ctx, pal, bind, tunicColor } = E;
   const gold = pal.accentMetal;
   addTunic(kit, D, tunicColor, bind, 0.04);
-  const sk = longSkirt(E, ctx.skirt || pal.primary);
+  const sk = addLongSkirt(kit, D, bind, ctx.skirt || pal.primary);
   addMeander(kit, bind, sk.y0 - 0.004, sk.rx + 0.004, sk.rz + 0.004, { color: gold, ink: shadeC(pal.secondary, 0.6) });
   // priests and gods wear a second garment folded over the chest; the people's team color stays on the tunic
   if (!E.worker) overfold(E, ctx.mortal ? pal.secondary : shadeC(pal.secondary, 1.1), gold);
@@ -151,24 +112,24 @@ function kilt(E) {
     },
   });
   addDrape(kit, D, bind, shadeC(pal.primary, 0.72), pal.accentMetal, { side: 1, width: 0.3 });
-  waistBelt(E, shadeC(pal.accentMetal, 0.85), pal.accentMetal);
+  addWaistBelt(kit, D, bind, shadeC(pal.accentMetal, 0.85), pal.accentMetal);
 }
 
 function himation(E) {
   // Zeus: a bare chest, a long wrap about the hips, the himation drawn across from the shoulder
   const { kit, D, pal, bind } = E;
   bareTorso(E);
-  const sk = longSkirt(E, pal.primary, { pleat: 0.011, top: 0.024 });
+  const sk = addLongSkirt(kit, D, bind, pal.primary, { pleat: 0.011, top: 0.024 });
   addMeander(kit, bind, sk.y0 - 0.004, sk.rx + 0.004, sk.rz + 0.004, { color: pal.accentMetal, ink: shadeC(pal.secondary, 0.7) });
   addDrape(kit, D, bind, pal.primary, pal.accentMetal, { side: 1, width: 0.34 });
-  waistBelt(E, shadeC(pal.accentMetal, 0.85), pal.accentMetal);
+  addWaistBelt(kit, D, bind, shadeC(pal.accentMetal, 0.85), pal.accentMetal);
 }
 
 function peplos(E) {
   // Athena: a long peplos under her armor, a gold meander at the hem
   const { kit, D, pal, bind, tunicColor } = E;
   addTunic(kit, D, tunicColor, bind, 0.04);
-  const sk = longSkirt(E, pal.primary, { pleat: 0.01 });
+  const sk = addLongSkirt(kit, D, bind, pal.primary, { pleat: 0.01 });
   addMeander(kit, bind, sk.y0 - 0.004, sk.rx + 0.004, sk.rz + 0.004, { color: trimOf(E), ink: shadeC(pal.secondary, 0.65) });
 }
 
@@ -210,7 +171,7 @@ function hide(E) {
     },
     paint: (o, x, y, z, u) => mul(o, 0.8 + 0.3 * hash(Math.round(x * 40), Math.round(z * 40), 1)),
   });
-  waistBelt(E, pal.secondary, pal.accentMetal, 'leather');
+  addWaistBelt(kit, D, bind, pal.secondary, pal.accentMetal, 'leather');
 }
 
 export function legs(E) {

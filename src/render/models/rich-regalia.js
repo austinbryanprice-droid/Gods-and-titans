@@ -2,7 +2,7 @@
 // pieces gods and creatures wear over the garments (rigid pieces riding a bone, or lofts
 // weighted to the skeleton). Flames are the fire giant's; the rest comes with each pantheon.
 import * as THREE from 'three';
-import { MeshKit, ps, vs, B } from './rich-kit.js';
+import { MeshKit, ps, vs, B, rigid } from './rich-kit.js';
 import { finishGear } from './rich-gear.js';
 import { shadeC, mixC, tintC } from './unit-geo.js';
 import { torsoRing } from './rich-body.js';
@@ -268,5 +268,34 @@ export function addChains(E, { wrists = true } = {}) {
       kit.loft([vs(w + 0.004, D.armR * 0.72 + 0.014, D.armR * 0.7 + 0.014, 0, side * D.shoulderZ), vs(w + 0.04, D.armR * 0.78 + 0.016, D.armR * 0.76 + 0.016, 0, side * D.shoulderZ)],
         { sides: 12, start: null, end: null, color: col, mat: 'iron', bind: bind.arm[side] });
     }
+  }
+}
+
+/**
+ * A tail from the small of the back, riding the pelvis. `forked` rises in a curve and splits into
+ * two upright prongs (Set's). opts: color (default the unit's skin), len (scale of the length).
+ */
+export function addTail(E, { color = null, len = 1 } = {}) {
+  const { kit, D, pal } = E;
+  const K = D.k * len;
+  const col = color || pal.skin;
+  const bind = rigid(B.pelvis);
+  const root = torsoRing(D, 0.16, 0);
+  const x0 = root.dx - root.rx + 0.01;
+  const y0 = root.y;
+  // the stem: out and up from the back, a gentle S
+  const stem = [[0, 0, 0.034], [-0.07, 0.008, 0.03], [-0.135, 0.045, 0.026], [-0.168, 0.11, 0.0215], [-0.172, 0.18, 0.0175]];
+  kit.loft(stem.map(([dx, dy, r]) => ps(x0 + dx * K, y0 + dy * K, 0, r * D.k, r * D.k * 0.92)), {
+    ref: [0, 0, 1], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.012 * K, color: col, mat: 'skin', bind,
+    paint: (o, x, y, z, u) => mul(o, 0.9 + 0.1 * u),
+  });
+  // the fork: two prongs curving apart and back up
+  const top = stem[stem.length - 1];
+  for (const side of [1, -1]) {
+    const prong = [[top[0], top[1], 0.0175, 0], [top[0] - 0.004, top[1] + 0.05, 0.0145, 0.012], [top[0] - 0.008, top[1] + 0.105, 0.0105, 0.034], [top[0] - 0.004, top[1] + 0.155, 0.0045, 0.052]];
+    kit.loft(prong.map(([dx, dy, r, dz]) => ps(x0 + dx * K, y0 + dy * K, side * dz * K, r * D.k, r * D.k)), {
+      ref: [0, 0, 1], rings: 7, sides: 7, start: null, end: 'round', capDepth: 0.01 * K, color: col, mat: 'skin', bind,
+      paint: (o, x, y, z, u) => mul(o, 1 - 0.28 * u),
+    });
   }
 }
