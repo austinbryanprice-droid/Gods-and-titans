@@ -48,7 +48,7 @@ const HAIR = '#241b15';
 const shade = (c, k) => (c && c.team ? TEAM(c.team * k, c.mat) : shadeC(c, k));
 
 /** A beard a shade lighter than the hair over it: the curls would not show in black. */
-const beardOf = (pal) => mixC(pal.hair, '#6b5240', 0.3);
+export const beardOf = (pal) => mixC(pal.hair, '#6b5240', 0.3);
 
 /** Who wears what: the people by their work, the rest by name. */
 const NAMED = {
@@ -78,7 +78,7 @@ export function palette(pal, ctx) {
 }
 
 /** A fringed shawl across the chest from one shoulder, the team's color with a border of gold and tassels of wool. */
-function shawl(E, { side = -1, width = 0.34, color = null, trim = GOLD, len = 0.042, fringe = WOOL } = {}) {
+export function shawl(E, { side = -1, width = 0.34, color = null, trim = GOLD, len = 0.042, fringe = WOOL } = {}) {
   const { kit, D, bind } = E;
   const c = color || TEAM(0.95, 'cloth');
   addDrape(kit, D, bind, c, trim, { side, width, cells: [6, 18], fringe: { color: fringe, n: 18, len, r: 0.0045 } });

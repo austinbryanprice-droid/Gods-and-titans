@@ -1149,6 +1149,40 @@ per-frame budget, so a revealed army appears over a few frames.
   four legs swinging at the gallop, the tail's wave), the rider's the humanoid's (lean, twist, arms, cape and hair that
   lag). Costs: 7.5k triangles for the Centaur, 8.8k for the Dullahan (creatures, budget 10.5k), both 1.07 and 1.14 times
   the low-poly height.
+  The insects are two plans. The Egyptian Scarab is a beetle (`rich-insect.js`, `insectSupported`: body `insect`, no head,
+  headgear or weapon, the extras `shell eye_glow`), a plan of its own in `PLANS` (`rich-creatures.js`): one skinned mesh on 27
+  bones, `root`, `body`, `head`, two mandibles, two antennae of two bones and a leg of three bones (`F1u F1l F1p`) for each of
+  `BEETLE_LEGS` (`F1 F-1 M1 M-1 B1 B-1`, the front pair digging, a broad shin with teeth). The shell is lapis with a gold rim
+  and a seam ridge of the team's colour down the back (a thin ridge was 2.9% of the top-down area, so it is widened to 4.8%);
+  `insectLeg` and `bead` are shared with the scorpion. The pose is `applyInsect` (`rich-insect-anim.js`, called by
+  `applyCreature` for plan `insect`; the `insect` case of `unit-anim.js` calls it when the model is rich): a tripod gait from
+  the low-poly keys (`ga` swings each leg about the vertical at its hip, `la` and `lb` lift the two sets, which alternate: a
+  right front leg steps with the left second and the right third), each leg folding as it lifts, the body bobbing and
+  lunging (`bX`) and pitching (`bRz`), the head looking about while it stands and rearing then snapping down in a bite with
+  the mandibles spread and shut, the antennae feeling ahead. The rich rig strides 0.9 (the low-poly default is 1.25: `blendPose`
+  low-passes the keys, so a long stride at a fast cadence sweeps less than the ground goes by and the feet slid). 6.0k
+  triangles, 1.01 times the low-poly height.
+  The Mesopotamian Scorpion Man is a person on a scorpion's body (`rich-scorpion.js`, `scorpionSupported`: body `insect`, a
+  human head, one head, no headgear, the extras `beard long_hair cape armor eye_glow tail`), built as the centaur is: by the
+  humanoid template path (`buildRichTemplate`, `scorpion = v.body === 'insect'`), the person dressed by the pantheon's outfit
+  (`outfitFor(pantheon, 'insect')` lays `SCORPION_OUTFITS[pantheon]` over it, `rich-scorpion-outfits.js`; `richSupported` asks
+  for one, so an insect person of another pantheon keeps the low-poly model), built in a frame with his pelvis at x = 0
+  (`scorpionFrame`: raised so that his waist stands at the top of the carapace), then settled onto the scorpion's middle
+  (`settle`, which moves every bone including the root: the pose reads the root's rest position, `q.root`). `PROFILES.scorpion`
+  is the humanoid's values that the low-poly `insectTemplate` used inline (identical, so the low-poly models are unchanged).
+  The skeleton is the humanoid's 23 bones and 36 of the scorpion's (`addScorpionBones`: `body` under the root, `meso1`,
+  `meso2`, `tail1` to `tail5`, `palpR1 palpR2 palpL1 palpL2` and eight legs of three, `SCORPION_LEGS` `a1 a-1 b1 b-1 c1 c-1 d1
+  d-1`), the pelvis a child of `body`, so the carapace carries him. `addScorpion(E, o)` is the `legs` layer: a carapace of 14
+  stations by 20 sides with a gold rim, an abdomen of seven overlapping scalloped plates with a plate of the team's colour down the back of each,
+  a tail of five segments (`ref [0, 0, 1]`: the tail's path goes vertical, where a ring frame about `[0, 1, 0]` flips) with a
+  bulb and a hooked ivory sting that glows at the tip, eight legs (`insectLeg` with the lighter profile) and two small
+  pincers. The Scorpion Man is bare to the waist with a belt, bronze pauldrons and bands at the arm, a fringed shawl and a
+  headband in the team's colour, black hair rolled at the nape and a curled beard, his bow in the left hand; the shell is
+  chitin of the colour of old bronze, darker than his skin (the same tone read as one body). The pose is `applyScorpion`: the
+  legs as the beetle's with a shorter sweep, the abdomen swaying behind in a wave, the five tail joints curled over the back
+  and uncurling with the thrust of the sting (`st`), the pincers held out and flung wide for the blow, and the person
+  steadied as a rider is (`poseRider`, shared with `applyCentaur`: lean, twist, arms, cape and hair that lag, the pelvis
+  turned back against the body's pitch). 9.6k triangles (a creature's budget is 10.5k), 0.96 times the low-poly height.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

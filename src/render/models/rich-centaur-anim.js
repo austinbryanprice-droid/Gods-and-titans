@@ -3,8 +3,8 @@
 // (rich-creature-anim.js applyQuadruped): body bob / pitch / roll, the barrel bending through its three bones so the hind legs stay
 // planted while the front rises and falls, four legs swinging at the gallop, the tail's wave. The person's is the humanoid's
 // (rich-anim.js applyRich): the torso leaning and twisting, the head riding steady, the arms from the arm keys, cloth and hair that
-// lag behind. The person's pelvis hangs from the horse's withers: it turns back against the pitch and the sway of the horse's front,
-// so the torso stays upright over a galloping horse.
+// lag behind (poseRider, which the scorpion man's torso shares, rich-insect-anim.js). The person's pelvis hangs from the horse's
+// withers: it turns back against the pitch and the sway of the horse's front, so the torso stays upright over a galloping horse.
 import * as THREE from 'three';
 import { B } from './rich-kit.js';
 import { strike } from './rich-anim.js';
@@ -34,23 +34,35 @@ function centaurBones(R) {
   };
 }
 
+const RH = { seed: 0, moving: false, phi: 0, gait: 0, s: 0, attacking: false, k: null, lunge: 0, wind: 0, idle: 0, breath: 0, sway: 0 };
+
+/**
+ * The beat of the moment that the person's motion reads (one object, written afresh by each call): the walk's phase and its sign, the
+ * strike's wind-up / lunge, whether the unit stands idle, its breath and its slow sway.
+ */
+export function rhythm(m, state, t) {
+  const r = RH;
+  r.seed = m.seed;
+  r.moving = m.moving;
+  r.phi = m.walkPhase;
+  r.gait = r.moving ? 1 : 0;
+  r.s = r.moving ? Math.sin(r.phi) : 0;
+  r.attacking = state === 'attack';
+  r.k = strike(r.attacking ? m.ap : undefined, m.rig.weapon === 'bow');
+  r.lunge = r.k.h * (1 - r.k.r);
+  r.wind = r.k.w * (1 - r.k.h);
+  r.idle = !r.moving && state !== 'dead' && !r.attacking ? 1 : 0;
+  r.breath = Math.sin(t * 1.7 + r.seed);
+  r.sway = Math.sin(t * 0.55 + r.seed * 1.7);
+  return r;
+}
+
 /** Pose the skeleton of m (a UnitModel with m.rich on the 'centaur' plan) from its blended pose keys P (applyCreature then syncs the skin). */
 export function applyCentaur(m, R, P, state, t, dt) {
   const q = R.q || (R.q = centaurBones(R));
   const b = R.bones;
-  const rig = m.rig;
-  const seed = m.seed;
-  const moving = m.moving;
-  const phi = m.walkPhase;
-  const gait = moving ? 1 : 0;
-  const s = moving ? Math.sin(phi) : 0;
-  const attacking = state === 'attack';
-  const k = strike(attacking ? m.ap : undefined, rig.weapon === 'bow');
-  const lunge = k.h * (1 - k.r);
-  const wind = k.w * (1 - k.h);
-  const idle = !moving && state !== 'dead' && !attacking ? 1 : 0;
-  const breath = Math.sin(t * 1.7 + seed);
-  const sway = Math.sin(t * 0.55 + seed * 1.7);
+  const r = rhythm(m, state, t);
+  const { seed, gait, s, lunge, wind, idle, breath, sway } = r;
   const alpha = P.bRz;
 
   // the horse: bob and lunge on the root, a roll and a side shift while running; the pitch bends the barrel, so the hind legs stay
@@ -94,8 +106,22 @@ export function applyCentaur(m, R, P, state, t, dt) {
   pel.position.set(q.pelvis.x + 0.025 * lunge - 0.01 * wind, q.pelvis.y - 0.004 * lunge + 0.004 * breath * idle, q.pelvis.z + 0.006 * sway * idle);
   pel.rotation.set(0, -0.7 * yawF, -0.85 * pitchF);
 
-  // the spine: the lean and twist of the torso (the pose's, and a rider's forward lean at the gallop) shared between two joints
-  const lean = (rig.lean || 0) + P.tRz - 0.08 * gait + 0.04 * wind - 0.05 * lunge + 0.012 * breath * idle;
+  // the rider: the torso, the head, the arms, what he carries, the cape and the hair (a rider leans forward at the gallop)
+  poseRider(m, q, b, P, state, t, dt, r, 0.08);
+}
+
+/**
+ * A person's upper body on the humanoid bones, from the pose keys of the arms and the torso: the lean and twist of the spine, the head
+ * riding steady, the arms, what is carried upright on the palm bone (q.carry, if any), the cape streaming and the hair swinging.
+ * `r` is the rhythm of the moment (rhythm()), `forward` how far the person leans into the walk (a rider's, at the gallop). `q.upper`
+ * has the rest x of the two upper arms.
+ */
+export function poseRider(m, q, b, P, state, t, dt, r, forward) {
+  const rig = m.rig;
+  const { seed, phi, moving, gait, s, k, lunge, wind, idle, breath, sway, attacking } = r;
+
+  // the spine: the lean and twist of the torso (the pose's, and the person's forward lean) shared between two joints
+  const lean = (rig.lean || 0) + P.tRz - forward * gait + 0.04 * wind - 0.05 * lunge + 0.012 * breath * idle;
   const twist = P.tRy;
   const roll = P.tRx + 0.02 * sway * idle - 0.03 * s * gait;
   b[B.spine].rotation.set(roll * 0.4, twist * 0.35 + 0.05 * s * gait, lean * 0.42);
@@ -103,7 +129,7 @@ export function applyCentaur(m, R, P, state, t, dt) {
 
   // neck and head: counter the lean so the eyes stay level, look around while standing, dip with a blow
   const look = idle * (0.4 * Math.sin(t * 0.37 + seed * 3) * Math.sin(t * 0.91 + seed) + 0.2 * Math.sin(t * 0.23 + seed * 5));
-  const nod = 0.03 * Math.sin(phi * 2 + 0.6) * gait + 0.012 * breath * idle + 0.25 * P.hRz;
+  const nod = 0.03 * Math.sin(phi * 2 + 0.6) * gait + 0.012 * breath * idle + 0.25 * (P.hRz || 0);
   b[B.neck].rotation.set(0, look * 0.45 - twist * 0.25, -lean * 0.3 + nod * 0.5);
   b[B.head].rotation.set(0.02 * sway * idle, look * 0.55 - twist * 0.3, -lean * 0.32 + nod * 0.5);
 
