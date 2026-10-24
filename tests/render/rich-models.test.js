@@ -19,11 +19,12 @@ const THREE = await import('three');
 const {
   buildUnitModel, getUnitModelInfo, preloadUnitModels, clearUnitModelCache, getUnitMaterial,
 } = await import('../../src/render/models/unit-models.js');
-const { richSupported, buildRichTemplate } = await import('../../src/render/models/rich-humanoid.js');
+const { richSupported, buildRichTemplate, RICH_PANTHEONS } = await import('../../src/render/models/rich-humanoid.js');
 const { BONE_COUNT, B, MeshKit, ps } = await import('../../src/render/models/rich-kit.js');
 const { outfitFor, LAYERS } = await import('../../src/render/models/rich-outfits.js');
 const { RICH_ARMS, RICH_OFFHANDS } = await import('../../src/render/models/rich-arms.js');
 const { RICH_WEAPONS } = await import('../../src/render/models/rich-gear.js');
+const { jaguarSpots, quilt, featherRows } = await import('../../src/render/models/rich-paint.js');
 const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
 const { unitLook } = await import('../../src/render/models/unit-looks.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
@@ -57,6 +58,7 @@ const egyptian = (id) => looks(UNITS[id] || MORTALS[id], 'egyptian');
 const hindu = (id) => looks(UNITS[id] || MORTALS[id], 'hindu');
 const japanese = (id) => looks(UNITS[id] || MORTALS[id], 'japanese');
 const chinese = (id) => looks(UNITS[id] || MORTALS[id], 'chinese');
+const aztec = (id) => looks(UNITS[id] || MORTALS[id], 'aztec');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
@@ -68,6 +70,8 @@ const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hind
 const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amaterasu', 'japanese_susanoo', 'japanese_raijin', 'japanese_inari', 'japanese_tengu', 'japanese_oni', 'japanese_samurai'];
 // every Chinese unit on the humanoid, giant and upright-monkey bodies (Nuwa, the lion, the phoenix and the dragon keep their low-poly models)
 const CHINESE = ['worshipper', 'warrior', 'archer', 'priest', 'chinese_sun_wukong', 'chinese_guan_yu', 'chinese_chang_e', 'chinese_pangu', 'chinese_monkey_clone', 'chinese_clay_warrior', 'chinese_crossbowman'];
+// every Aztec unit on the humanoid body (Quetzalcoatl, Cipactli, the jaguar spirit, the ahuizotl and Xiuhcoatl keep their low-poly models)
+const AZTEC = ['worshipper', 'warrior', 'archer', 'priest', 'aztec_huitzilopochtli', 'aztec_tezcatlipoca', 'aztec_tlaloc', 'aztec_tlaloque', 'aztec_eagle_warrior'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -731,6 +735,195 @@ test('Chinese mortals and gods carry the team\'s color on their cloth, plumes an
 test('the Chinese gods, mortals and the monkeys animate every state without a NaN', () => {
   for (const id of CHINESE) {
     const m = buildUnitModel(chinese(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('the Aztecs dress their own way: the loincloth, quilted armor, feathers and a black-haired people', () => {
+  const base = outfitFor('norse');
+  const az = outfitFor('aztec');
+  for (const layer of LAYERS) assert.equal(typeof az[layer], 'function', `the Aztec ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(az[layer], base[layer], `the Aztecs dress their ${layer} their own way`);
+  assert.equal(typeof az.palette, 'function', 'the people have black hair');
+  assert.equal(typeof az.gear, 'function', 'a macuahuitl, a mirror and a jar are styled');
+  assert.equal(typeof az.skinPaint, 'function', 'the gods\' faces are painted over their skin');
+  assert.equal(typeof az.shield, 'function', 'the sun god\'s shield is not the soldiers\'');
+  assert.ok(RICH_PANTHEONS.has('aztec'), 'the Aztec players get the new characters');
+  assert.ok(!RICH_PANTHEONS.has('celtic'), 'and the Celts, not yet, do not');
+});
+
+test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look; Quetzalcoatl, the crocodile, the jaguar, the ahuizotl and the fire serpent stay low-poly', () => {
+  for (const id of AZTEC) assert.ok(richSupported(aztec(id)), `${id} is supported`);
+  for (const id of ['aztec_quetzalcoatl', 'aztec_cipactli', 'aztec_jaguar_spirit', 'aztec_ahuizotl', 'aztec_xiuhcoatl', 'battering_ram']) assert.ok(!richSupported(aztec(id)), `${id} stays low-poly`);
+  // an Aztec warrior is not a Chinese one
+  assert.notEqual(buildRichTemplate(aztec('warrior')).triangles, buildRichTemplate(chinese('warrior')).triangles);
+  assert.notEqual(buildRichTemplate(aztec('priest')).triangles, buildRichTemplate(chinese('priest')).triangles);
+});
+
+test('the Aztecs carry what they are known by: a macuahuitl, a chimalli, a bow, a staff, a smoking mirror, a jar of rain', () => {
+  const names = (id) => buildRichTemplate(aztec(id)).rich.attach.filter((x) => !x.tool).map((x) => x.name).sort();
+  assert.deepEqual(names('warrior'), ['shield', 'weaponR'], 'a macuahuitl and a chimalli');
+  assert.deepEqual(names('archer'), ['weaponL'], 'a bow');
+  assert.deepEqual(names('priest'), ['weaponR'], 'a staff');
+  assert.deepEqual(names('aztec_eagle_warrior'), ['weaponR'], 'a macuahuitl');
+  assert.deepEqual(names('aztec_huitzilopochtli'), ['shield', 'weaponR'], 'a club and a shield of down');
+  assert.deepEqual(names('aztec_tezcatlipoca'), ['weaponL', 'weaponR'], 'the mirror and a club');
+  assert.deepEqual(names('aztec_tlaloc'), ['weaponR'], 'the lightning');
+  assert.deepEqual(names('aztec_tlaloque'), ['weaponR'], 'a jar');
+  assert.deepEqual(names('worshipper'), [], 'the worshippers\' tools are not held items');
+});
+
+test('the Aztecs hold their things their own way: a flat paddle set with obsidian, a fringed shield, a black mirror, a clay jar', () => {
+  // the same unit under another people's outfit holds the shared item
+  const shared = (id) => ({ ...aztec(id), pantheon: 'norse', lookOf: 'norse' });
+  for (const id of ['warrior', 'aztec_eagle_warrior', 'aztec_huitzilopochtli']) {
+    const mine = pieceSize(aztec(id), 'weaponR');
+    const plain = pieceSize(shared(id), 'weaponR');
+    assert.ok(mine.x > plain.x * 1.3, `${id}: the macuahuitl is longer than the shared weapon (${mine.x.toFixed(2)} against ${plain.x.toFixed(2)})`);
+    assert.ok(mine.z < 0.1 && mine.z < mine.y * 0.5, `${id}: a paddle is flat (${mine.y.toFixed(2)} by ${mine.z.toFixed(2)})`);
+  }
+  // the Smoking Mirror's club is the macuahuitl too: narrower than a blade, its edges cut into teeth
+  const club = pieceSize(aztec('aztec_tezcatlipoca'), 'weaponR');
+  assert.ok(club.y < pieceSize(shared('aztec_tezcatlipoca'), 'weaponR').y * 0.6, 'a paddle is narrower than a blade');
+  assert.ok(pieceTris(aztec('aztec_tezcatlipoca'), 'weaponR') > pieceTris(shared('aztec_tezcatlipoca'), 'weaponR') + 100, 'obsidian teeth are geometry');
+  // a chimalli has a fringe of feathers about its rim; the sun god's has five balls of down as well
+  for (const [id, more] of [['warrior', 120], ['aztec_huitzilopochtli', 150]]) {
+    const mine = pieceSize(aztec(id), 'shield');
+    const plain = pieceSize(shared(id), 'shield');
+    assert.ok(mine.y > plain.y * 1.15, `${id}: the shield and its fringe are larger (${mine.y.toFixed(2)} against ${plain.y.toFixed(2)})`);
+    assert.ok(pieceTris(aztec(id), 'shield') > pieceTris(shared(id), 'shield') + more, `${id}: the fringe is feathers`);
+  }
+  // the mirror: a disc of black glass, smaller than the shared one, with wisps of smoke standing above it
+  const mirror = pieceSize(aztec('aztec_tezcatlipoca'), 'weaponL');
+  const plainMirror = pieceSize(shared('aztec_tezcatlipoca'), 'weaponL');
+  assert.ok(mirror.x > plainMirror.x * 1.25 && mirror.z < plainMirror.z, `the smoke rises above a smaller disc (${mirror.x.toFixed(2)} by ${mirror.z.toFixed(2)})`);
+  assert.ok(pieceTris(aztec('aztec_tezcatlipoca'), 'weaponL') > pieceTris(shared('aztec_tezcatlipoca'), 'weaponL') + 100, 'with its wisps');
+  // the helpers' jar of rain is rounder and lighter than the shared cauldron
+  assert.ok(pieceTris(aztec('aztec_tlaloque'), 'weaponR') < pieceTris(shared('aztec_tlaloque'), 'weaponR'), 'a jar is simpler than a cauldron on its chains');
+  assert.ok(pieceSize(aztec('aztec_tlaloque'), 'weaponR').z < pieceSize(shared('aztec_tlaloque'), 'weaponR').z * 0.85, 'and slimmer');
+  // the macuahuitl is built by the same code for a club and a sword
+  assert.ok(RICH_WEAPONS.has('club') && RICH_WEAPONS.has('sword'));
+});
+
+test('the gods and the eagle warrior wear their regalia: the hummingbird\'s needle, the eagle\'s beak, the rain god\'s fan of plumes', () => {
+  const shared = (id) => ({ ...aztec(id), pantheon: 'norse', lookOf: 'norse' });
+  const box = (u) => bodyBox(buildRichTemplate(u));
+  // the beak of the eagle helm and the needle of the hummingbird helm stand out before the face
+  assert.ok(box(aztec('aztec_eagle_warrior')).max.x > box(shared('aztec_eagle_warrior')).max.x + 0.06, 'the eagle\'s beak');
+  assert.ok(box(aztec('aztec_huitzilopochtli')).max.x > box(shared('aztec_huitzilopochtli')).max.x + 0.15, 'the hummingbird\'s needle');
+  // the fan of plumes behind Tlaloc's shoulders reaches out behind and to the sides
+  const fan = box(aztec('aztec_tlaloc'));
+  const plain = box(shared('aztec_tlaloc'));
+  assert.ok(fan.min.x < plain.min.x - 0.06, 'the fan stands behind him');
+  assert.ok(fan.max.z > plain.max.z + 0.08 && fan.min.z < plain.min.z - 0.08, 'and spreads wider than his shoulders');
+  // the eagle's wing feathers trail from the forearms: wider than the same suit without them
+  assert.ok(box(aztec('aztec_eagle_warrior')).max.z > box(shared('aztec_eagle_warrior')).max.z + 0.02);
+});
+
+test('the gods\' faces are painted: the sun god\'s black band across the eyes, the Smoking Mirror\'s stripes of yellow, nobody else\'s', () => {
+  const az = outfitFor('aztec');
+  const D = { hs: 1, headX: 0.02, headCY: 1.5 };
+  const E = (id, more = {}) => ({ ctx: { unit: { id }, cls: 'infantry' }, worker: false, armor: true, D, ...more });
+  // a vertex on the front of the face, dy above the eyes' line
+  const at = (paint, dy, x = D.headX + 0.1, z = 0) => {
+    const o = { r: 0.5, g: 0.4, b: 0.3, team: 0 };
+    paint(o, x, D.headCY + dy * D.hs, z);
+    return o;
+  };
+  for (const id of ['warrior', 'archer', 'priest', 'aztec_tlaloc', 'aztec_tlaloque', 'aztec_eagle_warrior']) {
+    assert.equal(az.skinPaint(E(id, { armor: id === 'warrior' })), null, `${id} has no face paint`);
+  }
+  assert.equal(az.skinPaint(E('worshipper', { worker: true })), null, 'nor does a worshipper');
+  const sun = az.skinPaint(E('aztec_huitzilopochtli'));
+  assert.ok(at(sun, 0.01).r < 0.1 && at(sun, 0.01).b < 0.1, 'black across the eyes');
+  assert.deepEqual(at(sun, 0.06), { r: 0.5, g: 0.4, b: 0.3, team: 0 }, 'and nothing above it');
+  assert.deepEqual(at(sun, -0.05), { r: 0.5, g: 0.4, b: 0.3, team: 0 }, 'or below');
+  assert.deepEqual(at(sun, 0.01, D.headX - 0.05), { r: 0.5, g: 0.4, b: 0.3, team: 0 }, 'or behind the face');
+  const smoke = az.skinPaint(E('aztec_tezcatlipoca'));
+  const stripe = at(smoke, 0.01);
+  assert.ok(stripe.r > 0.6 && stripe.g > 0.4 && stripe.b < 0.1, 'a stripe of yellow across the eyes');
+  assert.ok(at(smoke, -0.05).r > 0.6, 'and another across the chin');
+  assert.deepEqual(at(smoke, -0.025), { r: 0.5, g: 0.4, b: 0.3, team: 0 }, 'black skin between them');
+  assert.deepEqual(at(smoke, 0.01, D.headX + 0.1, 0.2), { r: 0.5, g: 0.4, b: 0.3, team: 0 }, 'none on the ears');
+});
+
+test('the paints of the Aztec look: a jaguar\'s rosettes, quilting stitched on a diamond grid, rows of feathers', () => {
+  // each paint over a patch of the unit's surface: how much it darkens, and by how much
+  const stat = (paint) => {
+    let dark = 0;
+    let n = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 40; j++) {
+        for (let k = 0; k < 10; k++) {
+          const o = { r: 1, g: 1, b: 1, team: 0 };
+          paint(o, i * 0.0173, j * 0.0171, (k - 5) * 0.0169);
+          n++;
+          if (o.r < 0.9) dark++;
+          min = Math.min(min, o.r);
+          max = Math.max(max, o.r);
+          assert.ok(o.r === o.g && o.g === o.b, 'a shade, not a tint');
+        }
+      }
+    }
+    return { share: dark / n, min, max };
+  };
+  const spots = stat(jaguarSpots(0.05));
+  assert.ok(spots.share > 0.05 && spots.share < 0.3, `rosettes cover some of the pelt (${spots.share.toFixed(2)})`);
+  assert.ok(spots.min < 0.4 && spots.max === 1, 'a dark middle and clear tawny between');
+  const stitches = stat(quilt(0.05, 0.8));
+  assert.ok(stitches.share > 0.25 && stitches.share < 0.5, `the stitching is a grid of lines (${stitches.share.toFixed(2)})`);
+  assert.ok(Math.abs(stitches.min - 0.8) < 1e-9 && stitches.max === 1, 'a shade darker than the cotton');
+  const rows = stat(featherRows({ pitch: 0.04, per: 14 }));
+  assert.ok(rows.min < 0.75 && rows.max > 1.05, 'dark where one feather lies over the next, light on its face');
+  // a seam is stitched, the middle of a quilted diamond is not; on a team-painted vertex the team's color is what is scaled
+  const seam = { r: 1, g: 1, b: 1, team: 1 };
+  quilt(0.05, 0.8)(seam, 0, 0.05, 0);
+  assert.ok(Math.abs(seam.team - 0.8) < 1e-9 && seam.r === 1, 'the stitching on team-colored cotton is a darker team color');
+  const middle = { r: 1, g: 1, b: 1, team: 1 };
+  quilt(0.05, 0.8)(middle, 0, 0.025, 0);
+  assert.equal(middle.team, 1);
+});
+
+test('the Aztec people have black hair, the gods have it too', () => {
+  const az = outfitFor('aztec');
+  const pal = { hair: new THREE.Color('#8a5a3a'), skin: new THREE.Color('#d9a678'), primary: new THREE.Color('#b08a5a') };
+  const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  for (const mortal of [true, false]) {
+    const people = az.palette(pal, { mortal, unit: { id: mortal ? 'warrior' : 'aztec_huitzilopochtli' } });
+    assert.ok(lum(people.hair) < 0.03, 'black hair');
+    assert.equal(people.skin, pal.skin, 'the rest of the palette is kept');
+  }
+  assert.equal(pal.hair.getHexString(), '8a5a3a', 'the shared palette itself is not touched');
+});
+
+test('Aztec mortals, gods and helpers carry the team\'s color on their cloth, plumes and shields, the gold keeps its own', () => {
+  for (const [id, share] of [['worshipper', 0.04], ['warrior', 0.06], ['archer', 0.02], ['priest', 0.03], ['aztec_huitzilopochtli', 0.008], ['aztec_tezcatlipoca', 0.02], ['aztec_tlaloc', 0.02], ['aztec_tlaloque', 0.06], ['aztec_eagle_warrior', 0.15]]) {
+    const fx = buildRichTemplate(aztec(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    let metal = 0;
+    for (let i = 0; i < fx.length; i += 4) {
+      if (fx[i] > 0) team++;
+      if (fx[i + 3] > 0.3) metal++;
+    }
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+    if (id === 'aztec_huitzilopochtli') assert.ok(metal > n * 0.1, `${id}: gold vertices ${metal} of ${n}`);
+  }
+  // the sun god's shield is the team's color too, under its balls of white down
+  const shield = buildRichTemplate(aztec('aztec_huitzilopochtli')).rich.attach.find((a) => a.name === 'shield');
+  const fx = shield.geo.attributes.aFx.array;
+  let team = 0;
+  for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) team++;
+  assert.ok(team > fx.length / 4 * 0.2, `the sun god's shield face is team painted (${team} of ${fx.length / 4})`);
+});
+
+test('the Aztec gods, mortals and the eagle warrior animate every state without a NaN', () => {
+  for (const id of AZTEC) {
+    const m = buildUnitModel(aztec(id), PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();

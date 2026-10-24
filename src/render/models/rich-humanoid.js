@@ -18,7 +18,7 @@ import { BEAST_HEADS } from './rich-heads.js';
 const RICH_BODIES = new Set(['humanoid', 'giant']);
 /** Upright beasts (the body beast_biped: a monkey king and his clones) are dressed on the humanoid rig by the pantheons listed here; the others keep their low-poly beasts. */
 const RICH_BEAST_BIPEDS = new Set(['chinese']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress']);
 const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring']);
 
 /**
@@ -26,7 +26,7 @@ const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skir
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
@@ -139,7 +139,7 @@ export function buildRichTemplate(unitType, detail = 1) {
   const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right)) : null;
   if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece });
   if (items.left.kind === 'offhand' && items.left.id === 'shield') {
-    attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, outfit.shield || {}), shield: true });
+    attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, (typeof outfit.shield === 'function' ? outfit.shield(ctx) : outfit.shield) || {}), shield: true });
   } else if (items.left.kind !== 'none') {
     const left = heldPiece(ctx, P, -1, items.left, 1, leftStyle);
     if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left });

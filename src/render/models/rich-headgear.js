@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { shadeC, tintC } from './unit-geo.js';
 import { vs, ps, smoothstep, mixBind } from './rich-kit.js';
 import { torsoRing } from './rich-body.js';
-import { clamp, lerp, gradY, paints, recolor, mul, hash } from './rich-paint.js';
+import { clamp, lerp, gradY, paints, recolor, mul, hash, featherRows } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
@@ -1218,5 +1218,176 @@ export function addHairpins(kit, D, pal, bind, { metal, bead = null, n = 3 } = {
       kit.loft([ps(base[0], base[1], base[2], 0.0042 * hs), ps(tip[0], tip[1], tip[2], 0.0032 * hs)], { ref: [0, 1, 0.3], rings: 2, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: metal, mat: 'gold', bind: bind.head });
       knob(kit, tip, 0.0105 * hs, { color: bead || metal, mat: bead ? 'gem' : 'gold', glow: bead ? 0.3 : 0, bind: bind.head });
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Aztec headgear: the quetzal-feather crown, the eagle and hummingbird helms, the rain god's face
+// ---------------------------------------------------------------------------
+
+/**
+ * The Mexica's feather crown (copilli): a band at the brow with a fan of long plumes rising from the back of the head and leaning out
+ * and back, and a shorter row of another color in front of it. opts: band (the gold), colors (the long plumes', cycled), inner
+ * (the short row's), tip (their ends), jade (a bead at the brow), n (plumes in the long row), len (scale of the length).
+ */
+export function addQuetzalFan(kit, D, pal, bind, { band, colors, inner = null, tip = null, jade = null, n = 9, len = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.006 * hs;
+  const y0 = hy + 0.05 * hs;
+  const rx = 0.1 * hs + g;
+  const rz = 0.088 * hs + g;
+  const cx = hx - 0.002 * hs;
+  kit.loft([vs(y0, rx, rz, cx), vs(y0 + 0.014 * hs, rx + 0.002, rz + 0.002, cx), vs(y0 + 0.028 * hs, rx, rz, cx)],
+    { rings: 3, sides: 24, start: null, end: null, color: band, mat: 'gold', bind: bind.head });
+  if (jade) knob(kit, [cx + rx + 0.004 * hs, y0 + 0.014 * hs, 0], 0.016 * hs, { color: jade, mat: 'gem', glow: 0.2, bind: bind.head });
+  const row = (count, L, lean, w, cols, tipC, lift) => {
+    for (let i = 0; i < count; i++) {
+      const k = count > 1 ? i / (count - 1) : 0.5;
+      const th = (k - 0.5) * PI * 1.1; // 0 straight back, out to either side
+      const c = Math.cos(th);
+      const s = Math.sin(th);
+      feather(kit, [cx - rx * 0.86 * c, y0 + lift * hs, rz * 0.86 * s], [-lean * c, 1, s * 0.9], [-c, 0.25, s], L * hs * (1 - 0.2 * Math.abs(s)), w * hs, {
+        color: cols[i % cols.length], tip: tipC, bind: bind.head, bend: [-0.04 * hs * L, 0, s * 0.03 * hs], rows: 5, thick: 0.0035 * hs,
+      });
+    }
+  };
+  row(n, 0.3 * len, 0.45, 0.034, colors, tip, 0.02);
+  if (inner) row(Math.max(3, n - 2), 0.2 * len, 0.2, 0.03, [inner].flat(), tip, 0.012);
+}
+
+/**
+ * The eagle warrior's helm: the head of an eagle in feathers, worn like a hood with the face looking out of the open beak: a feathered
+ * cap over the crown, the ears and the nape, the upper beak hooked over the brow, a yellow eye on each side of it, down standing on
+ * the crown and a tuft of long feathers falling behind. opts: plumage (the cap), tip (the pale ends of the feathers), beak, eye, down.
+ */
+export function addEagleHelm(kit, D, pal, bind, { plumage, tip = null, beak, eye, down = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.016 * hs;
+  const dome = [
+    vs(hy - 0.075 * hs, 0.09 * hs + g, 0.078 * hs + g, hx - 0.012 * hs),
+    vs(hy - 0.03 * hs, 0.098 * hs + g, 0.087 * hs + g, hx - 0.006 * hs),
+    vs(hy + 0.02 * hs, 0.103 * hs + g, 0.091 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.06 * hs, 0.099 * hs + g, 0.087 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.098 * hs, 0.078 * hs + g, 0.07 * hs + g, hx - 0.008 * hs),
+    vs(hy + 0.124 * hs, 0.042 * hs + g, 0.04 * hs + g, hx - 0.012 * hs),
+  ];
+  kit.loft(dome, {
+    rings: 8, sides: 22, start: null, end: 'round', capRings: 2, capDepth: 0.018 * hs, color: plumage, mat: 'feather', bind: bind.head,
+    warp: (p, a) => {
+      // the edge: high over the brow, falling past the ear to the nape, so the face stays open
+      const line = hy + 0.062 * hs - 0.12 * hs * smoothstep(0.45, 1.4, Math.abs(wrap(a)));
+      if (p[1] < line) p[1] = line;
+    },
+    paint: featherRows({ pitch: 0.026 * hs, per: 18, cx: hx, dark: 0.66, light: 1.12 }),
+  });
+  // the upper beak: a hooked cone over the brow, deep at its root, its point turned down
+  const bp = [[0.085, 0.083, 0.048, 0.04], [0.14, 0.094, 0.042, 0.036], [0.19, 0.082, 0.032, 0.027], [0.224, 0.052, 0.018, 0.016], [0.23, 0.03, 0.004, 0.004]];
+  kit.loft(bp.map(([x, y, w, h]) => ps(hx + x * hs, hy + y * hs, 0, w * hs, h * hs)), {
+    ref: [0, 0, 1], rings: 7, sides: 10, start: 'round', end: 'round', capRings: 2, capDepth: [0.014 * hs, 0.004 * hs], color: beak, mat: 'gold', bind: bind.head,
+    paint: gradY(hy + 0.03 * hs, hy + 0.1 * hs, 0.8, 1.1),
+  });
+  // the eyes: a yellow disc with a dark pupil on each side of the beak's root
+  for (const side of [1, -1]) {
+    const ex = hx + 0.054 * hs;
+    const ey = hy + 0.07 * hs;
+    kit.loft([ps(ex, ey, side * 0.082 * hs, 0.019 * hs, 0.019 * hs), ps(ex + 0.004 * hs, ey, side * 0.094 * hs, 0.017 * hs, 0.017 * hs)],
+      { ref: [1, 0, 0], sides: 10, start: null, end: 'round', capRings: 2, capDepth: 0.004 * hs, color: eye, mat: 'gloss', glow: 0.25, bind: bind.head });
+    kit.loft([ps(ex + 0.006 * hs, ey, side * 0.0955 * hs, 0.008 * hs, 0.008 * hs), ps(ex + 0.008 * hs, ey, side * 0.0985 * hs, 0.0075 * hs, 0.0075 * hs)],
+      { ref: [1, 0, 0], sides: 8, start: null, end: 'round', capRings: 1, capDepth: 0.002 * hs, color: pal.eye, mat: 'gloss', bind: bind.head });
+  }
+  // down standing on the crown, and a tuft of long feathers behind
+  const d = down || plumage;
+  for (let i = 0; i < 5; i++) {
+    const k = (i - 2) / 2;
+    feather(kit, [hx - 0.012 * hs, hy + 0.118 * hs, k * 0.03 * hs], [-0.5, 1, k * 0.55], [1, 0.2, 0], 0.12 * hs * (1 - 0.2 * Math.abs(k)), 0.026 * hs, { color: d, tip, bind: bind.head, bend: [-0.02 * hs, 0, k * 0.01 * hs], rows: 4, thick: 0.003 * hs });
+  }
+  for (let i = 0; i < 5; i++) {
+    const k = (i - 2) / 2;
+    feather(kit, [hx - 0.104 * hs, hy - 0.03 * hs, k * 0.06 * hs], [-0.5, -1, k * 0.5], [1, 0, 0], 0.17 * hs * (1 - 0.15 * Math.abs(k)), 0.03 * hs, { color: shade(plumage, 0.9), tip, bind: bind.hair, bend: [-0.03 * hs, 0, 0], rows: 4, thick: 0.003 * hs });
+  }
+}
+
+/**
+ * The hummingbird helm of the god of the sun and of war: a gold cap fitted to the crown with a brow band, a long needle of a beak
+ * springing from the brow and pointing forward and up, a jewel for an eye on each side and a crest of iridescent plumes sweeping back
+ * from the crown. opts: gold, beak (default a dark shade of the gold), eye (a gem), crest (the plumes' colors, cycled), tip.
+ */
+export function addHummingbirdHelm(kit, D, pal, bind, { gold, beak = null, eye, crest, tip = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.012 * hs;
+  const dome = [
+    vs(hy - 0.045 * hs, 0.092 * hs + g, 0.08 * hs + g, hx + 0.004 * hs),
+    vs(hy + 0.0 * hs, 0.097 * hs + g, 0.086 * hs + g, hx),
+    vs(hy + 0.035 * hs, 0.102 * hs + g, 0.09 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.072 * hs, 0.095 * hs + g, 0.084 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.102 * hs, 0.072 * hs + g, 0.066 * hs + g, hx - 0.006 * hs),
+    vs(hy + 0.118 * hs, 0.036 * hs + g, 0.036 * hs + g, hx - 0.007 * hs),
+  ];
+  // the rim: high over the brow so the eyes look out, falling past the ear to the nape
+  const rim = (a) => hy + 0.054 * hs - 0.096 * hs * smoothstep(0.5, 1.5, Math.abs(wrap(a)));
+  kit.loft(dome, {
+    rings: 7, sides: 20, start: null, end: 'round', capRings: 2, capDepth: 0.014 * hs, color: gold, mat: 'gold', glow: 0.08, bind: bind.head,
+    warp: (p, a) => { const line = rim(a); if (p[1] < line) p[1] = line; },
+    paint: gradY(hy, hy + 0.13 * hs, 0.8, 1.16),
+  });
+  // the brow band along the rim, and a nape guard of two lames
+  kit.loft([vs(hy + 0.05 * hs, 0.101 * hs + g + 0.004, 0.09 * hs + g + 0.004, hx - 0.001 * hs), vs(hy + 0.078 * hs, 0.1 * hs + g + 0.004, 0.088 * hs + g + 0.004, hx - 0.003 * hs)],
+    { sides: 20, start: null, end: null, color: shade(gold, 0.82), mat: 'gold', bind: bind.head });
+  for (let i = 0; i < 2; i++) {
+    const yt = hy + (0.012 - 0.038 * i) * hs;
+    const rx = (0.104 + 0.012 * i) * hs + g;
+    const rz = (0.093 + 0.012 * i) * hs + g;
+    kit.loft([vs(yt, rx, rz, hx - (0.004 + 0.01 * i) * hs), vs(yt - 0.042 * hs, rx * 1.08, rz * 1.1, hx - (0.012 + 0.01 * i) * hs)], {
+      rings: 2, sides: 20, start: null, end: null, color: i ? shade(gold, 0.88) : gold, mat: 'gold', bind: bind.head,
+      warp: (p, a) => { const k = smoothstep(0.95, 1.75, Math.abs(wrap(a))); p[1] = lerp(hy + 0.012 * hs, p[1], k); },
+    });
+  }
+  // the beak: a needle from the brow, slightly up-curved
+  kit.loft([ps(hx + 0.09 * hs, hy + 0.064 * hs, 0, 0.026 * hs), ps(hx + 0.16 * hs, hy + 0.074 * hs, 0, 0.018 * hs), ps(hx + 0.27 * hs, hy + 0.1 * hs, 0, 0.009 * hs), ps(hx + 0.38 * hs, hy + 0.14 * hs, 0, 0.0025 * hs)],
+    { ref: [0, 0, 1], rings: 6, sides: 8, start: 'round', end: 'round', capRings: 1, capDepth: [0.012 * hs, 0.003 * hs], color: beak || shade(gold, 0.55), mat: 'metal', bind: bind.head });
+  for (const side of [1, -1]) {
+    kit.loft([ps(hx + 0.05 * hs, hy + 0.054 * hs, side * 0.086 * hs, 0.017 * hs, 0.017 * hs), ps(hx + 0.053 * hs, hy + 0.054 * hs, side * 0.098 * hs, 0.014 * hs, 0.014 * hs)],
+      { ref: [1, 0, 0], sides: 10, start: null, end: 'round', capRings: 2, capDepth: 0.004 * hs, color: eye, mat: 'gem', glow: 0.5, bind: bind.head });
+  }
+  // the crest: plumes sweeping back and out over the crown
+  const n = 7;
+  for (let i = 0; i < n; i++) {
+    const k = i / (n - 1);
+    const s = (k - 0.5) * 2;
+    feather(kit, [hx + 0.02 * hs - 0.05 * hs * Math.abs(s), hy + 0.106 * hs - 0.008 * hs * Math.abs(s), s * 0.05 * hs], [-0.85 + 0.2 * Math.abs(s), 0.5, s * 0.8], [0.1, 1, 0], (0.28 - 0.06 * Math.abs(s)) * hs, 0.026 * hs, {
+      color: crest[i % crest.length], tip, bind: bind.head, bend: [-0.02 * hs, -0.05 * hs, s * 0.03 * hs], rows: 5, thick: 0.003 * hs,
+    });
+  }
+}
+
+/**
+ * The rain god's face: a ring of white standing off the face round each eye (the goggles), a curled lip of white across the mouth and
+ * a pair of jaguar fangs hanging from it. opts: ring (the goggles), fang (the teeth), lip (default the ring's color).
+ */
+export function addTlalocMask(kit, D, pal, bind, { ring, fang, lip = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const faceX = (z) => hx - 0.002 * hs + 0.102 * hs * Math.sqrt(Math.max(0, 1 - (z / (0.09 * hs)) ** 2));
+  for (const side of [1, -1]) {
+    const z = side * 0.041 * hs;
+    const fx = faceX(z);
+    const y = hy + 0.012 * hs;
+    kit.loft([ps(fx - 0.006 * hs, y, z, 0.029 * hs, 0.029 * hs), ps(fx + 0.004 * hs, y, z, 0.04 * hs, 0.04 * hs), ps(fx + 0.012 * hs, y, z, 0.038 * hs, 0.038 * hs)],
+      { ref: [0, 1, 0], rings: 3, sides: 14, start: null, end: null, color: ring, mat: 'bone', bind: bind.head });
+  }
+  const l = lip || ring;
+  kit.loft([-0.045, -0.025, 0, 0.025, 0.045].map((z) => ps(faceX(z * hs) + 0.004 * hs, hy - 0.047 * hs, z * hs, 0.0065 * hs, 0.0065 * hs)),
+    { ref: [1, 0, 0], rings: 6, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.005 * hs, color: l, mat: 'bone', bind: bind.head });
+  for (const side of [1, -1]) {
+    const z = side * 0.022 * hs;
+    kit.loft([ps(faceX(z) + 0.001 * hs, hy - 0.048 * hs, z, 0.009 * hs), ps(faceX(z) + 0.01 * hs, hy - 0.072 * hs, z * 1.15, 0.0065 * hs), ps(faceX(z) + 0.014 * hs, hy - 0.1 * hs, z * 1.3, 0.0015 * hs)],
+      { ref: [1, 0, 0], rings: 4, sides: 6, start: null, end: 'round', capRings: 1, capDepth: 0.004 * hs, color: fang, mat: 'bone', bind: bind.head });
   }
 }

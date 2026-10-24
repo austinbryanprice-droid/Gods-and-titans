@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { MeshKit, ps } from './rich-kit.js';
 import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { gripRotation } from './unit-parts.js';
-import { dye, mul } from './rich-paint.js';
+import { dye, mul, lerp } from './rich-paint.js';
+import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -292,6 +293,41 @@ function club(kit, pal, s, { color = null, studs = null, kanabo = false } = {}) 
     kit.loft([ps(dx * r * 0.85, y, dz * r * 0.85, 0.015 * s), ps(dx * (r + 0.045 * s), y + 0.012 * s, dz * (r + 0.045 * s), 0.003 * s)], {
       ref: [0, 1, 0], sides: 5, rings: 2, start: null, end: 'round', capDepth: 0.01 * s, color: stud, mat: 'bone',
     });
+  }
+}
+
+/**
+ * A macuahuitl, the Mexica's sword: a flat paddle of hardwood, broad and rounded at its end, a row of obsidian blades set into each
+ * edge like teeth, a grip wrapped in cord with a gold collar at the paddle and a tassel at the butt. opts: color (the wood), blade (the
+ * obsidian), tassel.
+ */
+function macuahuitl(kit, pal, s, { color = null, blade = null, tassel = null } = {}) {
+  const wood = color || pal.wood;
+  const glass = blade || withMat('#1a1620', 'gloss');
+  const prof = [[0.12, 0.024], [0.2, 0.04], [0.34, 0.05], [0.48, 0.054], [0.6, 0.05], [0.7, 0.036], [0.76, 0.016]];
+  const wAt = (y) => {
+    for (let i = 0; i + 1 < prof.length; i++) if (y <= prof[i + 1][0]) return lerp(prof[i][1], prof[i + 1][1], (y - prof[i][0]) / (prof[i + 1][0] - prof[i][0]));
+    return prof[prof.length - 1][1];
+  };
+  kit.loft(prof.map(([y, w]) => ps(0, y * s, 0, w * s, 0.0125 * s)), {
+    ref: [1, 0, 0], rings: 9, sides: 10, start: 'round', end: 'round', capDepth: [0.012 * s, 0.03 * s], color: wood, mat: 'wood', paint: grain(0.1),
+  });
+  grip(kit, -0.08 * s, 0.14 * s, 0.0235 * s, pal.leather, 5);
+  kit.loft([ps(0, 0.105 * s, 0, 0.03 * s), ps(0, 0.145 * s, 0, 0.032 * s)], { ref: [1, 0, 0], sides: 10, start: null, end: null, color: pal.accentMetal, mat: 'gold' });
+  kit.loft([ps(0, -0.08 * s, 0, 0.024 * s), ps(0, -0.095 * s, 0, 0.028 * s), ps(0, -0.108 * s, 0, 0.018 * s)], { ref: [1, 0, 0], rings: 3, sides: 8, start: null, end: 'round', capDepth: 0.01 * s, color: pal.accentMetal, mat: 'gold' });
+  kit.loft([ps(0, -0.1 * s, 0, 0.011 * s), ps(0.01 * s, -0.17 * s, 0, 0.015 * s), ps(0.014 * s, -0.25 * s, 0, 0.004 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 6, start: 'round', end: 'round', capDepth: [0.008 * s, 0.01 * s], color: tassel || pal.secondary, mat: 'cloth',
+    paint: (o, x, y, z, u, a) => mul(o, 0.8 + 0.3 * Math.abs(Math.sin(a * TAU * 2))),
+  });
+  // the obsidian: a strip of black glass set along each edge, serrated, its teeth pointing outward
+  const teeth = 15;
+  for (const dir of [1, -1]) {
+    kit.sheet(1, teeth * 2, (u, v, out) => {
+      const y = 0.2 + v * 0.54;
+      out[0] = dir * (wAt(y) * 0.96 + u * (Math.round(v * teeth * 2) % 2 ? 0.028 : 0)) * s;
+      out[1] = y * s;
+      out[2] = 0;
+    }, { thick: 0.005 * s, color: glass, inner: glass, mat: 'gloss' });
   }
 }
 
@@ -588,12 +624,12 @@ function yue(kit, pal, s, { shaftColor = null } = {}) {
  */
 export function richWeapon(kit, pal, id, s, opts = {}) {
   switch (id) {
-    case 'sword': sword(kit, pal, s, { flame: !!opts.glowBlade }); return true;
+    case 'sword': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else sword(kit, pal, s, { flame: !!opts.glowBlade }); return true;
     case 'katana': katana(kit, pal, s); return true;
     case 'axe': if (opts.axe === 'yue') yue(kit, pal, s, opts); else axe(kit, pal, s, opts); return true;
     case 'hammer': hammer(kit, pal, s, { glow: opts.runes || null }); return true;
     case 'spear': spear(kit, pal, s, { runes: opts.runes || null }); return true;
-    case 'club': club(kit, pal, s, opts); return true;
+    case 'club': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else club(kit, pal, s, opts); return true;
     case 'bow': if (opts.crossbow) crossbow(kit, pal, s, opts); else bow(kit, pal, s, opts); return true;
     case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else staff(kit, pal, s, opts); return true;
     case 'halberd': halberd(kit, pal, s, opts); return true;
@@ -609,6 +645,8 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
  *   pattern     'wedges' (default, alternating wedges) | 'rings' | 'cross' | 'stripe' | 'checker' | null
  *   boss        'dome' (default) | 'spike' | null;  spine: a ridge up the middle;  studs: a ring of rivets
  *   rim         the rim color (default the unit's metal);  dish: how deep the face is;  dy: moves it down the arm
+ *   puffs       5: balls of down on the face, one in the middle and four about it, puffColor their color (the sun god's shield)
+ *   fringe      { n, colors, tip, len }: feathers hanging from the lower rim (the Mexica's chimalli)
  */
 export function richShield(ctx, D, style = {}) {
   const { pal } = ctx;
@@ -682,6 +720,26 @@ export function richShield(ctx, D, style = {}) {
       const x = Math.cos(a) * W * 0.84;
       const y = cy + Math.sin(a) * H * 0.84;
       kit.loft([ps(x, y, z0 - dish * 0.4, 0.011), ps(x, y, z0 - dish * 0.4 - 0.012, 0.007)], { ref: [1, 0, 0], sides: 6, start: null, end: 'round', capDepth: 0.006, color: iron });
+    }
+  }
+  if (style.puffs) {
+    const pc = style.puffColor || pal.white;
+    for (const [px, py] of style.puffs >= 5 ? [[0, 0], [0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]] : [[0, 0]]) {
+      const x = px * W;
+      const y = cy + py * H;
+      const zz = z0 - dish * 1.2;
+      kit.loft([ps(x, y, zz, 0.036, 0.036), ps(x, y, zz - 0.012, 0.036, 0.036)], { ref: [1, 0, 0], sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: 0.018, color: pc, mat: 'feather' });
+    }
+  }
+  if (style.fringe) {
+    const f = style.fringe;
+    for (let i = 0; i < f.n; i++) {
+      const a = PI * (1.1 + (f.n > 1 ? i / (f.n - 1) : 0.5) * 0.8); // the lower half of the rim
+      const cx = Math.cos(a);
+      const cs = Math.sin(a);
+      feather(kit, [cx * W * 1.0, cy + cs * H * 1.0, z0 - 0.006], [cx * 0.5, cs * 0.35 - 0.8, 0], [0, 0, -1], f.len ?? 0.1, 0.021, {
+        color: f.colors[i % f.colors.length], tip: f.tip || null, rows: 4, thick: 0.003, bend: [0, 0, -0.012],
+      });
     }
   }
   const g = kit.build({ ground: 0, strength: 0.3 });
