@@ -49,12 +49,13 @@ export function featherWings(spec, o) {
     const outer = new MeshKit(null, { sides: 6 });
     const at = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
     const up = [0, 1, 0];
-    // the leading edge: shoulder to wrist to the tip of the hand
+    // the leading edge: shoulder to wrist to the tip of the hand, a flat pad (the arm's muscle and its small feathers), thick at the shoulder
     const tip = [W[0] - 0.06 * S, W[1] + 0.03 * S, W[2] + side * 0.42 * S];
-    inner.loft([ps(R[0], R[1], R[2], 0.022 * S * 1.2), ps(...at(R, W, 0.5), 0.017 * S * 1.2), ps(W[0], W[1], W[2], 0.014 * S * 1.2)],
-      { ref: [1, 0, 0], rings: 4, sides: 6, start: 'round', end: null, capDepth: 0.014 * S, color: shadeC(covertC, 0.82), mat: 'feather' });
-    outer.loft([ps(W[0], W[1], W[2], 0.014 * S * 1.2), ps(...at(W, tip, 0.5), 0.011 * S * 1.2), ps(tip[0], tip[1], tip[2], 0.006 * S)],
-      { ref: [1, 0, 0], rings: 4, sides: 6, start: null, end: 'round', capDepth: 0.01 * S, color: shadeC(covertC, 0.82), mat: 'feather' });
+    const pad = shadeC(covertC, 0.9);
+    inner.loft([ps(R[0], R[1], R[2], 0.05 * S, 0.026 * S), ps(...at(R, W, 0.5), 0.042 * S, 0.02 * S), ps(W[0], W[1], W[2], 0.034 * S, 0.016 * S)],
+      { ref: [1, 0, 0], rings: 5, sides: 8, start: 'round', end: null, capDepth: 0.03 * S, color: pad, mat: 'feather' });
+    outer.loft([ps(W[0], W[1], W[2], 0.034 * S, 0.016 * S), ps(...at(W, tip, 0.5), 0.026 * S, 0.012 * S), ps(tip[0], tip[1], tip[2], 0.008 * S, 0.006 * S)],
+      { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: 'round', capDepth: 0.02 * S, color: pad, mat: 'feather' });
     // secondaries along the inner arm, sweeping back and a little down
     for (let i = 0; i < nSec; i++) {
       const t = 0.08 + (0.86 * i) / Math.max(1, nSec - 1);
@@ -69,15 +70,25 @@ export function featherWings(spec, o) {
       const dir = [-Math.cos(a) * 0.95, -0.06 - 0.12 * (1 - kk), side * Math.sin(a)];
       feather(outer, at(W, tip, kk * 0.5), dir, up, (0.5 + 0.2 * Math.sin(kk * 2.2)) * S * long, 0.04 * S * wide * (7 / nPri) ** 0.5, { color: flightC, tip: o.tip, bend: [-0.02 * S, -0.025 * S, 0], thick: 0.003 * S, rows: 4 });
     }
-    // coverts: shorter feathers over the roots of the flight feathers
-    for (let i = 0; i < 5; i++) {
-      const t = 0.1 + (0.8 * i) / 4;
-      feather(inner, at(R, W, t), [-1, -0.1, side * (0.1 + 0.3 * t)], up, 0.26 * S * long, 0.034 * S * wide, { color: covertC, tip: null, bend: [0, -0.02 * S, 0], thick: 0.003 * S, mat: 'feather', rows: 3 });
+    // coverts: the greater ones over the roots of the flight feathers, a row of small ones lying back from the leading edge over the pad
+    for (let i = 0; i < nSec; i++) {
+      const t = 0.08 + (0.86 * i) / Math.max(1, nSec - 1);
+      feather(inner, at(R, W, t), [-1, -0.1, side * (0.1 + 0.3 * t)], up, 0.26 * S * long, 0.04 * S * wide * (6 / nSec) ** 0.5, { color: covertC, tip: null, bend: [0, -0.02 * S, 0], thick: 0.003 * S, mat: 'feather', rows: 3 });
     }
-    for (let i = 0; i < 4; i++) {
-      const kk = i / 3;
-      const a = lerp(0.3, 1.2, kk);
-      feather(outer, at(W, tip, 0.2 + kk * 0.4), [-Math.cos(a) * 0.95, -0.05, side * Math.sin(a)], up, 0.3 * S * long, 0.034 * S * wide, { color: covertC, tip: null, bend: [-0.01 * S, -0.015 * S, 0], thick: 0.003 * S, rows: 3 });
+    for (let i = 0; i < nSec + 1; i++) {
+      const t = 0.03 + (0.92 * i) / nSec;
+      const q = at(R, W, t);
+      feather(inner, [q[0] + 0.035 * S, q[1] + 0.012 * S, q[2]], [-1, -0.05, side * (0.12 + 0.3 * t)], up, 0.15 * S * long, 0.04 * S * wide * (6 / nSec) ** 0.5, { color: shadeC(covertC, 1.06), tip: null, bend: [0, -0.01 * S, 0], thick: 0.003 * S, mat: 'feather', rows: 2 });
+    }
+    for (let i = 0; i < nPri; i++) {
+      const kk = i / Math.max(1, nPri - 1);
+      const a = lerp(0.3, 1.25, kk);
+      feather(outer, at(W, tip, 0.15 + kk * 0.4), [-Math.cos(a) * 0.95, -0.05, side * Math.sin(a)], up, 0.28 * S * long, 0.036 * S * wide * (7 / nPri) ** 0.5, { color: covertC, tip: null, bend: [-0.01 * S, -0.015 * S, 0], thick: 0.003 * S, rows: 3 });
+    }
+    for (let i = 0; i < 6; i++) {
+      const kk = i / 5;
+      const q = at(W, tip, kk * 0.55);
+      feather(outer, [q[0] + 0.03 * S, q[1] + 0.01 * S, q[2]], [-0.85, -0.04, side * (0.5 + 0.4 * kk)], up, 0.13 * S * long, 0.034 * S * wide, { color: shadeC(covertC, 1.06), tip: null, bend: [-0.005 * S, -0.008 * S, 0], thick: 0.003 * S, rows: 2 });
     }
     const m1 = new THREE.Matrix4().makeTranslation(-spec.pos[b1][0], -spec.pos[b1][1], -spec.pos[b1][2]);
     const m2 = new THREE.Matrix4().makeTranslation(-spec.pos[b2][0], -spec.pos[b2][1], -spec.pos[b2][2]);

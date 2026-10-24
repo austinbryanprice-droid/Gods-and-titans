@@ -701,6 +701,12 @@ export function animateModel(m, state, t, dt, ex) {
       if (state === 'dead') T.wing = -0.5;
       T.fold = restingWings(m, state);
       blendPose(m, T, dt, 26);
+      if (m.rich) {
+        // the skinned rich bird: bones in place of rigid parts and morph hinges
+        applyCreature(m, m.cur, state, t, dt);
+        for (const f of m.rich.flames) inf(f, 'fl', flick);
+        break;
+      }
       const body = m.parts.body;
       body.position.set(m.cur.bX, m.cur.bY, 0);
       body.rotation.z = m.cur.bRz;

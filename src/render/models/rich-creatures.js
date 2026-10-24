@@ -5,9 +5,11 @@
 // rich-humanoid.js asks this file, so it must not import rich-humanoid.js back.
 import { unitContext, normalizeVisual } from './unit-bodies.js';
 import { quadSupported, buildQuadrupedTemplate } from './rich-quadruped.js';
+import { birdSupported, buildBirdTemplate } from './rich-bird.js';
 
 const PLANS = [
   { supported: quadSupported, build: buildQuadrupedTemplate },
+  { supported: birdSupported, build: buildBirdTemplate },
 ];
 
 /** The plan that dresses this unit type, or null (the unit keeps its low-poly model). */

@@ -43,6 +43,7 @@ export function applyCreature(m, P, state, t, dt) {
   const R = m.rich;
   switch (R.plan) {
     case 'quadruped': applyQuadruped(m, R, P, state, t); break;
+    case 'bird': applyBird(m, R, P, state, t, dt); break;
     default: break;
   }
   syncRich(R);
@@ -192,4 +193,90 @@ function applyQuadruped(m, R, P, state, t) {
   legAt(q.legs.FL, P.gFL, P.kFL, true);
   legAt(q.legs.BR, P.gBR, P.kBR, false);
   legAt(q.legs.BL, P.gBL, P.kBL, false);
+}
+
+// ---------------------------------------------------------------------------
+// birds
+// ---------------------------------------------------------------------------
+
+function birdBones(R) {
+  const [root, body, chest, neck1, neck2, head, jaw, earR, earL] = bonesOf(R, ['root', 'body', 'chest', 'neck1', 'neck2', 'head', 'jaw', 'earR', 'earL']);
+  const tail = bonesOf(R, [1, 2, 3, 4].map((i) => `${TAIL_KEYS[0]}${i}`));
+  const leg = (k) => bonesOf(R, [`leg${k}`, `foot${k}`]);
+  return { root, body, chest, neck1, neck2, head, jaw, ears: [earR, earL], tail, legs: [leg('R'), leg('L')], wings: wingBonesOf(R), lag: 0 };
+}
+
+/**
+ * The wings of a bird: the pose's beat (P.wing, in the low-poly rig's units) spread over both bones, the outer one trailing
+ * the inner one by a lag that eases toward the beat (so the primaries bend through the stroke), the whole wing swept forward
+ * on the down stroke and back on the up; a standing bird (P.fold) folds them back along its sides.
+ */
+function poseBirdWings(q, P, state, dt) {
+  const w = q.wings;
+  if (!w) return;
+  const fold = P.fold || 0;
+  const dead = state === 'dead';
+  const flap = dead ? -1.0 : P.wing * 1.15 + 0.05;
+  const k = dt > 0 ? 1 - Math.exp(-9 * Math.min(dt, 0.25)) : 1;
+  q.lag += (flap - q.lag) * k;
+  const lag = q.lag;
+  const rise = clamp(flap - lag, -0.6, 0.6);
+  const sweep1 = (0.06 - 0.12 * clamp(flap, -0.7, 1.2) * 0.4) + fold * 1.1;
+  const sweep2 = 0.1 + fold * 1.0;
+  const a2 = lag - flap - fold * 0.35;
+  const tuck = fold * -1.0;
+  for (const side of [1, -1]) {
+    const w1 = side > 0 ? w.r1 : w.l1;
+    const w2 = side > 0 ? w.r2 : w.l2;
+    _q.setFromAxisAngle(AX_Y, -side * sweep1);
+    _r.setFromAxisAngle(AX_X, -side * (flap * (1 - fold) + tuck));
+    w1.quaternion.copy(_q.multiply(_r));
+    w2.rotation.set(-side * (a2 * (1 - fold) + rise * 0.0), -side * sweep2, 0);
+  }
+}
+
+function applyBird(m, R, P, state, t, dt) {
+  const q = R.q || (R.q = birdBones(R));
+  const seed = m.seed;
+  const k = strike(state === 'attack' ? m.ap : undefined);
+  const lunge = k.h * (1 - k.r);
+  const wind = k.w * (1 - k.h);
+  const dead = state === 'dead';
+  const fold = P.fold || 0;
+  const alpha = P.bRz;
+  const beat = P.wing;
+  const look = Math.sin(t * 0.43 + seed * 3) * Math.sin(t * 0.97 + seed) * (1 - Math.min(1, lunge + wind));
+
+  // body: the pose's pitch and lunge; the head rides steadier than the body, reaching out and down in a strike
+  q.root.position.set(P.bX, P.bY, 0);
+  q.body.rotation.set(0, 0, alpha + 0.02 * beat);
+  q.chest.rotation.set(0, 0, 0.12 * alpha - 0.05 * beat);
+  const reach = 0.5 * lunge - 0.4 * wind;
+  q.neck1.rotation.set(0, 0.5 * look, -0.45 * alpha - 0.35 * reach + 0.03 * beat);
+  q.neck2.rotation.set(0, 0.6 * look, -0.35 * alpha - 0.3 * reach - 0.02 * beat);
+  q.head.rotation.set(0, 0.5 * look, -0.1 * alpha - 0.2 * reach + 0.05 * wind);
+  if (q.jaw) q.jaw.rotation.set(0, 0, -clamp(0.15 + 0.9 * wind + 0.2 * lunge + (state === 'cast' ? 0.7 : 0), 0, 1.3) * 0.5 * (dead ? 0.3 : 1));
+  q.ears.forEach((ear, i) => {
+    if (!ear) return;
+    const side = i === 0 ? 1 : -1;
+    ear.rotation.set(side * 0.1, 0, 0.1 + 0.5 * (wind + lunge));
+  });
+
+  // tail: a wave down its bones, lifted when the beast climbs and dropped on a dive
+  const amp = m.moving ? 1 : 0.5;
+  q.tail.forEach((b, i) => {
+    b.rotation.set(0, Math.sin(m.wavePhase * 0.8 - i * 0.9) * (0.06 + 0.05 * i) * amp, (i === 0 ? -0.35 * alpha + 0.05 * Math.sin(t * 3.2 + seed) : -0.1 * alpha) + (dead ? -0.25 : 0));
+  });
+
+  poseBirdWings(q, P, state, dt);
+
+  // legs: trailing under the tail in flight; forward with the toes spread for a strike; hanging when it stands
+  const fly = 1 - fold;
+  const grab = lunge + 0.5 * wind;
+  q.legs.forEach(([leg, foot], i) => {
+    if (!leg) return;
+    const s = i === 0 ? 1 : -1;
+    leg.rotation.set(0.05 * s * fly, 0, -0.85 * fly * (1 - grab) + 0.5 * grab * fly + 0.04 * Math.sin(t * 2 + seed + i));
+    foot.rotation.set(0, 0, -0.5 * fly * (1 - grab) - 0.3 * grab * fly);
+  });
 }
