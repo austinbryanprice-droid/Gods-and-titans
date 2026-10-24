@@ -150,14 +150,15 @@ export function buildBirdTemplate(unitType, ctx) {
   // plumage: the back a shade toward the second tone, the belly paler, rows of feathers lying toward the tail
   const rows = 34;
   const per = 12;
+  // (a loft hands its paint the angle round the ring as a fraction, 0 at the top)
   const plumage = (o, x, y, z, u, a) => {
-    const c = Math.cos(a);
+    const c = Math.cos(a * TAU);
     tint(o, backC, 0.7 * smoothstep(0.1, 0.9, c));
     tint(o, belly, 0.75 * smoothstep(0.2, 0.95, -c));
     const row = u * rows;
     const i = Math.floor(row);
     const f = row - i;
-    const col = (a / TAU) * per + (i & 1) * 0.5;
+    const col = a * per + (i & 1) * 0.5;
     const cc = col - Math.floor(col);
     const edge = f + 0.34 * (2 * cc - 1) ** 2;
     if (edge < 0.3) mul(o, 0.8);
