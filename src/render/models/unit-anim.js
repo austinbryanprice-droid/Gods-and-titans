@@ -658,6 +658,11 @@ export function animateModel(m, state, t, dt, ex) {
       }
       T.fold = restingWings(m, state);
       blendPose(m, T, dt, 18);
+      if (m.rich) {
+        // the skinned rich spirit: the humanoid bones above the waist, the wisp's chain of bones below it
+        applyRich(m, m.cur, state, t, dt);
+        break;
+      }
       applyHumanoid(m, m.cur);
       const tail = m.parts.tail || m.parts.wisp;
       m.waveA(tail, m.moving ? 1 : 0.35);

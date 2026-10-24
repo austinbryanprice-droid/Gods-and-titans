@@ -271,7 +271,11 @@ export function headStations(D) {
   ];
 }
 
-export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck = true } = {}) {
+/**
+ * The head and neck. opts: neck (false: none), face(faceX) (a unit's own eyes and mouth in place of the default ones, given
+ * the function that returns the x of the face surface in front of a z: the spirits' hollow eyes and wailing mouth).
+ */
+export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck = true, face = null } = {}) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
@@ -292,7 +296,8 @@ export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck 
     // eyes: dark, slightly glossy, set well apart in their sockets
     const eye = ctx.v.extras.includes('eye_glow') && pal.eyeGlow ? pal.eyeGlow : pal.eye;
     const glow = ctx.v.extras.includes('eye_glow') ? 1 : 0;
-    if (cyclops) addCyclopsEye(kit, D, pal, bind, faceX(0), glow ? pal.eyeGlow : null);
+    if (face) face(faceX);
+    else if (cyclops) addCyclopsEye(kit, D, pal, bind, faceX(0), glow ? pal.eyeGlow : null);
     else for (const side of [1, -1]) {
       const z = side * 0.041 * hs;
       kit.loft([ps(faceX(z) - 0.012 * hs, hy + 0.012 * hs, z, 0.011 * hs, 0.0155 * hs), ps(faceX(z) - 0.0015 * hs, hy + 0.012 * hs, z, 0.0095 * hs, 0.013 * hs)],
@@ -305,7 +310,7 @@ export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck 
       ], { ref: [1, 0, 0], rings: 5, sides: 6, capDepth: 0.004 * hs, color: pal.hair, mat: 'hair', bind: bind.head });
     }
     // a thin mouth under the nose (a beard, where there is one, covers it)
-    if (!ctx.v.extras.includes('beard')) {
+    if (!face && !ctx.v.extras.includes('beard')) {
       kit.loft([
         ps(faceX(-0.03 * hs) - 0.004 * hs, hy - 0.052 * hs, -0.03 * hs, 0.004 * hs, 0.004 * hs),
         ps(faceX(0) - 0.001 * hs, hy - 0.054 * hs, 0, 0.0045 * hs, 0.004 * hs),

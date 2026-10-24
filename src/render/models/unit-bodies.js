@@ -352,6 +352,13 @@ export const PROFILES = {
     upper: 0.17, fore: 0.17, armR: 0.055, handR: 0.068, headR: 0.15, headY: 0.92, headX: 0.07,
     padR: 0.085, lean: -0.18, bare: true, weaponSize: 1.1,
   },
+  // (a spirit stands taller in the waist than a person and leans into its drift, as the low-poly torso is turned by; below the hip it has a wisp, not legs)
+  spirit: {
+    hipY: 0.5, hipZ: 0.085, thigh: 0.245, legR: 0.056, footL: 0.15, footH: 0.06,
+    waistW: 0.25, chestW: 0.36, depth: 0.17, chestD: 0.21, shoulderY: 0.86, shoulderZ: 0.2,
+    upper: 0.185, fore: 0.17, armR: 0.044, handR: 0.048, headR: 0.122, headY: 1.03, headX: 0.012,
+    padR: 0.075, lean: -0.08, bare: false, weaponSize: 1,
+  },
 };
 
 function armColorFor(ctx, P) {
@@ -1038,7 +1045,7 @@ function humanoidTemplate(ctx, profileName) {
 
 function spiritTemplate(ctx) {
   const { v, pal } = ctx;
-  const P = { ...PROFILES.humanoid, hipY: 0.5, shoulderY: 0.86, headY: 1.03 };
+  const P = { ...PROFILES.spirit };
   const parts = [];
   const items = humanoidItems(v);
   parts.push({ name: 'pelvis', parent: null, pos: [0, P.hipY, 0], geo: null });

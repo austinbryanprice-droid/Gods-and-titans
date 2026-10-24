@@ -1076,6 +1076,26 @@ per-frame budget, so a revealed army appears over a few frames.
   `skinPaint` hook and denser lofts for the spots to show on), a crest and a bushy tail, the Sasabonsam in a rag, iron
   bands, claws and hook feet. Costs: 5.4k triangles for the Vanara, 7.3k for the Sasabonsam, 7.6k for the Bultungin and
   8.3k for the Ugallu (a minion's budget is 8.5k).
+  The spirits (the Greek Shade and the Celtic Banshee) ride the humanoid's skeleton and pose code as well (`RICH_BODIES`
+  takes `spirit`), on a `spirit` profile in `unit-bodies.js` (the low-poly spirit's own proportions, now one shared
+  object: a tall waist, a lean into the drift). Below the waist there is a wisp in place of legs: `humanoidSpec(d, {
+  tail })` appends a chain of bones after the pelvis' (`tail0` to `tail3`, each the child of the one before, the first
+  of the pelvis; `spec.tail = { first, count }`, and `spec.wing` says whether the wing bones are there), a bell of
+  cloth and eleven ragged tongues are skinned along the chain with `alongPath` (`rich-spirit.js`), and a robe blends
+  the torso's weights into the wisp's at the hip. Above it: the robe with the team's sash, a torn shawl, sleeves that
+  open wide over bare forearms, long thin hands with curling fingers, and a hood drawn up to a peak (the Shade) or a
+  veil, a circlet and long hair (the Banshee). A spirit is not dressed by its pantheon: `outfitFor(pantheon, body)`
+  gives the body `spirit` the one `SPIRIT` outfit, coloured by the unit's palette (its `palette` hook brings a pale
+  gown down to where the sun and the bloom do not burn it out to white), with two new outfit hooks, `hands(E)` and
+  `face(E)`, for its own hands and its hollow burning eyes and mouth (a frown on the Shade, a wail on the Banshee;
+  `addHeadAndNeck` takes a `face` option). The body is see-through: a paint may set `out.alpha`, and a built mesh with
+  a faded vertex carries a four-component `color` attribute (three.js reads the fourth as the vertex's alpha);
+  `ghostly(kit)` scales it by 0.88, keeps what glows strongly (the eyes) solid and gives the rest a faint light of
+  its own so that a spirit still reads at dusk. The skinned ghost material is opacity 1 and depth-writing: its
+  translucency is the vertices', faint toward the hem and the tips of the tongues and the hair. The pose code is
+  `applyRich`'s (the `spirit` case of `unit-anim.js` keeps its float, lean and raised arms) plus `poseTail`, a wave
+  that runs down the chain from `wavePhase`: it sways a still spirit and, quicker, lays the wisp back along the air
+  behind a moving one. Costs: 6.2k triangles for the Shade (a minion), 7.6k for the Banshee.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
