@@ -221,8 +221,9 @@ export function buildQuadrupedTemplate(unitType, ctx) {
   const bodyBind = alongPath(bodyBones, bodyPts);
   // a coat: the back a shade toward the second tone, the belly paler, streaks of hair
   const rosettes = head === 'cat' ? jaguarSpots(0.045) : null;
+  // (a loft hands its paint the angle round the ring as a fraction, 0 at the top)
   const coat = (o, x, y, z, u, a) => {
-    const c = Math.cos(a);
+    const c = Math.cos(a * 2 * PI);
     tint(o, backC, 0.7 * smoothstep(0.1, 0.9, c));
     tint(o, belly, 0.8 * smoothstep(0.2, 0.95, -c));
     furStreaks(o, x, y, z);
@@ -300,7 +301,7 @@ export function buildQuadrupedTemplate(unitType, ctx) {
     kit.loft(st, {
       ref: [1, 0, 0], rings: 12, sides: 10, start: null, end: null, color: fur, bind,
       paint: (o, x, y, z, u, a) => {
-        coat(o, x, y, z, u, 0.62 * PI);
+        coat(o, x, y, z, u, 0.31);
         tint(o, dark, 0.45 * smoothstep(leg * 0.5, leg * 0.1, y));
       },
     });
