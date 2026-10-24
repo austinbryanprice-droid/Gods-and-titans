@@ -925,7 +925,7 @@ per-frame budget, so a revealed army appears over a few frames.
   beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
   `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
   motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
-  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, the Aztecs, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
+  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, the Aztecs, the Celts, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
   pins the choice for tools. The bones live outside the scene graph (detached bind mode): `applyRich`
   ends with `syncRich`, and rigid pieces (weapon, shield, tools, flames, cargo, wings) ride mounts
   (`mountOn`), so the pose costs nothing on frames where a unit does not animate. Winged units get
@@ -963,8 +963,18 @@ per-frame budget, so a revealed army appears over a few frames.
   (`jaguarSpots` paint) and obsidian mirror, Tlaloc's goggles and fangs (`addTlalocMask`) with a fan of
   plumes at his back (`addQuetzalBack`); the macuahuitl (`rich-gear.js`: a flat paddle with obsidian
   teeth on both edges, built for a club or a sword), a chimalli with a fringe of feathers (and the sun
-  god's five balls of down), a clay jar of rain; an outfit's `shield` may be a function of the unit
-  as well as a style object). Gods with more than two arms carry the extra two pairs as one rigid
+  god's five balls of down), a clay jar of rain; `rich-outfits-celtic.js`: long dresses under a plaid
+  shawl for the people, trews woven in a check (`tartan` paint) and a mail shirt (`addMailShirt`,
+  `mailSheen` paint) under a plaid brat pinned with a penannular brooch (`addBrooch`) for the soldiers,
+  the torc (`addTorc`) at every neck, the tall oval shield with its spine, a bronze band and studs
+  (`richShield` `band`, `roundels`), the druid's white robe, antlers (`addAntlers`) and oak staff with a
+  crescent of gold, the Woad Raiders' bare skin painted in bands of blue (`skinPaint`) with limed hair
+  and a double axe, the Dagda's fur mantle and studded club, the Morrigan's raven (`addRaven`, a rigid
+  piece on the chest bone) and crown of feathers, Lugh's golden mail, Brigid's crown of flame
+  (`addFlameCrown`, flickering like the Hindu arch) and torch, Balor's plaid kilt and iron torc; an
+  outfit's `gear` may ask the gear builder for a weapon that is not in `RICH_WEAPONS` (`build: true`:
+  the double axe, the torch), and a held piece with a flicker morph flickers; an outfit's `shield` may
+  be a function of the unit as well as a style object). Gods with more than two arms carry the extra two pairs as one rigid
   piece on the chest bone (`extraArmsPiece` in `rich-regalia.js`: each hand holds an item the arm
   builders already make, moved into place with `MeshKit.placed`); such units get a separate
   triangle allowance (`multi_arms` in the test).

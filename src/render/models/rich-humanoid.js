@@ -18,7 +18,7 @@ import { BEAST_HEADS } from './rich-heads.js';
 const RICH_BODIES = new Set(['humanoid', 'giant']);
 /** Upright beasts (the body beast_biped: a monkey king and his clones) are dressed on the humanoid rig by the pantheons listed here; the others keep their low-poly beasts. */
 const RICH_BEAST_BIPEDS = new Set(['chinese']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress', 'antlers', 'flame']);
 const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring']);
 
 /**
@@ -26,7 +26,7 @@ const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skir
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec', 'celtic']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
@@ -66,11 +66,12 @@ function heldPiece(ctx, P, side, item, sizeK = 1, style = null) {
   else if (item.kind === 'offhand') grip = id === 'lantern' ? 'hang' : 'fwd';
   if (grip === 'fist') return null;
   const size = P.weaponSize * sizeK;
-  const built = item.kind === 'offhand' ? RICH_OFFHANDS.has(id) : (item.kind === 'weapon' || item.kind === 'bow') && (RICH_WEAPONS.has(id) || RICH_ARMS.has(id));
+  // (style.build: the pantheon's outfit builds this weapon with rich-gear.js although it is not one of RICH_WEAPONS: the double axe, the torch)
+  const built = item.kind === 'offhand' ? RICH_OFFHANDS.has(id) : (item.kind === 'weapon' || item.kind === 'bow') && (RICH_WEAPONS.has(id) || RICH_ARMS.has(id) || !!(style && style.build));
   if (built) {
     const kit = new MeshKit(null, { sides: 10 });
     const opts = { glowBlade: ctx.grand && id === 'sword', runes: ctx.grand && (id === 'hammer' || id === 'spear') ? pal.glow : null, ...style };
-    if (RICH_WEAPONS.has(id)) richWeapon(kit, pal, id, size, opts);
+    if (RICH_WEAPONS.has(id) || (style && style.build)) richWeapon(kit, pal, id, size, opts);
     else richArm(kit, pal, id, size, opts);
     return finishGear(kit, handFrame(P, side, grip));
   }
@@ -137,12 +138,14 @@ export function buildRichTemplate(unitType, detail = 1) {
   const styleOf = (item) => (outfit.gear ? outfit.gear(ctx, item) : null);
   const leftStyle = styleOf(items.left);
   const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right)) : null;
-  if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece });
+  // (a held piece with a flame in it, a torch, flickers like the flames on a fire giant)
+  const flickers = (g) => (g.morphAttributes.position ? { flicker: true } : {});
+  if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece, ...flickers(rightPiece) });
   if (items.left.kind === 'offhand' && items.left.id === 'shield') {
     attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, (typeof outfit.shield === 'function' ? outfit.shield(ctx) : outfit.shield) || {}), shield: true });
   } else if (items.left.kind !== 'none') {
     const left = heldPiece(ctx, P, -1, items.left, 1, leftStyle);
-    if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left });
+    if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left, ...flickers(left) });
   }
   const rig = {
     hipY: P.hipY, thigh: P.thigh, lean: P.lean, shoulderY: P.shoulderY,

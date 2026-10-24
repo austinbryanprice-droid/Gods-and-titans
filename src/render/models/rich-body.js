@@ -332,7 +332,7 @@ export function addHands(kit, D, pal, bind, color, skinPaint = null) {
   }
 }
 
-export function addBoots(kit, D, pal, bind, color, cuff) {
+export function addBoots(kit, D, pal, bind, color, cuff, { top: shaft = null } = {}) {
   const r = D.legR;
   for (const side of [1, -1]) {
     const z = side * D.hipZ;
@@ -344,7 +344,7 @@ export function addBoots(kit, D, pal, bind, color, cuff) {
       ps(r * 2.3, h * 0.4, z, h * 0.4, r * 0.72),
     ], { ref: [0, 1, 0], rings: 8, sides: 10, capDepth: h * 0.38, color, mat: 'leather', bind: rigid(side > 0 ? B.footR : B.footL), paint: gradY(0, 0.03, 0.7, 1) });
     // shaft up to the calf, with a folded cuff
-    const top = bootTop(D);
+    const top = shaft ?? bootTop(D);
     const ls = legStations(D, side, 0.007).filter((s) => s.c[1] <= top + 0.01);
     ls[ls.length - 1] = vs(top, ls[ls.length - 1].rx, ls[ls.length - 1].rz, ls[ls.length - 1].c[0], z);
     kit.loft(ls, { rings: 6, start: null, end: null, color, mat: 'leather', bind: bind.leg[side], paint: gradY(0, 0.14, 0.78, 1) });

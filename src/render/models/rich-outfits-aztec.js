@@ -9,11 +9,11 @@
 // is a shield face, a crest feather, a headband, bands on the arms or the plumes of a crown. Overrides only the layers
 // where the Mexica dress differently from the default (rich-outfit-default.js).
 import { TEAM, shadeC, withMat } from './unit-geo.js';
-import { vs, ps } from './rich-kit.js';
+import { ps } from './rich-kit.js';
 import { torsoStations, armStations, legFrom, addSandals, addBareLegs } from './rich-body.js';
 import {
   addTunic, addCape, addDrape, addGarland, addPauldrons, addPteruges, addLongSkirt, addHem, addSash, addBelt, addAnkles, addFurMantle,
-  addMaxtlatl, addIchcahuipilli, addLegBands,
+  addMaxtlatl, addIchcahuipilli, addLegBands, addArmBands,
 } from './rich-clothing.js';
 import {
   addHairCap, addLongHair, addHeadband, addPlumes, addQuetzalFan, addEagleHelm, addHummingbirdHelm, addTlalocMask,
@@ -81,25 +81,6 @@ function bareTorso(E) {
 function sandals(E, strap = LEATHER, sole = shadeC(LEATHER, 0.9)) {
   const { kit, D, pal, bind, skin, skinPaint } = E;
   addSandals(kit, D, pal, bind, { skin, skinPaint, sole, strap });
-}
-
-/** A band round the top of each upper arm and a cuff at each wrist. */
-function armBands(E, { upper = null, wrist = null, mat = 'gold' } = {}) {
-  const { kit, D, bind } = E;
-  const w = D.shoulderY - 0.02 - D.upper - D.fore;
-  for (const side of [1, -1]) {
-    const bd = bind.arm[side];
-    const z = side * D.shoulderZ;
-    if (upper) {
-      const y = D.shoulderY - 0.02 - D.upper * 0.42;
-      kit.loft([vs(y - 0.016, D.armR * 1.06 + 0.012, D.armR * 1.03 + 0.012, 0, z), vs(y + 0.016, D.armR * 1.07 + 0.012, D.armR * 1.04 + 0.012, 0, z)],
-        { sides: 12, start: null, end: null, color: upper, mat, bind: bd });
-    }
-    if (wrist) {
-      kit.loft([vs(w + 0.012, D.armR * 0.66 + 0.009, D.armR * 0.64 + 0.009, 0, z), vs(w + D.fore * 0.5, D.armR * 0.86 + 0.009, D.armR * 0.84 + 0.009, 0.002, z)],
-        { sides: 12, rings: 3, start: null, end: null, color: wrist, mat, bind: bd });
-    }
-  }
 }
 
 /** The ears' discs: a round plug of gold or jade set in each lobe. */
@@ -260,28 +241,28 @@ export function arms(E) {
   }
   switch (dress) {
     case 'warrior':
-      armBands(E, { upper: shade(pal.secondary, 0.95), wrist: COTTON, mat: 'cloth' });
+      addArmBands(kit, D, bind, { upper: shade(pal.secondary, 0.95), wrist: COTTON, mat: 'cloth' });
       break;
     case 'archer':
-      armBands(E, { wrist: COTTON, mat: 'cloth' });
+      addArmBands(kit, D, bind, { wrist: COTTON, mat: 'cloth' });
       break;
     case 'eagle':
-      armBands(E, { wrist: GOLD });
+      addArmBands(kit, D, bind, { wrist: GOLD });
       wingFeathers(E);
       break;
     case 'huitzilopochtli':
-      armBands(E, { upper: GOLD, wrist: GOLD });
+      addArmBands(kit, D, bind, { upper: GOLD, wrist: GOLD });
       break;
     case 'tezcatlipoca':
       // the team's color on his upper arms, gold at the wrists
-      armBands(E, { upper: TEAM(0.95, 'cloth'), mat: 'cloth' });
-      armBands(E, { wrist: GOLD });
+      addArmBands(kit, D, bind, { upper: TEAM(0.95, 'cloth'), mat: 'cloth' });
+      addArmBands(kit, D, bind, { wrist: GOLD });
       break;
     case 'tlaloc':
-      armBands(E, { upper: TURQ_GEM, wrist: TURQ_GEM, mat: 'gem' });
+      addArmBands(kit, D, bind, { upper: TURQ_GEM, wrist: TURQ_GEM, mat: 'gem' });
       break;
     default: // the helpers
-      armBands(E, { wrist: TURQUOISE, mat: 'cloth' });
+      addArmBands(kit, D, bind, { wrist: TURQUOISE, mat: 'cloth' });
   }
 }
 

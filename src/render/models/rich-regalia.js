@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { MeshKit, ps, vs, B, rigid } from './rich-kit.js';
 import { finishGear, richWeapon } from './rich-gear.js';
 import { richArm } from './rich-arms.js';
-import { shadeC, mixC, tintC } from './unit-geo.js';
+import { shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { torsoRing } from './rich-body.js';
 import { feather } from './rich-feathers.js';
 import { hash, lerp, clamp, gradY, mul, tint, recolor } from './rich-paint.js';
@@ -108,6 +108,78 @@ export function addPrabhavali(E, { size = 1, tongues = 7 } = {}) {
   }
   const o = spec.pos[B.head];
   return { name: 'prabhavali', bone: B.head, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])), flicker: true };
+}
+
+/**
+ * A crown of flame, Brigid's: a gold fillet round the brow and tongues of fire standing up from it, the tallest at the front and
+ * the back and a few shorter between (rides the head bone, flickers). opts: tongues, size.
+ */
+export function addFlameCrown(E, { tongues = 9, size = 1 } = {}) {
+  const { D, pal, spec } = E;
+  const hs = D.hs;
+  const kit = new MeshKit(null, { sides: 6 });
+  const cx = D.headX - 0.002 * hs;
+  const y0 = D.headCY + 0.05 * hs;
+  const rx = 0.1 * hs + 0.014 * hs;
+  const rz = 0.088 * hs + 0.014 * hs;
+  kit.loft([vs(y0, rx, rz, cx), vs(y0 + 0.015 * hs, rx + 0.002, rz + 0.002, cx), vs(y0 + 0.03 * hs, rx, rz, cx)],
+    { rings: 3, sides: 24, start: null, end: null, color: pal.accentMetal, mat: 'gold', glow: 0.15 });
+  for (let i = 0; i < tongues; i++) {
+    const th = (i / tongues) * TAU;
+    const c = Math.cos(th);
+    const sn = Math.sin(th);
+    const wob = 0.82 + 0.36 * hash(i, 3, 8);
+    const base = [cx + c * (rx - 0.004), y0 + 0.022 * hs, sn * (rz - 0.004)];
+    const dir = [c * 0.28 - 0.1, 1, sn * 0.34];
+    const l = Math.hypot(...dir);
+    tongue(kit, pal, base, dir.map((x) => x / l), (0.12 + 0.07 * Math.abs(c)) * hs * size * wob, 0.027 * hs * size, { bend: 0.3, k: 0.35, sides: 5, n: 4, rings: 4, cap: 2 });
+  }
+  const o = spec.pos[B.head];
+  return { name: 'flameCrown', bone: B.head, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])), flicker: true };
+}
+
+/**
+ * A raven perched on a shoulder, the Morrigan's: a glossy black bird with its wings folded and its tail down behind, its head turned
+ * toward the ear and an ember in its eye, riding the chest bone. opts: side (-1 the left shoulder), size, color (the plumage), eye.
+ */
+export function addRaven(E, { side = -1, size = 1, color = null, eye = null } = {}) {
+  const { D, pal, spec } = E;
+  const K = D.k * size;
+  const kit = new MeshKit(null, { sides: 8 });
+  const black = color || withMat('#16141c', 'feather');
+  const sheen = mixC(black, '#46528a', 0.55);
+  const bill = withMat('#25252c', 'bone');
+  const ember = eye || tintC(pal.eyeGlow || pal.glow, 0.2);
+  // the bird in a frame of its own: feet at the origin, facing +x, up +y
+  const stations = [[-0.075, 0.062, 0.011, 0.013], [-0.035, 0.064, 0.027, 0.027], [0.008, 0.07, 0.035, 0.032], [0.045, 0.082, 0.03, 0.026], [0.062, 0.098, 0.018, 0.018]];
+  kit.loft(stations.map(([x, y, ry, rz]) => ps(x * K, y * K, 0, ry * K, rz * K)), {
+    ref: [0, 1, 0], rings: 8, sides: 8, start: 'round', end: 'round', capDepth: [0.014 * K, 0.012 * K], color: black, mat: 'feather',
+    paint: (o, x, y, z, u) => mul(o, 0.86 + 0.3 * Math.sin(u * PI)),
+  });
+  kit.loft([ps(0.07 * K, 0.108 * K, 0, 0.02 * K, 0.019 * K), ps(0.08 * K, 0.108 * K, 0, 0.02 * K, 0.019 * K)],
+    { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: 0.02 * K, color: black, mat: 'feather' });
+  kit.loft([ps(0.088 * K, 0.108 * K, 0, 0.012 * K, 0.0105 * K), ps(0.108 * K, 0.105 * K, 0, 0.0095 * K, 0.0085 * K), ps(0.132 * K, 0.097 * K, 0, 0.0025 * K, 0.0025 * K)],
+    { ref: [0, 1, 0], rings: 4, sides: 6, start: null, end: 'round', capDepth: 0.006 * K, color: bill, mat: 'bone' });
+  for (const j of [1, -1]) {
+    kit.loft([ps(0.083 * K, 0.116 * K, j * 0.014 * K, 0.0045 * K, 0.0045 * K), ps(0.087 * K, 0.116 * K, j * 0.0155 * K, 0.0045 * K, 0.0045 * K)],
+      { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capDepth: 0.0045 * K, color: ember, mat: 'gem', glow: 1 });
+    // a leg, and the wing folded along the flank, two feathers deep; the tail's three
+    kit.loft([ps(0.0 * K, 0.0, j * 0.013 * K, 0.0045 * K, 0.0045 * K), ps(0.004 * K, 0.04 * K, j * 0.013 * K, 0.0045 * K, 0.0045 * K)],
+      { ref: [1, 0, 0], sides: 5, start: 'round', end: 'round', capDepth: 0.004 * K, color: bill, mat: 'bone' });
+    for (let i = 0; i < 2; i++) {
+      feather(kit, [0.03 * K - i * 0.018 * K, (0.088 - i * 0.012) * K, j * 0.027 * K], [-1, -0.2 - 0.06 * i, j * 0.08], [0, 1, 0], (0.12 - 0.012 * i) * K, 0.034 * K,
+        { color: i ? black : sheen, tip: i ? sheen : null, rows: 4, thick: 0.003, bend: [0, -0.008 * K, j * 0.004 * K] });
+    }
+  }
+  for (let i = 0; i < 3; i++) {
+    const s = i - 1;
+    feather(kit, [-0.07 * K, 0.058 * K, 0], [-1, -0.5, s * 0.16], [0, 1, 0], 0.115 * K, 0.026 * K, { color: black, tip: sheen, rows: 4, thick: 0.003, bend: [0, -0.01 * K, s * 0.01 * K] });
+  }
+  // on the shoulder, turned a little toward the head
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), side * 0.7);
+  const M = new THREE.Matrix4().compose(new THREE.Vector3(-0.022, D.shoulderY + 0.004, side * D.shoulderZ * 0.86), q, new THREE.Vector3(1, 1, 1));
+  const o = spec.pos[B.chest];
+  return { name: 'raven', bone: B.chest, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2]).multiply(M)) };
 }
 
 /** A little ball (a pearl, a pompom) at `p`: a short loft with round ends. */
