@@ -832,6 +832,11 @@ export function animateModel(m, state, t, dt, ex) {
       }
       T.lx = lx;
       blendPose(m, T, dt, 24);
+      if (m.rich) {
+        // the skinned rich ram: the wheels, the log on its ropes and the banner on bones in place of rigid parts and a morph
+        applyCreature(m, m.cur, state, t, dt);
+        break;
+      }
       if (p.log) {
         p.log.position.x = m.cur.lx;
         p.log.rotation.z = -m.cur.lx * 0.35;

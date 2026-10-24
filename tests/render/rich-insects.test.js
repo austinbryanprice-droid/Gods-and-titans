@@ -98,10 +98,9 @@ test('the Scarab has a body plan of its own and the Scorpion Man is a person on 
   // a scorpion man is dressed by his pantheon's outfit: one that has none for him keeps the low-poly model
   assert.ok(richSupported({ ...scorpion, lookOf: 'mesopotamian' }));
   assert.ok(!richSupported({ ...scorpion, lookOf: 'norse' }), 'no Norse scorpion man is dressed');
-  // the others that stay low-poly are not insects
-  for (const [pantheon, id] of [['greek', 'battering_ram']]) {
-    assert.ok(!richSupported(unitLook(UNITS[id], pantheon)), `${id} stays low-poly`);
-  }
+  // the others are not insects: the battering ram has a plan of its own (rich-ram.test.js)
+  const ram = unitLook(UNITS.battering_ram, 'greek');
+  assert.ok(!insectSupported(ram.visual) && !scorpionSupported(ram.visual), 'the ram is no insect');
 });
 
 test('the Scorpion Man is dressed by his own people and builds a scorpion where a person\'s legs would be', () => {
