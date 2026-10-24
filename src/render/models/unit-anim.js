@@ -3,6 +3,7 @@
 // animateModel(model, state, t, dt, extra) is called once per frame.
 import { KNEE_SAMPLES, WING_SAMPLES } from './unit-bodies.js';
 import { applyRich } from './rich-anim.js';
+import { applyCreature } from './rich-creature-anim.js';
 
 const PI = Math.PI;
 const D90 = PI / 2;
@@ -672,6 +673,11 @@ export function animateModel(m, state, t, dt, ex) {
     case 'centaur': {
       quadPose(m, T, state, t);
       blendPose(m, T, dt, 20);
+      if (m.rich) {
+        // the skinned rich beast: bones in place of rigid parts and morph hinges
+        applyCreature(m, m.cur, state, t, dt);
+        break;
+      }
       applyQuad(m, m.cur);
       inf(m.parts.body, 'fl', flick);
       break;

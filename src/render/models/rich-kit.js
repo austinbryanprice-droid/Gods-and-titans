@@ -74,17 +74,22 @@ export function humanoidSpec(d, opts = {}) {
   return { d, pos, parent: PARENT.slice(0, pos.length) };
 }
 
-/** A fresh set of Bone objects in the bind pose (parents first; the root is returned too). */
+/**
+ * A fresh set of Bone objects in the bind pose (the root is returned too). Bone i is named spec.names[i] when the
+ * spec has names (the creature rigs: rich-creature-kit.js), else after the humanoid's; a bone's parent may come
+ * later in the list than the bone.
+ */
 export function createBones(spec) {
-  const bones = [];
-  spec.pos.forEach((p, i) => {
+  const bones = spec.pos.map((p, i) => {
     const b = new THREE.Bone();
-    b.name = BONE_NAMES[i];
+    b.name = (spec.names && spec.names[i]) || BONE_NAMES[i] || `bone${i}`;
+    return b;
+  });
+  spec.pos.forEach((p, i) => {
     const par = spec.parent[i];
     const pp = par >= 0 ? spec.pos[par] : [0, 0, 0];
-    b.position.set(p[0] - pp[0], p[1] - pp[1], p[2] - pp[2]);
-    if (par >= 0) bones[par].add(b);
-    bones.push(b);
+    bones[i].position.set(p[0] - pp[0], p[1] - pp[1], p[2] - pp[2]);
+    if (par >= 0) bones[par].add(bones[i]);
   });
   return bones;
 }
@@ -143,6 +148,61 @@ export const mixBind = (f, g, tOf) => (x, y, z, S) => {
   }
   S.k = k;
 };
+
+/**
+ * Weights along a chain of bones laid out along a polyline (a spine, a tail, a serpent's body, a bent leg):
+ * bones[i] sits at pts[i], the polyline may run on past the last bone (that bone holds everything beyond).
+ * A vertex takes the arc length of its nearest point on the polyline and the weights blend across each joint
+ * (pts[1] .. pts[n - 1]) over +-hw of arc length: hw omitted is half of the shorter neighbouring segment, a smooth
+ * bend all along the chain; a small hw keeps a segment stiff and bends it at the joint (a knee).
+ */
+export function alongPath(bones, pts, hw = null) {
+  const n = bones.length;
+  const segs = [];
+  const arc = [0];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const dz = b[2] - a[2];
+    const len = Math.hypot(dx, dy, dz) || 1e-6;
+    segs.push({ a, dx, dy, dz, len, inv: 1 / (len * len) });
+    arc.push(arc[i] + len);
+  }
+  const half = [];
+  for (let j = 1; j < n; j++) {
+    const lo = segs[j - 1].len;
+    const hi = segs[j] ? segs[j].len : lo;
+    half.push(Array.isArray(hw) ? hw[j - 1] : hw ?? 0.5 * Math.min(lo, hi));
+  }
+  return (x, y, z, S) => {
+    let best = Infinity;
+    let s = 0;
+    for (let i = 0; i < segs.length; i++) {
+      const g = segs[i];
+      const px = x - g.a[0];
+      const py = y - g.a[1];
+      const pz = z - g.a[2];
+      const t = clamp((px * g.dx + py * g.dy + pz * g.dz) * g.inv);
+      const qx = px - g.dx * t;
+      const qy = py - g.dy * t;
+      const qz = pz - g.dz * t;
+      const d = qx * qx + qy * qy + qz * qz;
+      if (d < best) {
+        best = d;
+        s = arc[i] + t * g.len;
+      }
+    }
+    let rest = 1;
+    for (let j = 1; j < n; j++) {
+      const w = smoothstep(arc[j] - half[j - 1], arc[j] + half[j - 1], s);
+      S.add(bones[j - 1], rest * (1 - w));
+      rest *= w;
+    }
+    S.add(bones[n - 1], rest);
+  };
+}
 
 // ---------------------------------------------------------------------------
 // stations
@@ -737,8 +797,17 @@ export function instantiate(geometry, spec, material) {
   mesh.skeleton = skeleton;
   // a fixed generous sphere: the skinned pose moves vertices well off the bind pose
   const top = geometry.boundingBox.max.y;
-  mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, top * 0.5, 0), top * 0.95 + 0.4);
-  mesh.boundingBox = new THREE.Box3(new THREE.Vector3(-0.7, 0, -0.7).multiplyScalar(top), new THREE.Vector3(0.7, top * 1.3, 0.7).multiplyScalar(top));
+  if (spec.fit) {
+    // a creature is not a standing figure: wrap the whole body
+    const box = geometry.boundingBox;
+    const c = box.getCenter(new THREE.Vector3());
+    const r = box.getSize(new THREE.Vector3()).length() * 0.5;
+    mesh.boundingSphere = new THREE.Sphere(c, r * 1.12 + 0.3);
+    mesh.boundingBox = box.clone().expandByScalar(Math.max(0.3, r * 0.25));
+  } else {
+    mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, top * 0.5, 0), top * 0.95 + 0.4);
+    mesh.boundingBox = new THREE.Box3(new THREE.Vector3(-0.7, 0, -0.7).multiplyScalar(top), new THREE.Vector3(0.7, top * 1.3, 0.7).multiplyScalar(top));
+  }
   // the renderer calls skeleton.update() once a frame for every skinned mesh it draws: that is
   // replaced by syncRich, run when the pose changes
   const refresh = THREE.Skeleton.prototype.update.bind(skeleton);

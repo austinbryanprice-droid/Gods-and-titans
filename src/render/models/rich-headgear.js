@@ -415,7 +415,7 @@ function domeBand(kit, D, bind, dy, g, color, mat = undefined) {
  * hanging in front of each shoulder and a queue down the back. opts: cloth (the main color, a team
  * color for the people's), stripe, trim (the band), tail (the queue, off under a cape).
  */
-export function addNemes(kit, D, pal, bind, { cloth, stripe, trim, tail = true } = {}) {
+export function addNemes(kit, D, pal, bind, { cloth, stripe, trim, tail = true, lappets = true } = {}) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
@@ -447,7 +447,7 @@ export function addNemes(kit, D, pal, bind, { cloth, stripe, trim, tail = true }
   const bands = (o, x, y, z, u) => {
     if (Math.floor(u * 8.5) % 2 === 1) recolor(o, stripe, 1);
   };
-  for (const side of [1, -1]) {
+  for (const side of lappets ? [1, -1] : []) {
     const z = side * 0.098 * hs;
     const frontAt = (y, clear) => {
       const f = clamp((y - D.hipY) / (D.shoulderY - D.hipY), 0, 1.09);

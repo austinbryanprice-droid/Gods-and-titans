@@ -271,7 +271,7 @@ export function headStations(D) {
   ];
 }
 
-export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
+export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck = true } = {}) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
@@ -313,7 +313,7 @@ export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null) {
       ], { ref: [1, 0, 0], rings: 5, sides: 6, capDepth: 0.003 * hs, color: pal.mouth, mat: 'skin', bind: bind.head });
     }
   }
-  // neck
+  if (!neck) return;
   const nk = 0.05 * D.k;
   kit.loft([vs(D.shoulderY - 0.03, nk * 1.3, nk * 1.4, 0), vs(D.shoulderY + 0.01, nk * 1.05, nk * 1.1, D.headX * 0.3), vs(hy - 0.075 * hs, nk * 0.95, nk * 1.0, D.headX * 0.7)],
     { rings: 5, start: null, end: null, color: skin, bind: bind.neck, paint: skinPaint });

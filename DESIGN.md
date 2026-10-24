@@ -1016,6 +1016,22 @@ per-frame budget, so a revealed army appears over a few frames.
   unit out of `richSupported`. An upright beast (the body `beast_biped`) is built on the humanoid rig only
   for the pantheons in `RICH_BEAST_BIPEDS` in `rich-humanoid.js` (the Chinese monkeys); the other beast
   bipeds stay low-poly.
+  Rich creatures (the units that are not on the humanoid rig): `creatureSupported` / `buildCreatureTemplate`
+  in `rich-creatures.js`, called from `richSupported` / `buildRichTemplate`, pick a body plan by what a unit
+  looks like (its `visual` body, head, heads and extras); a unit a plan cannot dress fully stays low-poly. Each
+  plan is one skinned mesh on a skeleton of its own plus rigid pieces (wings), instanced and mounted like the
+  humanoid's (`spec.fit` gives the culling sphere of a body that is not upright), and moved by
+  `rich-creature-anim.js` (`applyCreature`, called from `unit-anim.js` when `m.rich.plan` is set) from the same
+  pose keys as the low-poly rig, the spine, neck, tail wave, ears and paws added. Shared kit:
+  `rich-creature-kit.js` (bones from a list, a path of stations to loft along), `rich-creature-parts.js` (a lock of
+  hair or a spine, paws, hooves, collars, a ring of gems), `rich-creature-hair.js` (ruff, lion's mane, horse's
+  mane, tails of hair), `rich-creature-wings.js` (feathered wings, two bones a side), `rich-mammal-heads.js` (the
+  heads of a wolf, jackal, fox, cat, lion, bull and horse, with jaw and ears) and `rich-creature-human-head.js` (the
+  humanoid's face and headgear on a beast's neck). The four-legged plan (`rich-quadruped.js`: canine, fox,
+  feline, sphinx, bovine and equine builds, tables of proportions; three tails for a fox spirit with an aura, two
+  more heads for Cerberus, wings for the pegasus and the lamassu, which a grounded unit holds up and back
+  standing about) dresses the wolf of Fenrir, Cerberus, the pegasus, the sphinx, the jackal, the three fox
+  spirits, the guardian lion, the jaguar spirit, the ahuizotl, the Cú Sídhe, the lamassu, the bull of heaven and Osebo.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
