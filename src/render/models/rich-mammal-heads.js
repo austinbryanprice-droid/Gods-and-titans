@@ -208,7 +208,7 @@ export function mammalHead(kit, o) {
       ref: [0, 1, 0], rings: lean ? 5 : 6, sides: lean ? 8 : 10, start: 'round', end: 'round', capRings: 2, capDepth: [0.05, 0.035], color: fur, bind: jawBind,
       paint: (oo, x, y, z, u, a) => {
         paint(oo, x, y, z, u, a);
-        tint(oo, pale, (0.12 + 0.6 * smoothstep(0, 0.9, -Math.cos(a))) * (o.pale ? 1 : 0.6));
+        tint(oo, pale, (0.12 + 0.6 * smoothstep(0, 0.9, -Math.cos(a * 2 * Math.PI))) * (o.pale ? 1 : 0.6));
       },
     });
     if (!lean) {
