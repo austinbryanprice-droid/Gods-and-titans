@@ -925,7 +925,9 @@ per-frame budget, so a revealed army appears over a few frames.
   beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
   `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
   motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
-  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, the Aztecs, the Celts, the Mesopotamians, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
+  in play: all ten, each after its own look pass (the Norse first, then the Greeks, the Egyptians, the Hindus, the Japanese, the
+  Chinese, the Aztecs, the Celts, the Mesopotamians and the West Africans); a pantheon added later stays low-poly until it has had
+  one. `setUnitDetail('rich' | 'base' | 'auto')`
   pins the choice for tools. The bones live outside the scene graph (detached bind mode): `applyRich`
   ends with `syncRich`, and rigid pieces (weapon, shield, tools, flames, cargo, wings) ride mounts
   (`mountOn`), so the pose costs nothing on frames where a unit does not animate. Winged units get
@@ -947,8 +949,9 @@ per-frame budget, so a revealed army appears over a few frames.
   tiger-skin loincloths, geta, the katana, yumi, kanabo, shakujo, folding and feather fans, the sacred
   mirror and the jewel, a ring on the back for the sun (rays) and the thunder (drums:
   `addAuraRing` in `rich-regalia.js`) or a sashimono banner for the other gods; an outfit may also set
-  `palette(pal, ctx)` to recolor the shared palette (the people's black hair) and `gear(ctx, item)`
-  to change how an item is built (an iron club, a long bow, a ringed staff); `rich-outfits-chinese.js`:
+  `palette(pal, ctx)` to recolor the shared palette (the people's black hair, their skin) and `gear(ctx, item, side)`
+  to change how an item is built in either hand (an iron club, a long bow, a ringed staff; `side` 1 the right
+  hand, -1 the left); `rich-outfits-chinese.js`:
   the jacket closed in a diagonal across the breast (`addJiaoling`) and tied with a sash, trousers
   bound at the calf and cloth shoes under a bamboo douli, a wound scarf, a Taoist daoguan or the
   soldier's plumed helm; the mingguang cuirass with its round mirrors, pteruges and tunjian shoulder
@@ -982,12 +985,31 @@ per-frame budget, so a revealed army appears over a few frames.
   streams of water (`addWaterStreams`: glowing ribbons on the cape bones), Nergal's black iron, lion
   pelt and studded pear-headed mace (`pearMace`), the apkallu in the head and the skin of a fish
   (`addFishHood`, `addFishCloak`) and the Slinger's sling (its `gear` asks for `build: true` for a
-  `whip`, which `rich-gear.js` builds as two cords, a pouch and a stone); an
+  `whip`, which `rich-gear.js` builds as two cords, a pouch and a stone); `rich-outfits-west-african.js`:
+  the people's skin a deep brown and their hair black (`palette`; the gods keep their data's), a wrapper of
+  kente under a tunic in the team's color and a head tie (`addHeadWrap`, the gele) for the workers (`kente`
+  paint: strips of color sewn edge to edge, banded across; `kenteAt` for a cloth laid out by its own grid,
+  Anansi's toga), the war smock with a strap of leather charms and cowries across the chest (`addAmulets`)
+  under a leather cap with antelope horns and a band of cowries (`addHornedCap`) and a tall oval shield
+  of hide for the soldiers, a striped smock, the same cap with a plume of guinea fowl feathers for horns
+  and a quiver at the hip (`addQuiver`) for the archers, the priest's agbada (wide sleeves, its front a bib in the team's color edged in
+  gold, two sheets laid on the robe so that their edges stay sharp) under a folded cap (`addFila`) with
+  the talking drum and its hooked stick (`rich-arms.js` `DRUMS` styles `talking` and `beater`: the
+  outfit's `gear` tells the two hands apart by `side`), the Dart Hunter's smock of mud cloth (`mudcloth`
+  paint: dark cotton, laddered and dotted in pale) with a leopard's skin over the shoulders, Shango's
+  red and white, his stacked bangles (`addBangles`, a list of colors taken in turn), his beaded crown
+  with its veil of strands (`addBeadedCrown`) and his oshe (a beaded staff with a double axe for a head),
+  Oya's tall head tie, her wrapper of nine colors, nine copper bangles and fly whisk of horsehair, Ogun's
+  skirt of palm fibre (`addRaffia`) and black iron with a crest of raffia (`addRaffiaCrest`) and his
+  cutlass (a machete), Anansi's kente, his four more arms (the calabash and a talking drum) and the gold
+  spider on his breast and at the head of his staff (`addSpiderPendant`, `spider` in `rich-gear.js`),
+  the Aziza's leaves; an
   outfit's `gear` may ask the gear builder for a weapon that is not in `RICH_WEAPONS` (`build: true`:
-  the double axe, the torch, the sling), and a held piece with a flicker morph flickers; an outfit's `shield` may
+  the double axe, the torch, the sling, Shango's oshe, Oya's whisk), and a held piece with a flicker morph flickers; an outfit's `shield` may
   be a function of the unit as well as a style object). Gods with more than two arms carry the extra two pairs as one rigid
   piece on the chest bone (`extraArmsPiece` in `rich-regalia.js`: each hand holds an item the arm
-  builders already make, moved into place with `MeshKit.placed`); such units get a separate
+  builders already make, named by its id or as `{ id, opts }` with options for its builder, moved into
+  place with `MeshKit.placed`); such units get a separate
   triangle allowance (`multi_arms` in the test).
   Animal heads the kit builds (`BEAST_HEADS`: the jackal, the falcon, the monkey, the crow, the demon) live in
   `rich-heads.js` and are skinned to the head bone like a human one; any other beast head keeps a

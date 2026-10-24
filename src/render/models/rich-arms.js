@@ -291,6 +291,37 @@ function drum(kit, pal, s) {
   kit.loft([at(-0.014, 0.0235), at(0.014, 0.0235)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: pal.leather, mat: 'leather' });
 }
 
+/**
+ * A talking drum (dundun), the Yoruba's: a long hourglass of wood with a skin over each end, held at its waist, the two skins laced
+ * to each other by a cage of cords standing off the waist (squeezed, they change its voice), a band of leather round each rim. Its
+ * axis runs across the grip like the damaru's. opts: skin, cord, wood.
+ */
+function talkingDrum(kit, pal, s, { skin = null, cord = null, wood = null } = {}) {
+  const body = wood || mixC(pal.wood, '#6a3a1a', 0.4);
+  const hide = skin || mixC(pal.white, '#d9b77a', 0.6);
+  const lace = cord || mixC(pal.leather, '#c9a46a', 0.45);
+  const y0 = 0.04 * s;
+  const at = (z, r) => ps(0, y0, z * s, r * s, r * s);
+  const prof = [[-0.16, 0.066], [-0.13, 0.064], [-0.07, 0.042], [-0.025, 0.03], [0, 0.028], [0.025, 0.03], [0.07, 0.042], [0.13, 0.064], [0.16, 0.066]];
+  kit.loft(prof.map(([z, r]) => at(z, r)), { ref: [1, 0, 0], rings: 10, sides: 12, start: null, end: null, color: body, mat: 'wood', paint: (o, x, y, z, u) => mul(o, 0.84 + 0.22 * Math.sin(u * PI)) });
+  for (const sg of [1, -1]) {
+    kit.loft([at(sg * 0.158, 0.068), at(sg * 0.166, 0.07), at(sg * 0.172, 0.0)], { ref: [1, 0, 0], rings: 3, sides: 12, start: null, end: 'round', capRings: 1, capDepth: 0.006 * s, color: hide, mat: 'cloth' });
+    kit.loft([at(sg * 0.15, 0.073), at(sg * 0.166, 0.074)], { ref: [1, 0, 0], sides: 12, start: null, end: null, color: pal.leather, mat: 'leather' });
+  }
+  // the cage of cords from rim to rim
+  const n = 12;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const b = a + PI / n;
+    const p0 = [Math.cos(a) * 0.074, Math.sin(a) * 0.074, -0.154];
+    const p1 = [Math.cos(b) * 0.074, Math.sin(b) * 0.074, 0.154];
+    const m = [(p0[0] + p1[0]) * 0.36, (p0[1] + p1[1]) * 0.36, 0];
+    kit.loft([p0, m, p1].map(([x, y, z]) => ps(x * s, y0 + y * s, z * s, 0.0032 * s)), { ref: [1, 0, 0], rings: 2, sides: 3, start: null, end: null, color: lace, mat: 'cloth' });
+  }
+  // the hand's grip round the cords at the waist
+  kit.loft([at(-0.02, 0.034), at(0.02, 0.034)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: shadeC(lace, 0.8), mat: 'leather' });
+}
+
 /** A lotus bloom on a short stem: two rings of pink petals paling toward their tips round a gold heart. */
 function lotus(kit, pal, s) {
   const green = mixC('#4f8a48', pal.secondary, 0.1);
@@ -530,6 +561,17 @@ function bachi(kit, pal, s) {
   });
 }
 
+/** The stick a talking drum is beaten with (kongo): a slim rod of dark wood bent round at its end into a hook that strikes the skin. */
+function drumBeater(kit, pal, s) {
+  const path = [[0, -0.07, 0.0115], [0, 0.06, 0.0105], [0.004, 0.17, 0.0095], [0.024, 0.225, 0.009], [0.06, 0.244, 0.009], [0.088, 0.222, 0.0105]];
+  kit.loft(path.map(([x, y, r]) => ps(x * s, y * s, 0, r * s, r * s)), {
+    ref: [0, 0, 1], rings: 10, sides: 6, start: 'round', end: 'round', capDepth: 0.006 * s, color: mixC(pal.woodDark, '#2a1a10', 0.3), mat: 'wood', paint: grain(0.08),
+  });
+}
+
+/** The drums a hand may hold, by opts.drum (none: the damaru). */
+const DRUMS = { stick: bachi, talking: talkingDrum, beater: drumBeater };
+
 /** The weapons built here, by the visual's weapon id. */
 const ARMS = { trident, lightning_bolt: lightningBolt, scepter, scythe, ankh: (kit, pal, s, opts) => ankh(kit, pal, s * 0.82, opts), mace, discus, fan, drum: bachi, cauldron };
 export const RICH_ARMS = new Set(Object.keys(ARMS));
@@ -540,11 +582,12 @@ export const RICH_OFFHANDS = new Set(Object.keys(OFFHANDS));
 
 /**
  * Add weapon or offhand item `id` (one of RICH_ARMS, RICH_OFFHANDS) to `kit` in the grip frame; opts as for richWeapon.
- * The drum is a damaru (the offhand), or with opts.drum 'stick' a drumstick (the weapon): the thunder god beats with both hands.
+ * The drum is a damaru (the offhand), or with opts.drum 'stick' a drumstick (the weapon): the thunder god beats with both hands;
+ * with opts.drum 'talking' it is the Yoruba's talking drum, and 'beater' the hooked stick it is played with.
  * Returns whether it was built.
  */
 export function richArm(kit, pal, id, s, opts = {}) {
-  const make = id === 'drum' ? (opts.drum === 'stick' ? bachi : drum) : ARMS[id] || OFFHANDS[id];
+  const make = id === 'drum' ? DRUMS[opts.drum] || drum : ARMS[id] || OFFHANDS[id];
   if (!make) return false;
   make(kit, pal, s, opts);
   return true;

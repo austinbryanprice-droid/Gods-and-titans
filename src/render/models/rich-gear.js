@@ -751,25 +751,146 @@ function sling(kit, pal, s, { color = null, stone = null } = {}) {
 }
 
 /**
+ * A fly whisk (iruke), Oya's: a short handle bound in beads of two colors, a knob of brass at its top, and from the knob a lock
+ * of horsehair falling over and down the way the hand hangs it (+x), its strands fanning a little apart and ending ragged, one in
+ * two catching the light. opts: hair (the tail's color), beads ([c0, c1]).
+ */
+function whisk(kit, pal, s, { hair = null, beads = null } = {}) {
+  const tail = hair || withMat('#1b1715', 'hair');
+  const [c0, c1] = beads || [pal.accentMetal, pal.secondary];
+  kit.loft([ps(0, -0.08 * s, 0, 0.02 * s), ps(0, 0.06 * s, 0, 0.019 * s), ps(0, 0.17 * s, 0, 0.018 * s)], {
+    ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.01 * s, color: c0, mat: 'lacquer',
+    paint: (o, x, y, z, u) => dye(o, Math.floor(u * 8) & 1 ? c1 : c0, 1),
+  });
+  kit.loft([ps(0, 0.165 * s, 0, 0.024 * s), ps(0, 0.185 * s, 0, 0.03 * s), ps(0, 0.205 * s, 0, 0.018 * s)], { ref: [1, 0, 0], rings: 3, sides: 8, start: null, end: 'round', capDepth: 0.01 * s, color: pal.accentMetal, mat: 'gold' });
+  const n = 9;
+  for (let i = 0; i < n; i++) {
+    const k = (i / (n - 1) - 0.5) * 2;
+    const th = k * 0.55;
+    const c = Math.cos(th);
+    const sn = Math.sin(th);
+    const L = 1 - 0.16 * ((i * 3) % 5) / 4;
+    const path = [[0.004, 0.2, 0.009], [0.036, 0.233, 0.0088], [0.076, 0.224, 0.0084], [0.1, 0.168, 0.008], [0.112, 0.07, 0.007], [0.117, 0.07 - 0.11 * L, 0.0056], [0.115, 0.07 - 0.2 * L, 0.0036]];
+    kit.loft(path.map(([d, y, r]) => ps(c * d * s, y * s, sn * d * s, r * s, r * s)), {
+      ref: [-sn, 0, c], rings: 7, sides: 4, start: null, end: 'round', capRings: 1, capDepth: 0.006 * s, color: tail, mat: 'hair',
+      paint: (o, x, y, z, u, a) => mul(o, (i & 1 ? 1.45 : 1) * (0.85 + 0.35 * a)),
+    });
+  }
+}
+
+/**
+ * Shango's oshe: a short staff of wood stained red, bound in bands of white and red beads, a knob carved under its head, and the
+ * head a double axe: a blade fanning out to each side of a block, narrow at the block and broad at its curved edge, a thunderstone
+ * on top. opts: shaftColor, metal (the blades'), bands ([c0, c1]: the beadwork's colors).
+ */
+function oshe(kit, pal, s, { shaftColor = null, metal = null, bands = null } = {}) {
+  const shaft = shaftColor || withMat('#8a2a1c', 'wood');
+  const head = metal || pal.accentMetal;
+  const [b0, b1] = bands || [pal.white, withMat('#b4262a', 'cloth')];
+  kit.loft([ps(0, -0.14 * s, 0, 0.021 * s), ps(0, 0.1 * s, 0, 0.0195 * s), ps(0, 0.36 * s, 0, 0.0185 * s), ps(0, 0.5 * s, 0, 0.02 * s)], {
+    ref: [1, 0, 0], rings: 9, sides: 8, start: 'round', end: null, capDepth: 0.01 * s, color: shaft, mat: 'wood', paint: grain(0.1),
+  });
+  [-0.1, 0.12, 0.24, 0.36].forEach((y, i) => {
+    kit.loft([ps(0, (y - 0.016) * s, 0, 0.025 * s), ps(0, y * s, 0, 0.0265 * s), ps(0, (y + 0.016) * s, 0, 0.025 * s)], { ref: [1, 0, 0], rings: 3, sides: 8, start: null, end: null, color: i % 2 ? b1 : b0, mat: 'lacquer' });
+  });
+  // the carved knob under the head, and the block the blades are set on
+  kit.loft([ps(0, 0.48 * s, 0, 0.02 * s), ps(0, 0.52 * s, 0, 0.034 * s), ps(0, 0.57 * s, 0, 0.031 * s), ps(0, 0.6 * s, 0, 0.022 * s)], { ref: [1, 0, 0], rings: 4, sides: 10, start: null, end: null, color: shadeC(shaft, 0.85), mat: 'wood' });
+  const y0 = 0.67 * s;
+  kit.loft([ps(0, y0 - 0.075 * s, 0, 0.024 * s, 0.022 * s), ps(0, y0 + 0.06 * s, 0, 0.026 * s, 0.024 * s)], { ref: [1, 0, 0], sides: 10, start: 'round', end: null, capDepth: 0.01 * s, color: head, mat: 'gold' });
+  const half = [[0.016, 0.034], [0.06, 0.05], [0.112, 0.088], [0.15, 0.106], [0.174, 0.06], [0.182, 0.0], [0.174, -0.06], [0.15, -0.106], [0.112, -0.088], [0.06, -0.05], [0.016, -0.034]];
+  for (const dir of [1, -1]) {
+    const pts = half.map(([x, y]) => [dir * x * s, y0 + y * s]);
+    if (dir < 0) pts.reverse();
+    kit.slab(pts, { depth: 0.02 * s, bevel: 0.0075 * s, color: head, mat: 'gold', paint: (o, x, y, z, u) => mul(o, 0.86 + 0.3 * sstep(0.5, 1, dir > 0 ? u : 1 - u)) });
+  }
+  // the thunderstone: a pointed stone over the block
+  kit.loft([ps(0, y0 + 0.055 * s, 0, 0.022 * s, 0.018 * s), ps(0, y0 + 0.095 * s, 0, 0.026 * s, 0.02 * s), ps(0, y0 + 0.15 * s, 0, 0.004 * s, 0.004 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 8, start: 'round', end: 'round', capDepth: [0.008 * s, 0.004 * s], color: withMat('#2e2a2a', 'gloss'), mat: 'gloss',
+  });
+}
+
+/**
+ * Ogun's cutlass, a machete of iron: a long broad blade without a guard, its back straight and its edge swelling toward the end,
+ * which is cut away at a slant, an iron collar at its root, a grip of dark wood bound with cord. opts: metal (the iron), handle.
+ */
+function machete(kit, pal, s, { metal = null, handle = null } = {}) {
+  const iron = metal || shadeC(pal.darkMetal, 1.4);
+  const wood = handle || pal.woodDark;
+  kit.loft([ps(0, -0.13 * s, 0, 0.022 * s), ps(0, -0.02 * s, 0, 0.0205 * s), ps(0, 0.075 * s, 0, 0.019 * s)], { ref: [1, 0, 0], rings: 4, sides: 8, start: 'round', end: null, capDepth: 0.012 * s, color: wood, mat: 'wood', paint: grain(0.1) });
+  grip(kit, -0.1 * s, 0.05 * s, 0.0225 * s, pal.leather, 4);
+  kit.loft([ps(0, 0.068 * s, 0, 0.023 * s, 0.017 * s), ps(0, 0.1 * s, 0, 0.022 * s, 0.014 * s)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: shadeC(iron, 0.7), mat: 'iron' });
+  const pts = [[-0.018, 0.09], [0.02, 0.09], [0.03, 0.2], [0.042, 0.4], [0.056, 0.6], [0.066, 0.72], [0.048, 0.8], [-0.022, 0.785], [-0.022, 0.5], [-0.02, 0.25]].map(([x, y]) => [x * s, y * s]);
+  kit.slab(pts, { depth: 0.012 * s, bevel: 0.0055 * s, color: iron, mat: 'metal', paint: (o, x, y, z, u) => mul(o, 0.8 + 0.36 * sstep(0.5, 1, u)) });
+}
+
+/**
+ * A spider, Anansi's sign, modelled with its back toward +z and its head toward +y, `size` long, and moved into place by
+ * `matrix`: a round abdomen, a smaller head, four legs a side raised at the knee. opts: color, mat, bind (a rigid one: the
+ * spider is built and then moved), glow, eye (the color of two glowing eyes; none: none).
+ */
+export function spider(kit, matrix, size, { color, mat = 'gold', bind = undefined, glow = 0, eye = null } = {}) {
+  const k = size;
+  kit.placed(matrix, (kk) => {
+    const body = (st, sides) => kk.loft(st.map(([y, rx, rz]) => ps(0, y * k, 0, rx * k, rz * k)), { ref: [1, 0, 0], rings: st.length - 1, sides, start: 'round', end: 'round', capRings: 1, capDepth: 0.03 * k, color, mat, glow, bind });
+    body([[-0.86, 0.06, 0.05], [-0.76, 0.26, 0.19], [-0.54, 0.36, 0.26], [-0.3, 0.32, 0.23], [-0.1, 0.18, 0.14]], 8);
+    body([[-0.04, 0.1, 0.08], [0.08, 0.22, 0.15], [0.22, 0.22, 0.15], [0.36, 0.08, 0.06]], 8);
+    const dirs = [1.05, 0.45, -0.2, -0.8];
+    dirs.forEach((ang, i) => {
+      for (const side of [1, -1]) {
+        const root = [side * 0.15, 0.3 - i * 0.09, 0];
+        const d = [side * Math.cos(ang), Math.sin(ang)];
+        const knee = [root[0] + d[0] * 0.42, root[1] + d[1] * 0.42, 0.16];
+        const foot = [knee[0] + d[0] * 0.36, knee[1] + d[1] * 0.36 - 0.04, -0.12];
+        kk.loft([ps(root[0] * k, root[1] * k, root[2] * k, 0.045 * k), ps(knee[0] * k, knee[1] * k, knee[2] * k, 0.034 * k), ps(foot[0] * k, foot[1] * k, foot[2] * k, 0.014 * k)], {
+          ref: [0, 0, 1], rings: 2, sides: 4, start: null, end: 'round', capDepth: 0.01 * k, color, mat, glow, bind,
+        });
+      }
+    });
+    if (eye) {
+      for (const side of [1, -1]) {
+        kk.loft([ps(side * 0.07 * k, 0.33 * k, 0.08 * k, 0.035 * k), ps(side * 0.07 * k, 0.33 * k, 0.11 * k, 0.03 * k)], { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capDepth: 0.02 * k, color: eye, mat: 'gem', glow: 1, bind });
+      }
+    }
+  });
+}
+
+/** Anansi's staff: a shaft of dark wood banded in gold, a gold spider clinging to its top over a knob of the same. opts: shaftColor, metal, eye. */
+function spiderStaff(kit, pal, s, { shaftColor = null, metal = null, eye = null } = {}) {
+  const shaft = shaftColor || pal.woodDark;
+  const gold = metal || pal.accentMetal;
+  kit.loft([ps(0, -0.5 * s, 0, 0.0195 * s), ps(0, -0.1 * s, 0, 0.0215 * s), ps(0, 0.3 * s, 0, 0.0215 * s), ps(0, 0.6 * s, 0, 0.019 * s)], {
+    ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.009 * s, color: shaft, mat: 'wood', paint: grain(0.08),
+  });
+  grip(kit, -0.1 * s, 0.1 * s, 0.0245 * s, pal.leather, 4);
+  for (const y of [-0.46, 0.26, 0.42]) kit.loft([ps(0, (y - 0.012) * s, 0, 0.0235 * s), ps(0, (y + 0.012) * s, 0, 0.0235 * s)], { ref: [1, 0, 0], sides: 8, start: null, end: null, color: gold, mat: 'gold' });
+  kit.loft([ps(0, 0.58 * s, 0, 0.021 * s), ps(0, 0.62 * s, 0, 0.034 * s), ps(0, 0.67 * s, 0, 0.026 * s)], { ref: [1, 0, 0], rings: 3, sides: 10, start: null, end: 'round', capDepth: 0.02 * s, color: gold, mat: 'gold' });
+  // the spider on the knob, its back to the front of the staff
+  spider(kit, new THREE.Matrix4().compose(new THREE.Vector3(0.012 * s, 0.7 * s, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, PI / 2, 0)), new THREE.Vector3(1, 1, 1)), 0.13 * s, { color: gold, mat: 'gold', eye, glow: 0.1 });
+}
+
+/**
  * Add weapon `id` to `kit` in the grip frame (origin = palm, +Y along the weapon, blade
  * width along X, thickness along Z), like the low-poly addWeapon. opts.glowBlade: a flaming
  * blade; opts.runes: the runic glow color of a god's hammer. The double axe and the torch are built here but not in
  * RICH_WEAPONS: a pantheon's outfit asks for them (gear returns { build: true }), so those pantheons that use them
- * with the low-poly models keep them.
+ * with the low-poly models keep them. A pantheon's own form of a weapon is asked for the same way: the sword as a macuahuitl
+ * or a machete (opts.macuahuitl, opts.machete), the axe as a yue (opts.axe 'yue'), the bow as a crossbow (opts.crossbow), the
+ * staff as a shakujo, a ruyi, a druid's or Anansi's (opts.staff 'shakujo' | 'ruyi' | 'druid' | 'spider'), the double axe as
+ * Shango's oshe (opts.oshe), the whip as a sling or, with opts.whisk, Oya's fly whisk.
  */
 export function richWeapon(kit, pal, id, s, opts = {}) {
   switch (id) {
-    case 'sword': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else sword(kit, pal, s, { flame: !!opts.glowBlade, blade: opts.blade || null, fitting: opts.fitting || null }); return true;
+    case 'sword': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else if (opts.machete) machete(kit, pal, s, opts); else sword(kit, pal, s, { flame: !!opts.glowBlade, blade: opts.blade || null, fitting: opts.fitting || null }); return true;
     case 'katana': katana(kit, pal, s); return true;
     case 'axe': if (opts.axe === 'yue') yue(kit, pal, s, opts); else axe(kit, pal, s, opts); return true;
     case 'hammer': hammer(kit, pal, s, { glow: opts.runes || null }); return true;
     case 'spear': spear(kit, pal, s, { runes: opts.runes || null, shaftColor: opts.shaftColor || null }); return true;
     case 'club': if (opts.macuahuitl) macuahuitl(kit, pal, s, opts); else club(kit, pal, s, opts); return true;
     case 'bow': if (opts.crossbow) crossbow(kit, pal, s, opts); else bow(kit, pal, s, opts); return true;
-    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else if (opts.staff === 'druid') druidStaff(kit, pal, s, opts); else staff(kit, pal, s, opts); return true;
-    case 'double_axe': doubleAxe(kit, pal, s, opts); return true;
+    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else if (opts.staff === 'druid') druidStaff(kit, pal, s, opts); else if (opts.staff === 'spider') spiderStaff(kit, pal, s, opts); else staff(kit, pal, s, opts); return true;
+    case 'double_axe': if (opts.oshe) oshe(kit, pal, s, opts); else doubleAxe(kit, pal, s, opts); return true;
     case 'torch': torch(kit, pal, s); return true;
-    case 'whip': sling(kit, pal, s, opts); return true;
+    case 'whip': if (opts.whisk) whisk(kit, pal, s, opts); else sling(kit, pal, s, opts); return true;
     case 'halberd': halberd(kit, pal, s, opts); return true;
     default: return false;
   }

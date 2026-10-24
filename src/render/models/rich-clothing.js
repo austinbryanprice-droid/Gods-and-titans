@@ -25,13 +25,18 @@ function frontAt(st, y) {
   return st[0].c[0] + st[0].rx;
 }
 
+/**
+ * A tunic from `hem` below the hip to the neck. opts: skirted (its lower part follows the legs), mat, weave (a pattern in the cloth
+ * itself, laid on before its shading: kente, mud cloth), paint (more color work over the shaded cloth), sides and rings (a finer
+ * grid for the weave to show on).
+ */
 export function addTunic(kit, D, color, bind, hem, opts = {}) {
   const st = torsoStations(D, 0.012);
   const y0 = D.hipY - hem;
   const out = [vs(y0, D.depth * 0.62 + 0.02, D.waistW * 0.66 + 0.02), ...st];
   kit.loft(out, {
-    rings: 11, start: null, end: 'round', capDepth: 0.01, color, bind: opts.skirted ? bind.skirt : bind.torso, mat: opts.mat,
-    paint: paints(gradY(D.hipY - hem, D.hipY + 0.05, 0.82, 1), opts.paint),
+    rings: opts.rings ?? 11, sides: opts.sides, start: null, end: 'round', capDepth: 0.01, color, bind: opts.skirted ? bind.skirt : bind.torso, mat: opts.mat,
+    paint: paints(opts.weave, gradY(D.hipY - hem, D.hipY + 0.05, 0.82, 1), opts.paint),
   });
 }
 
@@ -317,9 +322,10 @@ export function addMeander(kit, bind, y, rx, rz, { color, ink, h = 0.034, cols =
 
 /**
  * A long skirt to the ankles, hugging the body at the waist (clearance `top`); returns the ring at
- * its hem so a border can go on. A wrap over a bare chest needs an addWaistBelt over its top edge.
+ * its hem so a border can go on. A wrap over a bare chest needs an addWaistBelt over its top edge. opts.weave: a pattern in the
+ * cloth itself, laid on before its shading (Oya's nine colors), on a grid of `sides` round and `rings` down.
  */
-export function addLongSkirt(kit, D, bind, color, { flare = 1, pleat = 0.008, top = 0.008 } = {}) {
+export function addLongSkirt(kit, D, bind, color, { flare = 1, pleat = 0.008, top = 0.008, weave = null, sides = 36, rings = 7 } = {}) {
   const y0 = D.ankleY + 0.05;
   const rx = D.depth * 0.5 + 0.1 * flare;
   const rz = D.waistW * 0.5 + 0.11 * flare;
@@ -330,13 +336,13 @@ export function addLongSkirt(kit, D, bind, color, { flare = 1, pleat = 0.008, to
     vs(D.hipY - 0.04, D.depth * 0.5 + 0.045, D.waistW * 0.5 + 0.055),
     vs(t.y, t.rx, t.rz, t.dx),
   ], {
-    rings: 7, sides: 36, start: null, end: null, color, bind: bind.skirt,
+    rings, sides, start: null, end: null, color, bind: bind.skirt,
     warp: (p, a, u) => {
       const s = Math.sin(a * 9) * pleat * (1 - u);
       p[0] += Math.cos(a) * s;
       p[2] += Math.sin(a) * s;
     },
-    paint: gradY(y0, D.hipY, 0.8, 1),
+    paint: weave ? paints(weave, gradY(y0, D.hipY, 0.8, 1)) : gradY(y0, D.hipY, 0.8, 1),
   });
   return { y0, rx, rz };
 }
@@ -1025,9 +1031,10 @@ export function addTunjian(kit, D, pal, bind, { plate, trim, face = null } = {})
 /**
  * A skirt wrapped about the hips and falling to above the knee, bare of any apron: a hide, a kilt of leaves. opts: color,
  * len (1 reaches the knee), flare (how far it stands out), teeth (a ragged hem of this many points round; 0 an even hem), depth
- * (how deep the points hang), mark (a paint over the cloth: a hide's stripes), mat.
+ * (how deep the points hang), mark (a paint over the cloth: a hide's stripes), mat, weave (a pattern in the cloth itself, laid on
+ * before its shading: kente), sides and rings (a finer grid for a pattern woven in narrow strips).
  */
-export function addWrapSkirt(kit, D, bind, { color, len = 0.8, flare = 1, teeth = 0, depth = 0.04, mark = null, mat = 'cloth' } = {}) {
+export function addWrapSkirt(kit, D, bind, { color, len = 0.8, flare = 1, teeth = 0, depth = 0.04, mark = null, mat = 'cloth', weave = null, sides = null, rings = 6 } = {}) {
   const yb = D.hipY - D.thigh * len + 0.03;
   const t = torsoRing(D, 0.12, 0.016);
   const st = [
@@ -1037,14 +1044,14 @@ export function addWrapSkirt(kit, D, bind, { color, len = 0.8, flare = 1, teeth 
     vs(t.y, t.rx, t.rz, t.dx),
   ];
   kit.loft(st, {
-    rings: 6, sides: teeth ? Math.max(24, teeth * 4) : 28, start: null, end: null, color, mat, bind: bind.skirt,
+    rings, sides: sides ?? (teeth ? Math.max(24, teeth * 4) : 28), start: null, end: null, color, mat, bind: bind.skirt,
     warp: (p, a, u) => {
       const s = Math.sin(a * 7 + u * 2) * 0.008 * (1 - u * 0.6);
       p[0] += Math.cos(a) * s;
       p[2] += Math.sin(a) * s;
       if (teeth && u < 0.02) p[1] -= depth * Math.abs(((a / TAU) * teeth) % 1 - 0.5) * 2;
     },
-    paint: paints(gradY(yb - depth, D.hipY, 0.8, 1), mark),
+    paint: paints(weave, gradY(yb - depth, D.hipY, 0.8, 1), mark),
   });
 }
 
@@ -1439,5 +1446,151 @@ export function addScaleCoat(kit, D, bind, { color, trim = null, rows = 6, hem =
   if (trim) {
     const r0 = torsoRing(D, f0, g + 0.022 + flare(f0));
     kit.loft([vs(r0.y - 0.022, r0.rx + 0.004, r0.rz + 0.004, r0.dx), vs(r0.y + 0.008, r0.rx, r0.rz, r0.dx)], { sides: 24, start: null, end: null, color: trim, mat: 'leather', bind: bind.skirt });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// West African dress: raffia, bangles, the amulets of a war smock, a quiver
+// ---------------------------------------------------------------------------
+
+/** The half widths of a hip skirt at height y (the stations addWrapSkirt uses), so that strands and flounces can be laid on it: [rx, rz, dx]. */
+function skirtAt(D, yEnd, flare) {
+  const t = torsoRing(D, 0.12, 0.016);
+  const yMid = lerp(yEnd, D.hipY - 0.04, 0.5);
+  const st = [
+    [yEnd, D.depth * 0.5 + 0.082 * flare, D.waistW * 0.5 + 0.1 * flare, 0],
+    [yMid, D.depth * 0.5 + 0.06 * flare, D.waistW * 0.5 + 0.076 * flare, 0],
+    [D.hipY - 0.04, D.depth * 0.5 + 0.042, D.waistW * 0.5 + 0.052, 0],
+    [t.y, t.rx, t.rz, t.dx],
+  ];
+  return (y) => {
+    for (let i = 0; i + 1 < st.length; i++) {
+      const a = st[i];
+      const b = st[i + 1];
+      if (y <= b[0] || i + 2 === st.length) {
+        const k = clamp((y - a[0]) / (b[0] - a[0] || 1e-9));
+        return [lerp(a[1], b[1], k), lerp(a[2], b[2], k), lerp(a[3], b[3], k)];
+      }
+    }
+    return st[0].slice(1);
+  };
+}
+
+/**
+ * A skirt of raffia, the palm-fibre skirt of Ogun's shrines: rows of long strands hanging from a band at the waist, each row
+ * starting a little lower than the one above and its strands set between theirs, over a plain short skirt so that nothing shows
+ * through, the strands ending ragged at the knee. opts: color (the fibre), color2 (every second strand's), under (the short
+ * skirt's), band (the waistband), rows, n (strands in a row), len (1 reaches the knee), flare (how far it stands out), thick.
+ */
+export function addRaffia(kit, D, bind, { color, color2 = null, under = null, band = null, rows = 3, n = 24, len = 1, flare = 1, thick = 0.0085 } = {}) {
+  const t = torsoRing(D, 0.12, 0.016);
+  const yTop = t.y;
+  const yEnd = D.hipY - D.thigh * len + 0.03;
+  const at = skirtAt(D, yEnd, flare);
+  const yb = lerp(yTop, yEnd, 0.72);
+  const ub = under || shade(color, 0.6);
+  // the short skirt under the strands
+  const stU = [yb, lerp(yb, D.hipY - 0.04, 0.5), D.hipY - 0.04, t.y].map((y) => {
+    const [rx, rz, dx] = at(y);
+    return vs(y, rx - 0.004, rz - 0.004, dx);
+  });
+  kit.loft(stU, { rings: 4, sides: 20, start: null, end: null, color: ub, mat: 'cloth', bind: bind.skirt });
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < n; i++) {
+      const a = ((i + (r % 2) * 0.5) / n) * TAU;
+      const yr = yTop - 0.014 - r * 0.05;
+      const yt = yEnd + 0.05 * hash(i, r, 7) - 0.006 * r;
+      const [rx0, rz0, dx0] = at(yr);
+      const [rx1, rz1, dx1] = at(yt);
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      kit.loft([
+        ps(dx0 + c * (rx0 + 0.006), yr, s * (rz0 + 0.006), thick, thick),
+        ps(dx1 + c * (rx1 + 0.012), yt, s * (rz1 + 0.012), thick * 0.55, thick * 0.55),
+      ], {
+        ref: [1, 0, 0], sides: 3, start: null, end: null, color: i % 2 && color2 ? color2 : color, mat: 'cloth', bind: bind.skirt,
+        paint: (o, x, y, z, u) => mul(o, 0.78 + 0.3 * u),
+      });
+    }
+  }
+  if (band) {
+    kit.loft([vs(t.y - 0.012, t.rx + 0.022, t.rz + 0.022, t.dx), vs(t.y + 0.026, t.rx + 0.018, t.rz + 0.018, t.dx)], { sides: 20, start: null, end: null, color: band, mat: 'leather', bind: bind.torso });
+  }
+}
+
+/**
+ * Bangles stacked at each wrist, `n` thin rings (Oya's nine of copper, Shango's beads), the first at the wrist and the rest up the
+ * forearm. opts: color (or a list of colors, taken in turn), n, mat, gap (the pitch between rings).
+ */
+export function addBangles(kit, D, bind, { color, n = 5, mat = 'gold', gap = 0.0125 } = {}) {
+  const w = D.shoulderY - 0.02 - D.upper - D.fore;
+  const colors = Array.isArray(color) ? color : [color];
+  for (const side of [1, -1]) {
+    const z = side * D.shoulderZ;
+    for (let i = 0; i < n; i++) {
+      const y = w + 0.016 + i * gap;
+      const f = clamp((y - (w + 0.012)) / (D.fore * 0.5));
+      const rx = lerp(D.armR * 0.66, D.armR * 0.86, f) + 0.009;
+      const rz = lerp(D.armR * 0.64, D.armR * 0.84, f) + 0.009;
+      kit.loft([vs(y - 0.0045, rx, rz, 0, z), vs(y + 0.0045, rx + 0.001, rz + 0.001, 0, z)], { sides: 8, start: null, end: null, color: colors[i % colors.length], mat, bind: bind.arm[side] });
+    }
+  }
+}
+
+/**
+ * A packet (an amulet, a charm) laid on the body at `c` facing `nrm`: a plump square of leather standing off the surface,
+ * `w` wide, `h` high.
+ */
+function packet(kit, bd, c, nrm, w, h, color, mat = 'leather') {
+  const d = 0.011;
+  kit.loft([
+    ps(c[0] + nrm[0] * 0.002, c[1], c[2] + nrm[2] * 0.002, h * 0.5, w * 0.5, 4),
+    ps(c[0] + nrm[0] * d, c[1], c[2] + nrm[2] * d, h * 0.46, w * 0.46, 4),
+  ], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 1, capDepth: 0.004, color, mat, bind: bd });
+}
+
+/**
+ * The charms of a war smock: a strap of leather across the chest from one shoulder to the opposite hip with a row of leather
+ * packets sewn along it (each bound at its middle) and a cowrie between each pair. opts: strap, packets (the leather, one or
+ * several colors cycled), n (packets), side (+1 from the left shoulder, -1 from the right), cowrie (the shells' color; none: no
+ * shells), low and high (where on the torso it runs from and to, as for torsoRing).
+ */
+export function addAmulets(kit, D, bind, { strap, packets, n = 5, side = 1, cowrie = null, low = 0.2, high = 0.97 } = {}) {
+  const g = 0.034;
+  const m = 16;
+  const pts = [];
+  for (let i = 0; i <= m; i++) {
+    const t = i / m;
+    const ring = torsoRing(D, lerp(low, high, t), g);
+    const ang = lerp(0.55, -0.85, t) * side;
+    const x = ring.dx + Math.cos(ang * 1.6) * ring.rx;
+    const z = Math.sin(ang * 1.6) * ring.rz;
+    // the way the body faces there: the gradient of its elliptical section
+    const nx = (x - ring.dx) / (ring.rx * ring.rx);
+    const nz = z / (ring.rz * ring.rz);
+    const nl = Math.hypot(nx, nz) || 1;
+    pts.push({ p: [x, ring.y, z], n: [nx / nl, 0, nz / nl] });
+  }
+  kit.loft(pts.map((q) => ps(q.p[0], q.p[1], q.p[2], 0.0125, 0.0065)), { ref: [0, 1, 0], rings: m, sides: 6, start: 'round', end: 'round', capDepth: 0.008, color: strap, mat: 'leather', bind: bind.torso });
+  const cols = Array.isArray(packets) ? packets : [packets];
+  const at = (t) => {
+    const f = clamp(t) * m;
+    const i = Math.min(m - 1, Math.floor(f));
+    const k = f - i;
+    const a = pts[i];
+    const b = pts[i + 1];
+    return {
+      p: [lerp(a.p[0], b.p[0], k), lerp(a.p[1], b.p[1], k), lerp(a.p[2], b.p[2], k)],
+      n: [lerp(a.n[0], b.n[0], k), 0, lerp(a.n[2], b.n[2], k)],
+    };
+  };
+  for (let i = 0; i < n; i++) {
+    const q = at((i + 0.5) / n * 0.86 + 0.07);
+    packet(kit, bind.torso, q.p, q.n, 0.044, 0.05, cols[i % cols.length]);
+    if (cowrie && i + 1 < n) {
+      const c = at((i + 1) / n * 0.86 + 0.07);
+      kit.loft([ps(c.p[0] + c.n[0] * 0.004, c.p[1], c.p[2] + c.n[2] * 0.004, 0.0105, 0.0075, 2.4), ps(c.p[0] + c.n[0] * 0.013, c.p[1], c.p[2] + c.n[2] * 0.013, 0.0095, 0.0065, 2.4)],
+        { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 1, capDepth: 0.005, color: cowrie, mat: 'bone', bind: bind.torso });
+    }
   }
 }

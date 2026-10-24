@@ -17,6 +17,7 @@ const { GameRenderer } = await import('../../src/render/game-renderer.js');
 const { createWorld } = await import('../../src/sim/world.js');
 const { ViewState } = await import('../../src/game/view-state.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
+const { PANTHEON_LIST } = await import('../../src/data/index.js');
 
 const W = 1280;
 const H = 720;
@@ -81,22 +82,19 @@ test('high and ultra draw the rich humanoids, low and medium the low-poly models
   }
 });
 
-test('only the pantheons that have the new characters get them: the Norse sample, not the West Africans', () => {
-  const { world, r, step } = makeMatch('high');
+test('every pantheon has the new characters now, the West Africans last; a people without them would keep the low-poly models', () => {
+  const { r, step } = makeMatch('high');
   step(0.3);
   const norse = ownedBy(r, 0);
   const others = ownedBy(r, 1);
   assert.ok(norse.length > 0 && others.length > 0, 'both players have unit views');
   assert.ok(norse.every((v) => v.model.rich), 'every Norse unit the builder can dress is rich');
-  assert.equal(others.filter((v) => v.model.rich).length, 0, 'the West African ones stay low-poly');
-  assert.equal(r.detailFor('norse'), 'rich');
-  assert.equal(r.detailFor('west_african'), 'base');
-  // a tool pinning rich shows them all (the West African workers wear a veil the builder does not make yet, so a warrior is called up)
-  const worker = [...world.entities.values()].find((e) => e.kind === 'unit' && e.owner === 1);
-  world.spawnUnit(1, 'warrior', worker.x + 1, worker.y + 1, { silent: true });
+  assert.ok(others.every((v) => v.model.rich), 'and every West African one (the workers\' head tie included)');
+  for (const p of PANTHEON_LIST) assert.equal(r.detailFor(p.id), 'rich', p.id);
+  // the gate still stands for a people the outfits do not know, unless a tool pins rich
+  assert.equal(r.detailFor('atlantean'), 'base');
   r.setUnitDetail('rich');
-  step(0.3);
-  assert.ok(ownedBy(r, 1).some((v) => v.model.rich), 'the West African warriors take the rich build when pinned');
+  assert.equal(r.detailFor('atlantean'), 'rich');
   r.dispose();
 });
 
