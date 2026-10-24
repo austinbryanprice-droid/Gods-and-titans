@@ -23,6 +23,7 @@ const { richSupported, buildRichTemplate } = await import('../../src/render/mode
 const { BONE_COUNT, B, MeshKit, ps } = await import('../../src/render/models/rich-kit.js');
 const { outfitFor, LAYERS } = await import('../../src/render/models/rich-outfits.js');
 const { RICH_ARMS, RICH_OFFHANDS } = await import('../../src/render/models/rich-arms.js');
+const { RICH_WEAPONS } = await import('../../src/render/models/rich-gear.js');
 const { UNITS, MORTALS, PANTHEON_LIST } = await import('../../src/data/index.js');
 const { unitLook } = await import('../../src/render/models/unit-looks.js');
 const { PLAYER_COLORS } = await import('../../src/config.js');
@@ -54,6 +55,7 @@ const norse = (id) => looks(UNITS[id] || MORTALS[id], 'norse');
 const greek = (id) => looks(UNITS[id] || MORTALS[id], 'greek');
 const egyptian = (id) => looks(UNITS[id] || MORTALS[id], 'egyptian');
 const hindu = (id) => looks(UNITS[id] || MORTALS[id], 'hindu');
+const japanese = (id) => looks(UNITS[id] || MORTALS[id], 'japanese');
 const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
@@ -61,10 +63,30 @@ const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek
 const EGYPTIAN = ['worshipper', 'warrior', 'archer', 'priest', 'egyptian_ra', 'egyptian_anubis', 'egyptian_isis', 'egyptian_set', 'egyptian_mummy', 'egyptian_chariot_archer'];
 // every Hindu unit on the humanoid body (the elephant, the monkey soldier and the naga keep their low-poly models)
 const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hindu_vishnu', 'hindu_durga', 'hindu_hanuman', 'hindu_garuda', 'hindu_kshatriya'];
+// every Japanese unit on the humanoid and giant bodies (the great serpent, the foxes and the fox spirits keep their low-poly models)
+const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amaterasu', 'japanese_susanoo', 'japanese_raijin', 'japanese_inari', 'japanese_tengu', 'japanese_oni', 'japanese_samurai'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
 }
+
+/** The bounding box of the skinned body of a template (the rigid pieces that ride a bone are not in it). */
+function bodyBox(tpl) {
+  tpl.rich.geo.computeBoundingBox();
+  return tpl.rich.geo.boundingBox;
+}
+
+/** The size of a rigid piece (a held item) of a template, by its attach name. */
+function pieceSize(unit, name) {
+  const geo = buildRichTemplate(unit).rich.attach.find((a) => a.name === name).geo;
+  geo.computeBoundingBox();
+  return geo.boundingBox.getSize(new THREE.Vector3());
+}
+
+const pieceTris = (unit, name) => buildRichTemplate(unit).rich.attach.find((a) => a.name === name).geo.userData.triangles;
+
+/** The unit with its extras changed, or its head. */
+const withVisual = (u, change) => ({ ...u, visual: { ...u.visual, ...change(u.visual) } });
 
 function runStates(model, label) {
   const skel = model.rich.mesh.skeleton;
@@ -445,6 +467,128 @@ test('Hindu mortals and gods carry the team\'s color on their cloth, the metal k
 test('the Hindu gods, mortals and Garuda animate every state without a NaN', () => {
   for (const id of HINDU) {
     const m = buildUnitModel(hindu(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('the Japanese dress their own way: kosode and hakama, laced armor, tiger skins and black hair', () => {
+  const base = outfitFor('norse');
+  const jp = outfitFor('japanese');
+  for (const layer of LAYERS) assert.equal(typeof jp[layer], 'function', `the Japanese ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(jp[layer], base[layer], `the Japanese dress their ${layer} their own way`);
+  assert.equal(typeof jp.palette, 'function', 'the people have black hair');
+  assert.equal(typeof jp.gear, 'function', 'an oni\'s club is iron, a priestess\'s staff is ringed');
+  assert.ok(!jp.shield, 'they fight with the blade and carry no shield');
+  assert.ok(!base.palette && !base.gear, 'the other peoples keep the shared palette and the shared items');
+});
+
+test('every Japanese humanoid and giant is dressed in the Japanese look, the serpent, the foxes and the fox spirits stay low-poly', () => {
+  for (const id of JAPANESE) assert.ok(richSupported(japanese(id)), `${id} is supported`);
+  for (const id of ['japanese_yamata_no_orochi', 'japanese_kitsune', 'japanese_myobu_fox', 'japanese_tenko', 'battering_ram']) assert.ok(!richSupported(japanese(id)), `${id} stays low-poly`);
+  // only the crow's and the demon's heads the kit builds are let through
+  const tengu = japanese('japanese_tengu');
+  assert.ok(!richSupported(withVisual(tengu, () => ({ head: 'gorilla' }))));
+  // a Japanese warrior is not a Hindu one
+  assert.notEqual(buildRichTemplate(japanese('warrior')).triangles, buildRichTemplate(hindu('warrior')).triangles);
+});
+
+test('the Japanese carry what they are known by: a katana, a yumi, a fan, a mirror, drumsticks, a shakujo, a kanabo', () => {
+  const names = (id) => buildRichTemplate(japanese(id)).rich.attach.map((x) => x.name).sort();
+  assert.deepEqual(names('warrior'), ['weaponR'], 'a katana');
+  assert.deepEqual(names('archer'), ['weaponL'], 'a yumi');
+  assert.deepEqual(names('priest'), ['weaponR'], 'a folding fan');
+  assert.deepEqual(names('japanese_samurai'), ['weaponR'], 'a katana');
+  assert.deepEqual(names('japanese_amaterasu'), ['weaponL'], 'the sacred mirror');
+  assert.deepEqual(names('japanese_susanoo'), ['weaponR'], 'the sword that slew the serpent');
+  assert.deepEqual(names('japanese_raijin'), ['weaponL', 'weaponR'], 'a drumstick in each hand');
+  assert.deepEqual(names('japanese_inari'), ['weaponL', 'weaponR'], 'a shakujo and a jewel');
+  assert.deepEqual(names('japanese_tengu'), ['weaponR', 'wingL1', 'wingL2', 'wingR1', 'wingR2'], 'a fan of feathers and his wings');
+  assert.deepEqual(names('japanese_oni'), ['weaponR'], 'a kanabo');
+  assert.ok(RICH_WEAPONS.has('katana'), 'the katana is built');
+  for (const id of ['fan', 'drum']) assert.ok(RICH_ARMS.has(id), `the ${id} is built`);
+  for (const id of ['mirror', 'orb', 'drum']) assert.ok(RICH_OFFHANDS.has(id), `the ${id} is built`);
+});
+
+test('the Japanese hold their things their own way: an iron kanabo, a long yumi, a ringed shakujo, a fan of feathers, drumsticks', () => {
+  // the same unit under another people's outfit holds the shared item
+  const shared = (id) => ({ ...japanese(id), pantheon: 'norse' });
+  assert.ok(pieceTris(japanese('japanese_oni'), 'weaponR') > pieceTris(shared('japanese_oni'), 'weaponR') * 1.5, 'the kanabo is studded');
+  assert.ok(pieceSize(japanese('archer'), 'weaponL').x > pieceSize(norse('archer'), 'weaponL').x * 1.1, 'the yumi is longer than the shared bow');
+  assert.ok(pieceSize(japanese('japanese_inari'), 'weaponR').z > pieceSize(shared('japanese_inari'), 'weaponR').z * 1.5, 'the shakujo carries a ring on its head, set to face the front');
+  assert.notEqual(pieceTris(japanese('japanese_tengu'), 'weaponR'), pieceTris(shared('japanese_tengu'), 'weaponR'), 'a fan of feathers, not the priest\'s paper fan');
+  assert.ok(pieceTris(japanese('japanese_tengu'), 'weaponR') < pieceTris(japanese('priest'), 'weaponR') && pieceSize(japanese('japanese_tengu'), 'weaponR').z > pieceSize(japanese('priest'), 'weaponR').z, 'with a thicker, feathered build');
+  // the thunder god beats with a long stick in each hand, where Shiva's damaru is a small drum
+  for (const name of ['weaponL', 'weaponR']) assert.ok(pieceSize(japanese('japanese_raijin'), name).x > 0.7, `Raijin's ${name} is a drumstick`);
+  assert.ok(pieceSize(hindu('hindu_shiva'), 'weaponL').x < 0.4, 'Shiva keeps his damaru');
+});
+
+test('Amaterasu and Raijin stand before a ring on their backs, the other gods carry a banner on a pole', () => {
+  for (const id of ['japanese_amaterasu', 'japanese_raijin']) {
+    const u = japanese(id);
+    const ring = buildRichTemplate(u);
+    const plain = buildRichTemplate(withVisual(u, (v) => ({ extras: v.extras.filter((e) => e !== 'aura_ring') })));
+    // the ring is skinned on the chest bone: behind the back, wider than the shoulders
+    assert.ok(ring.triangles > plain.triangles + 400, `${id}: ${ring.triangles} triangles with the ring, ${plain.triangles} without`);
+    assert.ok(bodyBox(ring).max.z > bodyBox(plain).max.z + 0.15, `${id}: the ring is wider than the body`);
+    assert.ok(bodyBox(ring).min.x < bodyBox(plain).min.x - 0.05, `${id}: the ring is behind the back`);
+    // without a ring the god carries a banner on a pole instead, up over the head
+    assert.ok(bodyBox(plain).max.y > 1.8 && bodyBox(plain).max.y > bodyBox(ring).max.y, `${id}: a banner stands behind a god with no ring`);
+  }
+  for (const id of ['japanese_susanoo', 'japanese_inari']) {
+    const tpl = buildRichTemplate(japanese(id));
+    assert.ok(bodyBox(tpl).max.y > 1.8, `${id}: a banner on a pole rises over his head`);
+    assert.ok(bodyBox(tpl).max.z < 0.4, `${id}: and no ring spreads wide behind him`);
+  }
+  // the creatures and the people carry neither
+  for (const id of ['japanese_tengu', 'japanese_oni', 'warrior', 'japanese_samurai']) assert.ok(bodyBox(buildRichTemplate(japanese(id))).max.y < 1.5, `${id} has no banner`);
+});
+
+test('the Tengu has a crow\'s head with a beak, the Oni a demon\'s with tusks', () => {
+  for (const [id, reach] of [['japanese_tengu', 0.07], ['japanese_oni', 0.02]]) {
+    const u = japanese(id);
+    const beast = buildRichTemplate(u);
+    const human = buildRichTemplate(withVisual(u, () => ({ head: 'human' })));
+    assert.notEqual(beast.triangles, human.triangles, `${id}: a muzzle is not a face`);
+    assert.ok(bodyBox(beast).max.x > bodyBox(human).max.x + reach, `${id}: the head reaches further forward`);
+  }
+});
+
+test('the Tengu stands on a one-toothed geta that hangs below the soles the others rest on', () => {
+  assert.ok(bodyBox(buildRichTemplate(japanese('japanese_tengu'))).min.y < -0.1, 'the tooth hangs below the ground line (a flier never touches it)');
+  for (const id of JAPANESE.filter((x) => x !== 'japanese_tengu')) assert.ok(bodyBox(buildRichTemplate(japanese(id))).min.y > -0.02, `${id} stands on the ground`);
+});
+
+test('the Japanese people have black hair, the gods and the creatures keep the shared palette', () => {
+  const jp = outfitFor('japanese');
+  const pal = { hair: new THREE.Color('#8a5a3a'), skin: new THREE.Color('#d9a678') };
+  const people = jp.palette(pal, { mortal: true });
+  const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  assert.ok(lum(people.hair) < 0.03, 'black hair');
+  assert.equal(people.skin, pal.skin, 'the rest of the palette is kept');
+  assert.equal(pal.hair.getHexString(), '8a5a3a', 'the shared palette itself is not touched');
+  assert.equal(jp.palette(pal, { mortal: false }), pal, 'a god keeps his own');
+});
+
+test('Japanese mortals and gods carry the team\'s color on their cloth, the metal keeps its own', () => {
+  for (const [id, share] of [['worshipper', 0.08], ['warrior', 0.09], ['archer', 0.012], ['priest', 0.01], ['japanese_samurai', 0.1], ['japanese_amaterasu', 0.012], ['japanese_susanoo', 0.025], ['japanese_raijin', 0.012], ['japanese_inari', 0.025], ['japanese_tengu', 0.03], ['japanese_oni', 0.003]]) {
+    const fx = buildRichTemplate(japanese(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    let metal = 0;
+    for (let i = 0; i < fx.length; i += 4) {
+      if (fx[i] > 0) team++;
+      if (fx[i + 3] > 0.3) metal++;
+    }
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+    if (id === 'japanese_samurai') assert.ok(metal > n * 0.08, `${id}: metal vertices ${metal} of ${n}`);
+  }
+});
+
+test('the Japanese gods, mortals and creatures animate every state without a NaN', () => {
+  for (const id of JAPANESE) {
+    const m = buildUnitModel(japanese(id), PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();

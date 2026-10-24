@@ -5,7 +5,7 @@
 import { PROFILES } from './unit-bodies.js';
 import { shadeC, mixC } from './unit-geo.js';
 import { vs, ps, B, chain, rigid, mixBind, smoothstep } from './rich-kit.js';
-import { clamp, lerp, gradY } from './rich-paint.js';
+import { clamp, lerp, gradY, mul } from './rich-paint.js';
 import { BEAST_HEADS, addBeastHead } from './rich-heads.js';
 
 const PI = Math.PI;
@@ -386,6 +386,51 @@ export function addSandals(kit, D, pal, bind, { skin, skinPaint = null, strap, s
       const y = D.ankleY + 0.05 + i * 0.045;
       kit.loft([legRing(D, side, y, 0.005), legRing(D, side, y + 0.016, 0.005)], { sides: 10, start: null, end: null, color: strap, mat: 'leather', bind: bind.leg[side] });
     }
+  }
+}
+
+/**
+ * Geta: a bare foot on a wooden board held by a thong, the board standing on teeth. `ippon` is one tall
+ * tooth under the middle of the board (the tengu's), else two low ones. `tooth` is how far the teeth
+ * hang below the sole, so a unit that stands on the ground wears them low (0.02) and a flier high.
+ * opts: skin, skinPaint, strap (the thong), wood, tooth, ippon.
+ */
+export function addGeta(kit, D, pal, bind, { skin, skinPaint = null, strap, wood, tooth = 0.02, ippon = false }) {
+  const r = D.legR;
+  const h = D.footH;
+  for (const side of [1, -1]) {
+    const z = side * D.hipZ;
+    const foot = rigid(side > 0 ? B.footR : B.footL);
+    kit.loft([
+      ps(-r * 0.8, h * 0.66, z, h * 0.66, r * 0.78),
+      ps(r * 0.25, h * 0.54, z, h * 0.54, r * 0.8),
+      ps(r * 1.45, h * 0.42, z, h * 0.42, r * 0.8),
+      ps(r * 2.3, h * 0.32, z, h * 0.32, r * 0.68),
+    ], { ref: [0, 1, 0], rings: 5, sides: 8, capRings: 2, capDepth: h * 0.34, color: skin, bind: foot, paint: skinPaint });
+    // the board: longer than the foot, rounded, a little under the sole
+    kit.loft([
+      ps(-r * 1.0, -0.006, z, 0.009, r * 0.88),
+      ps(r * 0.3, -0.006, z, 0.009, r * 0.95),
+      ps(r * 1.7, -0.006, z, 0.009, r * 0.9),
+      ps(r * 2.6, -0.006, z, 0.009, r * 0.66),
+    ], { ref: [0, 1, 0], rings: 4, sides: 10, capRings: 2, capDepth: 0.009, color: wood, mat: 'wood', bind: foot });
+    // the teeth: planks across the board
+    const plank = (x, w, hgt) => {
+      kit.loft([ps(x, -0.012, z, w, r * 0.74, 4), ps(x, -0.012 - hgt * 0.5, z, w * 0.96, r * 0.72, 4), ps(x, -0.012 - hgt, z, w * 0.9, r * 0.68, 4)],
+        { ref: [1, 0, 0], sides: 8, start: null, end: 'round', capRings: 1, capDepth: 0.004, color: wood, mat: 'wood', bind: foot, paint: (o, px, py) => mul(o, 0.8 + 0.2 * clamp((py + 0.012 + hgt) / hgt + 0.2)) });
+    };
+    if (ippon) plank(r * 0.7, 0.014, tooth);
+    else {
+      plank(r * 0.05, 0.012, tooth);
+      plank(r * 1.95, 0.012, tooth);
+    }
+    // the thong: over the toes and across the instep, and a ring at the board's edge
+    kit.loft([ps(r * 2.0, h * 0.3, z, h * 0.3 + 0.003, 0.009), ps(r * 1.05, h * 0.5, z, h * 0.5 + 0.004, r * 0.8 + 0.004)],
+      { ref: [0, 1, 0], sides: 6, start: null, end: null, color: strap, mat: 'cloth', bind: foot });
+    kit.loft([ps(r * 1.0, h * 0.5, z, h * 0.5 + 0.004, r * 0.8 + 0.004), ps(r * 1.0 + 0.016, h * 0.46, z, h * 0.46 + 0.004, r * 0.8 + 0.004)],
+      { ref: [0, 1, 0], sides: 10, start: null, end: null, color: strap, mat: 'cloth', bind: foot });
+    const ya = D.ankleY + 0.004;
+    kit.loft([legRing(D, side, ya, 0.006), legRing(D, side, ya + 0.016, 0.006)], { sides: 10, start: null, end: null, color: strap, mat: 'cloth', bind: bind.leg[side] });
   }
 }
 

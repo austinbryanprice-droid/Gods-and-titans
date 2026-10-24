@@ -4,7 +4,7 @@
 // Anything not built here keeps its low-poly model.
 import * as THREE from 'three';
 import { MeshKit, ps } from './rich-kit.js';
-import { TEAM, shadeC, mixC, tintC } from './unit-geo.js';
+import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { gripRotation } from './unit-parts.js';
 import { dye, mul } from './rich-paint.js';
 
@@ -16,7 +16,7 @@ export const sstep = (a, b, x) => {
 };
 
 /** Weapons the rich kit builds itself. */
-export const RICH_WEAPONS = new Set(['sword', 'axe', 'hammer', 'spear', 'club', 'bow', 'staff']);
+export const RICH_WEAPONS = new Set(['sword', 'axe', 'hammer', 'spear', 'club', 'bow', 'staff', 'katana']);
 
 /** Matrix taking a piece modelled in the grip frame into the hand bone's frame (palm center, wrist at the origin's parent). */
 export function handFrame(P, side, grip) {
@@ -101,6 +101,44 @@ function sword(kit, pal, s, { flame = false } = {}) {
       // fuller: a shallow darker groove along the middle of each face; bright edges
       mul(o, 1 - 0.2 * sstep(0.7, 1, face) * sstep(0.04, 0.2, u) * (1 - sstep(0.62, 0.85, u)));
       if (edge > 0.9) mul(o, 1.08);
+    },
+  });
+}
+
+/**
+ * A katana: a long, gently curved, single-edged blade (the edge on +X, the tip bending back toward -X
+ * and so up when the sword is carried point-forward) with a pale wavy temper line, a round guard,
+ * a gold collar and a handle wrapped in cord.
+ */
+function katana(kit, pal, s) {
+  const steel = withMat(mixC(pal.accentMetal, '#dde2e8', 0.65), 'metal');
+  const fitting = pal.accentMetal;
+  const cord = withMat('#2a2430', 'cloth');
+  // the handle: ray skin under a diamond wrap, a cap at the butt
+  grip(kit, -0.165 * s, 0.07 * s, 0.0215 * s, cord, 7);
+  kit.loft([ps(0, -0.17 * s, 0, 0.026 * s), ps(0, -0.19 * s, 0, 0.026 * s), ps(0, -0.2 * s, 0, 0.018 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 10, start: null, end: 'round', capDepth: 0.012 * s, color: fitting, mat: 'gold',
+  });
+  // the round guard and the collar at the root of the blade
+  kit.loft([ps(0, 0.072 * s, 0, 0.058 * s, 0.054 * s), ps(0, 0.086 * s, 0, 0.058 * s, 0.054 * s)], {
+    ref: [1, 0, 0], sides: 16, start: 'flat', end: 'flat', color: shadeC(fitting, 0.85), mat: 'gold',
+  });
+  kit.loft([ps(0, 0.086 * s, 0, 0.026 * s, 0.0105 * s), ps(0, 0.12 * s, 0, 0.0245 * s, 0.0095 * s)], {
+    ref: [1, 0, 0], sides: 8, start: null, end: null, color: fitting, mat: 'gold',
+  });
+  // the blade: long, thick at the back (mune), curving; stations along a shallow arc
+  const y0 = 0.12;
+  const L = 0.8;
+  const arc = (t) => -0.052 * t * t;
+  const rows = [[0, 0.0235, 0.0095], [0.14, 0.0235, 0.009], [0.4, 0.0225, 0.0082], [0.7, 0.0215, 0.0072], [0.9, 0.0195, 0.006], [0.975, 0.0145, 0.0038], [1, 0.002, 0.002]];
+  kit.loft(rows.map(([t, rx, rz]) => ps(arc(t) * s, (y0 + t * (L - y0)) * s, 0, rx * s, rz * s, 1.7)), {
+    ref: [1, 0, 0], rings: 12, sides: 8, start: null, end: 'round', capDepth: 0.02 * s, color: steel, mat: 'metal',
+    paint: (o, x, y, z, u, a) => {
+      const c = Math.cos(a * TAU);
+      // the temper line: a pale wavy band a little back from the cutting edge; the back of the blade a shade bluer and darker
+      const w = 0.52 + 0.09 * Math.sin(u * 38) + 0.05 * Math.sin(u * 91 + 1);
+      const band = sstep(w - 0.14, w, c) * (1 - sstep(w, w + 0.18, c));
+      mul(o, 0.84 + 0.34 * band + (c > 0.88 ? 0.16 : 0) - (c < -0.3 ? 0.08 : 0));
     },
   });
 }
@@ -207,21 +245,43 @@ function spear(kit, pal, s, { runes = null, shaftColor = null } = {}) {
   }
 }
 
-/** A knotted club: a gnarled trunk swelling to a heavy head ringed with iron-hard studs. */
-function club(kit, pal, s, { color = null, studs = null } = {}) {
+/**
+ * A club: a gnarled trunk swelling to a heavy head ringed with studs. opts: color (the wood; iron for a
+ * kanabo), studs (their color), kanabo (a smooth round iron club, the head ringed with rows of studs).
+ */
+function club(kit, pal, s, { color = null, studs = null, kanabo = false } = {}) {
   const wood = color || pal.wood;
   const stud = studs || shadeC(wood, 0.55);
   kit.loft([ps(0, -0.08 * s, 0, 0.034 * s), ps(0, 0.05 * s, 0, 0.03 * s), ps(0, 0.22 * s, 0, 0.04 * s), ps(0, 0.38 * s, 0, 0.066 * s), ps(0, 0.5 * s, 0, 0.088 * s), ps(0, 0.58 * s, 0, 0.07 * s)], {
-    ref: [1, 0, 0], rings: 12, sides: 10, start: 'round', end: 'round', capDepth: [0.014 * s, 0.045 * s], color: wood, mat: 'wood',
-    warp: (p, a, u) => {
+    ref: [1, 0, 0], rings: 12, sides: kanabo ? 12 : 10, start: 'round', end: 'round', capDepth: [0.014 * s, 0.045 * s], color: wood, mat: kanabo ? 'iron' : 'wood',
+    warp: kanabo ? null : (p, a, u) => {
       // knots and burrs along the trunk
       const k = Math.max(0, Math.sin(u * 17 + a * 2.3)) ** 3 * 0.012 * s * (0.4 + u);
       p[0] += Math.cos(a) * k;
       p[2] += Math.sin(a) * k;
     },
-    paint: (o, x, y, z, u) => mul(o, 0.8 + 0.3 * u + 0.08 * Math.sin(u * 40 + y * 9)),
+    paint: kanabo ? (o, x, y, z, u) => mul(o, 0.78 + 0.34 * u + 0.06 * Math.sin(u * 60 + y * 9)) : (o, x, y, z, u) => mul(o, 0.8 + 0.3 * u + 0.08 * Math.sin(u * 40 + y * 9)),
   });
   grip(kit, -0.06 * s, 0.12 * s, 0.0375 * s, pal.leather, 4);
+  if (kanabo) {
+    // iron bands under the studs, three staggered rows of conical studs round the head
+    for (const y of [0.34, 0.585]) {
+      kit.loft([ps(0, (y - 0.014) * s, 0, (y > 0.5 ? 0.07 : 0.062) * s), ps(0, (y + 0.014) * s, 0, (y > 0.5 ? 0.073 : 0.065) * s)], { ref: [1, 0, 0], sides: 12, start: null, end: null, color: shadeC(stud, 0.8), mat: 'iron' });
+    }
+    const rows = [[0.4, 0.062], [0.46, 0.078], [0.52, 0.086]];
+    rows.forEach(([y, r], row) => {
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const a = ((i + (row % 2) * 0.5) / n) * TAU;
+        const dx = Math.cos(a);
+        const dz = Math.sin(a);
+        kit.loft([ps(dx * r * 0.9 * s, y * s, dz * r * 0.9 * s, 0.016 * s), ps(dx * (r + 0.05) * s, (y + 0.006) * s, dz * (r + 0.05) * s, 0.003 * s)], {
+          ref: [0, 1, 0], sides: 5, rings: 2, start: null, end: 'round', capDepth: 0.01 * s, color: stud, mat: 'iron',
+        });
+      }
+    });
+    return;
+  }
   // studs around the head
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * TAU + (i % 2) * 0.35;
@@ -235,14 +295,18 @@ function club(kit, pal, s, { color = null, studs = null } = {}) {
   }
 }
 
-/** A recurved bow: tapering flat limbs curving away from the archer, a wrapped grip, horn nocks and a drawn-string line. */
-function bow(kit, pal, s, { color = null } = {}) {
+/**
+ * A recurved bow: tapering flat limbs curving away from the archer, a wrapped grip, horn nocks and a drawn-string
+ * line. opts: color, yumi (the Japanese bow: taller, held a third of the way up, so the lower limb is the shorter).
+ */
+function bow(kit, pal, s, { color = null, yumi = false } = {}) {
   const wood = color || pal.woodDark;
-  const L = 0.84 * s;
+  const up = (yumi ? 0.62 : 0.42) * s;
+  const lo = (yumi ? 0.36 : 0.42) * s;
   const at = (t) => {
     const k = Math.abs(t) * 2; // 0 at the grip, 1 at the tips
     const x = (0.108 * Math.cos(t * PI) ** 1.15 - 0.046 + 0.034 * sstep(0.62, 1, k)) * s;
-    return [x, t * L];
+    return [x, t * 2 * (t > 0 ? up : lo)];
   };
   const limb = [];
   const n = 9;
@@ -254,7 +318,7 @@ function bow(kit, pal, s, { color = null } = {}) {
     limb.push(ps(x, y, 0, r, r * 1.45));
   }
   kit.loft(limb, {
-    ref: [0, 0, 1], rings: 12, sides: 6, capRings: 2, start: 'round', end: 'round', capDepth: 0.01 * s, color: wood, mat: 'wood',
+    ref: [0, 0, 1], rings: 12, sides: 6, capRings: 2, start: 'round', end: 'round', capDepth: 0.01 * s, color: wood, mat: yumi ? 'lacquer' : 'wood',
     paint: (o, x, y, z, u) => mul(o, 0.9 + 0.14 * Math.sin(u * 34) * Math.sin(u * PI)),
   });
   // leather-wrapped grip
@@ -263,6 +327,14 @@ function bow(kit, pal, s, { color = null } = {}) {
   kit.loft([ps(g0[0], g0[1], 0, 0.026 * s, 0.03 * s), ps(0.0 + at(0)[0], 0, 0, 0.0285 * s, 0.032 * s), ps(g1[0], g1[1], 0, 0.026 * s, 0.03 * s)], {
     ref: [0, 0, 1], rings: 5, sides: 8, start: null, end: null, color: pal.leather, mat: 'leather',
   });
+  if (yumi) {
+    // the rattan binding: pale bands up the limbs
+    for (const t of [-0.3, -0.19, 0.2, 0.3, 0.4]) {
+      const [x, y] = at(t);
+      const r = (0.0125 + 0.0105 * (1 - Math.abs(t) * 2) ** 1.2) * s;
+      kit.loft([ps(x, y - 0.012 * s, 0, r * 1.15, r * 1.6), ps(x, y + 0.012 * s, 0, r * 1.15, r * 1.6)], { ref: [0, 0, 1], sides: 6, start: null, end: null, color: withMat('#d8c490', 'cloth') });
+    }
+  }
   // horn nocks at the tips, and the string between them
   for (const sgn of [-1, 1]) {
     const [x, y] = at(sgn * 0.5);
@@ -272,8 +344,54 @@ function bow(kit, pal, s, { color = null } = {}) {
   }
   const [x0, y0] = at(-0.5);
   const [x1, y1] = at(0.5);
-  kit.loft([ps(x0 - 0.008 * s, y0, 0, 0.0035 * s), ps((x0 + x1) / 2 - 0.006 * s, 0, 0, 0.0035 * s), ps(x1 - 0.008 * s, y1, 0, 0.0035 * s)], {
+  kit.loft([ps(x0 - 0.008 * s, y0, 0, 0.0035 * s), ps((x0 + x1) / 2 - 0.006 * s, (y0 + y1) / 2, 0, 0.0035 * s), ps(x1 - 0.008 * s, y1, 0, 0.0035 * s)], {
     ref: [0, 0, 1], sides: 4, start: null, end: null, color: mixC(pal.white, pal.leather, 0.25), mat: 'cloth',
+  });
+}
+
+/**
+ * A shakujo, the pilgrim's staff: a shaft of wood under a head of gold, a tall ring with a smaller ring hung
+ * at each side of it and a jewel at its crown.
+ */
+function shakujo(kit, pal, s) {
+  const metal = pal.accentMetal;
+  kit.loft([ps(0, -0.5 * s, 0, 0.0195 * s), ps(0, -0.1 * s, 0, 0.0215 * s), ps(0, 0.3 * s, 0, 0.0215 * s), ps(0, 0.56 * s, 0, 0.0195 * s)], {
+    ref: [1, 0, 0], rings: 8, sides: 8, start: 'round', end: null, capDepth: 0.009 * s, color: pal.wood, mat: 'wood', paint: grain(0.08),
+  });
+  grip(kit, -0.1 * s, 0.1 * s, 0.0245 * s, pal.leather, 4);
+  kit.loft([ps(0, -0.5 * s, 0, 0.0215 * s), ps(0, -0.455 * s, 0, 0.022 * s)], { ref: [1, 0, 0], sides: 8, start: 'round', end: null, capDepth: 0.008 * s, color: shadeC(metal, 0.72), mat: 'metal' });
+  // the socket under the ring, flared
+  kit.loft([ps(0, 0.5 * s, 0, 0.0245 * s), ps(0, 0.545 * s, 0, 0.034 * s), ps(0, 0.6 * s, 0, 0.0175 * s)], { ref: [1, 0, 0], rings: 4, sides: 10, start: null, end: null, color: metal, mat: 'gold' });
+  // the great ring, taller than wide, standing across the blade so the front of the figure sees it face on
+  const cy = 0.74 * s;
+  const rx = 0.07 * s;
+  const ry = 0.135 * s;
+  const loop = [];
+  const N = 14;
+  for (let i = 0; i <= N; i++) {
+    const a = -PI / 2 + (i / N) * TAU;
+    loop.push(ps(0, cy + ry * Math.sin(a), rx * Math.cos(a), 0.0095 * s, 0.0095 * s));
+  }
+  kit.loft(loop, { ref: [1, 0, 0], sides: 5, start: null, end: null, color: metal, mat: 'gold' });
+  // two small rings hung from each side of it
+  for (const side of [1, -1]) {
+    for (const k of [0, 1]) {
+      const a = (0.2 + k * 0.5) * side;
+      const pz = (rx + 0.022 * s) * Math.cos(a) * 0.98;
+      const py = cy + ry * 0.5 * Math.sin(a * 1.6) + 0.02 * s;
+      const ring = [];
+      for (let i = 0; i <= 8; i++) {
+        const b = (i / 8) * TAU;
+        ring.push(ps(0, py + Math.sin(b) * 0.021 * s, pz + Math.cos(b) * 0.021 * s, 0.0048 * s, 0.0048 * s));
+      }
+      kit.loft(ring, { ref: [1, 0, 0], sides: 4, start: null, end: null, color: metal, mat: 'gold' });
+    }
+  }
+  // the jewel at the crown, a flame of light on a gold cup
+  const top = cy + ry;
+  kit.loft([ps(0, top - 0.004 * s, 0, 0.012 * s), ps(0, top + 0.016 * s, 0, 0.02 * s), ps(0, top + 0.034 * s, 0, 0.012 * s)], { ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: null, color: metal, mat: 'gold' });
+  kit.loft([ps(0, top + 0.03 * s, 0, 0.016 * s), ps(0, top + 0.062 * s, 0, 0.022 * s), ps(0, top + 0.1 * s, 0, 0.005 * s)], {
+    ref: [1, 0, 0], rings: 4, sides: 8, start: null, end: 'round', capDepth: 0.01 * s, color: tintC(pal.glow, 0.3), mat: 'gem', glow: 1,
   });
 }
 
@@ -317,12 +435,13 @@ function staff(kit, pal, s, { shaftColor = null, orb = null } = {}) {
 export function richWeapon(kit, pal, id, s, opts = {}) {
   switch (id) {
     case 'sword': sword(kit, pal, s, { flame: !!opts.glowBlade }); return true;
+    case 'katana': katana(kit, pal, s); return true;
     case 'axe': axe(kit, pal, s, opts); return true;
     case 'hammer': hammer(kit, pal, s, { glow: opts.runes || null }); return true;
     case 'spear': spear(kit, pal, s, { runes: opts.runes || null }); return true;
     case 'club': club(kit, pal, s, opts); return true;
     case 'bow': bow(kit, pal, s, opts); return true;
-    case 'staff': staff(kit, pal, s, opts); return true;
+    case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else staff(kit, pal, s, opts); return true;
     default: return false;
   }
 }

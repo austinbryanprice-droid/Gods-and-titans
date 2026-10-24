@@ -5,10 +5,10 @@
 // units of the head scale.
 import { shadeC, mixC, withMat } from './unit-geo.js';
 import { vs, ps } from './rich-kit.js';
-import { clamp, lerp, mul } from './rich-paint.js';
+import { clamp, lerp, mul, tint } from './rich-paint.js';
 
 /** The head kinds built here (richSupported lets a unit with one of them through). */
-export const BEAST_HEADS = new Set(['jackal', 'falcon', 'monkey']);
+export const BEAST_HEADS = new Set(['jackal', 'falcon', 'monkey', 'bird', 'demon']);
 
 const INK = withMat('#16120f', 'gloss');
 const AMBER = withMat('#e6b24a', 'gloss');
@@ -256,12 +256,146 @@ function monkey(kit, D, pal, bind, skinPaint, glowEyes) {
 }
 
 /**
+ * The crow (a karasu-tengu's): a sleek black head with a flat crown, a heavy straight bill arched
+ * along its top and hooked at the tip, a patch of bare dark skin at its root, bristles at the nostrils,
+ * bright eyes under a heavy brow. The unit's palette skin is the plumage.
+ */
+function crow(kit, D, pal, bind, skinPaint, glowEyes) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const X = (x) => hx + x * hs;
+  const Y = (y) => hy + y * hs;
+  const plume = pal.skin;
+  const horn = withMat(mixC(shadeC(plume, 0.6), '#8a919c', 0.3), 'bone');
+  const sheen = { r: 0.16, g: 0.19, b: 0.3 };
+  const skull = [
+    vs(Y(-0.1), 0.044 * hs, 0.04 * hs, X(0.03)),
+    vs(Y(-0.078), 0.07 * hs, 0.062 * hs, X(0.018)),
+    vs(Y(-0.04), 0.092 * hs, 0.08 * hs, X(0.004)),
+    vs(Y(0.0), 0.1 * hs, 0.087 * hs, X(-0.002)),
+    vs(Y(0.04), 0.099 * hs, 0.086 * hs, X(-0.006)),
+    vs(Y(0.078), 0.086 * hs, 0.075 * hs, X(-0.01)),
+    vs(Y(0.103), 0.058 * hs, 0.052 * hs, X(-0.013)),
+    vs(Y(0.112), 0.026 * hs, 0.026 * hs, X(-0.015)),
+  ];
+  kit.loft(skull, {
+    rings: 12, capDepth: [0.012 * hs, 0.012 * hs], color: plume, bind: bind.head,
+    // a blue gloss over the crown and nape, the throat plainer
+    paint: skinPaint || ((o, x, y, z, u) => tint(o, sheen, 0.5 * clamp((y - Y(-0.02)) / (0.14 * hs)) * (0.6 + 0.4 * Math.sin(z * 120 + y * 40)))),
+  });
+  // the bill: tall at the root, its top ridge arching over to a hooked tip; the lower half tucked under it
+  kit.loft([
+    ps(X(0.05), Y(0.006), 0, 0.054 * hs, 0.046 * hs),
+    ps(X(0.11), Y(0.004), 0, 0.05 * hs, 0.04 * hs),
+    ps(X(0.17), Y(-0.008), 0, 0.04 * hs, 0.032 * hs),
+    ps(X(0.225), Y(-0.03), 0, 0.026 * hs, 0.02 * hs),
+    ps(X(0.255), Y(-0.058), 0, 0.012 * hs, 0.009 * hs),
+    ps(X(0.26), Y(-0.078), 0, 0.004 * hs, 0.003 * hs),
+  ], {
+    ref: [0, 1, 0], rings: 9, sides: 10, start: null, end: 'round', capDepth: 0.004 * hs, color: horn, mat: 'bone', bind: bind.head,
+    // the root is dark bare skin, the tip a little paler
+    paint: (o, x, y, z, u) => { if (u < 0.12) mul(o, 0.6); else mul(o, 0.9 + 0.3 * clamp((u - 0.7) / 0.3)); },
+  });
+  kit.loft([
+    ps(X(0.055), Y(-0.05), 0, 0.022 * hs, 0.036 * hs),
+    ps(X(0.12), Y(-0.058), 0, 0.022 * hs, 0.03 * hs),
+    ps(X(0.18), Y(-0.062), 0, 0.016 * hs, 0.021 * hs),
+    ps(X(0.228), Y(-0.07), 0, 0.007 * hs, 0.011 * hs),
+  ], { ref: [0, 1, 0], rings: 4, sides: 8, start: null, end: 'round', capDepth: 0.006 * hs, color: shadeC(horn, 0.85), mat: 'bone', bind: bind.head });
+  // bristles at the nostrils, pointing forward over the bill
+  for (const side of [1, -1]) {
+    kit.loft([ps(X(0.06), Y(0.026), side * 0.03 * hs, 0.008 * hs), ps(X(0.1), Y(0.032), side * 0.034 * hs, 0.006 * hs), ps(X(0.135), Y(0.03), side * 0.03 * hs, 0.002 * hs)],
+      { ref: [0, 1, 0], rings: 3, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: shadeC(plume, 0.9), mat: 'feather', bind: bind.head });
+  }
+  sideEyes(kit, D, bind, skull, X, Y, 0.038, 0.03, { color: AMBER, w: 0.02, h: 0.02, glow: glowEyes ? 1 : 0.2, ring: 1.3 });
+  // a heavy brow over each eye, slanting down toward the bill: a scowl
+  for (const side of [1, -1]) {
+    const zAt = (x, y) => skullZ(skull, X(x), Y(y)) + 0.002 * hs;
+    kit.loft([[0.07, 0.05], [0.04, 0.062], [0.0, 0.066]].map(([x, y]) => ps(X(x), Y(y), side * zAt(x, y), 0.006 * hs, 0.007 * hs)),
+      { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capDepth: 0.004 * hs, color: shadeC(plume, 0.7), mat: 'feather', bind: bind.head });
+  }
+}
+
+/**
+ * The oni: a wide brutish face, a heavy brow ridge slanting down toward the nose over round yellow
+ * eyes, a broad flat nose, a wide grinning mouth with a thrust-out lower jaw and two tusks curving up
+ * out of it, big pointed ears. The unit's palette skin is the face; the horns and the hair are the outfit's.
+ */
+function oni(kit, D, pal, bind, skinPaint, glowEyes) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const X = (x) => hx + x * hs;
+  const Y = (y) => hy + y * hs;
+  const skin = pal.skin;
+  const brow = shadeC(skin, 0.7);
+  const lip = mixC(skin, '#4a1a1a', 0.45);
+  const ivory = withMat('#efe6cc', 'bone');
+  const eyeC = withMat('#f4d24a', 'gloss');
+  const skull = [
+    vs(Y(-0.108), 0.058 * hs, 0.056 * hs, X(0.04)),
+    vs(Y(-0.084), 0.088 * hs, 0.09 * hs, X(0.03)),
+    vs(Y(-0.044), 0.104 * hs, 0.105 * hs, X(0.012)),
+    vs(Y(-0.004), 0.112 * hs, 0.11 * hs, X(-0.002)),
+    vs(Y(0.04), 0.11 * hs, 0.104 * hs, X(-0.004)),
+    vs(Y(0.078), 0.095 * hs, 0.09 * hs, X(-0.008)),
+    vs(Y(0.104), 0.065 * hs, 0.062 * hs, X(-0.01)),
+    vs(Y(0.116), 0.03 * hs, 0.03 * hs, X(-0.011)),
+  ];
+  kit.loft(skull, {
+    rings: 12, capDepth: [0.012 * hs, 0.014 * hs], color: skin, bind: bind.head,
+    // a flush over the cheeks, the brow and jaw darker
+    paint: skinPaint || ((o, x, y, z) => mul(o, 0.92 + 0.14 * Math.exp(-(((y - Y(-0.03)) / (0.05 * hs)) ** 2)) - 0.16 * clamp((y - Y(0.03)) / (0.06 * hs)))),
+  });
+  // the brow ridge: a bar over both eyes, its middle lower than its ends (a glare)
+  kit.loft([-0.092, -0.06, -0.026, 0, 0.026, 0.06, 0.092].map((z) => ps(X(0.098 - 0.06 * (z / 0.092) ** 2), Y(0.05 - 0.016 * (1 - Math.abs(z) / 0.092) + 0.012 * (Math.abs(z) / 0.092) ** 2), z * hs, 0.0125 * hs, 0.017 * hs)),
+    { ref: [1, 0, 0], rings: 8, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.01 * hs, color: brow, bind: bind.head });
+  // the eyes: round yellow lenses under the ridge, a dark slit pupil
+  for (const side of [1, -1]) {
+    const z = side * 0.044 * hs;
+    kit.loft([ps(X(0.088), Y(0.022), z, 0.014 * hs, 0.016 * hs), ps(X(0.103), Y(0.022), z, 0.0128 * hs, 0.0148 * hs)],
+      { ref: [0, 1, 0], sides: 8, start: null, end: 'round', capRings: 2, capDepth: 0.005 * hs, color: eyeC, mat: 'gloss', glow: glowEyes ? 1 : 0.3, bind: bind.head });
+    kit.loft([ps(X(0.102), Y(0.022), z, 0.0095 * hs, 0.0034 * hs), ps(X(0.1085), Y(0.022), z, 0.0085 * hs, 0.003 * hs)],
+      { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.003 * hs, color: INK, mat: 'gloss', bind: bind.head });
+  }
+  // the nose: broad and flat, flared at the nostrils
+  kit.loft([ps(X(0.098), Y(0.026), 0, 0.016 * hs, 0.028 * hs), ps(X(0.118), Y(-0.008), 0, 0.024 * hs, 0.04 * hs), ps(X(0.128), Y(-0.034), 0, 0.024 * hs, 0.05 * hs)],
+    { rings: 5, sides: 10, start: null, end: 'round', capRings: 2, capDepth: 0.014 * hs, color: skin, bind: bind.head });
+  for (const side of [1, -1]) {
+    kit.loft([ps(X(0.131), Y(-0.04), side * 0.02 * hs, 0.0065 * hs, 0.009 * hs), ps(X(0.139), Y(-0.04), side * 0.02 * hs, 0.0055 * hs, 0.008 * hs)],
+      { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.003 * hs, color: INK, mat: 'gloss', bind: bind.head });
+  }
+  // the mouth: a dark gape between a heavy upper lip and a jaw thrust forward, a row of teeth in it
+  const lipRow = (x, y, w, r, color, mat) => kit.loft([-w, -w * 0.5, 0, w * 0.5, w].map((z) => ps(X(x - 0.022 * (Math.abs(z) / w) ** 2), Y(y), z * hs, r * hs, r * 0.9 * hs)),
+    { ref: [0, 1, 0], rings: 6, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: 0.007 * hs, color, mat, bind: bind.head });
+  lipRow(0.116, -0.05, 0.062, 0.011, lip, 'skin');
+  kit.loft([-0.054, -0.027, 0, 0.027, 0.054].map((z) => ps(X(0.108 - 0.016 * (Math.abs(z) / 0.054) ** 2), Y(-0.066), z * hs, 0.0075 * hs, 0.0075 * hs)),
+    { ref: [0, 1, 0], rings: 5, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.004 * hs, color: INK, mat: 'gloss', bind: bind.head });
+  lipRow(0.128, -0.083, 0.052, 0.0125, lip, 'skin');
+  kit.loft([-0.045, -0.015, 0.015, 0.045].map((z) => ps(X(0.106 - 0.012 * (Math.abs(z) / 0.045) ** 2), Y(-0.062), z * hs, 0.0045 * hs, 0.0045 * hs)),
+    { ref: [0, 1, 0], rings: 4, sides: 5, start: 'round', end: 'round', capRings: 1, capDepth: 0.003 * hs, color: ivory, mat: 'bone', bind: bind.head });
+  // the tusks: two curved fangs rising from the lower jaw past the upper lip
+  for (const side of [1, -1]) {
+    kit.loft([ps(X(0.118), Y(-0.082), side * 0.036 * hs, 0.0125 * hs), ps(X(0.128), Y(-0.058), side * 0.04 * hs, 0.01 * hs), ps(X(0.134), Y(-0.03), side * 0.043 * hs, 0.0065 * hs), ps(X(0.13), Y(-0.008), side * 0.043 * hs, 0.0012 * hs)],
+      { ref: [1, 0, 0], rings: 6, sides: 6, start: 'round', end: 'round', capRings: 1, capDepth: [0.008 * hs, 0.004 * hs], color: ivory, mat: 'bone', bind: bind.head });
+  }
+  // the ears: big and pointed, swept out and back
+  for (const side of [1, -1]) {
+    kit.loft([ps(X(-0.002), Y(0.016), side * 0.1 * hs, 0.026 * hs, 0.032 * hs), ps(X(-0.014), Y(0.04), side * 0.138 * hs, 0.02 * hs, 0.024 * hs), ps(X(-0.026), Y(0.082), side * 0.158 * hs, 0.003 * hs, 0.004 * hs)],
+      { ref: [1, 0, 0], rings: 5, sides: 8, start: null, end: 'round', capDepth: 0.006 * hs, color: shadeC(skin, 0.92), bind: bind.head });
+  }
+}
+
+/**
  * The head and face of a unit whose head is not human (BEAST_HEADS). The unit's palette skin is the
- * fur or plumage; Set (an id ending in _set) gets his own jackal.
+ * fur, plumage or face; Set (an id ending in _set) gets his own jackal.
  */
 export function addBeastHead(kit, D, pal, ctx, bind, skinPaint = null) {
   const kind = ctx.v.head;
   if (kind === 'falcon') falcon(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
   else if (kind === 'monkey') monkey(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
+  else if (kind === 'bird') crow(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
+  else if (kind === 'demon') oni(kit, D, pal, bind, skinPaint, ctx.ex.has('eye_glow') && !!pal.eyeGlow);
   else jackal(kit, D, pal, bind, skinPaint, /(^|_)set$/.test(ctx.unit.id));
 }

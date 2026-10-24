@@ -2,6 +2,7 @@
 // (rich-body.js) and weighted to the same bones, so cloth follows the limb under it: tunics,
 // belts, cuirasses, pauldrons, mantles and capes. The pantheon outfits (rich-outfits.js) choose
 // and color them.
+import * as THREE from 'three';
 import { shadeC, TEAM } from './unit-geo.js';
 import { vs, ps, B, smoothstep } from './rich-kit.js';
 import { torsoStations, torsoRing, legRing, ringAt } from './rich-body.js';
@@ -191,7 +192,7 @@ export function addMuscleCuirass(kit, D, pal, bind, color, trim, { medallion = n
  * rounded off at the bottom. opts: color (the cloth or leather of the strips), lower (the longer
  * row, default the same), edge (hem color), strips (per row), len (scale of the length).
  */
-export function addPteruges(kit, D, pal, bind, { color, lower = null, edge = null, strips = 16, len = 1 } = {}) {
+export function addPteruges(kit, D, pal, bind, { color, lower = null, edge = null, strips = 16, len = 1, mat = undefined } = {}) {
   const sides = strips * 2;
   const top = D.hipY + 0.035;
   const row = (y1, cTop, cBottom, col, hem) => {
@@ -199,7 +200,7 @@ export function addPteruges(kit, D, pal, bind, { color, lower = null, edge = nul
     const [tx, tz] = r(cTop);
     const [bx, bz] = r(cBottom);
     kit.loft([vs(y1, bx, bz), vs(lerp(y1, top, 0.5), (tx + bx) / 2, (tz + bz) / 2), vs(top, tx, tz)], {
-      rings: 4, sides, start: null, end: null, color: col, bind: bind.skirt,
+      rings: 4, sides, start: null, end: null, color: col, bind: bind.skirt, mat,
       warp: (p, a, u) => {
         // strips lobe out and round off toward the hem; between them the leather is cut higher
         const ph = Math.cos(a * strips);
@@ -211,7 +212,7 @@ export function addPteruges(kit, D, pal, bind, { color, lower = null, edge = nul
       },
       paint: (o, x, yy, z, u, a) => {
         mul(o, 0.9 + 0.1 * Math.cos(a * TAU * strips / TAU));
-        if (hem && u < 0.12) dye(o, hem, 0.85);
+        if (hem && u < 0.12) recolor(o, hem, 0.85);
       },
     });
   };
@@ -600,4 +601,205 @@ export function addGarland(kit, D, bind, { colors, low = 0.4, r = 0.016, beads =
     },
     paint: (o, x, y, z, u) => dye(o, colors[Math.floor(u * beads + 0.5) % colors.length], 1),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Japanese dress: the crossed collar, the sash, the hakama, the lacquered armor and its plates
+// ---------------------------------------------------------------------------
+
+/**
+ * The crossed collar of a kimono, one lapel over the other: the outer one runs from the left of the neck
+ * down across the chest to the right hip, the inner one from the right of the neck to where the outer covers
+ * it. opts: color (the outer collar), inner (the other's color, default the same), width.
+ */
+export function addKosodeCollar(kit, D, bind, { color, inner = null, width = 0.05 } = {}) {
+  const strip = (th0, th1, f0, f1, g, col) => kit.sheet(2, 12, (u, v, out) => {
+    const f = clamp(lerp(f0, f1, v) + (u - 0.5) * width, 0.02, 1.08);
+    const r = torsoRing(D, f, g + 0.003 * Math.sin(v * PI));
+    const th = lerp(th0, th1, v ** 0.9);
+    out[0] = r.dx + r.rx * Math.cos(th);
+    out[1] = r.y;
+    out[2] = r.rz * Math.sin(th);
+  }, { thick: 0.006, color: col, inner: shade(col, 0.8), bind: bind.torso });
+  strip(0.42, 0.0, 1.07, 0.7, 0.02, inner || color);
+  strip(-0.42, 0.62, 1.07, 0.14, 0.026, color);
+}
+
+/**
+ * A sash (obi) round the waist, wide, with a cord over it and a flat drum knot at the back. opts: color, cord
+ * (the cord's color; null for none), knot ('back' | null), wide (scale of the width).
+ */
+export function addObi(kit, D, bind, { color, cord = null, knot = 'back', wide = 1, mat = 'cloth' } = {}) {
+  const a = torsoRing(D, -0.02, 0.044);
+  const b = torsoRing(D, 0.19 * wide, 0.038);
+  kit.loft([vs(a.y, a.rx, a.rz, a.dx), vs((a.y + b.y) / 2, (a.rx + b.rx) / 2 + 0.004, (a.rz + b.rz) / 2 + 0.004, (a.dx + b.dx) / 2), vs(b.y, b.rx, b.rz, b.dx)],
+    { sides: 22, rings: 3, start: null, end: null, color, mat, bind: bind.torso, paint: (o, x, y, z, u) => mul(o, 0.94 + 0.08 * Math.sin(u * PI)) });
+  if (cord) {
+    const c = torsoRing(D, 0.12, 0.05);
+    kit.loft([vs(c.y - 0.007, c.rx, c.rz, c.dx), vs(c.y + 0.007, c.rx, c.rz, c.dx)], { sides: 22, start: null, end: null, color: cord, mat: 'trim', bind: bind.torso });
+  }
+  if (knot === 'back') {
+    // the drum knot: a flat cushion standing off the small of the back, a band across it
+    const r = torsoRing(D, 0.09, 0.04);
+    const M = new THREE.Matrix4().compose(
+      new THREE.Vector3(r.dx - r.rx - 0.01, r.y + 0.01, 0),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, PI / 2, 0)),
+      new THREE.Vector3(1, 1, 1),
+    );
+    kit.placed(M, (k) => {
+      k.slab([[-0.072, -0.04], [-0.076, 0.03], [-0.04, 0.056], [0.0, 0.058], [0.04, 0.056], [0.076, 0.03], [0.072, -0.04], [0.03, -0.054], [-0.03, -0.054]],
+        { depth: 0.04, bevel: 0.014, color, mat, bind: bind.torso, paint: gradY(-0.05, 0.06, 0.86, 1.06) });
+    });
+    if (cord) kit.loft([ps(r.dx - r.rx - 0.034, r.y + 0.01, -0.082, 0.007), ps(r.dx - r.rx - 0.034, r.y + 0.01, 0.082, 0.007)],
+      { ref: [0, 1, 0], sides: 6, start: 'round', end: 'round', capDepth: 0.006, color: cord, mat: 'trim', bind: bind.torso });
+  }
+}
+
+/**
+ * The hakama: wide pleated trousers from the waist to the ankle, flaring a little toward the hem, with a
+ * stiff plate at the small of the back and a cord tied across the front. opts: color, trim (the cord and
+ * the hem), len (1 reaches the ankle), flare, pleat, top (where the waist sits, as a torso height fraction).
+ */
+export function addHakama(kit, D, bind, { color, trim = null, len = 1, flare = 1, pleat = 0.007, top = 0.3, mat = 'cloth' } = {}) {
+  const y0 = D.ankleY + 0.045 + (1 - len) * 0.26;
+  const knee = D.hipY - D.thigh;
+  const t = torsoRing(D, top, 0.03);
+  const st = [
+    vs(y0, D.depth * 0.5 + 0.1 * flare, D.waistW * 0.5 + 0.112 * flare),
+    vs(lerp(y0, knee, 0.55) + 0.02, D.depth * 0.5 + 0.088 * flare, D.waistW * 0.5 + 0.1 * flare),
+    vs(knee + 0.03, D.depth * 0.5 + 0.074 * flare, D.waistW * 0.5 + 0.088 * flare),
+    vs(D.hipY - 0.03, D.depth * 0.5 + 0.058, D.waistW * 0.5 + 0.07),
+    vs(t.y, t.rx, t.rz, t.dx),
+  ].filter((q, i, a) => i === 0 || q.c[1] > a[i - 1].c[1] + 0.004);
+  kit.loft(st, {
+    rings: 7, sides: 40, start: null, end: null, color, mat, bind: bind.skirt,
+    warp: (p, a, u) => {
+      const sw = Math.sin(a * 10) * pleat * (1 - u * 0.7);
+      p[0] += Math.cos(a) * sw;
+      p[2] += Math.sin(a) * sw;
+    },
+    paint: (o, x, y, z, u, a) => mul(o, 0.86 + 0.16 * Math.abs(Math.cos(a * 10 * 0.5 * 2)) + 0.1 * u),
+  });
+  if (trim) {
+    // a band of the trim color at the hem, folding as the cloth does
+    const a = st[0];
+    const b = st[1];
+    const k = 0.04 / (b.c[1] - a.c[1]);
+    kit.loft([vs(a.c[1] - 0.003, a.rx + 0.004, a.rz + 0.004, a.c[0]), vs(a.c[1] + 0.04, lerp(a.rx, b.rx, k) + 0.003, lerp(a.rz, b.rz, k) + 0.003, lerp(a.c[0], b.c[0], k))], {
+      sides: 40, start: null, end: null, color: trim, mat: 'trim', bind: bind.skirt,
+      warp: (p, ang) => {
+        const sw = Math.sin(ang * 10) * pleat * 0.95;
+        p[0] += Math.cos(ang) * sw;
+        p[2] += Math.sin(ang) * sw;
+      },
+    });
+  }
+  // the back plate (koshi-ita): a stiff panel curving up the small of the back
+  kit.sheet(3, 4, (u, v, out) => {
+    const f = lerp(top - 0.06, top + 0.17, v);
+    const r = torsoRing(D, f, 0.04 + 0.006 * Math.sin(v * PI));
+    const th = PI + (u - 0.5) * 0.7;
+    out[0] = r.dx + r.rx * Math.cos(th) * 1.0;
+    out[1] = r.y;
+    out[2] = r.rz * Math.sin(th);
+  }, { thick: 0.006, color: shade(color, 1.1), inner: shade(color, 0.8), bind: bind.torso });
+  // the cord across the front: a band round the waist with its bow hanging at the front
+  if (trim) {
+    kit.loft([vs(t.y - 0.012, t.rx + 0.006, t.rz + 0.006, t.dx), vs(t.y + 0.014, t.rx + 0.004, t.rz + 0.004, t.dx)], { sides: 22, start: null, end: null, color: trim, mat: 'trim', bind: bind.skirt });
+  }
+}
+
+/**
+ * The cuirass of a warrior: rows of lacquered plates, each lipping over the one below, the lower edge of every row
+ * laced in a color, over the chest and belly to a rolled hem; two laced straps over the shoulders. opts: plate,
+ * lace, trim, rows.
+ */
+export function addDoMaru(kit, D, pal, bind, { plate, lace, trim, rows = 7 } = {}) {
+  const g = 0.024;
+  const f0 = 0.08;
+  const f1 = 0.97;
+  for (let i = 0; i < rows; i++) {
+    const fa = lerp(f0, f1, i / rows);
+    const fb = Math.min(lerp(f0, f1, (i + 1.45) / rows), 1.03);
+    const ra = torsoRing(D, fa, g + 0.012);
+    const rb = torsoRing(D, fb, g);
+    kit.loft([vs(ra.y, ra.rx + 0.012, ra.rz + 0.012, ra.dx), vs(ra.y + (rb.y - ra.y) * 0.3, ra.rx + 0.002, ra.rz + 0.002, ra.dx), vs(rb.y, rb.rx, rb.rz, rb.dx)], {
+      rings: 3, sides: 22, start: null, end: null, color: i % 2 ? shade(plate, 0.9) : plate, mat: 'lacquer', bind: bind.torso,
+      paint: (o, x, y, z, u, a) => {
+        if (u < 0.2) recolor(o, lace, 0.95);
+        else mul(o, 0.92 + 0.12 * Math.abs(Math.cos(a * TAU * 5)));
+      },
+    });
+  }
+  // a rolled hem of gold below the lowest row, and the collar
+  const hem = torsoRing(D, f0 - 0.02, g + 0.02);
+  kit.loft([vs(hem.y - 0.008, hem.rx + 0.006, hem.rz + 0.006, hem.dx), vs(hem.y + 0.014, hem.rx + 0.002, hem.rz + 0.002, hem.dx)], { sides: 22, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
+  // the shoulder straps, laced, from the breast over each shoulder to the back
+  for (const side of [1, -1]) {
+    kit.sheet(2, 8, (u, v, out) => {
+      const th = lerp(0.62, PI - 0.7, v) * side;
+      const f = 0.96 + 0.14 * Math.sin(v * PI);
+      const rr = torsoRing(D, clamp(f - (v > 0.5 ? (v - 0.5) * 0.2 : 0) * 0 , 0.2, 1.1), g + 0.006);
+      out[0] = rr.dx + rr.rx * Math.cos(th) * (0.9 + 0.12 * (1 - v));
+      out[1] = lerp(D.shoulderY - 0.07, D.shoulderY + 0.028, Math.sin(v * PI)) + (v > 0.5 ? -(v - 0.5) * 0.14 : -(0.5 - v) * 0.1);
+      out[2] = side * (D.shoulderZ * 0.33 + (u - 0.5) * 0.05);
+    }, { thick: 0.006, color: lace, inner: shade(lace, 0.8), bind: bind.torso });
+  }
+}
+
+/**
+ * A pair of shoulder plates (sode): broad lacquered panels hanging from the shoulders over the upper arms,
+ * four rows of plate each stepping a little outward from the one above, the lower edge of every row laced
+ * in a color, a gold edge along the foot. opts: plate, lace, trim, size.
+ */
+export function addSode(kit, D, pal, bind, { plate, lace, trim, size = 1 } = {}) {
+  const K = D.k * size;
+  const sh = D.shoulderY - 0.012;
+  const rows = 4;
+  const rowH = 0.056 * K;
+  const w = 0.16 * K;
+  for (const side of [1, -1]) {
+    const upper = side > 0 ? B.upperR : B.upperL;
+    const bd = (x, y, z, S) => { S.add(upper, 0.7); S.add(B.chest, 0.3); };
+    // a sheet's outer face looks along u x v (x forward, y down): toward -z, so the right side runs u backward
+    const face = (u) => (side > 0 ? 1 - u : u);
+    for (let r = 0; r < rows; r++) {
+      const y0 = sh + 0.012 - r * rowH * 0.9;
+      const fn = (u, v, out) => {
+        const uu = face(u);
+        const arch = 1 - (2 * uu - 1) ** 2;
+        out[0] = (uu - 0.5) * w * (1 + 0.05 * r) - 0.004;
+        out[1] = y0 - v * rowH + 0.014 * arch * (1 - v) * (r === 0 ? 1 : 0.25);
+        out[2] = side * (D.shoulderZ + 0.05 * K + 0.012 * K * r + 0.012 * arch * (r === 0 ? 1 : 0.4) + 0.006 * v);
+      };
+      kit.sheet(6, 1, fn, { thick: 0.007, color: r % 2 ? shade(plate, 0.9) : plate, mat: 'lacquer', inner: shade(plate, 0.7), bind: bd });
+      // the lacing along the lower edge of the row
+      kit.sheet(6, 1, (u, v, out) => {
+        fn(u, 0.7 + 0.3 * v, out);
+        out[2] += side * 0.0022;
+      }, { thick: 0.0085, color: lace, mat: 'cloth', inner: lace, bind: bd });
+    }
+    // a gold edge along the foot of the lowest row
+    kit.sheet(6, 1, (u, v, out) => {
+      const uu = face(u);
+      const r = rows - 1;
+      out[0] = (uu - 0.5) * w * (1 + 0.05 * r) - 0.004;
+      out[1] = sh + 0.012 - (r * 0.9 + 1) * rowH - 0.004 * v;
+      out[2] = side * (D.shoulderZ + 0.05 * K + 0.012 * K * r + 0.006 + 0.0032);
+    }, { thick: 0.01, color: trim, mat: 'gold', inner: trim, bind: bd });
+  }
+}
+
+/** Armored sleeves (kote): a lacquered plate along the outside of each forearm in cloth, bound at the wrist and elbow. */
+export function addKote(kit, D, pal, bind, { plate, trim } = {}) {
+  const w = D.shoulderY - 0.02 - D.upper - D.fore;
+  for (const side of [1, -1]) {
+    const bd = bind.arm[side];
+    const z = side * D.shoulderZ;
+    kit.loft([vs(w + 0.012, D.armR * 0.66 + 0.012, D.armR * 0.64 + 0.012, 0, z), vs(w + D.fore * 0.5, D.armR * 0.84 + 0.012, D.armR * 0.82 + 0.012, 0.002, z), vs(w + D.fore * 0.94, D.armR * 0.94 + 0.014, D.armR * 0.92 + 0.014, 0, z)],
+      { sides: 12, rings: 3, start: null, end: null, color: plate, mat: 'lacquer', bind: bd, paint: gradY(w, w + D.fore, 0.86, 1.08) });
+    for (const y of [w + 0.012, w + D.fore * 0.94]) {
+      kit.loft([vs(y - 0.008, D.armR * 0.7 + 0.016, D.armR * 0.7 + 0.016, 0, z), vs(y + 0.008, D.armR * 0.72 + 0.016, D.armR * 0.72 + 0.016, 0, z)], { sides: 12, start: null, end: null, color: trim, mat: 'gold', bind: bd });
+    }
+  }
 }
