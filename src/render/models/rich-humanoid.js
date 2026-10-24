@@ -18,15 +18,16 @@ import { BEAST_HEADS } from './rich-heads.js';
 const RICH_BODIES = new Set(['humanoid', 'giant']);
 /** Upright beasts (the body beast_biped: a monkey king and his clones) are dressed on the humanoid rig by the pantheons listed here; the others keep their low-poly beasts. */
 const RICH_BEAST_BIPEDS = new Set(['chinese']);
-const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress', 'antlers', 'flame']);
+const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress', 'antlers', 'flame', 'veil']);
 const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring']);
 
 /**
- * The pantheons whose units are drawn with the rich characters in play. The Norse are the
- * sample; the builder already dresses supported units of the others, which stay low-poly
- * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
+ * The pantheons whose units are drawn with the rich characters in play: all ten, each after its
+ * own look pass (the Norse were the sample). A pantheon added later stays low-poly until it has
+ * had one, though the builder dresses its supported units all the same (tools pin it for all with
+ * GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec', 'celtic', 'mesopotamian']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese', 'aztec', 'celtic', 'mesopotamian', 'west_african']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
@@ -119,10 +120,13 @@ export function buildRichTemplate(unitType, detail = 1) {
     attach: [], // rigid pieces the layers add (flames, wings ...), riding bones
   };
 
-  // a pantheon's outfit may recolor the palette (the people's black hair) and paint the bare skin itself
+  // a pantheon's outfit may recolor the palette (the people's black hair, their skin) and paint the bare skin itself
   // (bandage on a mummy) before anything is built on it
   const outfit = outfitFor(E.pantheon);
-  if (outfit.palette) E.pal = outfit.palette(E.pal, ctx) || E.pal;
+  if (outfit.palette) {
+    E.pal = outfit.palette(E.pal, ctx) || E.pal;
+    E.skin = E.pal.skin;
+  }
   if (outfit.skinPaint) E.skinPaint = outfit.skinPaint(E) || E.skinPaint;
   addHeadAndNeck(kit, D, E.pal, ctx, bind, E.skinPaint);
   addHands(kit, D, E.pal, bind, E.skin, E.skinPaint);
@@ -135,9 +139,10 @@ export function buildRichTemplate(unitType, detail = 1) {
   const attach = [...E.attach];
   if (wings) attach.push(...wingPieces(ctx, D, spec, wings));
   const P = D;
-  const styleOf = (item) => (outfit.gear ? outfit.gear(ctx, item) : null);
-  const leftStyle = styleOf(items.left);
-  const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right)) : null;
+  // (the hand is asked about too: a drummer holds the drum in one and the stick in the other)
+  const styleOf = (item, side) => (outfit.gear ? outfit.gear(ctx, item, side) : null);
+  const leftStyle = styleOf(items.left, -1);
+  const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right, 1)) : null;
   // (a held piece with a flame in it, a torch, flickers like the flames on a fire giant)
   const flickers = (g) => (g.morphAttributes.position ? { flicker: true } : {});
   if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece, ...flickers(rightPiece) });

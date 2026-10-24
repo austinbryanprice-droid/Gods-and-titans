@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { shadeC, tintC } from './unit-geo.js';
 import { vs, ps, smoothstep, mixBind } from './rich-kit.js';
 import { torsoRing } from './rich-body.js';
-import { clamp, lerp, gradY, paints, recolor, mul, hash, featherRows } from './rich-paint.js';
+import { clamp, lerp, gradY, paints, recolor, mul, dye, hash, featherRows } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
 
 const PI = Math.PI;
@@ -1655,4 +1655,253 @@ export function addNapeBun(kit, D, pal, bind, { size = 1 } = {}) {
     },
     paint: (o, x, y, z, u) => mul(o, 0.74 + 0.34 * Math.max(0, Math.sin(u * rows * TAU - 0.8))),
   });
+}
+
+// ---------------------------------------------------------------------------
+// West African headgear: the head tie, the beaded crown with its veil, the horned cap, the folded cap, the raffia crest
+// ---------------------------------------------------------------------------
+
+/**
+ * A head tie (gele): a length of cloth wound over the crown, its lower edge at the brow and over the ears, rolled in soft bands
+ * stacked up the head and leaning to one side, a fan of folds standing up on that side, the ends hanging behind as tails. opts:
+ * color, band (the color of a band across the brow), fan (false: none), tall (scale of its height), tails (how far the ends hang,
+ * head scales; 0 for none), tail (their color), side (+1 or -1: the side the fan stands on).
+ */
+export function addHeadWrap(kit, D, pal, bind, { color, band = null, fan = true, tall = 1, tails = 0, tail = null, side = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.018 * hs;
+  const dome = [
+    vs(hy - 0.02 * hs, 0.094 * hs + g, 0.084 * hs + g, hx - 0.006 * hs),
+    vs(hy + 0.02 * hs, 0.1 * hs + g, 0.09 * hs + g, hx - 0.002 * hs),
+    vs(hy + 0.05 * hs, 0.104 * hs + g, 0.094 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.085 * hs, 0.098 * hs + g, 0.088 * hs + g, hx - 0.008 * hs),
+    vs(hy + 0.115 * hs, 0.07 * hs + g, 0.064 * hs + g, hx - 0.014 * hs),
+    vs(hy + 0.138 * hs * tall, 0.036 * hs + g, 0.034 * hs + g, hx - 0.018 * hs),
+  ];
+  kit.loft(dome, {
+    rings: 9, sides: 20, start: null, end: 'round', capDepth: 0.03 * hs, color, mat: 'cloth', bind: bind.head,
+    warp: (p, a, u) => {
+      const line = hy + 0.05 * hs - 0.058 * hs * smoothstep(0.6, 1.5, Math.abs(wrap(a)));
+      if (p[1] < line) p[1] = line;
+      const s = 0.0035 * hs * Math.sin(a * 5 + u * 4);
+      p[0] += Math.cos(a) * s;
+      p[2] += Math.sin(a) * s;
+    },
+    paint: gradY(hy - 0.04 * hs, hy + 0.14 * hs, 0.84, 1.08),
+  });
+  // the rolls: three folded bands stacked up the head, each a little further to the side than the one below and tilted
+  for (let i = 0; i < 3; i++) {
+    const y = hy + (0.052 + 0.03 * i) * hs;
+    const rx = (0.106 - 0.006 * i) * hs + g;
+    const rz = (0.094 - 0.006 * i) * hs + g;
+    const dz = side * 0.005 * hs * i;
+    kit.loft([vs(y - 0.016 * hs, rx, rz, hx - 0.004 * hs, dz), vs(y, rx + 0.011 * hs, rz + 0.011 * hs, hx - 0.004 * hs, dz), vs(y + 0.016 * hs, rx, rz, hx - 0.004 * hs, dz)], {
+      rings: 3, sides: 22, start: null, end: null, color: i % 2 ? shade(color, 0.92) : color, mat: 'cloth', bind: bind.head,
+      warp: (p, a, u) => {
+        // the fold slants across the band
+        p[1] += 0.008 * hs * Math.sin(a + i * 1.7) * (u - 0.5) * 2;
+      },
+    });
+  }
+  if (band) {
+    kit.loft([vs(hy + 0.034 * hs, 0.103 * hs + g + 0.006 * hs, 0.092 * hs + g + 0.006 * hs, hx - 0.002 * hs), vs(hy + 0.058 * hs, 0.106 * hs + g + 0.006 * hs, 0.095 * hs + g + 0.006 * hs, hx - 0.003 * hs)],
+      { sides: 22, start: null, end: null, color: band, mat: 'cloth', bind: bind.head });
+  }
+  if (fan) {
+    // the fan: a pleated sail standing up on one side, wider toward its top, the pleats running up it
+    const x0 = hx - 0.012 * hs;
+    const y0 = hy + 0.1 * hs;
+    const H = 0.15 * hs * tall;
+    kit.sheet(8, 4, (u, v, out) => {
+      const a = (u - 0.5) * 2;
+      out[0] = x0 + a * (0.04 + 0.055 * v) * hs + 0.006 * hs * v;
+      out[1] = y0 + v * H - 0.012 * hs * a * a * v;
+      out[2] = side * (0.05 + 0.055 * v) * hs + Math.sin(u * PI * 8) * 0.0065 * hs * (0.3 + v);
+    }, { thick: 0.006 * hs, color, inner: shade(color, 0.85), bind: bind.head, mat: 'cloth', paint: (o, x, y, z, u) => mul(o, 0.84 + 0.2 * Math.abs(Math.sin(u * PI * 4))) });
+  }
+  if (tails > 0) {
+    const kx = hx - 0.108 * hs;
+    const ky = hy + 0.02 * hs;
+    const tc = tail || color;
+    for (const [sd, drop] of [[1, tails], [-1, tails * 1.2]]) {
+      kit.sheet(2, 5, (u, v, out) => {
+        out[0] = kx - 0.016 * hs - 0.026 * hs * v;
+        out[1] = ky - 0.01 * hs - drop * hs * v;
+        out[2] = sd * (0.018 + 0.04 * v) * hs + (0.5 - u) * 0.044 * hs * (1 + 0.8 * v);
+      }, { thick: 0.004 * hs, color: tc, inner: shade(tc, 0.85), bind: bind.hair, mat: 'cloth' });
+    }
+  }
+}
+
+/**
+ * The beaded crown of a Yoruba king (ade): a cone of beadwork in squares of two colors rising from a band of metal at the brow, a
+ * knob at its point, and from the band over the face a veil of beaded strands, the colors alternating down them. opts: beads
+ * (the two colors), band (the metal), tall (scale of the cone), veil (scale of the strands' length; 0 for none), strands (how many),
+ * ball (the knob's color; none: no knob).
+ */
+export function addBeadedCrown(kit, D, pal, bind, { beads, band, tall = 1, veil = 0.8, strands = 11, ball = null } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.011 * hs + 0.006 * hs;
+  const y0 = hy + 0.046 * hs;
+  const H = 0.2 * hs * tall;
+  const rx0 = 0.1 * hs + g;
+  const rz0 = 0.088 * hs + g;
+  const cx = hx - 0.002 * hs;
+  const prof = [[0, 1.0], [0.12, 1.05], [0.38, 0.86], [0.66, 0.6], [0.88, 0.3], [1, 0.06]];
+  const cell = 0.04 * hs;
+  kit.loft(prof.map(([t, k]) => vs(y0 + H * t, rx0 * k, rz0 * k, cx - 0.01 * hs * t)), {
+    rings: 12, sides: 20, start: null, end: 'round', capDepth: 0.012 * hs, color: beads[0], mat: 'lacquer', bind: bind.head,
+    paint: (o, x, y, z, u, a) => {
+      const row = Math.floor((y - y0) / cell);
+      const col = Math.floor(a * 10);
+      dye(o, beads[(row + col) & 1], 1);
+    },
+  });
+  kit.loft([vs(y0 - 0.006 * hs, rx0 * 1.02, rz0 * 1.02, cx), vs(y0 + 0.02 * hs, rx0 * 1.04, rz0 * 1.04, cx)], { sides: 22, start: null, end: null, color: band, mat: 'gold', bind: bind.head });
+  if (ball) {
+    knob(kit, [cx - 0.01 * hs, y0 + H + 0.008 * hs, 0], 0.014 * hs, { color: ball, mat: 'gold', bind: bind.head });
+  }
+  // the veil: strands from the band across the front, hanging straight down to the lip
+  if (veil > 0) {
+    const L = 0.118 * hs * veil;
+    for (let i = 0; i < strands; i++) {
+      const th = lerp(-1.3, 1.3, strands > 1 ? i / (strands - 1) : 0.5);
+      const c = Math.cos(th);
+      const s = Math.sin(th);
+      const out = 0.012 * hs;
+      const a = [cx + c * (rx0 + out), y0 + 0.004 * hs, s * (rz0 + out)];
+      const b = [cx + c * (rx0 + out + 0.012 * hs * c), y0 - L, s * (rz0 + out + 0.004 * hs)];
+      kit.loft([ps(a[0], a[1], a[2], 0.0052 * hs), ps(b[0], b[1], b[2], 0.0046 * hs)], {
+        ref: [1, 0, 0], rings: 6, sides: 3, start: null, end: 'round', capDepth: 0.004 * hs, color: beads[0], mat: 'lacquer', bind: bind.head,
+        paint: (o, x, y, z, u) => dye(o, beads[Math.floor(u * 6 + 0.001 + i) & 1], 1),
+      });
+    }
+  }
+}
+
+/**
+ * A close cap of leather or cloth with a band round it (in two colors alternating when `cowrie` is given: a row of shells), and
+ * out of the crown a pair of antelope horns, long, ridged, rising and curving back, the hunter's and the war chief's; a tuft of
+ * feathers when `plume` is given. opts: cap, band, horn (none: no horns), cowrie (the shells' color), plume (a list of colors),
+ * tall (scale of the horns).
+ */
+export function addHornedCap(kit, D, pal, bind, { cap, band = null, horn = null, cowrie = null, plume = null, tall = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.014 * hs;
+  const dome = [
+    vs(hy - 0.02 * hs, 0.092 * hs + g, 0.082 * hs + g, hx - 0.01 * hs),
+    vs(hy + 0.02 * hs, 0.1 * hs + g, 0.088 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.058 * hs, 0.1 * hs + g, 0.089 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.09 * hs, 0.088 * hs + g, 0.078 * hs + g, hx - 0.008 * hs),
+    vs(hy + 0.118 * hs, 0.056 * hs + g, 0.05 * hs + g, hx - 0.012 * hs),
+    vs(hy + 0.134 * hs, 0.026 * hs + g, 0.024 * hs + g, hx - 0.014 * hs),
+  ];
+  kit.loft(dome, {
+    rings: 9, sides: 20, start: null, end: 'round', capDepth: 0.02 * hs, color: cap, mat: 'leather', bind: bind.head,
+    warp: (p, a) => {
+      // the edge: at the brow in front, over the ears, down to the nape behind
+      const line = hy + 0.046 * hs - 0.07 * hs * smoothstep(0.7, 1.55, Math.abs(wrap(a)));
+      if (p[1] < line) p[1] = line;
+    },
+    paint: gradY(hy - 0.04 * hs, hy + 0.14 * hs, 0.82, 1.08),
+  });
+  if (band) {
+    kit.loft([vs(hy + 0.036 * hs, 0.102 * hs + g + 0.004 * hs, 0.09 * hs + g + 0.004 * hs, hx - 0.004 * hs), vs(hy + 0.06 * hs, 0.103 * hs + g + 0.004 * hs, 0.091 * hs + g + 0.004 * hs, hx - 0.004 * hs)], {
+      sides: 30, start: null, end: null, color: band, mat: 'cloth', bind: bind.head,
+      paint: cowrie ? (o, x, y, z, u, a) => { if (Math.floor(a * 15) & 1) dye(o, cowrie, 1); } : undefined,
+    });
+  }
+  if (horn) {
+    // a horn: out of the crown above the temple, up and a little out, then swept back over the nape, ridged along its length
+    const h = tall;
+    for (const side of [1, -1]) {
+      const pts = [[-0.014, 0.088, 0.05, 0.021], [-0.036, 0.138, 0.066, 0.018], [-0.074 * h, 0.178 * h, 0.076, 0.014], [-0.126 * h, 0.2 * h, 0.074, 0.0095], [-0.18 * h, 0.198 * h, 0.064, 0.004]];
+      kit.loft(pts.map(([dx, dy, dz, r]) => ps(hx + dx * hs, hy + dy * hs, side * dz * hs, r * hs, r * hs)), {
+        ref: [1, 0, 0], rings: 10, sides: 6, start: 'round', end: 'round', capDepth: [0.012 * hs, 0.004 * hs], color: horn, mat: 'bone', bind: bind.head,
+        warp: (p, a, u) => {
+          const k = 0.0018 * hs * Math.max(0, Math.sin(u * 40)) * (1 - u);
+          p[0] += Math.cos(a) * k;
+          p[2] += Math.sin(a) * k;
+        },
+        paint: (o, x, y, z, u) => mul(o, 0.74 + 0.4 * u + 0.12 * Math.max(0, Math.sin(u * 40))),
+      });
+    }
+  }
+  if (plume && plume.length) {
+    // a tuft of feathers standing from the back of the crown, swept back
+    const n = plume.length;
+    for (let i = 0; i < n; i++) {
+      const k = n > 1 ? (i / (n - 1) - 0.5) * 2 : 0;
+      const root = [hx - 0.03 * hs, hy + 0.112 * hs, k * 0.03 * hs];
+      feather(kit, root, [-0.35, 1, k * 0.4], [1, 0, 0.1], 0.19 * hs * (1 - 0.18 * Math.abs(k)), 0.034 * hs, { color: plume[i], tip: null, bind: bind.head, bend: [-0.05 * hs, -0.02 * hs, k * 0.03 * hs], rows: 5, thick: 0.003 * hs });
+    }
+  }
+}
+
+/**
+ * A folded cap (fila), a soft cap of cloth fitting the crown, its top flopping over to one side and hanging at the ear, a band
+ * of trim at the brow. opts: color, band (the trim), side (+1 or -1: the side it hangs), flop (scale of the fold).
+ */
+export function addFila(kit, D, pal, bind, { color, band = null, side = 1, flop = 1 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const g = 0.016 * hs;
+  const dome = [
+    vs(hy + 0.0 * hs, 0.097 * hs + g, 0.086 * hs + g, hx - 0.004 * hs),
+    vs(hy + 0.035 * hs, 0.102 * hs + g, 0.09 * hs + g, hx - 0.003 * hs),
+    vs(hy + 0.07 * hs, 0.1 * hs + g, 0.089 * hs + g, hx - 0.006 * hs),
+    vs(hy + 0.102 * hs, 0.084 * hs + g, 0.075 * hs + g, hx - 0.01 * hs),
+    vs(hy + 0.122 * hs, 0.05 * hs + g, 0.046 * hs + g, hx - 0.014 * hs),
+  ];
+  kit.loft(dome, {
+    rings: 8, sides: 20, start: null, end: 'round', capDepth: 0.02 * hs, color, mat: 'cloth', bind: bind.head,
+    warp: (p, a) => {
+      const line = hy + 0.046 * hs - 0.062 * hs * smoothstep(0.7, 1.55, Math.abs(wrap(a)));
+      if (p[1] < line) p[1] = line;
+    },
+    paint: gradY(hy - 0.02 * hs, hy + 0.13 * hs, 0.84, 1.06),
+  });
+  // the fold: a sack of cloth from the crown out to the side and down over the ear
+  const f = flop;
+  kit.loft([
+    ps(hx - 0.01 * hs, hy + 0.1 * hs, side * 0.01 * hs, 0.06 * hs, 0.052 * hs),
+    ps(hx - 0.014 * hs, hy + 0.128 * hs, side * 0.07 * hs * f, 0.058 * hs, 0.05 * hs),
+    ps(hx - 0.016 * hs, hy + 0.1 * hs, side * 0.136 * hs * f, 0.054 * hs, 0.048 * hs),
+    ps(hx - 0.016 * hs, hy + 0.046 * hs, side * 0.16 * hs * f, 0.044 * hs, 0.04 * hs),
+    ps(hx - 0.016 * hs, hy + 0.0 * hs, side * 0.158 * hs * f, 0.03 * hs, 0.026 * hs),
+  ], { ref: [1, 0, 0], rings: 8, sides: 12, start: null, end: 'round', capRings: 2, capDepth: 0.024 * hs, color: shade(color, 0.94), mat: 'cloth', bind: bind.head, paint: gradY(hy, hy + 0.14 * hs, 0.82, 1.06) });
+  if (band) {
+    kit.loft([vs(hy + 0.034 * hs, 0.103 * hs + g + 0.004 * hs, 0.092 * hs + g + 0.004 * hs, hx - 0.003 * hs), vs(hy + 0.054 * hs, 0.105 * hs + g + 0.004 * hs, 0.094 * hs + g + 0.004 * hs, hx - 0.004 * hs)],
+      { sides: 22, start: null, end: null, color: band, mat: 'cloth', bind: bind.head });
+  }
+}
+
+/**
+ * A crest of raffia: strands of fibre rising from the crown of a helmet, arching out and hanging down about it like a fountain
+ * (the palm fronds of Ogun's shrines). opts: color, color2 (every second strand's), n, len (scale), y (the crown's height, head
+ * scales above the face's center).
+ */
+export function addRaffiaCrest(kit, D, pal, bind, { color, color2 = null, n = 16, len = 1, y = 0.136 } = {}) {
+  const hs = D.hs;
+  const hx = D.headX;
+  const hy = D.headCY;
+  const y0 = hy + y * hs;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU + (i % 2) * 0.12;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const L = len * (0.9 + 0.2 * hash(i, 3, 5));
+    const p = (r, dy) => ps(hx - 0.012 * hs + c * r * hs, y0 + dy * hs * L, s * r * hs * 0.9, 0.0068 * hs, 0.0068 * hs);
+    kit.loft([p(0.018, -0.006), p(0.05, 0.05), p(0.1, 0.062), p(0.142, 0.012), p(0.158, -0.056)], {
+      ref: [0, 1, 0], rings: 5, sides: 3, start: null, end: null, color: i % 2 && color2 ? color2 : color, mat: 'cloth', bind: bind.head,
+      paint: (o, x, y2, z, u) => mul(o, 0.8 + 0.3 * u),
+    });
+  }
 }

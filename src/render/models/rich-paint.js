@@ -120,6 +120,41 @@ export const tartan = ({ cell = 0.1, hue = null, k = 0.72, cx = 0, cz = 0, r = 0
   if (t - Math.floor(t) < band) mul(o, k);
 };
 
+/**
+ * The color of block `j` of strip `i` of kente, the Akan's strip-woven cloth: narrow strips sewn edge to edge, each its own color
+ * from `colors` (a team color works), the even ones banded across in the colors that follow, the odd ones plain with a band of
+ * another every third block. For a stole or a sheet laid out by its own grid.
+ */
+export const kenteAt = (colors, i, j) => {
+  const n = colors.length;
+  const k = i & 1 ? (j % 3 === 0 ? 2 : 0) : j;
+  return colors[(((i + k) % n) + n) % n];
+};
+
+/**
+ * Kente about a limb or a garment: the strips follow the arc at radius `r` round the vertical axis through (cx, cz); `flat` runs
+ * them along z instead, over a hanging sheet. `strip` is the width of a strip (a strip narrower than two vertices turns to noise),
+ * `block` the height of a band.
+ */
+export const kente = ({ colors, strip = 0.07, block = 0.07, cx = 0, cz = 0, r = 0.06, flat = false } = {}) => (o, x, y, z) => {
+  recolor(o, kenteAt(colors, Math.floor((flat ? z : Math.atan2(z - cz, x - cx) * r) / strip), Math.floor(y / block)), 1);
+};
+
+/**
+ * Mud cloth (bogolan), the Mande's hand-dyed cotton, sewn from strips `cell` wide: on the cloth's own dark ground, every other
+ * strip a ladder of bars of `ink` a cell apart, the strips between dotted with a dash of it in every other cell. Laid about a body
+ * like `kente` (r, cx, cz, flat).
+ */
+export const mudcloth = ({ ink, cell = 0.08, cx = 0, cz = 0, r = 0.06, flat = false } = {}) => (o, x, y, z) => {
+  const s = (flat ? z : Math.atan2(z - cz, x - cx) * r) / cell;
+  const t = y / cell;
+  const fs = s - Math.floor(s);
+  const ft = t - Math.floor(t);
+  if (!(Math.floor(s) & 1)) {
+    if (ft < 0.3) recolor(o, ink, 1);
+  } else if (Math.floor(t) & 1 && Math.abs(fs - 0.5) < 0.25 && Math.abs(ft - 0.5) < 0.25) recolor(o, ink, 1);
+};
+
 /** Ring mail: a flecked, uneven sheen (rows of rings catch the light one way and the next another). */
 export const mailSheen = (cell = 0.03, k = 0.2) => (o, x, y, z) => {
   const row = Math.floor(y / cell);

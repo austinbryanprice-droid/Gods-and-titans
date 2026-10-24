@@ -65,7 +65,8 @@ const chinese = (id) => looks(UNITS[id] || MORTALS[id], 'chinese');
 const aztec = (id) => looks(UNITS[id] || MORTALS[id], 'aztec');
 const celtic = (id) => looks(UNITS[id] || MORTALS[id], 'celtic');
 const mesopotamian = (id) => looks(UNITS[id] || MORTALS[id], 'mesopotamian');
-const SAMPLE = ['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
+const westAfrican = (id) => looks(UNITS[id] || MORTALS[id], 'west_african');
+const SAMPLE =['worshipper', 'warrior', 'norse_thor', 'norse_surtr'];
 const FINISHED = ['norse_odin', 'norse_freyja', 'norse_valkyrie', 'norse_einherjar', 'norse_frost_troll', 'norse_loki', 'norse_berserker', 'archer', 'priest'];
 // every Greek unit on the humanoid and giant bodies (the pegasus, centaur, Cerberus and shade keep their low-poly models)
 const GREEK = ['worshipper', 'warrior', 'archer', 'priest', 'greek_zeus', 'greek_athena', 'greek_poseidon', 'greek_hades', 'greek_kronos', 'greek_cyclops', 'greek_hoplite'];
@@ -82,6 +83,8 @@ const AZTEC = ['worshipper', 'warrior', 'archer', 'priest', 'aztec_huitzilopocht
 const CELTIC = ['worshipper', 'warrior', 'archer', 'priest', 'celtic_the_dagda', 'celtic_the_morrigan', 'celtic_lugh', 'celtic_brigid', 'celtic_balor', 'celtic_woad_raider'];
 // every Mesopotamian unit on the humanoid body (Tiamat, the scorpion man, Anzu, the lamassu, the bull of heaven and the mushussu keep their low-poly models)
 const MESOPOTAMIAN = ['worshipper', 'warrior', 'archer', 'priest', 'mesopotamian_marduk', 'mesopotamian_ishtar', 'mesopotamian_enki', 'mesopotamian_nergal', 'mesopotamian_apkallu', 'mesopotamian_slinger'];
+// every West African unit on the humanoid body (Ninki Nanka, the Sasabonsam, the Bultungin, Osebo and Onini keep their low-poly models)
+const WEST_AFRICAN = ['worshipper', 'warrior', 'archer', 'priest', 'west_african_shango', 'west_african_oya', 'west_african_ogun', 'west_african_anansi', 'west_african_aziza', 'west_african_dart_hunter'];
 
 function finite(arr, label) {
   for (let i = 0; i < arr.length; i++) assert.ok(Number.isFinite(arr[i]), `${label}: non-finite value at ${i}`);
@@ -1370,7 +1373,6 @@ test('the Mesopotamians dress their own way: kaunakes, fringed shawls, scale coa
   assert.equal(typeof meso.gear, 'function', 'a sling, spears of reed and a studded mace are styled');
   assert.equal(typeof meso.shield, 'function', 'the tall arched shield is not the shared round one');
   assert.ok(RICH_PANTHEONS.has('mesopotamian'), 'the Mesopotamian players get the new characters');
-  assert.ok(!RICH_PANTHEONS.has('west_african'), 'and the West Africans, not yet, do not');
 });
 
 test('every Mesopotamian humanoid, the apkallu and the Slinger are dressed in the Mesopotamian look; Tiamat, the scorpion man, Anzu, the lamassu, the bull of heaven, the mushussu and the ram stay low-poly', () => {
@@ -1729,6 +1731,530 @@ test('the people of Mesopotamia are black-haired, whoever they are; the gods and
 test('the Mesopotamian gods, mortals, the apkallu and the Slinger animate every state without a NaN', () => {
   for (const id of MESOPOTAMIAN) {
     const m = buildUnitModel(mesopotamian(id), PLAYER_COLORS[2], { detail: 'rich' });
+    assert.ok(m.rich, `${id} should be rich`);
+    runStates(m, id);
+    m.dispose();
+  }
+});
+
+test('the West Africans dress their own way: kente, mud cloth, the war smock hung with charms, beaded crowns and a deep-brown, black-haired people', () => {
+  const base = outfitFor('norse');
+  const wa = outfitFor('west_african');
+  for (const layer of LAYERS) assert.equal(typeof wa[layer], 'function', `the West African ${layer} layer`);
+  for (const layer of LAYERS) assert.notEqual(wa[layer], base[layer], `the West Africans dress their ${layer} their own way`);
+  assert.equal(typeof wa.palette, 'function', 'the people\'s skin is a deep brown and their hair black');
+  assert.equal(typeof wa.gear, 'function', 'the oshe, the whisk, the cutlass, the spider staff and the drums are styled');
+  assert.equal(typeof wa.shield, 'function', 'the tall oval shield of hide is not the shared round one');
+  // the last of the ten: every people has the new characters now
+  for (const p of PANTHEON_LIST) assert.ok(RICH_PANTHEONS.has(p.id), `the ${p.id} players get the new characters`);
+});
+
+test('every West African humanoid, the Aziza and the Dart Hunter are dressed in the West African look; Ninki Nanka, the Sasabonsam, the Bultungin, Osebo, Onini and the ram stay low-poly', () => {
+  for (const id of WEST_AFRICAN) assert.ok(richSupported(westAfrican(id)), `${id} is supported`);
+  for (const id of ['west_african_ninki_nanka', 'west_african_sasabonsam', 'west_african_bultungin', 'west_african_osebo', 'west_african_onini', 'battering_ram']) {
+    assert.ok(!richSupported(westAfrican(id)), `${id} stays low-poly`);
+  }
+  // a West African warrior is not a Mesopotamian one
+  assert.notEqual(buildRichTemplate(westAfrican('warrior')).triangles, buildRichTemplate(mesopotamian('warrior')).triangles);
+  assert.notEqual(buildRichTemplate(westAfrican('priest')).triangles, buildRichTemplate(mesopotamian('priest')).triangles);
+});
+
+test('the West Africans carry what they are known by: a spear and the oval shield, a bow, the talking drum and its stick, the oshe, the whisk, a cutlass, staffs', () => {
+  const names = (id) => buildRichTemplate(westAfrican(id)).rich.attach.filter((x) => !x.tool).map((x) => x.name).sort();
+  assert.deepEqual(names('warrior'), ['shield', 'weaponR'], 'a spear and a shield');
+  assert.deepEqual(names('archer'), ['weaponL'], 'a bow');
+  assert.deepEqual(names('priest'), ['weaponL', 'weaponR'], 'the talking drum in one hand and its stick in the other');
+  assert.deepEqual(names('west_african_dart_hunter'), ['weaponL'], 'a bow');
+  assert.deepEqual(names('west_african_shango'), ['weaponR'], 'the oshe');
+  assert.deepEqual(names('west_african_oya'), ['weaponR'], 'the whisk');
+  assert.deepEqual(names('west_african_ogun'), ['weaponR'], 'the cutlass');
+  assert.deepEqual(names('west_african_anansi'), ['extraArms', 'weaponR'], 'a staff, and four more arms with the calabash and a drum');
+  assert.deepEqual(names('west_african_aziza'), ['weaponR'], 'a staff');
+  assert.deepEqual(names('worshipper'), [], 'the worshippers\' tools are not held items');
+});
+
+test('the West Africans hold their things their own way: the oshe, a whisk of horsehair, a cutlass of dark iron, a gold spider on a staff, the talking drum and its hooked stick, a tall oval shield', () => {
+  // the same unit under another people's outfit holds the shared item
+  const shared = (id) => ({ ...westAfrican(id), pantheon: 'norse', lookOf: 'norse' });
+  const lum = (u, name) => {
+    const c = buildRichTemplate(u).rich.attach.find((a) => a.name === name).geo.attributes.color.array;
+    let sum = 0;
+    for (let i = 0; i < c.length; i += 3) sum += 0.2126 * c[i] + 0.7152 * c[i + 1] + 0.0722 * c[i + 2];
+    return sum / (c.length / 3);
+  };
+  // the oshe and the whisk are built by the rich gear for the West Africans only (the double axe and the whip are not among its weapons)
+  assert.ok(!RICH_WEAPONS.has('double_axe') && !RICH_WEAPONS.has('whip'));
+  const oshe = pieceSize(westAfrican('west_african_shango'), 'weaponR');
+  const plainAxe = pieceSize(shared('west_african_shango'), 'weaponR');
+  assert.ok(oshe.x > plainAxe.x + 0.3, `a staff with the double blade at its head (${oshe.x.toFixed(2)} against ${plainAxe.x.toFixed(2)})`);
+  assert.ok(pieceTris(westAfrican('west_african_shango'), 'weaponR') > pieceTris(shared('west_african_shango'), 'weaponR') + 500, 'the bands of beads, the knob and the blades are geometry');
+  // Oya's whisk: a lock of hair from the knob falling back over the hand, as wide as a hand
+  const whisk = pieceSize(westAfrican('west_african_oya'), 'weaponR');
+  assert.ok(whisk.z > 0.12, `its strands fan apart (${whisk.z.toFixed(2)})`);
+  assert.ok(boxOf(buildRichTemplate(westAfrican('west_african_oya')).rich.attach.find((a) => a.name === 'weaponR').geo).min.x < -0.1, 'and fall back past the grip');
+  assert.ok(pieceTris(westAfrican('west_african_oya'), 'weaponR') > pieceTris(shared('west_african_oya'), 'weaponR') + 500, 'a beaded handle, a knob and the strands');
+  // Ogun's cutlass is dark iron
+  assert.ok(lum(westAfrican('west_african_ogun'), 'weaponR') < lum(shared('west_african_ogun'), 'weaponR') * 0.5, 'dark iron');
+  // Anansi's staff carries a spider of gold, its legs spread wider than the plain staff's head
+  const spider = pieceSize(westAfrican('west_african_anansi'), 'weaponR');
+  assert.ok(spider.z > pieceSize(shared('west_african_anansi'), 'weaponR').z + 0.1, `the spider's legs (${spider.z.toFixed(2)})`);
+  // the priest: the talking drum lies across his left hand, its hooked stick is a slim rod in his right
+  const drum = pieceSize(westAfrican('priest'), 'weaponL');
+  const stick = pieceSize(westAfrican('priest'), 'weaponR');
+  assert.ok(drum.z > 0.3, `a long drum across the grip (${drum.z.toFixed(2)})`);
+  assert.ok(stick.x > 0.25 && stick.z < 0.04, `a slim stick (${stick.x.toFixed(2)} by ${stick.z.toFixed(2)})`);
+  assert.ok(stick.y > 0.08, 'bent round at its end');
+  // the shield: a tall oval of hide; the shared one is round
+  const shield = pieceSize(westAfrican('warrior'), 'shield');
+  const plain = pieceSize(shared('warrior'), 'shield');
+  assert.ok(shield.y > shield.x * 1.35, `taller than it is wide (${shield.y.toFixed(2)} by ${shield.x.toFixed(2)})`);
+  assert.ok(plain.x > plain.y * 0.95, 'the shared one is as wide as it is tall');
+});
+
+test('the West African gear styles: what the outfit asks the gear builder for, hand by hand', () => {
+  const wa = outfitFor('west_african');
+  const at = (id, item, side = 1) => wa.gear({ unit: { id }, pal: { eyeGlow: TEAM(1, 'gem') } }, { id: item }, side);
+  assert.equal(at('west_african_shango', 'double_axe').build, true, 'the oshe is built by the rich gear');
+  assert.equal(at('west_african_shango', 'double_axe').oshe, true);
+  assert.equal(at('west_african_oya', 'whip').build, true, 'and the whisk');
+  assert.equal(at('west_african_oya', 'whip').whisk, true);
+  assert.equal(at('west_african_ogun', 'sword').machete, true, 'Ogun\'s cutlass');
+  assert.equal(at('west_african_anansi', 'staff').staff, 'spider', 'a spider on Anansi\'s staff');
+  assert.ok(at('west_african_aziza', 'staff').orb, 'a green light on the Aziza\'s');
+  assert.equal(at('priest', 'drum', -1).drum, 'talking', 'the talking drum in the left hand');
+  assert.equal(at('priest', 'drum', 1).drum, 'beater', 'its stick in the right');
+  assert.ok(at('warrior', 'spear').shaftColor, 'the spears have a dark shaft');
+  assert.equal(at('west_african_shango', 'mace'), null, 'the rest are as shared');
+});
+
+test('kente is woven in narrow strips, each its own color and banded across; mud cloth is a dark ground laddered and dotted in pale', async () => {
+  const { kente, kenteAt, mudcloth } = await import('../../src/render/models/rich-paint.js');
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const cols = ['#e2a72a', '#1f6e4a', '#b3261e', '#211b16'].map((h) => withMat(h, 'cloth'));
+  // block j of strip i: an even strip is banded in the colors that follow its own, an odd one plain with a band every third block
+  assert.deepEqual([0, 1, 2, 3].map((j) => cols.indexOf(kenteAt(cols, 0, j))), [0, 1, 2, 3]);
+  assert.deepEqual([0, 1, 2, 3].map((j) => cols.indexOf(kenteAt(cols, 1, j))), [3, 1, 1, 3]);
+  assert.deepEqual([0, 1, 2, 3].map((i) => cols.indexOf(kenteAt(cols, i, 0))), [0, 3, 2, 1], 'the strips side by side differ');
+  const hexAt = (paint, y, z, ground = new THREE.Color(1, 1, 1)) => {
+    const o = ground.clone();
+    paint(o, 0, y, z, 0, 0);
+    return o.team ? `team ${o.team}` : o.getHexString();
+  };
+  // laid flat: the strips run along z, the blocks up y
+  const k = kente({ colors: cols, strip: 0.1, block: 0.1, flat: true });
+  assert.deepEqual([0.05, 0.15, 0.25].map((y) => hexAt(k, y, 0.05)), ['e2a72a', '1f6e4a', 'b3261e'], 'banded up the first strip');
+  assert.deepEqual([0.05, 0.15, 0.25].map((y) => hexAt(k, y, 0.15)), ['211b16', '1f6e4a', '1f6e4a'], 'the next strip plain, a band on its first block');
+  // a team color is woven in as the team's
+  const teamed = kente({ colors: [TEAM(0.9, 'cloth'), cols[0]], strip: 0.1, block: 0.1, flat: true });
+  assert.equal(hexAt(teamed, 0.05, 0.05), 'team 0.9');
+  // mud cloth: the ladders in the even strips, a dash in every other cell of the odd strips between
+  const ink = withMat('#e2d2a6', 'cloth');
+  const ground = new THREE.Color('#3e2a1c');
+  const m = mudcloth({ ink, cell: 0.1, flat: true });
+  const mud = (y, z) => hexAt(m, y, z, ground);
+  assert.equal(mud(0.01, 0.05), 'e2d2a6', 'a rung of the ladder');
+  assert.equal(mud(0.05, 0.05), '3e2a1c', 'the ground between the rungs');
+  assert.equal(mud(0.11, 0.05), 'e2d2a6', 'the next rung a cell up');
+  assert.equal(mud(0.15, 0.15), 'e2d2a6', 'a dash in an odd row of the next strip');
+  assert.equal(mud(0.05, 0.15), '3e2a1c', 'none in an even row');
+  assert.equal(mud(0.15, 0.11), '3e2a1c', 'the dash stands clear of the strip\'s edge');
+});
+
+test('a skirt of raffia hangs in rows of strands from the waist to the knee over a short skirt, standing out about the hips', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addRaffia } = await import('../../src/render/models/rich-clothing.js');
+  const make = (opts) => {
+    const { kit, D, bind } = dressing(westAfrican('west_african_ogun'));
+    addRaffia(kit, D, bind, { color: withMat('#c2bc6a', 'cloth'), n: 24, ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const three = make({ rows: 3 });
+  const one = make({ rows: 1 });
+  const short = make({ rows: 3, len: 0.6 });
+  const band = make({ rows: 3, band: withMat('#3a2618', 'leather') });
+  assert.equal(three.geo.userData.triangles - one.geo.userData.triangles, 2 * 24 * 6, 'every row is 24 strands of three sides');
+  const b = boxOf(three.geo);
+  const knee = three.D.hipY - three.D.thigh;
+  assert.ok(Math.abs(b.min.y - knee) < 0.05, `the strands end ragged at the knee (${b.min.y.toFixed(2)}, the knee at ${knee.toFixed(2)})`);
+  assert.ok(boxOf(short.geo).min.y > b.min.y + 0.08, 'len sets how far they hang');
+  assert.ok(b.max.z - b.min.z > three.D.waistW * 1.6, 'they stand out about the hips');
+  assert.ok(boxOf(band.geo).max.y > b.max.y + 0.015, 'the band sits over their tops');
+});
+
+test('bangles stack up each forearm from the wrist, as many as asked, in turn in the colors they are given', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addBangles } = await import('../../src/render/models/rich-clothing.js');
+  const make = (opts) => {
+    const { kit, D, bind } = dressing(westAfrican('west_african_oya'));
+    addBangles(kit, D, bind, { color: withMat('#c0703c', 'gold'), ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const nine = make({ n: 9, gap: 0.0105 });
+  const three = make({ n: 3 });
+  assert.equal(nine.geo.userData.triangles, 3 * three.geo.userData.triangles, 'a ring each, on both arms');
+  const { D } = nine;
+  const wrist = D.shoulderY - 0.02 - D.upper - D.fore;
+  const b = boxOf(nine.geo);
+  assert.ok(b.min.y > wrist && b.min.y < wrist + 0.03, 'the first at the wrist');
+  assert.ok(b.max.y > boxOf(three.geo).max.y + 0.05, 'the rest up the forearm');
+  assert.ok(Math.abs(b.min.z + b.max.z) < 1e-6 && b.max.z > D.shoulderZ, 'on both arms');
+  const two = make({ n: 6, color: [withMat('#c4202a', 'lacquer'), withMat('#f2eee2', 'lacquer')], mat: 'lacquer' });
+  const c = two.geo.attributes.color.array;
+  const seen = new Set();
+  for (let i = 0; i < c.length; i += 3) seen.add(`${c[i].toFixed(2)} ${c[i + 1].toFixed(2)} ${c[i + 2].toFixed(2)}`);
+  assert.equal(seen.size, 2, 'red and white in turn');
+});
+
+test('the charms of a war smock: a strap across the chest from one shoulder to the other hip, leather packets along it and cowries between them', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addAmulets } = await import('../../src/render/models/rich-clothing.js');
+  const make = (opts) => {
+    const { kit, D, bind } = dressing(westAfrican('warrior'));
+    addAmulets(kit, D, bind, { strap: withMat('#3a2618', 'leather'), packets: [withMat('#8e2e1c', 'leather')], n: 5, ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const five = make({});
+  const left = make({ side: -1 });
+  const three = make({ n: 3 });
+  const shells = make({ cowrie: withMat('#f0e8d2', 'bone') });
+  const b = boxOf(five.geo);
+  assert.ok(b.max.y > five.D.shoulderY - 0.03 && b.min.y < five.D.hipY + 0.1, 'from the shoulder down to the hip');
+  assert.ok(b.min.x > 0, 'over the front of the body');
+  // the strap runs across: its top over one shoulder, its foot at the other hip
+  const pos = five.geo.attributes.position.array;
+  let hi = [0, -Infinity, 0];
+  let lo = [0, Infinity, 0];
+  for (let i = 0; i < pos.length; i += 3) {
+    if (pos[i + 1] > hi[1]) hi = [pos[i], pos[i + 1], pos[i + 2]];
+    if (pos[i + 1] < lo[1]) lo = [pos[i], pos[i + 1], pos[i + 2]];
+  }
+  assert.ok(hi[2] < -0.1 && lo[2] > 0.08, `across the body (the top at z ${hi[2].toFixed(2)}, the foot at ${lo[2].toFixed(2)})`);
+  const bl = boxOf(left.geo);
+  assert.ok(Math.abs(bl.min.z + b.max.z) < 1e-6 && Math.abs(bl.max.z + b.min.z) < 1e-6, 'side -1 wears it the other way');
+  assert.ok(five.geo.userData.triangles > three.geo.userData.triangles + 40, 'a packet each');
+  assert.ok(shells.geo.userData.triangles > five.geo.userData.triangles + 100, 'a cowrie between each two');
+});
+
+test('a head tie is wound over the crown in rolls, a fan of folds standing up on the side asked, the ends hanging behind if asked', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addHeadWrap } = await import('../../src/render/models/rich-headgear.js');
+  const make = (opts) => {
+    const { kit, D, pal, bind } = dressing(westAfrican('worshipper'));
+    addHeadWrap(kit, D, pal, bind, { color: withMat('#b3261e', 'cloth'), ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const wrap = make({});
+  const plain = make({ fan: false });
+  const tall = make({ tall: 1.3 });
+  const tails = make({ fan: false, tails: 0.3 });
+  const left = make({ side: -1 });
+  const { hs, headCY } = wrap.D;
+  assert.ok(boxOf(plain.geo).min.y > headCY - 0.02 * hs && boxOf(plain.geo).max.y > headCY + 0.15 * hs, 'from the brow over the crown');
+  assert.ok(boxOf(wrap.geo).max.y > boxOf(plain.geo).max.y + 0.06, 'the fan stands up over it');
+  assert.ok(boxOf(tall.geo).max.y > boxOf(wrap.geo).max.y + 0.03, 'tall raises it');
+  assert.ok(boxOf(tails.geo).min.y < headCY - 0.25 * hs && boxOf(tails.geo).min.x < boxOf(plain.geo).min.x, 'the tails hang down the back');
+  // the fan: the points above the rolls lean to its side
+  const sideOf = (geo) => {
+    const p = geo.attributes.position.array;
+    let s = 0;
+    let n = 0;
+    for (let i = 0; i < p.length; i += 3) {
+      if (p[i + 1] > headCY + 0.17 * hs) {
+        s += p[i + 2];
+        n++;
+      }
+    }
+    return s / n;
+  };
+  assert.ok(sideOf(wrap.geo) > 0.05 && sideOf(left.geo) < -0.05, `on the right, or the left (${sideOf(wrap.geo).toFixed(2)}, ${sideOf(left.geo).toFixed(2)})`);
+});
+
+test('the beaded crown of the Yoruba kings: a cone of beadwork in two colors over a band, a knob at its point, a veil of strands over the face', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addBeadedCrown } = await import('../../src/render/models/rich-headgear.js');
+  const red = withMat('#c4202a', 'lacquer');
+  const white = withMat('#f2eee2', 'lacquer');
+  const gold = withMat('#dcae3a', 'gold');
+  const make = (opts) => {
+    const { kit, D, pal, bind } = dressing(westAfrican('west_african_shango'));
+    addBeadedCrown(kit, D, pal, bind, { beads: [red, white], band: gold, ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const crown = make({ ball: gold });
+  const bare = make({ veil: 0 });
+  const tall = make({ veil: 0, tall: 1.3 });
+  const { hs, headCY, headX } = crown.D;
+  assert.ok(boxOf(bare.geo).max.y > headCY + 0.24 * hs, 'a tall cone over the head');
+  assert.ok(boxOf(tall.geo).max.y > boxOf(bare.geo).max.y + 0.04, 'tall scales it');
+  assert.ok(crown.geo.userData.triangles > bare.geo.userData.triangles + 200, 'the strands of the veil and the knob are geometry');
+  // the veil: strands before the face, from the band to the lip
+  const before = (geo) => {
+    const pos = geo.attributes.position.array;
+    let n = 0;
+    for (let i = 0; i < pos.length; i += 3) if (pos[i] > headX + 0.08 * hs && pos[i + 1] < headCY + 0.03 * hs) n++;
+    return n;
+  };
+  assert.equal(before(bare.geo), 0, 'nothing before the face without it');
+  assert.ok(before(crown.geo) > 40, `the veil hangs before the face (${before(crown.geo)})`);
+  assert.ok(boxOf(crown.geo).min.y < headCY - 0.03 * hs, 'down to the lip');
+  // the beadwork: squares of red and of white, as many of each
+  const c = bare.geo.attributes.color.array;
+  let reds = 0;
+  let whites = 0;
+  for (let i = 0; i < c.length; i += 3) {
+    if (c[i] > 0.5 && c[i + 1] < 0.2) reds++;
+    else if (c[i] > 0.8 && c[i + 1] > 0.8 && c[i + 2] > 0.7) whites++;
+  }
+  assert.ok(reds > 60 && whites > 60 && Math.abs(reds - whites) < (reds + whites) * 0.2, `red ${reds}, white ${whites}`);
+});
+
+test('a cap with a pair of antelope horns rising from the crown and swept back, a row of cowries on its band, or a tuft of feathers', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addHornedCap } = await import('../../src/render/models/rich-headgear.js');
+  const cap = withMat('#3a2618', 'leather');
+  const band = withMat('#8e2e1c', 'leather');
+  const horn = withMat('#9a8262', 'bone');
+  const make = (id, opts) => {
+    const { kit, D, pal, bind } = dressing(westAfrican(id));
+    addHornedCap(kit, D, pal, bind, { cap, ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const plain = make('warrior', {});
+  const horns = make('warrior', { band, horn });
+  const tall = make('warrior', { band, horn, tall: 1.3 });
+  const shells = make('warrior', { band, horn, cowrie: withMat('#f0e8d2', 'bone') });
+  const plume = make('archer', { plume: [withMat('#3c3c46', 'feather'), withMat('#ece6d8', 'feather'), withMat('#3c3c46', 'feather')] });
+  const b = boxOf(horns.geo);
+  assert.ok(b.max.y > boxOf(plain.geo).max.y + 0.04, 'the horns rise over the cap');
+  assert.ok(b.min.x < boxOf(plain.geo).min.x - 0.05, 'and sweep back');
+  assert.ok(Math.abs(b.min.z + b.max.z) < 1e-6, 'a pair');
+  assert.ok(boxOf(tall.geo).max.y > b.max.y + 0.04 && boxOf(tall.geo).min.x < b.min.x - 0.04, 'tall makes them longer');
+  const pale = (geo) => {
+    const c = geo.attributes.color.array;
+    let n = 0;
+    for (let i = 0; i < c.length; i += 3) if (c[i] > 0.8 && c[i + 1] > 0.75) n++;
+    return n;
+  };
+  assert.equal(pale(horns.geo), 0);
+  assert.ok(pale(shells.geo) > 15, 'cowries on the band');
+  assert.ok(boxOf(plume.geo).max.y > boxOf(plain.geo).max.y + 0.08, 'the feathers stand up from the crown');
+});
+
+test('a folded cap fits the crown and flops over to one side, down to the ear', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addFila } = await import('../../src/render/models/rich-headgear.js');
+  const make = (opts) => {
+    const { kit, D, pal, bind } = dressing(westAfrican('priest'));
+    addFila(kit, D, pal, bind, { color: TEAM(0.9, 'cloth'), ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const right = make({ band: withMat('#e2a72a', 'cloth') });
+  const left = make({ side: -1 });
+  const flop = make({ flop: 1.3 });
+  const b = boxOf(right.geo);
+  const { hs, headCY } = right.D;
+  assert.ok(b.max.z > -b.min.z + 0.05, `it hangs over the right (z ${b.min.z.toFixed(2)} to ${b.max.z.toFixed(2)})`);
+  assert.ok(-boxOf(left.geo).min.z > boxOf(left.geo).max.z + 0.05, 'or the left');
+  assert.ok(boxOf(flop.geo).max.z > b.max.z + 0.03, 'flop sets how far');
+  assert.ok(b.max.y > headCY + 0.15 * hs && b.min.y < headCY, 'over the crown, down to the ear');
+  const fx = right.geo.attributes.aFx.array;
+  let team = 0;
+  for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) team++;
+  assert.ok(team > fx.length / 4 * 0.6 && team < fx.length / 4 * 0.95, `the cap is the team's color, its band not (${team} of ${fx.length / 4})`);
+});
+
+test('a crest of raffia rises from the crown of a helmet and falls about it like a fountain, wider than the head', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addRaffiaCrest } = await import('../../src/render/models/rich-headgear.js');
+  const make = (opts) => {
+    const { kit, D, pal, bind } = dressing(westAfrican('west_african_ogun'));
+    addRaffiaCrest(kit, D, pal, bind, { color: withMat('#c2bc6a', 'cloth'), ...opts });
+    return { geo: kit.build({ ground: 1 }), D };
+  };
+  const crest = make({});
+  const few = make({ n: 8 });
+  const long = make({ len: 1.4 });
+  assert.equal(crest.geo.userData.triangles, 2 * few.geo.userData.triangles, 'a strand at a time');
+  const b = boxOf(crest.geo);
+  const { hs, headCY } = crest.D;
+  assert.ok(b.min.y > headCY + 0.05 * hs && b.max.y > headCY + 0.2 * hs, 'above the head');
+  assert.ok(b.max.z - b.min.z > 0.28 * hs, `it falls wider than the head (${(b.max.z - b.min.z).toFixed(2)})`);
+  assert.ok(boxOf(long.geo).max.y > b.max.y + 0.02 && boxOf(long.geo).min.y < b.min.y - 0.02, 'len makes the strands longer');
+});
+
+test('the quiver hangs at the hip leaning back, its arrows standing out of its mouth with their fletching', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addQuiver } = await import('../../src/render/models/rich-regalia.js');
+  const make = (opts) => {
+    const d = dressing(westAfrican('archer'));
+    addQuiver(d, { color: withMat('#6a4528', 'leather'), fletch: [withMat('#ece6d8', 'feather')], ...opts });
+    return { geo: d.kit.build({ ground: 1 }), D: d.D };
+  };
+  const q = make({});
+  const left = make({ side: -1 });
+  const more = make({ n: 8 });
+  const b = boxOf(q.geo);
+  assert.ok(b.min.z > q.D.waistW * 0.5, 'at the right hip');
+  assert.ok(boxOf(left.geo).max.z < -q.D.waistW * 0.5, 'or the left');
+  assert.ok(b.min.y < q.D.hipY - 0.1 && b.max.y > q.D.hipY + 0.2, 'from below the hip, the arrows standing up behind');
+  assert.ok(b.min.x < -0.1, 'leaning back');
+  assert.ok(more.geo.userData.triangles > q.geo.userData.triangles + 100, 'a shaft and its fletching for each arrow');
+});
+
+test('Anansi\'s spider hangs on his breast on a cord of beads round the neck, eight legs spread, its eyes aglow if asked', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addSpiderPendant } = await import('../../src/render/models/rich-regalia.js');
+  const make = (opts) => {
+    const d = dressing(westAfrican('west_african_anansi'));
+    addSpiderPendant(d, { color: withMat('#dcae3a', 'gold'), ...opts });
+    return { geo: d.kit.build({ ground: 1 }), D: d.D };
+  };
+  const spider = make({});
+  const cord = make({ cord: withMat('#e0b02a', 'lacquer') });
+  const eyes = make({ eye: withMat('#ffcc33', 'gem') });
+  const big = make({ size: 1.4 });
+  const b = boxOf(spider.geo);
+  const { D } = spider;
+  assert.ok(b.min.x > 0.08, 'on the front of the chest');
+  assert.ok(b.min.y > D.hipY + 0.5 * (D.shoulderY - D.hipY) && b.max.y < D.shoulderY + 0.05, 'on the breast');
+  assert.ok(b.max.z - b.min.z > 0.15, 'its legs spread');
+  assert.ok(boxOf(big.geo).max.z - boxOf(big.geo).min.z > b.max.z - b.min.z + 0.05, 'size scales it');
+  assert.ok(boxOf(cord.geo).min.x < -0.05 && boxOf(cord.geo).max.y > D.shoulderY, 'the cord goes round the back of the neck');
+  const glow = (geo) => {
+    const fx = geo.attributes.aFx.array;
+    let n = 0;
+    for (let i = 0; i < fx.length; i += 4) if (fx[i + 1] > 0.5) n++;
+    return n;
+  };
+  assert.equal(glow(spider.geo), 0);
+  assert.ok(glow(eyes.geo) > 50, 'two glowing eyes');
+});
+
+test('a tunic, a wrap and a long skirt take a finer grid when asked, and a pattern woven into the cloth under its shading', async () => {
+  const { withMat } = await import('../../src/render/models/unit-geo.js');
+  const { addTunic, addWrapSkirt, addLongSkirt } = await import('../../src/render/models/rich-clothing.js');
+  const { kente, mudcloth } = await import('../../src/render/models/rich-paint.js');
+  const team = TEAM(0.9, 'cloth');
+  const build = (fn) => {
+    const { kit, D, bind } = dressing(westAfrican('worshipper'));
+    fn(kit, D, bind);
+    return kit.build({ ground: 1 });
+  };
+  const share = (geo) => {
+    const fx = geo.attributes.aFx.array;
+    let n = 0;
+    for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) n++;
+    return n / (fx.length / 4);
+  };
+  const weave = kente({ colors: [withMat('#e2a72a', 'cloth'), withMat('#1f6e4a', 'cloth')], r: 0.19 });
+  const tunic = build((kit, D, bind) => addTunic(kit, D, team, bind, 0.1));
+  const fine = build((kit, D, bind) => addTunic(kit, D, team, bind, 0.1, { sides: 24, rings: 18 }));
+  const mud = build((kit, D, bind) => addTunic(kit, D, team, bind, 0.1, { weave: mudcloth({ ink: withMat('#e2d2a6', 'cloth'), cell: 0.1, r: 0.13 }) }));
+  assert.ok(fine.userData.triangles > tunic.userData.triangles * 2, 'a finer grid');
+  assert.equal(mud.userData.triangles, tunic.userData.triangles, 'the weave is color, not geometry');
+  assert.ok(share(tunic) === 1 && share(mud) > 0.4 && share(mud) < 0.95, `the pale of the mud cloth over the team's cloth (${share(mud).toFixed(2)})`);
+  const wrap = build((kit, D, bind) => addWrapSkirt(kit, D, bind, { color: team, len: 1 }));
+  const wrapFine = build((kit, D, bind) => addWrapSkirt(kit, D, bind, { color: team, len: 1, sides: 48, rings: 12, weave }));
+  assert.ok(wrapFine.userData.triangles > wrap.userData.triangles * 2 && share(wrap) === 1 && share(wrapFine) === 0, 'the wrap: finer, and the kente\'s own colors over it');
+  const long = build((kit, D, bind) => addLongSkirt(kit, D, bind, team, {}));
+  const longFine = build((kit, D, bind) => addLongSkirt(kit, D, bind, team, { sides: 48, rings: 14, weave }));
+  assert.ok(longFine.userData.triangles > long.userData.triangles * 2 && share(long) === 1 && share(longFine) === 0, 'the long skirt too');
+  // the weave goes on before the shading: the same block is darker toward the hem
+  const c = wrapFine.attributes.color.array;
+  const p = wrapFine.attributes.position.array;
+  let lo = null;
+  let hi = null;
+  for (let i = 0; i < p.length; i += 3) {
+    const l = 0.2126 * c[i] + 0.7152 * c[i + 1] + 0.0722 * c[i + 2];
+    if (c[i] > c[i + 1] * 1.2 && c[i] > 0.3) {
+      if (!lo || p[i + 1] < lo[0]) lo = [p[i + 1], l];
+      if (!hi || p[i + 1] > hi[0]) hi = [p[i + 1], l];
+    }
+  }
+  assert.ok(lo && hi && lo[1] < hi[1] * 0.95, 'the gold is shaded darker at the hem than at the waist');
+});
+
+test('the crowns, head ties, horns, caps and sleeves show against the shared look: the heads rise, the priest is broader', () => {
+  const shared = (id) => ({ ...westAfrican(id), pantheon: 'norse', lookOf: 'norse' });
+  const body = (u) => boxOf(buildRichTemplate(u).rich.geo);
+  const rise = (id) => body(westAfrican(id)).max.y - body(shared(id)).max.y;
+  assert.ok(rise('west_african_shango') > 0.1, `Shango's beaded crown (${rise('west_african_shango').toFixed(2)})`);
+  assert.ok(rise('west_african_oya') > 0.1, `Oya's head tie (${rise('west_african_oya').toFixed(2)})`);
+  assert.ok(rise('west_african_dart_hunter') > 0.08, `the hunter's horns (${rise('west_african_dart_hunter').toFixed(2)})`);
+  assert.ok(rise('archer') > 0.1, `the archer's feathers (${rise('archer').toFixed(2)})`);
+  assert.ok(rise('worshipper') > 0.02, `the head tie (${rise('worshipper').toFixed(2)})`);
+  const width = (u) => {
+    const b = body(u);
+    return b.max.z - b.min.z;
+  };
+  assert.ok(width(westAfrican('priest')) > width(shared('priest')) + 0.08, 'the agbada\'s wide sleeves');
+});
+
+test('West African mortals, gods and helpers carry the team\'s color in their tunics, capes, linings, bands and shields; the gold and the iron keep their own', () => {
+  for (const [id, share] of [['worshipper', 0.07], ['warrior', 0.1], ['archer', 0.03], ['priest', 0.1], ['west_african_shango', 0.015], ['west_african_oya', 0.014], ['west_african_ogun', 0.035], ['west_african_anansi', 0.05], ['west_african_aziza', 0.008], ['west_african_dart_hunter', 0.04]]) {
+    const fx = buildRichTemplate(westAfrican(id)).rich.geo.attributes.aFx.array;
+    let team = 0;
+    let metal = 0;
+    for (let i = 0; i < fx.length; i += 4) {
+      if (fx[i] > 0) team++;
+      if (fx[i + 3] > 0.3) metal++;
+    }
+    const n = fx.length / 4;
+    assert.ok(team > n * share, `${id}: team-colored vertices ${team} of ${n}`);
+    if (id === 'west_african_ogun') assert.ok(metal > n * 0.15, `${id}: iron vertices ${metal} of ${n}`);
+    if (id === 'west_african_anansi') assert.ok(metal > n * 0.12, `${id}: gold vertices ${metal} of ${n}`);
+  }
+  // a warrior's shield face is the team's color, about a cross of hide
+  const shield = buildRichTemplate(westAfrican('warrior')).rich.attach.find((a) => a.name === 'shield');
+  const fx = shield.geo.attributes.aFx.array;
+  let team = 0;
+  for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0) team++;
+  assert.ok(team > fx.length / 4 * 0.3, `the shield's face is team painted (${team} of ${fx.length / 4})`);
+});
+
+test('the people of West Africa are deep brown and black-haired, whoever they are; the gods and the Aziza keep their own', () => {
+  const wa = outfitFor('west_african');
+  const pal = { hair: new THREE.Color('#c9a56a'), skin: new THREE.Color('#c8a07a'), primary: new THREE.Color('#b08a5a') };
+  const of = (id, extra = {}) => wa.palette(pal, { mortal: true, unit: { id }, worker: false, cls: 'infantry', ex: new Set(), ...extra });
+  const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  for (const [what, p] of [
+    ['a worker', of('worshipper', { worker: true, cls: 'worker' })],
+    ['a soldier', of('warrior', { ex: new Set(['armor']) })],
+    ['an archer', of('archer')],
+    ['a priest', of('priest', { cls: 'support' })],
+    ['the Dart Hunter', of('west_african_dart_hunter')],
+  ]) {
+    assert.ok(lum(p.skin) < lum(pal.skin) * 0.4, `${what} is deep brown`);
+    assert.ok(lum(p.hair) < 0.03, `${what} has black hair`);
+  }
+  for (const id of ['west_african_shango', 'west_african_oya', 'west_african_ogun', 'west_african_anansi', 'west_african_aziza']) {
+    assert.equal(wa.palette(pal, { mortal: false, unit: { id }, ex: new Set() }), pal, `${id}'s palette is the unit's own`);
+  }
+  assert.equal(pal.skin.getHexString(), 'c8a07a', 'the shared palette itself is not touched');
+  // and the body is built in it: the hands are the people's brown, not the shared skin
+  const hands = (u) => {
+    const geo = buildRichTemplate(u).rich.geo;
+    const si = geo.attributes.skinIndex.array;
+    const sw = geo.attributes.skinWeight.array;
+    const c = geo.attributes.color.array;
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < si.length / 4; i++) {
+      if ((si[i * 4] === B.handR || si[i * 4] === B.handL) && sw[i * 4] > 0.99) {
+        sum += 0.2126 * c[i * 3] + 0.7152 * c[i * 3 + 1] + 0.0722 * c[i * 3 + 2];
+        n++;
+      }
+    }
+    return sum / n;
+  };
+  const shared = (id) => ({ ...westAfrican(id), pantheon: 'norse', lookOf: 'norse' });
+  for (const id of ['worshipper', 'warrior', 'west_african_dart_hunter']) assert.ok(hands(westAfrican(id)) < hands(shared(id)) * 0.4, `${id}'s hands`);
+  assert.ok(Math.abs(hands(westAfrican('west_african_shango')) - hands(shared('west_african_shango'))) < 1e-6, 'Shango\'s are his own either way');
+});
+
+test('the West African gods, mortals, the Aziza and the Dart Hunter animate every state without a NaN', () => {
+  for (const id of WEST_AFRICAN) {
+    const m = buildUnitModel(westAfrican(id), PLAYER_COLORS[2], { detail: 'rich' });
     assert.ok(m.rich, `${id} should be rich`);
     runStates(m, id);
     m.dispose();

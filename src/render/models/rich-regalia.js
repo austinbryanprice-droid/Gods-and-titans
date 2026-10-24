@@ -3,7 +3,7 @@
 // weighted to the skeleton). Flames are the fire giant's; the rest comes with each pantheon.
 import * as THREE from 'three';
 import { MeshKit, ps, vs, B, rigid } from './rich-kit.js';
-import { finishGear, richWeapon } from './rich-gear.js';
+import { finishGear, richWeapon, spider } from './rich-gear.js';
 import { richArm } from './rich-arms.js';
 import { shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { torsoRing } from './rich-body.js';
@@ -679,7 +679,8 @@ const ARM_POSES = [
 /**
  * The extra arms of a many-armed god: pairs of arms from the shoulder blades, the first pair raised
  * with the hands up, the next held out in front, each hand holding its item. `items` is a list of
- * [right, left] item ids (a rich-gear.js weapon or a rich-arms.js item; null is an open hand). Returns
+ * [right, left] item ids (a rich-gear.js weapon or a rich-arms.js item, or { id, opts } with options for its builder; null is an
+ * open hand). Returns
  * the rigid attach entry (riding the chest bone: the extra arms do not swing).
  */
 export function extraArmsPiece(E, items) {
@@ -724,10 +725,13 @@ export function extraArmsPiece(E, items) {
       band(along(root, du, D.upper * 0.5), du, D.armR * 1.1 + 0.012, 0.03, gold);
       band(along(wrist, df, -0.004), df, D.armR * 0.65 + 0.009, 0.022, gold);
       if (!item) return;
+      // (an item is an id, or { id, opts } with options for its builder: a clay jar for the cauldron, a talking drum)
+      const id = typeof item === 'string' ? item : item.id;
+      const opts = typeof item === 'string' ? {} : item.opts || {};
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...unit(flip(pose.item))));
       const M = new THREE.Matrix4().compose(new THREE.Vector3(...hand), q, new THREE.Vector3(1, 1, 1));
       kit.placed(M, (k) => {
-        if (!richWeapon(k, pal, item, sw)) richArm(k, pal, item, sw);
+        if (!richWeapon(k, pal, id, sw, opts)) richArm(k, pal, id, sw, opts);
       });
     });
   });
@@ -769,5 +773,87 @@ export function addWaterStreams(E, { color, glow = 0.4 } = {}) {
         o.glow = glow * (0.7 + 0.5 * rip);
       },
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// West African regalia: the hunter's quiver, Anansi's spider
+// ---------------------------------------------------------------------------
+
+/**
+ * A quiver of leather hung at the hip (the right, or the left with side -1), leaning back: a tube with a band at its mouth and its
+ * foot, the arrows standing out of its mouth with their fletching. opts: color (the leather), trim (the bands; none: none), fletch
+ * (the feathers' colors, cycled), n (arrows), side.
+ */
+export function addQuiver(E, { color, trim = null, fletch, n = 5, side = 1 } = {}) {
+  const { kit, D, bind } = E;
+  const K = D.k;
+  const R = 0.03 * K;
+  const z = side * (D.waistW * 0.5 + 0.07 * K);
+  const p0 = [0.03 * K, D.hipY - 0.16 * K, z];
+  const p1 = [-0.07 * K, D.hipY + 0.15 * K, z + side * 0.02 * K];
+  const at = (u) => [lerp(p0[0], p1[0], u), lerp(p0[1], p1[1], u), lerp(p0[2], p1[2], u)];
+  const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
+  const dir = [(p1[0] - p0[0]) / len, (p1[1] - p0[1]) / len, (p1[2] - p0[2]) / len];
+  kit.loft([0, 0.5, 1].map((u, i) => {
+    const q = at(u);
+    const r = R * [0.88, 1, 1.08][i];
+    return ps(q[0], q[1], q[2], r, r);
+  }), {
+    ref: [1, 0, 0], rings: 4, sides: 10, start: 'round', end: 'flat', capDepth: 0.012 * K, color, mat: 'leather', bind: bind.torso,
+    paint: (o, x, y, z2, u) => mul(o, u > 0.985 ? 0.22 : 0.84 + 0.16 * u),
+  });
+  if (trim) {
+    for (const u of [0.1, 0.92]) {
+      const a = at(u - 0.035);
+      const b = at(u + 0.035);
+      const r = R * lerp(0.9, 1.08, u) + 0.004;
+      kit.loft([ps(a[0], a[1], a[2], r, r), ps(b[0], b[1], b[2], r, r)], { ref: [1, 0, 0], sides: 10, start: null, end: null, color: trim, mat: 'trim', bind: bind.torso });
+    }
+  }
+  const cols = Array.isArray(fletch) ? fletch : [fletch];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const off = [Math.cos(a) * R * 0.45, 0, Math.sin(a) * R * 0.45];
+    const base = at(0.75);
+    const top = at(1);
+    const L = 0.13 * K * (0.9 + 0.2 * hash(i, 2, 9));
+    const b0 = [base[0] + off[0], base[1], base[2] + off[2]];
+    const tip = [top[0] + off[0] * 1.8 + dir[0] * L, top[1] + dir[1] * L, top[2] + off[2] * 1.8 + dir[2] * L];
+    kit.loft([ps(b0[0], b0[1], b0[2], 0.0042 * K), ps(tip[0], tip[1], tip[2], 0.0042 * K)], { ref: [1, 0, 0], sides: 3, start: null, end: 'round', capDepth: 0.004 * K, color: withMat('#c9a56a', 'wood'), mat: 'wood', bind: bind.torso });
+    // the fletching: two vanes along the end of the shaft
+    const back = [tip[0] - dir[0] * 0.055 * K, tip[1] - dir[1] * 0.055 * K, tip[2] - dir[2] * 0.055 * K];
+    for (const f of [[Math.cos(a), 0, Math.sin(a)], [-Math.sin(a), 0, Math.cos(a)]]) {
+      feather(kit, back, dir, f, 0.06 * K, 0.012 * K, { color: cols[i % cols.length], tip: null, bind: bind.torso, rows: 2, thick: 0.0018 });
+    }
+  }
+}
+
+/**
+ * A spider of gold hung on the breast (Anansi's): on a cord of beads about the neck, its back to the front, eight legs spread.
+ * opts: color, size (scale), cord (the cord's color; none: no cord), f (its height on the torso, as for torsoRing), eye (the color of
+ * two glowing eyes; none: none).
+ */
+export function addSpiderPendant(E, { color, size = 1, cord = null, f = 0.8, eye = null } = {}) {
+  const { kit, D, bind } = E;
+  const K = D.k;
+  const ring = torsoRing(D, f, 0.03);
+  const c = new THREE.Vector3(ring.dx + ring.rx + 0.006, ring.y, 0);
+  const M = new THREE.Matrix4().compose(c, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, PI / 2, 0)), new THREE.Vector3(1, 1, 1));
+  spider(kit, M, 0.085 * K * size, { color, mat: 'gold', bind: bind.chest, glow: 0.1, eye });
+  if (cord) {
+    // the cord: from the back of the neck down to the spider's head
+    const top = torsoRing(D, 1.05, 0.018);
+    const n = 14;
+    const path = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const th = lerp(-PI * 0.95, PI * 0.95, t);
+      const k = Math.cos(th / 2) ** 2;
+      const y = lerp(top.y, ring.y + 0.06 * K * size, k);
+      const rg = torsoRing(D, clamp((y - D.hipY) / (D.shoulderY - D.hipY), 0, 1.07), 0.022);
+      path.push(ps(rg.dx + Math.cos(th) * rg.rx, y, Math.sin(th) * rg.rz, 0.0045 * K, 0.0045 * K));
+    }
+    kit.loft(path, { ref: [0, 1, 0], rings: n, sides: 4, start: null, end: null, color: cord, mat: 'gold', bind: bind.torso });
   }
 }
