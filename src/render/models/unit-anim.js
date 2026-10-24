@@ -745,6 +745,12 @@ export function animateModel(m, state, t, dt, ex) {
       if (state === 'dead') { T.st = 0; T.wing = -0.4; }
       T.fold = restingWings(m, state);
       blendPose(m, T, dt, 22);
+      if (m.rich) {
+        // the skinned rich serpent, hydra or dragon: bones in place of rigid parts and wave morphs
+        applyCreature(m, m.cur, state, t, dt);
+        for (const f of m.rich.flames) inf(f, 'fl', flick);
+        break;
+      }
       inf(body, 'st', m.cur.st);
       inf(body, 'jaw', m.cur.jaw);
       inf(body, 'ga', m.cur.ga);

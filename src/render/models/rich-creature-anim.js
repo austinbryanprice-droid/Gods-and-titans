@@ -44,6 +44,8 @@ export function applyCreature(m, P, state, t, dt) {
   switch (R.plan) {
     case 'quadruped': applyQuadruped(m, R, P, state, t); break;
     case 'bird': applyBird(m, R, P, state, t, dt); break;
+    case 'serpent': applySerpent(m, R, P, state, t, dt); break;
+    case 'hydra': applyHydra(m, R, P, state, t, dt); break;
     default: break;
   }
   syncRich(R);
@@ -278,5 +280,120 @@ function applyBird(m, R, P, state, t, dt) {
     const s = i === 0 ? 1 : -1;
     leg.rotation.set(0.05 * s * fly, 0, -0.85 * fly * (1 - grab) + 0.5 * grab * fly + 0.04 * Math.sin(t * 2 + seed + i));
     foot.rotation.set(0, 0, -0.5 * fly * (1 - grab) - 0.3 * grab * fly);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// serpents and eastern dragons
+// ---------------------------------------------------------------------------
+
+function serpentBones(R) {
+  const [root, s0, n1, n2, n3, head, jaw] = bonesOf(R, ['root', 's0', 'n1', 'n2', 'n3', 'head', 'jaw']);
+  const back = [];
+  for (let i = 1; R.ix[`b${i}`] !== undefined; i++) back.push(R.bones[R.ix[`b${i}`]]);
+  const leg = (key) => bonesOf(R, [`${key}u`, `${key}l`, `${key}p`]);
+  const legs = R.ix.F1u === undefined ? null : { F1: leg('F1'), 'F-1': leg('F-1'), B1: leg('B1'), 'B-1': leg('B-1') };
+  return { root, s0, neck: [n1, n2, n3], head, jaw, back, legs, amp: 0.35 };
+}
+
+/**
+ * A serpent or a dragon: the strike (P.st) leans the neck forward and down from its foot, the head riding steadier than
+ * the neck and the jaw opening with P.jaw; the body behind the base undulates, a wave running down its bones (the old rig's
+ * lateral wave, now a bend at every joint, growing toward the tail, stronger while it travels); a dragon's four legs swing
+ * in diagonal pairs when it walks and trail behind it in the air.
+ */
+function applySerpent(m, R, P, state, t, dt) {
+  const q = R.q || (R.q = serpentBones(R));
+  const seed = m.seed;
+  const moving = m.moving;
+  const dead = state === 'dead';
+  const idle = !moving && !dead && state !== 'attack' && state !== 'cast' ? 1 : 0;
+  const k = dt > 0 ? 1 - Math.exp(-4 * Math.min(dt, 0.25)) : 1;
+  q.amp += ((dead ? 0.08 : moving ? 1 : 0.35) - q.amp) * k;
+  const A = q.amp;
+  const dragon = !!q.legs;
+  const st = P.st;
+  const breath = Math.sin(t * 1.7 + seed);
+  const look = idle * 0.5 * Math.sin(t * 0.37 + seed * 3) * Math.sin(t * 0.91 + seed);
+
+  q.root.position.set(P.lunge, m.air ? 0.02 * Math.sin(t * 1.9 + seed) : 0, 0);
+  q.s0.rotation.set(0, 0.07 * Math.sin(t * 0.7 + seed) * (0.4 + idle) + 0.04 * Math.sin(m.wavePhase) * A, 0.012 * breath * idle - (dragon ? 0.04 : 0.1) * st);
+  const w = dragon ? [0.1, 0.12, 0.12] : [0.22, 0.28, 0.3];
+  q.neck.forEach((b, i) => {
+    b.rotation.set(0, (0.05 + 0.05 * idle) * Math.sin(t * 0.9 + seed + i * 0.8) + look * 0.25, -st * w[i] + 0.02 * breath * idle * (i + 1));
+  });
+  q.head.rotation.set(0, look * 0.5, st * (dragon ? 0.1 : 0.45) - 0.02 * breath * idle);
+  q.jaw.rotation.set(0, 0, -clamp(P.jaw, 0, 1.3) * 0.55);
+
+  const n = q.back.length;
+  q.back.forEach((b, i) => {
+    const grow = 0.5 + (0.5 * (i + 1)) / n;
+    const ph = m.wavePhase - i * 0.9;
+    b.rotation.set(0, Math.sin(ph) * 0.3 * A * grow, dragon ? 0.1 * A * grow * Math.sin(ph + 1.3) : 0);
+  });
+
+  if (q.legs) {
+    const phi = m.walkPhase;
+    const gait = moving && !m.air ? 1 : 0;
+    const tuck = m.air ? 1 : 0;
+    const leg = ([u, l, p], ph, front) => {
+      const s = Math.sin(phi + ph);
+      u.rotation.set(0, 0, 0.42 * s * gait - (front ? 0.85 : 0.7) * tuck);
+      l.rotation.set(0, 0, -0.55 * Math.max(0, Math.cos(phi + ph)) * gait - 0.7 * tuck);
+      p.rotation.set(0, 0, 0.3 * Math.max(0, Math.cos(phi + ph)) * gait + 0.4 * tuck);
+    };
+    leg(q.legs.F1, 0, true);
+    leg(q.legs['F-1'], Math.PI, true);
+    leg(q.legs.B1, Math.PI, false);
+    leg(q.legs['B-1'], 0, false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// the hydra
+// ---------------------------------------------------------------------------
+
+function hydraBones(R) {
+  const [root, body] = bonesOf(R, ['root', 'body']);
+  const tail = bonesOf(R, [1, 2, 3, 4].map((i) => `t${i}`));
+  const legs = bonesOf(R, ['legFR', 'legBL', 'legFL', 'legBR']);
+  const necks = [];
+  for (let i = 0; R.ix[`h${i}a`] !== undefined; i++) necks.push(bonesOf(R, ['a', 'b', 'c', 'h', 'j'].map((c) => `h${i}${c}`)));
+  return { root, body, tail, legs, necks, amp: 0.6 };
+}
+
+/**
+ * A hydra: every neck sways on a phase of its own, its head looking about; a strike leans them all forward and down and the
+ * jaws open together (a little less for each head after the first); the tail waves; the four legs swing in diagonal pairs.
+ */
+function applyHydra(m, R, P, state, t, dt) {
+  const q = R.q || (R.q = hydraBones(R));
+  const seed = m.seed;
+  const moving = m.moving;
+  const dead = state === 'dead';
+  const k = dt > 0 ? 1 - Math.exp(-4 * Math.min(dt, 0.25)) : 1;
+  q.amp += ((dead ? 0.1 : moving ? 1 : 0.6) - q.amp) * k;
+  const A = q.amp;
+  const st = P.st;
+  const breath = Math.sin(t * 1.4 + seed);
+
+  q.root.position.set(P.lunge, 0, 0);
+  q.body.rotation.set(0, 0.03 * Math.sin(m.wavePhase * 0.5) * A, 0.012 * breath);
+  q.necks.forEach(([a, b, c, h, j], i) => {
+    const ph = seed * 2 + i * 1.9;
+    const sw = A * Math.sin(t * 1.7 + ph);
+    const nod = Math.sin(t * 1.3 + ph * 1.3 + 0.8);
+    const look = Math.sin(t * 0.5 + ph) * Math.sin(t * 1.1 + ph * 0.7);
+    a.rotation.set(0, 0.07 * sw, -0.12 * st + 0.03 * nod);
+    b.rotation.set(0, 0.13 * sw, -0.2 * st + 0.05 * nod);
+    c.rotation.set(0, 0.16 * sw, -0.24 * st + 0.04 * nod);
+    h.rotation.set(0, 0.35 * look, 0.14 * st - 0.04 * nod);
+    j.rotation.set(0, 0, -clamp(P.jaw * (1 - 0.06 * i), 0, 1.3) * 0.5);
+  });
+  q.tail.forEach((b, i) => b.rotation.set(0, Math.sin(m.wavePhase - i * 0.9) * (0.12 + 0.06 * i) * A, 0));
+  const phi = m.walkPhase;
+  const gait = moving ? 1 : 0;
+  q.legs.forEach((leg, i) => {
+    if (leg) leg.rotation.set(0, 0, 0.36 * Math.sin(phi + (i < 2 ? 0 : Math.PI)) * gait);
   });
 }

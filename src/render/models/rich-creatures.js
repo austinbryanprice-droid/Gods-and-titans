@@ -6,10 +6,12 @@
 import { unitContext, normalizeVisual } from './unit-bodies.js';
 import { quadSupported, buildQuadrupedTemplate } from './rich-quadruped.js';
 import { birdSupported, buildBirdTemplate } from './rich-bird.js';
+import { serpentSupported, buildSerpentTemplate } from './rich-serpent.js';
 
 const PLANS = [
   { supported: quadSupported, build: buildQuadrupedTemplate },
   { supported: birdSupported, build: buildBirdTemplate },
+  { supported: serpentSupported, build: buildSerpentTemplate },
 ];
 
 /** The plan that dresses this unit type, or null (the unit keeps its low-poly model). */

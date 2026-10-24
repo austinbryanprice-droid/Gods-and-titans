@@ -41,8 +41,13 @@ const BIRDS = [
   ['norse', 'norse_raven'], ['egyptian', 'egyptian_bennu'], ['chinese', 'chinese_fenghuang'], ['celtic', 'celtic_battle_crow'], ['mesopotamian', 'mesopotamian_anzu'],
 ];
 
+const SERPENTS = [['egyptian', 'egyptian_apep'], ['aztec', 'aztec_xiuhcoatl'], ['west_african', 'west_african_onini']];
+const HYDRAS = [['japanese', 'japanese_yamata_no_orochi']];
+const DRAGONS = [['chinese', 'chinese_celestial_dragon'], ['mesopotamian', 'mesopotamian_tiamat'], ['west_african', 'west_african_ninki_nanka']];
+const LONG_BODIES = [...SERPENTS, ...DRAGONS];
+
 const look = ([pantheon, id]) => unitLook(UNITS[id], pantheon);
-const BY_ID = Object.fromEntries([...QUADRUPEDS, ...BIRDS].map((pair) => [pair[1], look(pair)]));
+const BY_ID = Object.fromEntries([...QUADRUPEDS, ...BIRDS, ...SERPENTS, ...HYDRAS, ...DRAGONS].map((pair) => [pair[1], look(pair)]));
 const unit = (id) => BY_ID[id];
 const withVisual = (u, change) => ({ ...u, visual: { ...u.visual, ...change(u.visual) } });
 
@@ -424,4 +429,213 @@ test('the phoenixes trail long tails, the Bennu burns, and the Anzu wears a lion
   assert.ok(tri('mesopotamian_anzu') > tri('norse_raven') + 300, 'the lion\'s head and mane');
   // the two crows are built alike
   assert.equal(tri('norse_raven'), tri('celtic_battle_crow'), 'the same corvid body');
+});
+
+// ---------------------------------------------------------------------------
+// serpents, the hydra and the eastern dragons
+// ---------------------------------------------------------------------------
+
+test('the serpents, the hydra and the dragons are built by the rich builder, as far as it can dress them', () => {
+  for (const pair of [...SERPENTS, ...HYDRAS, ...DRAGONS]) {
+    const u = look(pair);
+    assert.ok(creatureSupported(u), `${u.id} is a rich creature`);
+    assert.ok(richSupported(u), `${u.id} is supported`);
+  }
+  // only what the plan builds is let through: any other serpent keeps its low-poly model
+  const apep = unit('egyptian_apep');
+  assert.ok(!richSupported(withVisual(apep, () => ({ weapon: 'sword' }))), 'a serpent holds nothing');
+  assert.ok(!richSupported(withVisual(apep, () => ({ head: 'wolf' }))), 'a head the plan has no table for');
+  assert.ok(!richSupported(withVisual(apep, (v) => ({ extras: [...v.extras, 'wings'] }))), 'wings are not built on a serpent');
+  assert.ok(!richSupported(withVisual(apep, () => ({ heads: 3 }))), 'a serpent has one head, the hydra has many');
+  const tiamat = unit('mesopotamian_tiamat');
+  assert.ok(!richSupported(withVisual(tiamat, (v) => ({ extras: [...v.extras, 'wings'] }))), 'a winged dragon keeps its low-poly model');
+  assert.ok(!richSupported(withVisual(tiamat, () => ({ headgear: 'helmet' }))), 'a dragon wears no helmet');
+  assert.ok(richSupported(withVisual(tiamat, () => ({ headgear: 'antlers' }))), 'antlers are built');
+  assert.ok(richSupported(withVisual(unit('chinese_celestial_dragon'), () => ({ offhand: 'orb' }))), 'a pearl is built');
+  const orochi = unit('japanese_yamata_no_orochi');
+  assert.ok(richSupported(withVisual(orochi, () => ({ heads: 5 }))), 'a hydra of any ordinary number of necks is built');
+  assert.ok(richSupported(withVisual(orochi, () => ({ heads: 99 }))), 'a titan hydra is built with up to nine necks (the cap every unit has)');
+  assert.ok(!richSupported({ ...withVisual(orochi, () => ({ heads: 7 })), class: 'creature' }), 'seven necks do not fit the creature budget');
+  assert.ok(richSupported({ ...withVisual(orochi, () => ({ heads: 6 })), class: 'creature' }), 'six necks do');
+  assert.ok(!richSupported(withVisual(orochi, (v) => ({ extras: [...v.extras, 'wings'] }))), 'a winged hydra keeps its low-poly model');
+  assert.ok(!richSupported(withVisual(orochi, () => ({ headgear: 'crown' }))), 'a hydra wears no crown');
+});
+
+test('every serpent, hydra and dragon builds a valid skinned mesh inside the rich budget', () => {
+  for (const pair of LONG_BODIES) {
+    const u = look(pair);
+    const tpl = buildRichTemplate(u);
+    assert.equal(tpl.kind, UNITS[u.id].visual.body, `${u.id} keeps its kind so the low-poly animate switch still dispatches`);
+    assert.equal(tpl.rich.plan, 'serpent');
+    checkSkinned(u, tpl);
+    for (const name of ['root', 's0', 'n1', 'n2', 'n3', 'head', 'jaw', 'b1', 'b4', 'b7']) {
+      assert.ok(tpl.rich.ix[name] !== undefined, `${u.id} has a ${name} bone`);
+    }
+  }
+  for (const pair of HYDRAS) {
+    const u = look(pair);
+    const tpl = buildRichTemplate(u);
+    assert.equal(tpl.kind, 'hydra');
+    assert.equal(tpl.rich.plan, 'hydra');
+    checkSkinned(u, tpl);
+  }
+});
+
+test('Low and Medium keep the low-poly serpents; High and Ultra swap in the rich ones', () => {
+  for (const pair of [...SERPENTS, ...HYDRAS, ...DRAGONS]) {
+    const u = look(pair);
+    const base = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'base' });
+    assert.equal(base.rich, null, `${u.id} stays low-poly on Low and Medium`);
+    const rich = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'rich' });
+    assert.ok(rich.rich, `${u.id} is rich on High and Ultra`);
+    assert.ok(rich.root.getObjectByName('body')?.isSkinnedMesh, `${u.id}: one skinned body`);
+    assert.equal(rich.air, base.air, `${u.id} keeps its flight`);
+    for (const m of [base, rich]) m.dispose();
+  }
+  assert.ok(buildUnitModel(unit('chinese_celestial_dragon'), PLAYER_COLORS[0], { detail: 'rich' }).air, 'the celestial dragon flies');
+});
+
+test('every serpent, hydra and dragon animates every state without a NaN, through the same pose keys', () => {
+  for (const pair of [...SERPENTS, ...HYDRAS, ...DRAGONS]) {
+    const u = look(pair);
+    const m = buildUnitModel(u, PLAYER_COLORS[2], { detail: 'rich' });
+    runStates(m, u.id);
+    m.dispose();
+  }
+});
+
+test('a serpent undulates down its length while it travels and rears and lunges to strike', () => {
+  const m = buildUnitModel(unit('egyptian_apep'), PLAYER_COLORS[1], { detail: 'rich' });
+  const ix = m.rich.ix;
+  const range = (a) => Math.max(...a) - Math.min(...a);
+  const yaw = (name, state, moving, steps = 90) => {
+    const out = [];
+    m.animate('idle', 0, 0, {});
+    for (let i = 0; i < steps; i++) {
+      m.animate(state, i / 30, 1 / 30, { moving });
+      out.push(m.rich.bones[ix[name]].rotation.y);
+    }
+    return out;
+  };
+  // the wave runs down the bones: stronger toward the tail, stronger while it travels than while it lies
+  const mid = range(yaw('b3', 'move', true));
+  const tail = range(yaw('b7', 'move', true));
+  const still = range(yaw('b7', 'idle', false));
+  assert.ok(mid > 0.1, `the body bends from side to side (${mid.toFixed(2)})`);
+  assert.ok(tail > mid, 'the wave grows toward the tail');
+  assert.ok(tail > still * 1.5, `it undulates harder while it travels (${tail.toFixed(2)} against ${still.toFixed(2)})`);
+  // the wave travels: the bones do not swing in step
+  m.animate('idle', 0, 0, {});
+  let apart = 0;
+  for (let i = 0; i < 60; i++) {
+    m.animate('move', i / 30, 1 / 30, { moving: true });
+    apart = Math.max(apart, Math.abs(m.rich.bones[ix.b2].rotation.y - m.rich.bones[ix.b5].rotation.y));
+  }
+  assert.ok(apart > 0.1, 'a wave runs down the body, not a swing of the whole');
+  // a strike: the neck leans forward, the jaw opens and the whole body lunges
+  m.animate('idle', 0, 0, {});
+  for (let i = 0; i < 20; i++) m.animate('idle', i / 30, 1 / 30, {});
+  const rest = { n: m.rich.bones[ix.n2].rotation.z, jaw: m.rich.bones[ix.jaw].rotation.z, x: m.rich.bones[ix.root].position.x };
+  const peak = { n: rest.n, jaw: rest.jaw, x: rest.x };
+  for (let i = 0; i < 40; i++) {
+    m.animate('attack', i / 30, 1 / 30, { attackPhase: Math.min(0.99, i / 30) });
+    peak.n = Math.min(peak.n, m.rich.bones[ix.n2].rotation.z);
+    peak.jaw = Math.min(peak.jaw, m.rich.bones[ix.jaw].rotation.z);
+    peak.x = Math.max(peak.x, m.rich.bones[ix.root].position.x);
+  }
+  assert.ok(peak.jaw < rest.jaw - 0.2, `the jaw opens (${rest.jaw.toFixed(2)} -> ${peak.jaw.toFixed(2)})`);
+  assert.ok(Math.abs(peak.n - rest.n) > 0.05, 'the neck bends into the strike');
+  assert.ok(peak.x > rest.x + 0.02, 'the body lunges forward');
+  m.dispose();
+});
+
+test('an eastern dragon walks on four short legs in diagonal pairs and tucks them in flight', () => {
+  const walker = buildUnitModel(unit('mesopotamian_tiamat'), PLAYER_COLORS[1], { detail: 'rich' });
+  const ix = walker.rich.ix;
+  for (const k of ['F1', 'F-1', 'B1', 'B-1']) for (const part of ['u', 'l', 'p']) assert.ok(ix[`${k}${part}`] !== undefined, `Tiamat has a ${k}${part} bone`);
+  walker.animate('idle', 0, 0, {});
+  const swing = [];
+  for (let i = 0; i < 90; i++) {
+    walker.animate('move', i / 30, 1 / 30, { moving: true });
+    swing.push(['F1u', 'F-1u', 'B1u', 'B-1u'].map((n) => walker.rich.bones[ix[n]].rotation.z));
+  }
+  const range = (a) => Math.max(...a) - Math.min(...a);
+  for (let k = 0; k < 4; k++) assert.ok(range(swing.map((s) => s[k])) > 0.5, `leg ${k} swings`);
+  assert.ok(swing.some((s) => Math.abs(s[0] - s[1]) > 0.5), 'the left and right legs are out of step');
+  assert.ok(swing.some((s) => Math.abs(s[0] - s[3]) < 0.1), 'a front leg moves with the opposite hind one');
+  walker.dispose();
+  // the celestial dragon flies: its legs hang folded under it, and a serpent has none
+  const flyer = buildUnitModel(unit('chinese_celestial_dragon'), PLAYER_COLORS[1], { detail: 'rich' });
+  flyer.animate('idle', 0, 0, {});
+  const fold = [];
+  for (let i = 0; i < 90; i++) {
+    flyer.animate('move', i / 30, 1 / 30, { moving: true });
+    fold.push(flyer.rich.bones[flyer.rich.ix.F1u].rotation.z);
+  }
+  assert.ok(range(fold) < 0.1 && fold[0] < -0.5, 'in the air the legs stay tucked, not walking');
+  assert.equal(buildRichTemplate(unit('egyptian_apep')).rich.ix.F1u, undefined, 'a serpent has no legs');
+  flyer.dispose();
+});
+
+test('the hydra has a neck of three bones to each of its eight heads, and each head looks about on its own', () => {
+  const u = unit('japanese_yamata_no_orochi');
+  const tpl = buildRichTemplate(u);
+  for (let i = 0; i < 8; i++) for (const c of ['a', 'b', 'c', 'h', 'j']) assert.ok(tpl.rich.ix[`h${i}${c}`] !== undefined, `neck ${i} has a ${c} bone`);
+  assert.equal(tpl.rich.ix.h8a, undefined, 'no ninth neck');
+  for (const name of ['legFR', 'legFL', 'legBR', 'legBL', 't1', 't4']) assert.ok(tpl.rich.ix[name] !== undefined, `the hydra has a ${name} bone`);
+  // the heads stand apart in a fan across the shoulders
+  const hz = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => tpl.rich.spec.pos[tpl.rich.ix[`h${i}h`]][2]);
+  assert.ok(Math.max(...hz) - Math.min(...hz) > 0.8, 'the heads fan out');
+  for (let i = 1; i < 8; i++) assert.ok(hz[i] > hz[i - 1] - 0.02, 'in order from one side to the other');
+  const m = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'rich' });
+  const seen = [new Set(), new Set()];
+  for (let i = 0; i < 120; i++) {
+    m.animate('idle', i / 30, 1 / 30, {});
+    seen[0].add(m.rich.bones[m.rich.ix.h0c].rotation.y.toFixed(2));
+    seen[1].add(m.rich.bones[m.rich.ix.h5c].rotation.y.toFixed(2));
+  }
+  assert.ok(seen[0].size > 10 && seen[1].size > 10, 'the necks sway while it stands');
+  m.animate('idle', 0.5, 1 / 30, {});
+  const a = m.rich.bones[m.rich.ix.h0c].rotation.y;
+  const b = m.rich.bones[m.rich.ix.h5c].rotation.y;
+  assert.notEqual(a.toFixed(3), b.toFixed(3), 'the necks are out of step');
+  // every jaw opens in a strike
+  const jaws = [0, 3, 7].map((i) => m.rich.bones[m.rich.ix[`h${i}j`]]);
+  const closed = jaws.map((j) => j.rotation.z);
+  const open = [...closed];
+  for (let i = 0; i < 40; i++) {
+    m.animate('attack', i / 30, 1 / 30, { attackPhase: Math.min(0.99, i / 30) });
+    jaws.forEach((j, k) => { open[k] = Math.min(open[k], j.rotation.z); });
+  }
+  jaws.forEach((j, k) => assert.ok(open[k] < closed[k] - 0.1, `jaw ${k} opens`));
+  m.dispose();
+});
+
+test('what a serpent wears comes from its visual: flames, spikes, a mane, antlers, a pearl', () => {
+  const tri = (u) => buildRichTemplate(u).triangles;
+  const tiamat = unit('mesopotamian_tiamat');
+  // antlers and a mane cost triangles on top of the same body
+  assert.ok(tri(withVisual(tiamat, () => ({ headgear: 'antlers' }))) > tri(withVisual(tiamat, () => ({ headgear: 'none' }))) + 100, 'antlers');
+  assert.ok(tri(withVisual(tiamat, (v) => ({ extras: [...v.extras, 'mane'] }))) > tri(tiamat) + 500, 'a mane');
+  const celestial = unit('chinese_celestial_dragon');
+  assert.ok(tri(withVisual(celestial, (v) => ({ extras: v.extras.filter((e) => e !== 'spikes') }))) < tri(celestial), 'spikes');
+  // a pearl rides ahead of the head's jaws, skinned to the head bone
+  const pearl = (offhand) => tri(withVisual(celestial, () => ({ offhand })));
+  assert.ok(pearl('orb') > pearl('none'), 'the pearl');
+  // flames ride the Xiuhcoatl's back and flicker
+  const xiuh = buildUnitModel(unit('aztec_xiuhcoatl'), PLAYER_COLORS[0], { detail: 'rich' });
+  assert.ok(xiuh.rich.flames.length > 0, 'the fire serpent burns');
+  for (const f of xiuh.rich.flames) assert.equal(f.morphTargetInfluences.length, 1);
+  const seen = new Set();
+  for (let i = 0; i < 60; i++) {
+    xiuh.animate('idle', i / 30, 1 / 30, {});
+    seen.add(xiuh.rich.flames[0].morphTargetInfluences[0].toFixed(3));
+  }
+  assert.ok(seen.size > 5, 'the flames flicker');
+  xiuh.dispose();
+  const apep = buildUnitModel(unit('egyptian_apep'), PLAYER_COLORS[0], { detail: 'rich' });
+  assert.equal(apep.rich.flames.length, 0, 'Apep does not burn');
+  apep.dispose();
+  // a titan is thicker and glows with rune rings: it costs more than a plain serpent of the same body
+  assert.ok(tri(unit('egyptian_apep')) > tri(unit('west_african_onini')), 'a titan serpent is richer than a minion');
 });

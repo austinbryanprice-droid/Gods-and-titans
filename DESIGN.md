@@ -1039,6 +1039,18 @@ per-frame budget, so a revealed army appears over a few frames.
   phoenixes), legs with toes, and feathered wings (two rigid pieces a side on two bones, with a covert pad over the
   leading edge) that beat from the pose's `wing` key with the outer bone trailing, folded along the sides when a
   grounded bird stands about; the Bennu's flames are a flickering rigid piece on the body bone.
+  The serpent plan (`rich-serpent.js`, with `rich-reptile-heads.js`) dresses Apep, Xiuhcoatl, the Onini, the Ninki
+  Nanka, the celestial dragon, Tiamat and the Yamata no Orochi: one skinned loft down a spine of twelve stations
+  on bones of its own (a base `s0`, a neck of three bones to the head and its jaw, seven back bones to the tip of
+  the tail), the head from a two-entry table of reptile skulls (serpent and dragon: slit pupils, brows, fangs, a
+  tongue, horns, antlers or a crown on a dragon), skinned to the neck chain and the back chain at once with a blend
+  across the base so the neck bends and strikes without tearing the body. The undulation runs down the back
+  bones from the pose's `wavePhase` while the neck rises, sways and strikes from `st` and `lunge`, and the jaw
+  opens from `jaw`; a dragon has four short legs that walk in diagonal pairs and tuck up in the air, a mane and a
+  tail tuft as its look says; scales, a lighter underside and the team ring are paint, spikes and flames are
+  rigid pieces. The hydra is a mound with a tail, four stumpy legs and a three-bone neck to each head (960
+  triangles a neck and head, so a class that cannot afford the necks keeps its low-poly model), moss and cypress
+  on its back. The pose keys of the low-poly rig stay the source of truth.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

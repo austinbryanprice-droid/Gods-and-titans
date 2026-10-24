@@ -71,7 +71,7 @@ export const MAMMALS = {
 };
 
 /** The skull's [yCenter, ryVertical, rzLateral] at x along the head (straight between its stations). */
-function skullAt(S, x) {
+export function skullAt(S, x) {
   const k = S.skull;
   let i = 0;
   while (i < k.length - 2 && x > k[i + 1][0]) i++;
@@ -82,7 +82,7 @@ function skullAt(S, x) {
 const surfaceN = (S) => (S.round ? 2.3 : 2.15);
 
 /** The skull's half width at x and height y (the superellipse of the station there): the surface an eye or a brow sits on. */
-function widthAt(S, x, y) {
+export function widthAt(S, x, y) {
   const [yc, ry, rz] = skullAt(S, x);
   const k = clamp(Math.abs(y - yc) / ry, 0, 0.97);
   const n = surfaceN(S);
@@ -90,7 +90,7 @@ function widthAt(S, x, y) {
 }
 
 /** The skull's top at x and a sideways offset z: where an ear or a horn is rooted. */
-function topAt(S, x, z) {
+export function topAt(S, x, z) {
   const [yc, ry, rz] = skullAt(S, x);
   const k = clamp(Math.abs(z) / rz, 0, 0.97);
   const n = surfaceN(S);
@@ -130,7 +130,7 @@ function ear(kit, S, side, o, k, fur, inner) {
 }
 
 /** A glossy eye on the skull's surface, looking forward and out: a dark rim, the iris, a pupil (a slit for the cats). */
-function eyes(kit, S, o, color, glow, slit, lean) {
+export function eyes(kit, S, o, color, glow, slit, lean) {
   const [x, y, , r] = S.eye;
   const sz = widthAt(S, x, y);
   for (const side of [1, -1]) {
