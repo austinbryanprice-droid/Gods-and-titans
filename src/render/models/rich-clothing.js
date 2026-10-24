@@ -2,14 +2,27 @@
 // (rich-body.js) and weighted to the same bones, so cloth follows the limb under it: tunics,
 // belts, cuirasses, pauldrons, mantles and capes. The pantheon outfits (rich-outfits.js) choose
 // and color them.
-import { shadeC } from './unit-geo.js';
+import { shadeC, TEAM } from './unit-geo.js';
 import { vs, ps, B, smoothstep } from './rich-kit.js';
 import { torsoStations, torsoRing, legRing, ringAt } from './rich-body.js';
-import { clamp, lerp, hash, mul, dye, gradY, paints } from './rich-paint.js';
+import { clamp, lerp, hash, mul, dye, gradY, paints, recolor } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
 const wrap = (a) => (a > PI ? a - TAU : a);
+
+/** A shade of a color that stays a team color when it is one (shadeC would turn it into a plain grey). */
+const shade = (c, k) => (c && c.team ? TEAM(c.team * k, c.mat) : shadeC(c, k));
+
+/** The front surface (x) of a garment's stations (ascending in height) at height y: where a panel hanging on its front rests. */
+function frontAt(st, y) {
+  for (let i = 0; i + 1 < st.length; i++) {
+    const a = st[i];
+    const b = st[i + 1];
+    if (y <= b.c[1] || i + 2 === st.length) return lerp(a.c[0] + a.rx, b.c[0] + b.rx, clamp((y - a.c[1]) / (b.c[1] - a.c[1] || 1e-9)));
+  }
+  return st[0].c[0] + st[0].rx;
+}
 
 export function addTunic(kit, D, color, bind, hem, opts = {}) {
   const st = torsoStations(D, 0.012);
@@ -354,14 +367,7 @@ export function addShendyt(kit, D, bind, { color, trim = null, apron = null, len
   const ap = apron || color;
   const top = D.hipY + 0.02;
   const hem = yb - 0.012 * len;
-  const front = (y) => {
-    for (let i = 0; i + 1 < st.length; i++) {
-      const a = st[i];
-      const b = st[i + 1];
-      if (y <= b.c[1] || i + 2 === st.length) return lerp(a.c[0] + a.rx, b.c[0] + b.rx, clamp((y - a.c[1]) / (b.c[1] - a.c[1] || 1e-9)));
-    }
-    return bx;
-  };
+  const front = (y) => frontAt(st, y);
   kit.sheet(5, 8, (u, v, out) => {
     const y = lerp(top, hem, v);
     const w = lerp(0.042, 0.1, v ** 0.8) * D.k;
@@ -451,4 +457,147 @@ export function addWraps(kit, bind, st, y0, y1, n, color, { g = 0.009, fill = 0.
     b.c[2] -= tilt;
     kit.loft([a, b], { sides, start: null, end: null, color: shadeC(color, 1 - shades * 0.5 + shades * hash(i, seed, 5)), mat: 'cloth', bind });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Hindu dress: the dhoti, the quilted coat with its steel plates, the garland
+// ---------------------------------------------------------------------------
+
+/**
+ * The dhoti: a long cloth wrapped about the hips and drawn up between the legs, hanging in loose
+ * folds to the shin, a border at its hem, a fan of pleats at the front and a roll at the waist.
+ * opts: color, border (the hem's color), fan (the pleats' color, default the cloth's), sash (a
+ * knotted end hanging at the hip), len (1 = the mid-shin, 0.55 = just below the knee, 0.2 = a
+ * loincloth), loose (how baggy it hangs), mark (a paint over the cloth: stripes of a hide).
+ */
+export function addDhoti(kit, D, bind, { color, border = null, fan = null, sash = null, len = 1, loose = 1, mark = null } = {}) {
+  const knee = D.hipY - D.thigh;
+  const yb = knee + 0.02 - (knee - D.ankleY) * 0.55 * len;
+  const yh = D.hipY - 0.08;
+  const t = torsoRing(D, 0.12, 0.012);
+  const lz = D.hipZ + D.legR; // the outer edge of the thigh
+  const st = [
+    vs(yb, 0.074 + 0.02 * loose, lz + 0.016 + 0.018 * loose),
+    vs(lerp(yb, yh, 0.5), 0.088 + 0.022 * loose, lz + 0.026 + 0.026 * loose),
+    vs(yh, D.depth * 0.5 + 0.036 + 0.02 * loose, lz + 0.03 + 0.028 * loose),
+    vs(D.hipY + 0.01, D.depth * 0.5 + 0.034, D.waistW * 0.5 + 0.05),
+    vs(t.y, t.rx, t.rz, t.dx),
+  ];
+  // soft folds, slanting a little, deeper toward the hem; an uneven hem
+  const fold = (amp, hemK = 1) => (p, a, u) => {
+    const s = Math.sin(a * 7 + u * 2.4) * amp * loose * (1 - u * 0.7);
+    p[0] += Math.cos(a) * s;
+    p[2] += Math.sin(a) * s;
+    p[1] += 0.012 * hemK * Math.sin(a * 3 + 0.5) * (1 - u) ** 3;
+  };
+  kit.loft(st, {
+    rings: 6, sides: 26, start: null, end: null, color, mat: 'cloth', bind: bind.skirt,
+    warp: fold(0.009),
+    paint: paints(gradY(yb, D.hipY, 0.8, 1), mark),
+  });
+  if (border) {
+    const a = st[0];
+    const b = st[1];
+    const k = 0.05 / (b.c[1] - a.c[1]);
+    kit.loft([vs(a.c[1] - 0.004, a.rx + 0.004, a.rz + 0.004), vs(a.c[1] + 0.05, lerp(a.rx, b.rx, k) + 0.003, lerp(a.rz, b.rz, k) + 0.003)], {
+      sides: 26, start: null, end: null, color: border, mat: 'cloth', bind: bind.skirt, warp: fold(0.009 * 0.9),
+    });
+  }
+  // the roll of cloth at the waist
+  kit.loft([vs(t.y - 0.014, t.rx + 0.012, t.rz + 0.012, t.dx), vs(t.y + 0.02, t.rx + 0.014, t.rz + 0.014, t.dx), vs(t.y + 0.046, t.rx + 0.004, t.rz + 0.004, t.dx)],
+    { rings: 3, sides: 20, start: null, end: null, color: shade(color, 0.92), mat: 'cloth', bind: bind.skirt });
+  // the pleats drawn up between the legs and tucked in at the front: a fan hanging from the waist
+  const pc = fan || color;
+  const top = t.y + 0.012;
+  const hem = yb + 0.004;
+  kit.sheet(7, 6, (u, v, out) => {
+    const y = lerp(top, hem, v);
+    const w = lerp(0.032, 0.088, v ** 0.8);
+    const z = (u - 0.5) * 2 * w;
+    out[0] = frontAt(st, y) + 0.016 + 0.03 * v ** 2 * loose - 0.012 * (z / (w || 1)) ** 2 * v + 0.005 * Math.cos(u * 7 * PI) * v;
+    out[1] = y;
+    out[2] = z;
+  }, {
+    thick: 0.008, color: pc, inner: shade(pc, 0.82), bind: bind.skirt,
+    paint: (o, x, y, z, u, a) => {
+      mul(o, 0.9 + 0.1 * Math.cos(u * PI * 7));
+      if (mark) mark(o, x, y, z, u, a);
+      if (border && a > 0.9) recolor(o, border, 0.95);
+    },
+  });
+  // the end of a sash knotted at the right hip
+  if (sash) {
+    for (const [dir, drop] of [[1, 0.3], [0.5, 0.22]]) {
+      kit.sheet(2, 4, (u, v, out) => {
+        const th = 0.62 + (u - 0.5) * 0.11 + dir * 0.06 * v;
+        const r = torsoRing(D, lerp(0.14, -0.14, v * drop / 0.3), 0.034 + 0.01 * v);
+        out[0] = r.dx + r.rx * Math.cos(th);
+        out[1] = r.y;
+        out[2] = r.rz * Math.sin(th) * (1 + 0.12 * v);
+      }, { thick: 0.006, color: sash, inner: shade(sash, 0.8), bind: bind.skirt, paint: (o, x, y, z, u, a) => mul(o, 0.94 + 0.08 * Math.sin(a * 5 + u * 3)) });
+    }
+  }
+}
+
+/**
+ * The char-aina: a quilted sleeveless coat from the belt to the collar with a round steel plate on
+ * the breast, one on the back and one at each side (the "four mirrors"), rimmed in gold, a hem of trim.
+ * opts: color (the coat; a team color works), plate (steel), trim.
+ */
+export function addCharAina(kit, D, pal, bind, { color, plate, trim }) {
+  const g = 0.02;
+  const y = (f) => D.hipY + (D.shoulderY - D.hipY) * f;
+  kit.loft(torsoStations(D, g, 0.04), { rings: 8, start: null, end: 'round', capDepth: 0.01, color, mat: 'cloth', bind: bind.torso, paint: gradY(y(0.04), y(1.0), 0.86, 1.02) });
+  const hem = torsoRing(D, 0.06, g + 0.004);
+  kit.loft([vs(hem.y - 0.01, hem.rx + 0.004, hem.rz + 0.004, hem.dx), vs(hem.y + 0.024, hem.rx, hem.rz, hem.dx)], { sides: 22, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
+  const collar = torsoRing(D, 1.03, g + 0.006);
+  kit.loft([vs(collar.y - 0.012, collar.rx, collar.rz, collar.dx), vs(collar.y + 0.012, collar.rx - 0.002, collar.rz - 0.002, collar.dx)], { sides: 20, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
+  // a plate: a shallow dome of steel with a gold rim, its axis along (ax, az)
+  const disc = (f, ax, az, r) => {
+    const ring = torsoRing(D, f, g + 0.003);
+    const c = az === 0 ? [ring.dx + ax * ring.rx, ring.y, 0] : [ring.dx, ring.y, az * ring.rz];
+    const at = (d, k) => ps(c[0] + ax * d, c[1], c[2] + az * d, r * k, r * k);
+    const o = { ref: [0, 1, 0], sides: 14 };
+    kit.loft([at(-0.004, 1), at(0.008, 0.98), at(0.017, 0.62)], { ...o, rings: 3, start: null, end: 'round', capRings: 2, capDepth: 0.012, color: plate, mat: 'metal', bind: bind.torso, paint: gradY(c[1] - r, c[1] + r, 0.86, 1.1) });
+    kit.loft([at(0.003, 1.05), at(0.011, 1.05)], { ...o, start: null, end: null, color: trim, mat: 'gold', bind: bind.torso });
+    kit.loft([at(0.015, 0.2), at(0.026, 0.14)], { ...o, sides: 7, start: null, end: 'round', capRings: 1, capDepth: 0.006, color: trim, mat: 'gold', bind: bind.torso });
+  };
+  disc(0.62, 1, 0, 0.074 * D.k);
+  disc(0.62, -1, 0, 0.074 * D.k);
+  disc(0.5, 0, 1, 0.062 * D.k);
+  disc(0.5, 0, -1, 0.062 * D.k);
+}
+
+/**
+ * A garland or a string of beads from the neck down the chest, a rope of round blooms or beads,
+ * `colors` cycling along it. opts: low (how far down it hangs, as a height fraction of the torso),
+ * r (thickness), beads (how many), mat.
+ */
+export function addGarland(kit, D, bind, { colors, low = 0.4, r = 0.016, beads = 14, mat = 'cloth' } = {}) {
+  const n = 22;
+  const path = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const th = lerp(-1.32, 1.32, t);
+    const ring = torsoRing(D, lerp(1.04, low, Math.sin(t * PI) ** 0.9), 0.026 + r);
+    path.push([ring.dx + ring.rx * Math.cos(th), ring.y, ring.rz * Math.sin(th)]);
+  }
+  const centre = (u) => {
+    const f = clamp(u, 0, 1) * n;
+    const i = Math.min(n - 1, Math.floor(f));
+    const k = f - i;
+    return [lerp(path[i][0], path[i + 1][0], k), lerp(path[i][1], path[i + 1][1], k), lerp(path[i][2], path[i + 1][2], k)];
+  };
+  kit.loft(path.map((q) => ps(q[0], q[1], q[2], r, r)), {
+    ref: [0, 1, 0], rings: n, sides: 6, start: 'round', end: 'round', capRings: 2, capDepth: r, color: colors[0], mat, bind: bind.torso,
+    // a bead or a bloom every so often along it
+    warp: (p, a, u) => {
+      const c = centre(u);
+      const s = 1 + 0.38 * (0.5 + 0.5 * Math.cos(u * beads * TAU));
+      p[0] = c[0] + (p[0] - c[0]) * s;
+      p[1] = c[1] + (p[1] - c[1]) * s;
+      p[2] = c[2] + (p[2] - c[2]) * s;
+    },
+    paint: (o, x, y, z, u) => dye(o, colors[Math.floor(u * beads + 0.5) % colors.length], 1),
+  });
 }

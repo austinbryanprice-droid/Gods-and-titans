@@ -490,6 +490,31 @@ export class MeshKit {
   }
 
   /**
+   * Model something in a frame of its own with `fn(this)` (a held item in its grip frame), then
+   * move every vertex it added by `matrix` (rigid): the item ends up in this mesh, placed on a limb.
+   */
+  placed(matrix, fn) {
+    const v0 = this.count;
+    const f0 = this.flick.length;
+    fn(this);
+    for (let i = v0; i < this.count; i++) {
+      const o = i * 3;
+      _v.set(this.pos[o], this.pos[o + 1], this.pos[o + 2]).applyMatrix4(matrix);
+      this.pos[o] = _v.x;
+      this.pos[o + 1] = _v.y;
+      this.pos[o + 2] = _v.z;
+      _v.set(this.nor[o], this.nor[o + 1], this.nor[o + 2]).transformDirection(matrix);
+      this.nor[o] = _v.x;
+      this.nor[o + 1] = _v.y;
+      this.nor[o + 2] = _v.z;
+    }
+    for (let k = f0; k < this.flick.length; k++) {
+      const f = this.flick[k];
+      f.base = _v.set(f.base[0], f.base[1], f.base[2]).applyMatrix4(matrix).toArray();
+    }
+  }
+
+  /**
    * Finish: typed attributes, an index, and baked ambient occlusion. `matrix` (rigid) moves the
    * whole kit into another frame first (pieces modelled in a grip frame, placed in a bone's).
    * Primitives built with opts.flicker = { base, k } get a flame flicker morph ('fl', as the

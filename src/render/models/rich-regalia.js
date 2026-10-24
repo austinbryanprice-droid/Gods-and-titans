@@ -3,18 +3,18 @@
 // weighted to the skeleton). Flames are the fire giant's; the rest comes with each pantheon.
 import * as THREE from 'three';
 import { MeshKit, ps, vs, B, rigid } from './rich-kit.js';
-import { finishGear } from './rich-gear.js';
+import { finishGear, richWeapon } from './rich-gear.js';
+import { richArm } from './rich-arms.js';
 import { shadeC, mixC, tintC } from './unit-geo.js';
 import { torsoRing } from './rich-body.js';
 import { feather } from './rich-feathers.js';
-import { hash, lerp, clamp, gradY, mul } from './rich-paint.js';
+import { hash, lerp, clamp, gradY, mul, tint } from './rich-paint.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
 
 /** One tongue of flame: a tapered curl from `base` along `dir`, bent back by `bend`, with a flicker morph. */
-function tongue(kit, pal, base, dir, L, r, { bend = 0.3, k = 0.35, sides = 6 } = {}) {
-  const n = 5;
+function tongue(kit, pal, base, dir, L, r, { bend = 0.3, k = 0.35, sides = 6, n = 5, rings = 6, cap = 3 } = {}) {
   const st = [];
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);
@@ -24,7 +24,7 @@ function tongue(kit, pal, base, dir, L, r, { bend = 0.3, k = 0.35, sides = 6 } =
   const f = pal.fire;
   const h = pal.fireHot;
   kit.loft(st, {
-    rings: 6, sides, start: 'round', end: 'round', capDepth: [r * 0.5, L * 0.08], color: pal.fire, mat: 'gem', glow: 0.95, flicker: { base, k },
+    rings, sides, start: 'round', end: 'round', capRings: cap, capDepth: [r * 0.5, L * 0.08], color: pal.fire, mat: 'gem', glow: 0.95, flicker: { base, k },
     paint: (o, x, y, z, u) => {
       const t = u * u;
       o.r = f.r + (h.r - f.r) * t;
@@ -76,6 +76,38 @@ export function flamePieces(ctx, D, spec) {
   }
   const o = spec.pos[B.chest];
   return [{ name: 'flames', bone: B.chest, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])), flicker: true }];
+}
+
+/**
+ * The prabhavali: an arch of flames standing behind a god's head, a thin gold arch with tongues of
+ * fire along it (rides the head bone, flickers). `size` scales it; 1 is about twice the head's width.
+ */
+export function addPrabhavali(E, { size = 1, tongues = 7 } = {}) {
+  const { D, pal, spec } = E;
+  const hs = D.hs;
+  const kit = new MeshKit(null, { sides: 6 });
+  const R = 0.27 * hs * size;
+  const cx = D.headX - 0.13 * hs;
+  const cy = D.headCY - 0.05 * hs;
+  const arch = [];
+  for (let i = 0; i <= 10; i++) {
+    const a = (i / 10) * PI;
+    arch.push(ps(cx, cy + Math.sin(a) * R, Math.cos(a) * R, 0.009 * hs, 0.009 * hs));
+  }
+  kit.loft(arch, { sides: 5, start: 'round', end: 'round', capRings: 2, capDepth: 0.007 * hs, color: pal.accentMetal, mat: 'gold', glow: 0.3 });
+  for (let i = 0; i < tongues; i++) {
+    const a = (i / (tongues - 1)) * PI;
+    const s = Math.sin(a);
+    const c = Math.cos(a);
+    const wob = 0.85 + 0.3 * hash(i, 4, 9);
+    const base = [cx, cy + s * R * 1.02, c * R * 1.02];
+    const dir = [-0.18, s, c];
+    const l = Math.hypot(...dir);
+    // longest at the crown of the arch, shorter at its feet
+    tongue(kit, pal, base, dir.map((x) => x / l), (0.075 + 0.05 * s) * hs * size * wob, 0.022 * hs * size, { bend: 0.25, k: 0.3, sides: 4, n: 3, rings: 2, cap: 1 });
+  }
+  const o = spec.pos[B.head];
+  return { name: 'prabhavali', bone: B.head, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])), flicker: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -273,9 +305,10 @@ export function addChains(E, { wrists = true } = {}) {
 
 /**
  * A tail from the small of the back, riding the pelvis. `forked` rises in a curve and splits into
- * two upright prongs (Set's). opts: color (default the unit's skin), len (scale of the length).
+ * two upright prongs (Set's); `monkey` is long, rises in an S and curls forward over the back with a
+ * pale tuft at its tip (Hanuman's). opts: color (default the unit's skin), len (scale of the length), kind.
  */
-export function addTail(E, { color = null, len = 1 } = {}) {
+export function addTail(E, { color = null, len = 1, kind = 'forked' } = {}) {
   const { kit, D, pal } = E;
   const K = D.k * len;
   const col = color || pal.skin;
@@ -283,6 +316,18 @@ export function addTail(E, { color = null, len = 1 } = {}) {
   const root = torsoRing(D, 0.16, 0);
   const x0 = root.dx - root.rx + 0.01;
   const y0 = root.y;
+  if (kind === 'monkey') {
+    const path = [[0, 0, 0.032], [-0.075, 0.0, 0.03], [-0.15, 0.03, 0.028], [-0.215, 0.1, 0.026], [-0.245, 0.19, 0.024], [-0.24, 0.29, 0.022], [-0.205, 0.37, 0.02], [-0.15, 0.415, 0.0185], [-0.1, 0.425, 0.0185], [-0.066, 0.418, 0.027], [-0.034, 0.402, 0.02]];
+    const tuft = mixC(col, '#f8dfae', 0.55);
+    kit.loft(path.map(([dx, dy, r]) => ps(x0 + dx * K, y0 + dy * K, 0, r * D.k, r * D.k)), {
+      ref: [0, 0, 1], rings: 18, sides: 8, start: 'round', end: 'round', capDepth: [0.012 * K, 0.016 * K], color: col, mat: 'skin', bind,
+      paint: (o, x, y, z, u) => {
+        mul(o, 0.88 + 0.2 * Math.abs(Math.sin(u * 70 + z * 60)));
+        tint(o, tuft, clamp((u - 0.84) / 0.12) * 0.85);
+      },
+    });
+    return;
+  }
   // the stem: out and up from the back, a gentle S
   const stem = [[0, 0, 0.034], [-0.07, 0.008, 0.03], [-0.135, 0.045, 0.026], [-0.168, 0.11, 0.0215], [-0.172, 0.18, 0.0175]];
   kit.loft(stem.map(([dx, dy, r]) => ps(x0 + dx * K, y0 + dy * K, 0, r * D.k, r * D.k * 0.92)), {
@@ -298,4 +343,74 @@ export function addTail(E, { color = null, len = 1 } = {}) {
       paint: (o, x, y, z, u) => mul(o, 1 - 0.28 * u),
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// extra arms (a rigid piece on the chest bone)
+// ---------------------------------------------------------------------------
+
+/** How each pair of extra arms is held (right side; the left mirrors): the root as fractions of the shoulder width, the directions of the upper arm and forearm, and where the held item points. */
+const ARM_POSES = [
+  { root: [-0.05, -0.055, 0.8], upper: [-0.16, 0.5, 0.85], fore: [0.1, 1.0, 0.3], item: [0.1, 1, 0.45] },
+  { root: [-0.035, -0.128, 0.78], upper: [0.05, -0.62, 0.8], fore: [0.95, 0.4, -0.2], item: [1, 0.5, -0.15] },
+  { root: [-0.06, -0.01, 0.84], upper: [-0.3, 0.9, 0.6], fore: [0.0, 1.0, 0.55], item: [0, 1, 0.35] },
+];
+
+/**
+ * The extra arms of a many-armed god: pairs of arms from the shoulder blades, the first pair raised
+ * with the hands up, the next held out in front, each hand holding its item. `items` is a list of
+ * [right, left] item ids (a rich-gear.js weapon or a rich-arms.js item; null is an open hand). Returns
+ * the rigid attach entry (riding the chest bone: the extra arms do not swing).
+ */
+export function extraArmsPiece(E, items) {
+  const { D, pal, spec, skin, skinPaint } = E;
+  const kit = new MeshKit(null, { sides: 8 });
+  const gold = pal.accentMetal;
+  const sw = D.weaponSize * 0.58;
+  const hr = D.handR / 0.048;
+  const unit = (v) => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  };
+  const along = (p, d, t) => [p[0] + d[0] * t, p[1] + d[1] * t, p[2] + d[2] * t];
+  const refFor = (d) => (Math.abs(d[1]) < 0.8 ? [0, 1, 0] : [1, 0, 0]);
+  const limb = (a, b, ra, rb, opts) => {
+    const d = unit([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    const mid = along(a, d, Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) * 0.5);
+    kit.loft([ps(a[0], a[1], a[2], ra, ra * 0.95), ps(mid[0], mid[1], mid[2], (ra + rb) * 0.5 * 1.08, (ra + rb) * 0.5 * 1.03), ps(b[0], b[1], b[2], rb, rb * 0.95)],
+      { ref: refFor(d), rings: 4, sides: 8, capRings: 2, color: skin, paint: skinPaint, ...opts });
+  };
+  const band = (c, d, r, w, color = gold) => {
+    kit.loft([ps(c[0] - d[0] * w * 0.5, c[1] - d[1] * w * 0.5, c[2] - d[2] * w * 0.5, r), ps(c[0] + d[0] * w * 0.5, c[1] + d[1] * w * 0.5, c[2] + d[2] * w * 0.5, r)],
+      { ref: refFor(d), sides: 8, start: null, end: null, color, mat: 'gold', glow: 0.1 });
+  };
+  items.forEach((pair, p) => {
+    const pose = ARM_POSES[p % ARM_POSES.length];
+    pair.forEach((item, i) => {
+      const side = i === 0 ? 1 : -1;
+      const flip = (v) => [v[0], v[1], v[2] * side];
+      const root = [pose.root[0], D.shoulderY + pose.root[1], D.shoulderZ * pose.root[2] * side];
+      const du = unit(flip(pose.upper));
+      const df = unit(flip(pose.fore));
+      const elbow = along(root, du, D.upper * 0.97);
+      const wrist = along(elbow, df, D.fore * 0.97);
+      const hand = along(wrist, df, 0.046 * hr);
+      limb(root, elbow, D.armR * 1.08, D.armR * 0.88, { start: 'round', capDepth: D.armR });
+      limb(elbow, wrist, D.armR * 0.88, D.armR * 0.62, { start: null });
+      // the hand: a rounded mitten along the forearm
+      kit.loft([ps(...wrist, 0.027 * hr, 0.031 * hr), ps(...along(wrist, df, 0.034 * hr), 0.031 * hr, 0.042 * hr), ps(...along(wrist, df, 0.07 * hr), 0.025 * hr, 0.034 * hr)],
+        { ref: refFor(df), rings: 3, sides: 8, start: null, end: 'round', capRings: 2, capDepth: 0.02 * hr, color: skin, paint: skinPaint });
+      // an armlet on the upper arm, a bangle at the wrist
+      band(along(root, du, D.upper * 0.5), du, D.armR * 1.1 + 0.012, 0.03, gold);
+      band(along(wrist, df, -0.004), df, D.armR * 0.65 + 0.009, 0.022, gold);
+      if (!item) return;
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...unit(flip(pose.item))));
+      const M = new THREE.Matrix4().compose(new THREE.Vector3(...hand), q, new THREE.Vector3(1, 1, 1));
+      kit.placed(M, (k) => {
+        if (!richWeapon(k, pal, item, sw)) richArm(k, pal, item, sw);
+      });
+    });
+  });
+  const o = spec.pos[B.chest];
+  return { name: 'extraArms', bone: B.chest, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])) };
 }
