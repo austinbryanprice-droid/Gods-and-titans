@@ -734,3 +734,40 @@ export function extraArmsPiece(E, items) {
   const o = spec.pos[B.chest];
   return { name: 'extraArms', bone: B.chest, geo: finishGear(kit, new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2])) };
 }
+
+/**
+ * Streams of water running from a god's shoulders, Enki's (the lord of the sweet water under the earth): from each shoulder a broad
+ * ribbon of bright water down the outside of the arm and past the hip to the ground, rippling as it goes. They ride the cape
+ * bones, so they sway when the god moves. opts: color (the water), glow.
+ */
+export function addWaterStreams(E, { color, glow = 0.4 } = {}) {
+  const { kit, D } = E;
+  const bind = E.bind.cape;
+  const K = D.k;
+  const sh = D.shoulderY;
+  const z = D.shoulderZ;
+  for (const side of [1, -1]) {
+    const path = [
+      [0.004, sh + 0.02 * K, side * (z - 0.01)],
+      [-0.012, sh - 0.04 * K, side * (z + 0.075 * K)],
+      [-0.03, sh - 0.2 * K, side * (z + 0.105 * K)],
+      [-0.055, sh - 0.4 * K, side * (z + 0.105 * K)],
+      [-0.08, sh - 0.58 * K, side * (z + 0.09 * K)],
+      [-0.1, 0.1, side * (z + 0.09 * K)],
+    ];
+    kit.sheet(4, 20, (u, v, out) => {
+      const p = spline3(path, v);
+      const wid = 0.034 * K * (1 + 0.5 * v) * (u - 0.5) * 2;
+      out[0] = p[0] + 0.01 * K * Math.sin(v * 13 + (side > 0 ? 0 : 1.9)) * v;
+      out[1] = p[1];
+      out[2] = p[2] + wid + 0.012 * K * Math.sin(v * 9 + 1) * v;
+    }, {
+      thick: 0.006, color, inner: shadeC(color, 0.8), mat: 'gem', glow, bind,
+      paint: (o, x, y, z2, u, a) => {
+        const rip = 0.5 + 0.5 * Math.sin(a * 46 + u * 3);
+        mul(o, 0.82 + 0.3 * rip);
+        o.glow = glow * (0.7 + 0.5 * rip);
+      },
+    });
+  }
+}

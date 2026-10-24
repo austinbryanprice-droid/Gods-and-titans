@@ -41,7 +41,7 @@ function makeMatch(quality) {
     version: '0.1.0',
     seed: 4242,
     mapSize: 'small',
-    players: ['norse', 'mesopotamian'].map((p, i) => ({ index: i, name: `P${i}`, team: 1, pantheon: p, color: PLAYER_COLORS[i], kind: 'human', difficulty: 'normal' })),
+    players: ['norse', 'west_african'].map((p, i) => ({ index: i, name: `P${i}`, team: 1, pantheon: p, color: PLAYER_COLORS[i], kind: 'human', difficulty: 'normal' })),
   };
   const world = createWorld(setup);
   const vs = new ViewState({ setup, mapData: world.mapData, myIndex: 0, interpDelayMs: 50 });
@@ -81,20 +81,22 @@ test('high and ultra draw the rich humanoids, low and medium the low-poly models
   }
 });
 
-test('only the pantheons that have the new characters get them: the Norse sample, not the Mesopotamians', () => {
-  const { r, step } = makeMatch('high');
+test('only the pantheons that have the new characters get them: the Norse sample, not the West Africans', () => {
+  const { world, r, step } = makeMatch('high');
   step(0.3);
   const norse = ownedBy(r, 0);
   const others = ownedBy(r, 1);
   assert.ok(norse.length > 0 && others.length > 0, 'both players have unit views');
   assert.ok(norse.every((v) => v.model.rich), 'every Norse unit the builder can dress is rich');
-  assert.equal(others.filter((v) => v.model.rich).length, 0, 'the Mesopotamian ones stay low-poly');
+  assert.equal(others.filter((v) => v.model.rich).length, 0, 'the West African ones stay low-poly');
   assert.equal(r.detailFor('norse'), 'rich');
-  assert.equal(r.detailFor('mesopotamian'), 'base');
-  // a tool pinning rich shows them all
+  assert.equal(r.detailFor('west_african'), 'base');
+  // a tool pinning rich shows them all (the West African workers wear a veil the builder does not make yet, so a warrior is called up)
+  const worker = [...world.entities.values()].find((e) => e.kind === 'unit' && e.owner === 1);
+  world.spawnUnit(1, 'warrior', worker.x + 1, worker.y + 1, { silent: true });
   r.setUnitDetail('rich');
   step(0.3);
-  assert.ok(ownedBy(r, 1).some((v) => v.model.rich), 'the Mesopotamian warriors take the rich build when pinned');
+  assert.ok(ownedBy(r, 1).some((v) => v.model.rich), 'the West African warriors take the rich build when pinned');
   r.dispose();
 });
 

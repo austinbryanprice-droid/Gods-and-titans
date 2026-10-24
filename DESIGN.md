@@ -925,7 +925,7 @@ per-frame budget, so a revealed army appears over a few frames.
   beveled weapons and shields, faces, baked AO (`rich-kit.js` MeshKit, `rich-gear.js`), moved by
   `rich-anim.js` from the same pose keys as the low-poly rig plus spine, head, foot, cape and hair
   motion. Low and medium keep the low-poly models. Only the pantheons in `RICH_PANTHEONS` have them
-  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, the Aztecs, the Celts, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
+  in play (the Norse, then the Greeks, the Egyptians, the Hindus, the Japanese, the Chinese, the Aztecs, the Celts, the Mesopotamians, then one pantheon per look pass); `setUnitDetail('rich' | 'base' | 'auto')`
   pins the choice for tools. The bones live outside the scene graph (detached bind mode): `applyRich`
   ends with `syncRich`, and rigid pieces (weapon, shield, tools, flames, cargo, wings) ride mounts
   (`mountOn`), so the pose costs nothing on frames where a unit does not animate. Winged units get
@@ -971,9 +971,20 @@ per-frame budget, so a revealed army appears over a few frames.
   crescent of gold, the Woad Raiders' bare skin painted in bands of blue (`skinPaint`) with limed hair
   and a double axe, the Dagda's fur mantle and studded club, the Morrigan's raven (`addRaven`, a rigid
   piece on the chest bone) and crown of feathers, Lugh's golden mail, Brigid's crown of flame
-  (`addFlameCrown`, flickering like the Hindu arch) and torch, Balor's plaid kilt and iron torc; an
+  (`addFlameCrown`, flickering like the Hindu arch) and torch, Balor's plaid kilt and iron torc;
+  `rich-outfits-mesopotamian.js`: the kaunakes (`addKaunakes`: a skirt of woolly fleece in tiers of
+  tufts, short for the workers, to the ankle for the priest and the gods) with a fringed shawl in the
+  team's color (`addDrape` with a `fringe` of tassels, `addFringe`), the beard squared off in rows of
+  curls (`addCurledBeard`) and the hair rolled at the nape (`addNapeBun`), the soldiers' coat of scale
+  (`addScaleCoat`) under a pointed helmet (`addConeHelm`) and the tall wicker shield closing in an arch
+  (`richShield` `arch`, `pattern: 'wicker'`, roundels with their own `sides`), the priest's plain white
+  cap, the gods' crowns of horns, one pair over another (`addHornedTiara`; Ishtar's with a star), Enki's
+  streams of water (`addWaterStreams`: glowing ribbons on the cape bones), Nergal's black iron, lion
+  pelt and studded pear-headed mace (`pearMace`), the apkallu in the head and the skin of a fish
+  (`addFishHood`, `addFishCloak`) and the Slinger's sling (its `gear` asks for `build: true` for a
+  `whip`, which `rich-gear.js` builds as two cords, a pouch and a stone); an
   outfit's `gear` may ask the gear builder for a weapon that is not in `RICH_WEAPONS` (`build: true`:
-  the double axe, the torch), and a held piece with a flicker morph flickers; an outfit's `shield` may
+  the double axe, the torch, the sling), and a held piece with a flicker morph flickers; an outfit's `shield` may
   be a function of the unit as well as a style object). Gods with more than two arms carry the extra two pairs as one rigid
   piece on the chest bone (`extraArmsPiece` in `rich-regalia.js`: each hand holds an item the arm
   builders already make, moved into place with `MeshKit.placed`); such units get a separate

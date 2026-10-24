@@ -732,6 +732,25 @@ function yue(kit, pal, s, { shaftColor = null } = {}) {
 }
 
 /**
+ * A sling, the Assyrian slinger's: a leather cord knotted over the fist and a pouch at the end of two cords, a stone showing in it,
+ * the loose end trailing; in the grip frame it hangs forward and down. opts: color (the leather), stone.
+ */
+function sling(kit, pal, s, { color = null, stone = null } = {}) {
+  const leather = color || pal.leather;
+  const rock = stone || withMat('#8d877c', 'bone');
+  // the knot over the fist, and the cords, one each side, sagging to the pouch
+  kit.loft([ps(0, -0.03 * s, 0, 0.022 * s), ps(0, 0.04 * s, 0, 0.026 * s), ps(0, 0.09 * s, 0, 0.02 * s)], { ref: [1, 0, 0], rings: 4, sides: 6, start: 'round', end: null, capRings: 1, capDepth: 0.01 * s, color: leather, mat: 'leather' });
+  const cord = (z, dz) => [[0, 0.085], [0.045, 0.16], [0.12, 0.215], [0.22, 0.235], [0.31, 0.215]].map(([x, y], i) => ps(x * s, y * s, (z * (1 - i / 4) + dz * (i / 4)) * s, 0.0085 * s));
+  for (const z of [0.012, -0.012]) kit.loft(cord(z, z * 1.8), { ref: [0, 0, 1], rings: 6, sides: 4, start: 'round', end: null, capRings: 1, capDepth: 0.006 * s, color: leather, mat: 'leather' });
+  // the pouch: a flat patch of leather, wider in the middle, with a stone in it
+  kit.loft([ps(0.3 * s, 0.215 * s, 0, 0.012 * s, 0.03 * s), ps(0.335 * s, 0.208 * s, 0, 0.026 * s, 0.05 * s), ps(0.375 * s, 0.2 * s, 0, 0.018 * s, 0.036 * s), ps(0.395 * s, 0.196 * s, 0, 0.006 * s, 0.012 * s)],
+    { ref: [0, 1, 0], rings: 5, sides: 8, start: 'round', end: 'round', capRings: 1, capDepth: 0.008 * s, color: shadeC(leather, 0.9), mat: 'leather' });
+  kit.loft([ps(0.325 * s, 0.226 * s, 0, 0.026 * s, 0.026 * s), ps(0.352 * s, 0.226 * s, 0, 0.03 * s, 0.03 * s)], { ref: [0, 1, 0], sides: 8, start: 'round', end: 'round', capRings: 2, capDepth: 0.022 * s, color: rock, mat: 'bone' });
+  // the loose end of the second cord, trailing
+  kit.loft([ps(0.31 * s, 0.215 * s, -0.012 * s, 0.0075 * s), ps(0.36 * s, 0.17 * s, -0.03 * s, 0.0065 * s), ps(0.4 * s, 0.12 * s, -0.045 * s, 0.005 * s)], { ref: [0, 0, 1], rings: 4, sides: 4, start: null, end: 'round', capRings: 1, capDepth: 0.004 * s, color: leather, mat: 'leather' });
+}
+
+/**
  * Add weapon `id` to `kit` in the grip frame (origin = palm, +Y along the weapon, blade
  * width along X, thickness along Z), like the low-poly addWeapon. opts.glowBlade: a flaming
  * blade; opts.runes: the runic glow color of a god's hammer. The double axe and the torch are built here but not in
@@ -750,6 +769,7 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
     case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else if (opts.staff === 'druid') druidStaff(kit, pal, s, opts); else staff(kit, pal, s, opts); return true;
     case 'double_axe': doubleAxe(kit, pal, s, opts); return true;
     case 'torch': torch(kit, pal, s); return true;
+    case 'whip': sling(kit, pal, s, opts); return true;
     case 'halberd': halberd(kit, pal, s, opts); return true;
     default: return false;
   }
@@ -766,7 +786,9 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
  *   puffs       5: balls of down on the face, one in the middle and four about it, puffColor their color (the sun god's shield)
  *   fringe      { n, colors, tip, len }: feathers hanging from the lower rim (the Mexica's chimalli)
  *   band        a band of metal inset all round the face, its outer edge at that fraction of the radius (bandColor: its color, default the rim's)
- *   roundels    [{ y, k, color, mat }]: studs down the face, y as a fraction of its half height from the middle, k their radius as a fraction of the half width
+ *   roundels    [{ x, y, k, color, mat, sides }]: studs on the face, x and y as fractions of its half width and height from the middle (x none: down the middle), k their radius as a fraction of the half width, sides (12) how many they are cut with
+ *   arch        a tall shield with an arched top: the face is cut to a round arch above this fraction of its half height (0.3 for a tower shield)
+ *   pattern 'wicker' shades the face in horizontal bands of woven reed
  */
 export function richShield(ctx, D, style = {}) {
   const { pal } = ctx;
@@ -792,11 +814,20 @@ export function richShield(ctx, D, style = {}) {
     return n === 2 ? Math.hypot(dx, dy) : (dx ** n + dy ** n) ** (1 / n);
   };
   const dark = style.pattern === 'checker' || style.pattern === 'stripe' ? shadeC(pal.darkMetal, 0.8) : null;
+  // an arched top: above `arch` the width closes in along a round arch to a point at the top of the face
+  const arch = style.arch ?? null;
+  const archWarp = arch === null ? undefined : (p) => {
+    const t = (p[1] - cy) / H;
+    if (t <= arch) return;
+    p[0] *= Math.sqrt(Math.max(0, 1 - ((t - arch) / (1.04 - arch)) ** 2));
+  };
   kit.loft([ring(0.98, z0), ring(0.97, z0 - 0.012), ring(0.62, z0 - dish)], {
-    ref: [1, 0, 0], rings: 6, sides, start: 'round', end: 'round', capDepth: [0.006, dish], color: faceColor,
+    ref: [1, 0, 0], rings: 6, sides, start: 'round', end: 'round', capDepth: [0.006, dish], color: faceColor, warp: archWarp,
     paint: (o, x, y, z, u, a) => {
       const r = radial(x, y);
-      if (pattern === 'wedges') {
+      if (pattern === 'wicker') {
+        if (Math.floor((y - cy) / 0.034) % 2 === 0) mul(o, 0.84);
+      } else if (pattern === 'wedges') {
         if (Math.floor((a * 8) % 2) === 1) mul(o, 0.72);
       } else if (pattern === 'rings') {
         mul(o, 0.8 + 0.2 * Math.cos(r * 5 * PI));
@@ -816,7 +847,7 @@ export function richShield(ctx, D, style = {}) {
   if (style.disc) {
     const k = style.disc.k;
     kit.loft([ring(k, z0 - dish * 0.35), ring(k * 0.98, z0 - dish * 0.5 - 0.004), ring(k * 0.5, z0 - dish - 0.004)], {
-      ref: [1, 0, 0], rings: 5, sides, start: 'round', end: 'round', capDepth: [0.004, 0.006], color: colorOf(style.disc.color, 0.95),
+      ref: [1, 0, 0], rings: 5, sides, start: 'round', end: 'round', capDepth: [0.004, 0.006], color: colorOf(style.disc.color, 0.95), warp: archWarp,
     });
   }
   // the dish's surface in depth, at radial fraction r (the face is a cone from the rim in toward the boss)
@@ -824,20 +855,21 @@ export function richShield(ctx, D, style = {}) {
   if (style.band) {
     // a band of metal inset all round the face
     const k = style.band;
-    kit.loft([ring(k, faceZ(k) - 0.003), ring(k - 0.045, faceZ(k - 0.045) - 0.003)], { ref: [1, 0, 0], sides, start: null, end: null, color: style.bandColor ? colorOf(style.bandColor) : rim, mat: style.rimMat });
+    kit.loft([ring(k, faceZ(k) - 0.003), ring(k - 0.045, faceZ(k - 0.045) - 0.003)], { ref: [1, 0, 0], sides, start: null, end: null, color: style.bandColor ? colorOf(style.bandColor) : rim, mat: style.rimMat, warp: archWarp });
   }
   if (style.roundels) {
     // studs of enamel and metal in a row down the face
     for (const r of style.roundels) {
+      const xx = (r.x ?? 0) * W;
       const yy = cy + r.y * H;
-      const rr = Math.abs(r.y);
+      const rr = Math.min(0.97, radial(xx, yy));
       const zf = faceZ(rr);
       const k = (r.k ?? 0.1) * W;
-      kit.loft([ps(0, yy, zf - 0.002, k, k), ps(0, yy, zf - 0.008, k * 0.94, k * 0.94)], { ref: [1, 0, 0], sides: 12, start: 'round', end: 'round', capDepth: 0.006, color: colorOf(r.color || 'metal', 1), mat: r.mat });
+      kit.loft([ps(xx, yy, zf - 0.002, k, k), ps(xx, yy, zf - 0.008, k * 0.94, k * 0.94)], { ref: [1, 0, 0], sides: r.sides ?? 12, start: 'round', end: 'round', capDepth: 0.006, color: colorOf(r.color || 'metal', 1), mat: r.mat });
     }
   }
   // the rim, a rolled edge all round
-  kit.loft([ring(1.035, z0 + 0.004), ring(1.035, z0 - 0.02)], { ref: [1, 0, 0], sides, start: null, end: null, color: rim, mat: style.rimMat });
+  kit.loft([ring(1.035, z0 + 0.004), ring(1.035, z0 - 0.02)], { ref: [1, 0, 0], sides, start: null, end: null, color: rim, mat: style.rimMat, warp: archWarp });
   if (style.boss !== null) {
     const spike = style.boss === 'spike';
     kit.loft([ring(0.24, z0 - dish * 0.67), ring(0.2, z0 - dish * 1.33), ps(0, cy, z0 - (spike ? 0.1 : dish * 1.93), W * (spike ? 0.02 : 0.06), H * (spike ? 0.02 : 0.06))], {
