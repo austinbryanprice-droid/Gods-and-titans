@@ -14,7 +14,7 @@ const PI = Math.PI;
 const TAU = PI * 2;
 
 /** One tongue of flame: a tapered curl from `base` along `dir`, bent back by `bend`, with a flicker morph. */
-function tongue(kit, pal, base, dir, L, r, { bend = 0.3, k = 0.35, sides = 6, n = 5, rings = 6, cap = 3 } = {}) {
+export function tongue(kit, pal, base, dir, L, r, { bend = 0.3, k = 0.35, sides = 6, n = 5, rings = 6, cap = 3 } = {}) {
   const st = [];
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);

@@ -1032,6 +1032,13 @@ per-frame budget, so a revealed army appears over a few frames.
   more heads for Cerberus, wings for the pegasus and the lamassu, which a grounded unit holds up and back
   standing about) dresses the wolf of Fenrir, Cerberus, the pegasus, the sphinx, the jackal, the three fox
   spirits, the guardian lion, the jaguar spirit, the ahuizotl, the Cú Sídhe, the lamassu, the bull of heaven and Osebo.
+  The bird plan (`rich-bird.js`, with `rich-bird-heads.js`) dresses the raven, the Bennu, the fenghuang, the battle
+  crow and the Anzu: a feathered body, neck and head as one skinned loft (a corvid's, a phoenix's or a griffin's
+  proportions from a table; the crow's or the falcon's head from the humanoid's head kit, the Anzu's lion head from
+  the mammal tables), a tail of feathers bound to four bones (long, with two spade-tipped streamers, for the
+  phoenixes), legs with toes, and feathered wings (two rigid pieces a side on two bones, with a covert pad over the
+  leading edge) that beat from the pose's `wing` key with the outer bone trailing, folded along the sides when a
+  grounded bird stands about; the Bennu's flames are a flickering rigid piece on the body bone.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

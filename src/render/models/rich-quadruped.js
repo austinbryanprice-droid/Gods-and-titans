@@ -7,7 +7,7 @@ import { shadeC, mixC, TEAM } from './unit-geo.js';
 import { WEAPON_INFO } from './unit-parts.js';
 import { holdsAloft } from './unit-bodies.js';
 import { MeshKit, ps, rigid, alongPath, mixBind, smoothstep } from './rich-kit.js';
-import { creatureSpec, addBones, pathStations, frameMatrix, pathOf, bonesOf, atJoint, ringPoint, TAIL_KEYS, HEAD_KEYS } from './rich-creature-kit.js';
+import { creatureSpec, addBones, pathStations, frameMatrix, headToModel, pathOf, bonesOf, atJoint, ringPoint, TAIL_KEYS, HEAD_KEYS } from './rich-creature-kit.js';
 import { mammalHead, mammalMetrics } from './rich-mammal-heads.js';
 import { clamp, lerp, tint, dye, furStreaks, jaguarSpots } from './rich-paint.js';
 import { paw, hoof, collar, spike, halo } from './rich-creature-parts.js';
@@ -153,11 +153,6 @@ function layout(Q, kind, o) {
   return { cy, lz, fx, bx, hips, spine, chest, neck1, neck2, head, jaw, ears, tail, tails, legs, wing, extra, hm, dn };
 }
 
-/** A head-local point in model space. */
-function headToModel(M, p) {
-  const e = M.elements;
-  return [e[0] * p[0] + e[4] * p[1] + e[8] * p[2] + e[12], e[1] * p[0] + e[5] * p[1] + e[9] * p[2] + e[13], e[2] * p[0] + e[6] * p[1] + e[10] * p[2] + e[14]];
-}
 
 function skeleton(Lay) {
   const list = [

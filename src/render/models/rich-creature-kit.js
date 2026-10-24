@@ -142,6 +142,12 @@ export function frameMatrix(at, pitch = 0, yaw = 0, s = 1) {
   );
 }
 
+/** A point given in the frame of M (frameMatrix) in model space. */
+export function headToModel(M, p) {
+  const e = M.elements;
+  return [e[0] * p[0] + e[4] * p[1] + e[8] * p[2] + e[12], e[1] * p[0] + e[5] * p[1] + e[9] * p[2] + e[13], e[2] * p[0] + e[6] * p[1] + e[10] * p[2] + e[14]];
+}
+
 /** A matrix moving a rigid piece from model space into the frame of the bone at `at` (the piece is built in model space). */
 export const intoBone = (at) => new THREE.Matrix4().makeTranslation(-at[0], -at[1], -at[2]);
 
