@@ -132,7 +132,7 @@ function poseGroupsFor(m) {
     case 'humanoid':
     case 'naga':
     case 'spirit': return [G.arms, G.human];
-    case 'quadruped': return [G.quad, G.legs];
+    case 'quadruped': return m.rig.humanTop ? [G.quad, G.legs, G.arms] : [G.quad, G.legs];
     case 'centaur': return [G.quad, G.legs, G.arms];
     case 'bird': return [G.bird];
     case 'serpent':
@@ -508,7 +508,7 @@ function quadPose(m, T, state, t) {
   const breath = Math.sin(t * 1.7 + m.seed);
   if (state === 'dead') {
     // (the arms keep the pose they had; a centaur first seen dead has not written the arms' keys yet)
-    if (m.kind === 'centaur' && T.aRz === undefined) restArms(T, rig);
+    if ((m.kind === 'centaur' || rig.humanTop) && T.aRz === undefined) restArms(T, rig);
     return;
   }
   if (air) {
@@ -558,7 +558,7 @@ function quadPose(m, T, state, t) {
     T.jaw = 0.8;
     T.bRz = 0.08;
   }
-  if (m.kind === 'centaur') {
+  if (m.kind === 'centaur' || rig.humanTop) {
     restArms(T, rig);
     if (state === 'attack') attackUpper(T, rig, m, m.ap, m.ranged);
     else if (state === 'cast') castUpper(T, t, rig);

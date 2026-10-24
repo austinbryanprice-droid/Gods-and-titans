@@ -1183,6 +1183,45 @@ per-frame budget, so a revealed army appears over a few frames.
   and uncurling with the thrust of the sting (`st`), the pincers held out and flung wide for the blow, and the person
   steadied as a rider is (`poseRider`, shared with `applyCentaur`: lean, twist, arms, cape and hair that lag, the pelvis
   turned back against the body's pitch). 9.6k triangles (a creature's budget is 10.5k), 0.96 times the low-poly height.
+  Airavata, the Hindu titan (the white king of elephants with his three heads, and Indra riding him in a howdah), is a person
+  on an elephant, built as the centaur and the scorpion man are (`rich-elephant.js`, `elephantSupported`: body `elephant`, head
+  `elephant` or none, one head or three, headgear none or `headdress`, no weapon or offhand, extras only `jewelry rider` and
+  including `rider`; `richSupported` also asks for an `ELEPHANT_OUTFITS[unitType.lookOf || unitType.pantheon]` entry,
+  `rich-elephant-outfits.js`, today only the Hindu). The unit's own head, headgear and heads are the elephant's, so the
+  person is dressed from a context of his own (`riderContext`: the outfit's `rider` gives him a human head, the tall crown
+  and the thunderbolt, and the extras he can wear stay), drawn 0.72 times the scorpion man's profile (`richDims(ctx,
+  'rider')`: a small figure in a howdah) and seated by `elephantFrame` (`tx -0.04`, a lift that puts his hip at the top of
+  the cushion), then settled onto the elephant's middle (`settle`). The skeleton is the humanoid's 23 bones and 43 of the
+  elephant's (`addElephantBones`): `hips` (child of the root), `back`, `withers`, `tail1` to `tail4`, three bones for each of
+  `ELEPHANT_LEGS` (`F1 F-1 B1 B-1`: forelegs from the withers, hind legs from the hips) and, for each head, `h0` (the
+  middle one) `h1` `h2` under the withers with its trunk's five bones (`h0t1` to `h0t5`) and its ears' two (`h0eR h0eL`); the
+  person's pelvis is a child of `back`, so the barrel carries the howdah. A unit with one head builds 16 bones fewer. The
+  template is `kind: 'quadruped'` (the low-poly Airavata's) with `rich.plan = 'elephant'` and the rig `{ legLen 0.6, bodyY 0.6,
+  sprawl false, stride 1.3, humanTop true, gait 'walk' }`; `humanTop` on a quadruped rig makes `quadPose` write the arm keys
+  as a centaur's and `poseGroupsFor` blend them (no low-poly quadruped has `humanTop`). `addElephant(E, o)` is the `legs`
+  layer: a barrel (17 stations by 18 sides on `alongPath` of the back's three bones, a squared section), four pillar
+  legs (one loft each from inside the barrel to the sole, thick at the hip and the shoulder, creased at the knee and the
+  ankle, the foot flaring to the ground; four toenails on a front foot, three on a hind one; two bands of gold above the
+  ankle), a rope of a tail with a brush of hair, the three heads, the caparison (a `sheet` in the team's colour over the back
+  and down the flanks with a gold border, a gold line and three gold tassels a side) and the howdah (a platform of lacquer
+  rimmed in gold, a cushion in the team's colour, a gold rail and four posts, rigid on `back`). `elephantHead`
+  (`rich-elephant-head.js`) builds a head in a frame of its own: a domed skull, a trunk whose loft is bound along the
+  head's five trunk bones, two curving ivory tusks with a band of gold, ears as two-layer sheets on bones of their own (the
+  inner one of a side head is left out), small eyes (a heavy lid on the middle head only), a forehead cloth in the team's
+  colour bordered in gold and, on the middle head, a fan of seven plumes in gold and red; the two side heads are a `lean`
+  build with fewer rings and sides. Indra is bare to the waist in a red cloth with a gold border, a belt and a sash in the
+  team's colour, a cape in the team's colour, a collar and bands of gold, a garland, the tall crown with the flaming arch
+  of the prabhavali behind his head and the thunderbolt in his right hand; his skin is bronze (`palette`: the unit's own
+  white is the elephant's hide, a shade off white so that the light models it instead of blooming it). The pose is
+  `applyElephant` (`rich-elephant-anim.js`, called by `applyCreature` for plan `elephant`) over the low-poly pose keys: a
+  slow four-beat walk on pillar legs that bend little, the barrel bending through `back` and `withers` (0.45 and 0.55 of the
+  pitch) so that the hind legs stay planted, a tail swish down its four bones, three heads that each look about on a phase of
+  their own while the elephant stands, rear in the wind-up of a blow and come down with it, trunks (the tip curls most) that
+  swing in time with the steps, curl up in the wind-up and fall with the blow, ears that flap (slowly standing, quicker
+  walking, flared forward for the blow, laid back when it falls), and the person steadied as a rider is (`poseRider`: lean,
+  twist, arms, cape and hair that lag; the pelvis turned back against the body's pitch by 0.85 and its yaw by 0.7). 13.5k
+  triangles (a titan's budget is 14k), 66 bones, three meshes (the body, the flaming arch on the head bone, the thunderbolt
+  on the right hand), 0.975 times the low-poly height, a template in about 100 ms.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

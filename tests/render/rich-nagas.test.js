@@ -80,8 +80,8 @@ test('the nagas are built by the rich builder on the humanoid rig, with a serpen
   assert.ok(!richSupported(withVisual(nuwa, (v) => ({ extras: [...v.extras, 'rider'] }))), 'a rider is not dressed');
   assert.ok(!richSupported(withVisual(hinduNaga, () => ({ heads: 3 }))), 'a many-headed naga is not one head and a hood');
   assert.ok(richSupported(withVisual(hinduNaga, () => ({ head: 'human' }))), 'a naga with a person\'s head is dressed too');
-  // the others that stay low-poly (the elephant and the rams) are not nagas
-  for (const id of ['hindu_airavata', 'battering_ram']) assert.ok(!richSupported(unitLook(UNITS[id], 'hindu')), `${id} stays low-poly`);
+  // the others that stay low-poly (the rams) are not nagas
+  for (const id of ['battering_ram']) assert.ok(!richSupported(unitLook(UNITS[id], 'hindu')), `${id} stays low-poly`);
 });
 
 test('every naga is dressed by its own people and carries what it is known by', () => {

@@ -99,7 +99,7 @@ test('the Scarab has a body plan of its own and the Scorpion Man is a person on 
   assert.ok(richSupported({ ...scorpion, lookOf: 'mesopotamian' }));
   assert.ok(!richSupported({ ...scorpion, lookOf: 'norse' }), 'no Norse scorpion man is dressed');
   // the others that stay low-poly are not insects
-  for (const [pantheon, id] of [['hindu', 'hindu_airavata'], ['greek', 'battering_ram']]) {
+  for (const [pantheon, id] of [['greek', 'battering_ram']]) {
     assert.ok(!richSupported(unitLook(UNITS[id], pantheon)), `${id} stays low-poly`);
   }
 });

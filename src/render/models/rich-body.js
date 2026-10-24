@@ -40,11 +40,18 @@ const LENGTHS = ['hipY', 'hipZ', 'thigh', 'legR', 'footL', 'footH', 'waistW', 'c
 
 /** How much bigger the person of a rich centaur is than the low-poly one (whose torso is a person's build on a horse's body). */
 const CENTAUR_PERSON = 1.12;
+/** How big the person on an elephant's back is against a person's build (waist up, the scorpion man's profile): he sits in a howdah, a small figure. */
+const RIDER_PERSON = 0.72;
 
 export function richDims(ctx, name) {
-  const P = { ...PROFILES[name] };
+  const P = { ...PROFILES[name === 'rider' ? 'scorpion' : name] };
   // (the person on a centaur's back is drawn larger than the low-poly one: the horse under it is a big one)
   if (name === 'centaur') for (const k of LENGTHS) P[k] *= CENTAUR_PERSON;
+  // (the person on an elephant is a small one: the elephant is the unit; what he holds is a little over his size)
+  if (name === 'rider') {
+    for (const k of LENGTHS) P[k] *= RIDER_PERSON;
+    P.weaponSize = 0.55;
+  }
   if (ctx.grand && (name === 'humanoid' || name === 'naga' || name === 'centaur')) {
     P.chestW *= 1.08;
     P.weaponSize = 1.15;
