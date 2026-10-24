@@ -8,7 +8,7 @@
 // plumes, and his helpers in a loincloth with a jar of rain. The gods keep the codices' colors, so the team's color
 // is a shield face, a crest feather, a headband, bands on the arms or the plumes of a crown. Overrides only the layers
 // where the Mexica dress differently from the default (rich-outfit-default.js).
-import { TEAM, shadeC, withMat } from './unit-geo.js';
+import { TEAM, shadeC, mixC, withMat } from './unit-geo.js';
 import { ps } from './rich-kit.js';
 import { torsoStations, armStations, legFrom, addSandals, addBareLegs } from './rich-body.js';
 import {
@@ -19,6 +19,7 @@ import {
   addHairCap, addLongHair, addHeadband, addPlumes, addQuetzalFan, addEagleHelm, addHummingbirdHelm, addTlalocMask,
 } from './rich-headgear.js';
 import { addJewelry, addQuetzalBack } from './rich-regalia.js';
+import { nagaTail, nagaWaist, tailFan } from './rich-naga.js';
 import { feather } from './rich-feathers.js';
 import { dye, jaguarSpots, featherRows } from './rich-paint.js';
 import { DEFAULT } from './rich-outfit-default.js';
@@ -57,6 +58,7 @@ const NAMED = {
   aztec_tlaloc: 'tlaloc',
   aztec_tlaloque: 'tlaloque',
   aztec_eagle_warrior: 'eagle',
+  aztec_quetzalcoatl: 'quetzalcoatl',
 };
 
 /** The dress of a unit: commoner (worshipper), soldier (warrior), archer, priest, or a god's, a helper's or the elite's own. */
@@ -146,6 +148,17 @@ export function legs(E) {
       addAnkles(kit, D, bind, skin, skinPaint, D.ankleY + 0.1);
       sandals(E, GOLD);
       break;
+    case 'quetzalcoatl':
+      // the feathered serpent: a tail of lapped green feathers over a pale belly, rings of gold with one of the team's color between them, a fan of plumes at its tip
+      {
+        const { st } = nagaTail(E, {
+          skin: withMat(pal.primary, 'feather'), back: withMat(shade(pal.primary, 0.6), 'feather'), belly: withMat(mixC(pal.secondary, '#f4efd8', 0.5), 'feather'), backK: 0.6,
+          feathers: { rows: 24, per: 11, tip: TURQUOISE },
+          bands: [[0.24, 1, GOLD, 'gold'], [0.4, 2, TEAM(1), 'cloth', 1.07], [0.56, 1, GOLD, 'gold'], [0.74, 1, GOLD, 'gold']],
+        });
+        tailFan(E, st, { n: 5, back: 5, len: 0.42, width: 0.055, colors: [QUETZAL, TURQUOISE, QUETZAL_DEEP, TURQUOISE, QUETZAL], tip: MACAW, spread: 1.0, lift: 0.18 });
+      }
+      break;
     case 'huitzilopochtli':
       addBareLegs(kit, D, bind, skin, skinPaint);
       addLegBands(kit, D, bind, { knee: GOLD, ankle: GOLD, mat: 'gold' });
@@ -201,6 +214,11 @@ export function torso(E) {
     case 'huitzilopochtli':
       addIchcahuipilli(kit, D, bind, { color: pal.primary, trim: pal.secondary, hem: 0.12, mat: 'trim' });
       break;
+    case 'quetzalcoatl':
+      // a bare chest, a belt of gold and jade (and the team's sash) where the body becomes the tail
+      bareTorso(E);
+      nagaWaist(E, { color: TEAM(0.95, 'cloth'), rim: GOLD, clasp: JADE });
+      break;
     case 'tezcatlipoca':
       // black skin bare to the waist, a loincloth of the jaguar's pelt
       bareTorso(E);
@@ -252,6 +270,9 @@ export function arms(E) {
       break;
     case 'huitzilopochtli':
       addArmBands(kit, D, bind, { upper: GOLD, wrist: GOLD });
+      break;
+    case 'quetzalcoatl':
+      addArmBands(kit, D, bind, { upper: GOLD, wrist: GOLD, mat: 'gold' });
       break;
     case 'tezcatlipoca':
       // the team's color on his upper arms, gold at the wrists
@@ -337,6 +358,9 @@ export function head(E) {
       break;
     case 'priest':
       addQuetzalFan(kit, D, pal, bind, { band: GOLD, colors: [QUETZAL, QUETZAL_DEEP, TURQUOISE], inner: MACAW, jade: JADE, n: 7, len: 0.9 });
+      break;
+    case 'quetzalcoatl':
+      addQuetzalFan(kit, D, pal, bind, { band: GOLD, colors: [QUETZAL, QUETZAL_DEEP, TURQUOISE], inner: MACAW, jade: JADE, n: 9, len: 1.15 });
       break;
     case 'eagle':
       addEagleHelm(kit, D, pal, bind, { plumage: EAGLE_BROWN, tip: HERON, beak: BEAK, eye: BEAK, down: HERON });

@@ -17,9 +17,10 @@ import { batWingPieces } from './rich-beast-wings.js';
 import { BEAST_HEADS } from './rich-heads.js';
 import { creatureSupported, buildCreatureTemplate } from './rich-creatures.js';
 import { wispBones, addWispBinds, ghostly } from './rich-spirit.js';
+import { nagaBones, addNagaBinds } from './rich-naga.js';
 
-/** The bodies the humanoid rig dresses: people, giants, the upright beasts (the monkeys, the lion-headed demon, the winged horror, the were-hyena) and the spirits (a wisp below the waist). */
-const RICH_BODIES = new Set(['humanoid', 'giant', 'beast_biped', 'spirit']);
+/** The bodies the humanoid rig dresses: people, giants, the upright beasts (the monkeys, the lion-headed demon, the winged horror, the were-hyena), the spirits (a wisp below the waist) and the nagas (a serpent's tail). */
+const RICH_BODIES = new Set(['humanoid', 'giant', 'beast_biped', 'spirit', 'naga']);
 /** The beasts with the heads of these stand as tall and as slim as people (a monkey does); the rest are built on the hunched, broad-shouldered beast profile. */
 const UPRIGHT_BEASTS = new Set(['monkey']);
 const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent', 'headdress', 'antlers', 'flame', 'veil']);
@@ -107,12 +108,16 @@ export function buildRichTemplate(unitType, detail = 1) {
   const ctx = unitContext(unitType);
   const { v, pal, ex } = ctx;
   const spirit = v.body === 'spirit';
-  const name = v.body === 'giant' ? 'giant' : spirit ? 'spirit' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
+  const naga = v.body === 'naga';
+  const name = v.body === 'giant' ? 'giant' : spirit ? 'spirit' : naga ? 'naga' : v.body === 'beast_biped' && !UPRIGHT_BEASTS.has(v.head) ? 'beast_biped' : 'humanoid';
   const D = richDims(ctx, name);
   const wings = ex.has('wings') ? wingLayout(D, (ctx.unit.air ? 0.7 : 0.6) * D.k) : null;
-  const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, { ...(wings ? { wing: wings } : {}), ...(spirit ? { tail: wispBones(D) } : {}) });
+  const spec = humanoidSpec({ ...D, headY: D.headPivot, shoulderDrop: 0.02 }, {
+    ...(wings ? { wing: wings } : {}), ...(spirit ? { tail: wispBones(D) } : {}), ...(naga ? { tail: nagaBones(D), tailStyle: 'serpent' } : {}),
+  });
   const bind = makeBinds(spec, D);
   if (spirit) addWispBinds(spec, D, bind);
+  if (naga) addNagaBinds(spec, D, bind);
   const lava = ex.has('flames') && D.bare; // a fire giant: dark crust, glowing veins, iron plates
   const sides = name === 'giant' ? 20 : ctx.grand ? 14 : 12;
   const kit = new MeshKit(spec, { sides: Math.round(sides * (detail >= 1 ? 1 : 0.7)), rings: (name === 'giant' ? 1.6 : 1) * (detail >= 1 ? 1 : 0.7) });
@@ -185,8 +190,8 @@ export function buildRichTemplate(unitType, detail = 1) {
   let triangles = geo.userData.triangles;
   for (const a of attach) if (!a.tool || a.tool === 'pick') triangles += a.geo.userData.triangles ?? a.geo.attributes.position.count / 3;
   return {
-    // (a spirit keeps its kind, so the animation keeps its float, its lean and its raised arms; ghost: the translucent material)
-    kind: spirit ? 'spirit' : 'humanoid', rich: { spec, geo, attach, dims: D, carryAt: spec.pos[B.chest], ghost: spirit }, parts: [], rig,
+    // (a spirit or a naga keeps its kind, so the animation keeps its float or its sway, its lean and its raised arms; ghost: the translucent material)
+    kind: spirit ? 'spirit' : naga ? 'naga' : 'humanoid', rich: { spec, geo, attach, dims: D, carryAt: spec.pos[B.chest], ghost: spirit }, parts: [], rig,
     triangles, meshes: 1 + attach.filter((a) => !a.tool || a.tool === 'pick').length,
   };
 }

@@ -37,7 +37,7 @@ export function lavaSkin(pal) {
 
 export function richDims(ctx, name) {
   const P = { ...PROFILES[name] };
-  if (ctx.grand && name === 'humanoid') {
+  if (ctx.grand && (name === 'humanoid' || name === 'naga')) {
     P.chestW *= 1.08;
     P.weaponSize = 1.15;
   }

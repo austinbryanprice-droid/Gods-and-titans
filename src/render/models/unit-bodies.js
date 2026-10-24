@@ -359,6 +359,13 @@ export const PROFILES = {
     upper: 0.185, fore: 0.17, armR: 0.044, handR: 0.048, headR: 0.122, headY: 1.03, headX: 0.012,
     padR: 0.075, lean: -0.08, bare: false, weaponSize: 1,
   },
+  // (a naga's torso rises from a serpent's tail: the waist sits a little lower than a person's and the head with it; below the hip it has the tail, not legs)
+  naga: {
+    hipY: 0.46, hipZ: 0.085, thigh: 0.245, legR: 0.056, footL: 0.15, footH: 0.06,
+    waistW: 0.25, chestW: 0.36, depth: 0.17, chestD: 0.21, shoulderY: 0.82, shoulderZ: 0.2,
+    upper: 0.185, fore: 0.17, armR: 0.044, handR: 0.048, headR: 0.122, headY: 0.99, headX: 0.012,
+    padR: 0.075, lean: 0, bare: false, weaponSize: 1,
+  },
 };
 
 function armColorFor(ctx, P) {
@@ -1076,7 +1083,7 @@ function spiritTemplate(ctx) {
 
 function nagaTemplate(ctx) {
   const { v, pal } = ctx;
-  const P = { ...PROFILES.humanoid, hipY: 0.46, shoulderY: 0.82, headY: 0.99 };
+  const P = { ...PROFILES.naga };
   if (ctx.grand) { P.chestW *= 1.08; P.weaponSize = 1.15; P.padR *= 1.1; }
   const parts = [];
   const items = humanoidItems(v);

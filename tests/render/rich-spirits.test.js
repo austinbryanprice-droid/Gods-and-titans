@@ -139,7 +139,7 @@ test('the skeleton is the humanoid\'s with a chain of four bones that hang from 
     const u = look(pair);
     const { spec } = buildRichTemplate(u).rich;
     assert.equal(spec.pos.length, BONE_COUNT + 4, `${u.id}: the humanoid's bones and four more`);
-    assert.deepEqual(spec.tail, { first: BONE_COUNT, count: 4 });
+    assert.deepEqual(spec.tail, { first: BONE_COUNT, count: 4, style: 'wisp' });
     assert.equal(spec.wing, false, 'a spirit has no wings');
     assert.equal(spec.parent[BONE_COUNT], B.pelvis, 'the wisp hangs from the pelvis');
     for (let i = 1; i < 4; i++) assert.equal(spec.parent[BONE_COUNT + i], BONE_COUNT + i - 1, 'each bone is the child of the one above');
@@ -157,7 +157,7 @@ test('the skeleton is the humanoid\'s with a chain of four bones that hang from 
   const d = { hipY: 0.5, hipZ: 0.085, thigh: 0.25, ankleY: 0.05, shoulderY: 0.86, shoulderZ: 0.2, upper: 0.18, fore: 0.17, neckY: 0.94, headY: 1.02, headX: 0.02, headRad: 0.12 };
   const both = humanoidSpec(d, { wing: { root: [-0.1, 0.8, 0.1], wrist: [-0.2, 0.9, 0.5] }, tail: [[-0.1, 0.4, 0], [-0.2, 0.3, 0]] });
   assert.equal(both.pos.length, BONE_COUNT + 4 + 2, 'wings come before the tail');
-  assert.deepEqual(both.tail, { first: BONE_COUNT + 4, count: 2 });
+  assert.deepEqual(both.tail, { first: BONE_COUNT + 4, count: 2, style: 'wisp' });
   assert.equal(both.wing, true);
 });
 
