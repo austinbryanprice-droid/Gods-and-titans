@@ -27,6 +27,7 @@
       real=1               only data units (drops the synthetic test units from the filter result)
       looks=1              also show the shared mortals as each pantheon dresses them (data/pantheons/<id>.js looks), in that pantheon's row
       pitch=56             camera pitch in degrees
+      dist=1.2 aim=0.6 aimx=0.5   contact sheet camera: distance and look-at height (unit-scale heights) and the look-at point's offset along the model's forward axis (a creature's head)
       detail=rich          the rich skinned humanoids (high / ultra) instead of the low-poly models (default base)
   -->
   <script type="importmap">
@@ -88,6 +89,7 @@
     const detail = Q.get('detail') === 'rich' ? 'rich' : 'base';
     const distQ = Q.has('dist') ? Number(Q.get('dist')) : null; // contact sheet: camera distance in unit-scale heights, instead of fitting the whole model
     const aim = Q.has('aim') ? Number(Q.get('aim')) : null; // contact sheet: look at this height in unit-scale heights (1 = a humanoid's head), with zoom to close in
+    const aimX = Number(Q.get('aimx') || 0); // contact sheet: look this far along the model's forward axis from its middle, in unit-scale heights (a creature's head)
 
     // ---- controls ----
     const ui = { state: document.getElementById('state'), filter: document.getElementById('filter'), team: document.getElementById('team'), zoom: document.getElementById('zoom') };
@@ -411,7 +413,8 @@
       const d = distQ === null ? (radius * 0.92) / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * (cell.w / cell.h)))) / zoom : distQ * (m.p.u.visual.scale || 1);
       sheetCam.aspect = cell.w / cell.h;
       sheetCam.updateProjectionMatrix();
-      const look = aim === null ? center : center.clone().setY(aim * (m.p.u.visual.scale || 1));
+      const look = aim === null ? center.clone() : center.clone().setY(aim * (m.p.u.visual.scale || 1));
+      if (aimX) look.add(new THREE.Vector3(Math.cos(facing), 0, Math.sin(facing)).multiplyScalar(aimX * (m.p.u.visual.scale || 1)));
       sheetCam.position.set(look.x, look.y + d * Math.sin(pitch), look.z + d * Math.cos(pitch));
       sheetCam.lookAt(look);
       renderer.setViewport(cx, cy, cell.w, cell.h);

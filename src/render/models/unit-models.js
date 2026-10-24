@@ -653,7 +653,13 @@ class UnitModel {
     this.rigGroup.add(inst.mesh);
     inst.tools = {};
     inst.flames = [];
-    inst.restUpper = [inst.bones[B.upperR].position.x, inst.bones[B.upperL].position.x];
+    if (R.plan) {
+      // a creature's rig (rich-creature-kit.js): bones by name, posed by plan (rich-creature-anim.js)
+      inst.plan = R.plan;
+      inst.ix = R.ix;
+    } else {
+      inst.restUpper = [inst.bones[B.upperR].position.x, inst.bones[B.upperL].position.x];
+    }
     // the bones live outside the scene graph (see rich-kit.js instantiate): pieces ride a mount per bone
     const mounts = {};
     const mount = (bone) => mounts[bone] || (mounts[bone] = mountOn(inst, this.rigGroup, bone, `mount:${bone}`));

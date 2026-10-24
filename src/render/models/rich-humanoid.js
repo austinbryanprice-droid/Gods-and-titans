@@ -14,6 +14,7 @@ import { richDims, makeBinds, lavaSkin, addHeadAndNeck, addHands } from './rich-
 import { outfitFor, LAYERS } from './rich-outfits.js';
 import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.js';
 import { BEAST_HEADS } from './rich-heads.js';
+import { creatureSupported, buildCreatureTemplate } from './rich-creatures.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
 /** Upright beasts (the body beast_biped: a monkey king and his clones) are dressed on the humanoid rig by the pantheons listed here; the others keep their low-poly beasts. */
@@ -33,6 +34,7 @@ export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'j
 export function richSupported(unitType) {
   const v = unitType.visual;
   if (!v) return false;
+  if (creatureSupported(unitType)) return true;
   const body = v.body || 'humanoid';
   if (!RICH_BODIES.has(body) && !(body === 'beast_biped' && RICH_BEAST_BIPEDS.has(unitType.pantheon))) return false;
   if (((v.head || 'human') !== 'human' && !BEAST_HEADS.has(v.head)) || (v.heads || 1) !== 1) return false;
@@ -96,6 +98,7 @@ function heldPiece(ctx, P, side, item, sizeK = 1, style = null) {
  * Shaped like a low-poly template where the animation code reads it (kind, rig).
  */
 export function buildRichTemplate(unitType, detail = 1) {
+  if (creatureSupported(unitType)) return buildCreatureTemplate(unitType);
   const ctx = unitContext(unitType);
   const { v, pal, ex } = ctx;
   const name = v.body === 'giant' ? 'giant' : 'humanoid';
