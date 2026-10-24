@@ -35,9 +35,17 @@ export function lavaSkin(pal) {
 // dimensions
 // ---------------------------------------------------------------------------
 
+/** The lengths of a build that scale with its size (all but its lean, its bare skin and the size of what it carries). */
+const LENGTHS = ['hipY', 'hipZ', 'thigh', 'legR', 'footL', 'footH', 'waistW', 'chestW', 'depth', 'chestD', 'shoulderY', 'shoulderZ', 'upper', 'fore', 'armR', 'handR', 'headR', 'headY', 'headX', 'padR'];
+
+/** How much bigger the person of a rich centaur is than the low-poly one (whose torso is a person's build on a horse's body). */
+const CENTAUR_PERSON = 1.12;
+
 export function richDims(ctx, name) {
   const P = { ...PROFILES[name] };
-  if (ctx.grand && (name === 'humanoid' || name === 'naga')) {
+  // (the person on a centaur's back is drawn larger than the low-poly one: the horse under it is a big one)
+  if (name === 'centaur') for (const k of LENGTHS) P[k] *= CENTAUR_PERSON;
+  if (ctx.grand && (name === 'humanoid' || name === 'naga' || name === 'centaur')) {
     P.chestW *= 1.08;
     P.weaponSize = 1.15;
   }
@@ -273,14 +281,33 @@ export function headStations(D) {
 
 /**
  * The head and neck. opts: neck (false: none), face(faceX) (a unit's own eyes and mouth in place of the default ones, given
- * the function that returns the x of the face surface in front of a z: the spirits' hollow eyes and wailing mouth).
+ * the function that returns the x of the face surface in front of a z: the spirits' hollow eyes and wailing mouth), headless
+ * (a neck that ends in a cut, a flat cap of raw dark flesh, and no head: the Dullahan, whose head is in his hand).
  */
-export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck = true, face = null } = {}) {
+export function addHeadAndNeck(kit, D, pal, ctx, bind, skinPaint = null, { neck = true, face = null, headless = ctx.v.head === 'none' } = {}) {
   const hs = D.hs;
   const hx = D.headX;
   const hy = D.headCY;
   const st = headStations(D);
   const skin = pal.skin;
+  if (headless) {
+    const nk = 0.05 * D.k;
+    const top = hy - 0.03 * hs;
+    kit.loft([vs(D.shoulderY - 0.03, nk * 1.3, nk * 1.4, 0), vs(D.shoulderY + 0.012, nk * 1.08, nk * 1.12, D.headX * 0.3), vs(top, nk * 1.0, nk * 1.04, D.headX * 0.6)],
+      {
+        rings: 5, start: null, end: 'flat', color: skin, bind: bind.neck,
+        paint: (o, x, y, z, u, a) => {
+          if (skinPaint) skinPaint(o, x, y, z, u, a);
+          // the cut: raw and dark across the top
+          if (y > top - 0.004) {
+            o.r = pal.mouth.r * 0.7;
+            o.g = pal.mouth.g * 0.5;
+            o.b = pal.mouth.b * 0.5;
+          }
+        },
+      });
+    return;
+  }
   if (BEAST_HEADS.has(ctx.v.head)) addBeastHead(kit, D, pal, ctx, bind, skinPaint);
   else {
     // a giant with a third eye is a Cyclops: one great eye in the middle of the forehead

@@ -21,7 +21,7 @@ const AX_Y = new THREE.Vector3(0, 1, 0);
 const AX_Z = new THREE.Vector3(0, 0, 1);
 
 /** Wind-up / strike / recover envelopes of an attack phase 0..1 (all zero without one), written into the shared K. */
-function strike(ap, bow) {
+export function strike(ap, bow) {
   if (ap === undefined || ap === null) {
     K.w = K.h = K.r = 0;
     return K;

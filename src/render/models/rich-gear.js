@@ -8,6 +8,7 @@ import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { gripRotation } from './unit-parts.js';
 import { dye, mul, lerp } from './rich-paint.js';
 import { feather } from './rich-feathers.js';
+import { spineWhip } from './rich-dullahan.js';
 
 const PI = Math.PI;
 const TAU = PI * 2;
@@ -876,7 +877,7 @@ function spiderStaff(kit, pal, s, { shaftColor = null, metal = null, eye = null 
  * with the low-poly models keep them. A pantheon's own form of a weapon is asked for the same way: the sword as a macuahuitl
  * or a machete (opts.macuahuitl, opts.machete), the axe as a yue (opts.axe 'yue'), the bow as a crossbow (opts.crossbow), the
  * staff as a shakujo, a ruyi, a druid's or Anansi's (opts.staff 'shakujo' | 'ruyi' | 'druid' | 'spider'), the double axe as
- * Shango's oshe (opts.oshe), the whip as a sling or, with opts.whisk, Oya's fly whisk.
+ * Shango's oshe (opts.oshe), the whip as a sling or, with opts.whisk, Oya's fly whisk, or (opts.spine) the Dullahan's of vertebrae.
  */
 export function richWeapon(kit, pal, id, s, opts = {}) {
   switch (id) {
@@ -890,7 +891,7 @@ export function richWeapon(kit, pal, id, s, opts = {}) {
     case 'staff': if (opts.staff === 'shakujo') shakujo(kit, pal, s); else if (opts.staff === 'ruyi') ruyi(kit, pal, s); else if (opts.staff === 'druid') druidStaff(kit, pal, s, opts); else if (opts.staff === 'spider') spiderStaff(kit, pal, s, opts); else staff(kit, pal, s, opts); return true;
     case 'double_axe': if (opts.oshe) oshe(kit, pal, s, opts); else doubleAxe(kit, pal, s, opts); return true;
     case 'torch': torch(kit, pal, s); return true;
-    case 'whip': if (opts.whisk) whisk(kit, pal, s, opts); else sling(kit, pal, s, opts); return true;
+    case 'whip': if (opts.whisk) whisk(kit, pal, s, opts); else if (opts.spine) spineWhip(kit, pal, s, opts); else sling(kit, pal, s, opts); return true;
     case 'halberd': halberd(kit, pal, s, opts); return true;
     default: return false;
   }

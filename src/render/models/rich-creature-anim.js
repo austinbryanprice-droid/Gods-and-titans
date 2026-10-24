@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { syncRich } from './rich-kit.js';
 import { TAIL_KEYS, HEAD_KEYS } from './rich-creature-kit.js';
+import { applyCentaur } from './rich-centaur-anim.js';
 
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const smooth01 = (x) => {
@@ -46,6 +47,7 @@ export function applyCreature(m, P, state, t, dt) {
     case 'bird': applyBird(m, R, P, state, t, dt); break;
     case 'serpent': applySerpent(m, R, P, state, t, dt); break;
     case 'hydra': applyHydra(m, R, P, state, t, dt); break;
+    case 'centaur': applyCentaur(m, R, P, state, t, dt); break;
     default: break;
   }
   syncRich(R);

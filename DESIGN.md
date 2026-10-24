@@ -1121,6 +1121,34 @@ per-frame budget, so a revealed army appears over a few frames.
   side, and an S on the ground would half bury and leave the tip floating.
   Costs: 5.6k triangles for the Naga (a creature, budget 10.5k), 8.7k for Nuwa and 9.0k for Quetzalcoatl (gods, budget
   9k: Quetzalcoatl has 12 triangles left, his wings alone are 1.5k).
+  The centaurs (the Greek Centaur and the Celtic Dullahan) are a person on a horse's body (`rich-centaur.js`,
+  `centaurSupported`: a human head or none, no headgear, the extras `beard long_hair cape armor eye_glow tail`). One skinned
+  mesh on the humanoid's bones and nineteen of the horse's (`addCentaurBones`: `hips` under the root, `back`, `withers`, four
+  tail bones, four legs of three, the forelegs hanging from the withers and the hind legs from the hips) with the person's
+  pelvis a child of the withers, so the body pitches with the horse's front while the pose turns the pelvis back against it.
+  `spec.ix` has the horse's bones by name (`spec.ix = { root }` first: a parent name missing from it gives `undefined` and
+  silently detaches the bone). The person is dressed by the outfit layers as anyone is (`CENTAUR_OUTFITS` lays the centaur's
+  layers over the pantheon's) and built in a frame of its own with the pelvis at x = 0, raised to stand on the back
+  (`centaurFrame`, `raiseDims`), then the whole model is moved to the horse's middle (`settle`). `PROFILES.centaur` is the
+  humanoid's values the low-poly centaur used inline (identical, so the low-poly models are vertex-identical); the rich
+  person is drawn 1.12 times larger (`CENTAUR_PERSON` in `richDims`), the horse under it being a big one. `addHorse(E, o)` is
+  the `legs` layer: a barrel of 17 stations skinned along the three back bones, legs with hooves, a tail with its strands
+  and, unless `o.cloth` is false, a saddle cloth of the team's colour. The Centaur is a buckskin horse (the skin mixed toward
+  the primary: the rider's own tan read as one body with it) under the team's saddle cloth, the rider bare to the waist with a
+  baldric of the team's cloth, a quiver of six fletched arrows over the right shoulder, leather bracers and a bow; the
+  Dullahan a black steed with a grey ragged tail, a black iron cuirass and pauldrons and a short cape of the team's colour
+  (a longer one hangs through the barrel). He has no head: the neck ends in a raw stump (`addHeadAndNeck`'s headless
+  branch), and his own (`severedHead`, `rich-dullahan.js`: a waxen face with glowing eyes and a grin, long dark hair) is
+  held up by its hair in the left hand where a lantern would be, his whip a spine (`spineWhip`: a handle with a bone
+  pommel, eleven vertebrae with spikes along a curved cord) in the right. An outfit's `gear` returns `{ head: true, pivot:
+  true }` for the head: a `pivot` piece is built without a hand frame and rides a bone of its own at the palm
+  (`addPalmBone`, `spec.ix.carry`) that the pose turns upright whatever the arm does (rigidly on the hand, the head lay
+  sideways in a blow). The pose (`rich-centaur-anim.js`, `applyCentaur`, called by `applyCreature` for plan `centaur`) takes
+  both halves from the low-poly pose keys (`quadPose` writes the quadruped's, the legs' and the arm and torso keys of a
+  centaur): the horse is the quadruped plan's (bob, pitch through the three back bones so the hind legs stay planted,
+  four legs swinging at the gallop, the tail's wave), the rider's the humanoid's (lean, twist, arms, cape and hair that
+  lag). Costs: 7.5k triangles for the Centaur, 8.8k for the Dullahan (creatures, budget 10.5k), both 1.07 and 1.14 times
+  the low-poly height.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with
