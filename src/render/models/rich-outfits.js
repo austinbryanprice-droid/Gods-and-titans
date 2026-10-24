@@ -10,11 +10,12 @@ import { GREEK } from './rich-outfits-greek.js';
 import { EGYPTIAN } from './rich-outfits-egyptian.js';
 import { HINDU } from './rich-outfits-hindu.js';
 import { JAPANESE } from './rich-outfits-japanese.js';
+import { CHINESE } from './rich-outfits-chinese.js';
 
 export { LAYERS };
 
 /** Pantheon id -> its overrides. */
-export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN, hindu: HINDU, japanese: JAPANESE };
+export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN, hindu: HINDU, japanese: JAPANESE, chinese: CHINESE };
 
 /** The layer functions (and shield style) for a pantheon. */
 export function outfitFor(pantheon) {

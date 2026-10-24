@@ -9,16 +9,17 @@
 import * as THREE from 'three';
 import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { vs, ps } from './rich-kit.js';
-import { torsoStations, torsoRing, armStations, legStations, legFrom, legRing, ringAt, addSandals, addGeta, addBareLegs } from './rich-body.js';
+import { torsoStations, torsoRing, armStations, legRing, addSandals, addGeta, addBareLegs } from './rich-body.js';
 import {
   addTunic, addCape, addPteruges, addGreaves, addKosodeCollar, addObi, addHakama, addDoMaru, addSode, addKote, addDhoti, addLongSkirt, addWaistBelt, addGarland,
+  addTrousers, addLegWraps, addAnkles, addWideSleeves, addFurCuff,
 } from './rich-clothing.js';
 import {
   addHairCap, addLongHair, addBeard, addTiara, addHornPair, addSunDisk, addChonmage, addJingasa, addKabuto, addEboshi, addTokin, addHeadband, addHairSpikes,
 } from './rich-headgear.js';
 import { addJewelry, addAuraRing, addSashimono } from './rich-regalia.js';
 import { BEAST_HEADS } from './rich-heads.js';
-import { gradY, mul, hash, lerp } from './rich-paint.js';
+import { gradY, mul } from './rich-paint.js';
 import { DEFAULT } from './rich-outfit-default.js';
 
 const GOLD = withMat('#dfb54a', 'gold');
@@ -76,39 +77,6 @@ function bareTorso(E) {
 // legs: trousers and wraps, the hakama's hem, straw sandals, geta, bare feet
 // ---------------------------------------------------------------------------
 
-/** Tight trousers (momohiki) from the ankle to the hip. */
-function trousers(E, color) {
-  const { kit, D, bind } = E;
-  for (const side of [1, -1]) {
-    kit.loft(legFrom(D, side, 0.011, D.ankleY - 0.012), { rings: 7, start: null, end: null, color, mat: 'cloth', bind: bind.leg[side], paint: gradY(0.2, D.hipY, 0.85, 1) });
-  }
-}
-
-/** Leg wraps (kyahan): a snug gaiter from the ankle to below the knee, ridged where the cloth is wound, tied at the top. */
-function kyahan(E, color) {
-  const { kit, D, bind } = E;
-  const knee = D.hipY - D.thigh;
-  const y0 = D.ankleY + 0.012;
-  const y1 = knee - 0.04;
-  for (const side of [1, -1]) {
-    const st = legStations(D, side, 0.011);
-    const rings = [];
-    for (let i = 0; i <= 14; i++) rings.push(ringAt(st, lerp(y0, y1, i / 14), 0.006));
-    kit.loft(rings, { sides: 12, start: null, end: null, color, mat: 'cloth', bind: bind.leg[side], paint: (o, x, y) => mul(o, 0.84 + 0.18 * Math.abs(Math.cos((y - y0) * 130))) });
-    kit.loft([ringAt(st, y1 - 0.012, 0.01), ringAt(st, y1 + 0.004, 0.01)], { sides: 12, start: null, end: null, color: shade(color, 0.7), mat: 'cloth', bind: bind.leg[side] });
-  }
-}
-
-/** The leg below a long hem: skin from under the ankle to `top`. */
-function ankles(E, top) {
-  const { kit, D, bind, skin, skinPaint } = E;
-  const r = D.legR;
-  for (const side of [1, -1]) {
-    const st = legStations(D, side).filter((q) => q.c[1] <= top);
-    kit.loft([vs(D.ankleY - 0.03, r * 0.62, r * 0.58, 0, side * D.hipZ), ...st], { rings: 4, start: null, end: null, color: skin, bind: bind.leg[side], paint: skinPaint });
-  }
-}
-
 /** Feet: straw sandals over a tabi, or bare. */
 function feet(E, kind) {
   const { kit, D, pal, bind, skin, skinPaint } = E;
@@ -117,36 +85,27 @@ function feet(E, kind) {
   else addSandals(kit, D, pal, bind, { skin: COTTON, sole: shade(STRAW, 0.8), strap: STRAW });
 }
 
-/** A fur cuff (a ring of shaggy hair) round a limb, from station `a` (the top) to `b`. */
-function furCuff(kit, a, b, color, bd, seed) {
-  kit.loft([a, b], {
-    sides: 14, start: null, end: null, color, mat: 'fur', bind: bd,
-    warp: (p, ang, u) => { const n = hash(Math.round(ang * 14), seed, 3); p[1] -= 0.008 * (1 - u) * (0.5 + n); },
-    paint: (o, x, y, z, u) => mul(o, 0.82 + 0.26 * u),
-  });
-}
-
 export function legs(E) {
   const { kit, D, pal, bind, skin, skinPaint } = E;
   const dress = dressOf(E);
   switch (dress) {
     case 'peasant':
-      trousers(E, tintC(pal.primary, 0.08));
-      kyahan(E, shade(pal.secondary, 1.15));
+      addTrousers(kit, D, bind, tintC(pal.primary, 0.08));
+      addLegWraps(kit, D, bind, shade(pal.secondary, 1.15));
       feet(E, 'waraji');
       break;
     case 'ashigaru':
-      trousers(E, shade(pal.secondary, 0.8));
-      kyahan(E, COTTON);
+      addTrousers(kit, D, bind, shade(pal.secondary, 0.8));
+      addLegWraps(kit, D, bind, COTTON);
       feet(E, 'waraji');
       break;
     case 'archer':
-      trousers(E, shade(pal.primary, 0.9));
-      kyahan(E, COTTON);
+      addTrousers(kit, D, bind, shade(pal.primary, 0.9));
+      addLegWraps(kit, D, bind, COTTON);
       feet(E, 'waraji');
       break;
     case 'susanoo':
-      trousers(E, shade(pal.primary, 0.8));
+      addTrousers(kit, D, bind, shade(pal.primary, 0.8));
       addGreaves(kit, D, pal, bind, BLACK, GOLD);
       feet(E, 'waraji');
       break;
@@ -156,17 +115,17 @@ export function legs(E) {
       feet(E, 'bare');
       // a fur cuff above each ankle, iron or gold rings below the knee
       for (const side of [1, -1]) {
-        furCuff(kit, legRing(D, side, D.ankleY + 0.075, 0.02), legRing(D, side, D.ankleY + 0.015, 0.014), dress === 'raijin' ? pal.fur : shade(pal.accent, 0.7), bind.leg[side], side + 5);
+        addFurCuff(kit, legRing(D, side, D.ankleY + 0.075, 0.02), legRing(D, side, D.ankleY + 0.015, 0.014), dress === 'raijin' ? pal.fur : shade(pal.accent, 0.7), bind.leg[side], side + 5);
       }
       break;
     }
     case 'tengu':
-      ankles(E, D.ankleY + 0.12);
+      addAnkles(kit, D, bind, skin, skinPaint, D.ankleY + 0.12);
       addGeta(kit, D, pal, bind, { skin, skinPaint, strap: TEAM(0.9), wood: withMat('#6a4a2c', 'wood'), tooth: 0.13, ippon: true });
       break;
     default: {
       // the robed (priest, samurai, Amaterasu, Inari): the leg shows only below the hem
-      ankles(E, D.ankleY + 0.1);
+      addAnkles(kit, D, bind, skin, skinPaint, D.ankleY + 0.1);
       feet(E, dress === 'samurai' ? 'waraji' : 'zori');
     }
   }
@@ -308,42 +267,17 @@ export function torso(E) {
 // arms
 // ---------------------------------------------------------------------------
 
-/** Wide sleeves from the shoulder to the wrist, belling out toward the hem, which hangs back a little. */
-function wideSleeves(E, { color, trim = null, wide = 1, mat = 'cloth' }) {
-  const { kit, D, bind } = E;
-  const g = 0.012;
-  const r = D.armR;
-  const sh = D.shoulderY - 0.02;
-  const e = sh - D.upper;
-  const w = e - D.fore;
-  for (const side of [1, -1]) {
-    const z = side * D.shoulderZ;
-    const st = [
-      vs(w, r * (1.5 + 1.1 * wide) + g, r * (1.3 + 0.8 * wide) + g, -0.022 * wide, z),
-      vs(w + 0.035, r * (1.3 + 0.8 * wide) + g, r * (1.2 + 0.6 * wide) + g, -0.014 * wide, z),
-      vs(e - 0.01, r * (1.2 + 0.3 * wide) + g, r * (1.15 + 0.3 * wide) + g, -0.004 * wide, z),
-      vs(sh - 0.04, r * 1.2 + g + 0.005, r * 1.18 + g + 0.005, 0, z),
-      vs(sh + 0.008, r * 1.18 + g, r * 1.16 + g, 0, z),
-    ];
-    kit.loft(st, { rings: 7, sides: 16, start: null, end: 'round', capDepth: 0.014, color, mat, bind: bind.arm[side], paint: gradY(w, sh, 0.86, 1.02) });
-    if (trim) {
-      const a = st[0];
-      kit.loft([vs(w - 0.006, a.rx + 0.004, a.rz + 0.004, a.c[0], z), vs(w + 0.026, st[1].rx + 0.003, st[1].rz + 0.003, st[1].c[0], z)], { sides: 16, start: null, end: null, color: trim, mat: 'trim', bind: bind.arm[side] });
-    }
-  }
-}
-
 export function arms(E) {
   const { kit, D, pal, bind, skin, skinPaint } = E;
   const dress = dressOf(E);
   const w = D.shoulderY - 0.02 - D.upper - D.fore;
   if (dress === 'priest') {
-    wideSleeves(E, { color: pal.primary, trim: pal.secondary, wide: 1 });
+    addWideSleeves(kit, D, bind, { color: pal.primary, trim: pal.secondary, wide: 1 });
     for (const side of [1, -1]) kit.loft(armStations(D, side).slice(0, 3), { rings: 4, start: null, end: null, color: skin, bind: bind.arm[side], paint: skinPaint });
     return;
   }
   if (dress === 'amaterasu') {
-    wideSleeves(E, { color: pal.primary, trim: pal.secondary, wide: 1.35 });
+    addWideSleeves(kit, D, bind, { color: pal.primary, trim: pal.secondary, wide: 1.35 });
     for (const side of [1, -1]) {
       kit.loft(armStations(D, side).slice(0, 3), { rings: 4, start: null, end: null, color: skin, bind: bind.arm[side], paint: skinPaint });
       for (let i = 0; i < 2; i++) {
@@ -355,12 +289,12 @@ export function arms(E) {
     return;
   }
   if (dress === 'inari') {
-    wideSleeves(E, { color: pal.secondary, trim: pal.primary, wide: 1.1 });
+    addWideSleeves(kit, D, bind, { color: pal.secondary, trim: pal.primary, wide: 1.1 });
     for (const side of [1, -1]) kit.loft(armStations(D, side).slice(0, 3), { rings: 4, start: null, end: null, color: skin, bind: bind.arm[side], paint: skinPaint });
     return;
   }
   if (dress === 'tengu') {
-    wideSleeves(E, { color: pal.primary, trim: pal.secondary, wide: 0.8 });
+    addWideSleeves(kit, D, bind, { color: pal.primary, trim: pal.secondary, wide: 0.8 });
     for (const side of [1, -1]) kit.loft(armStations(D, side).slice(0, 3), { rings: 4, start: null, end: null, color: skin, bind: bind.arm[side], paint: skinPaint });
     return;
   }
@@ -371,7 +305,7 @@ export function arms(E) {
       const z = side * D.shoulderZ;
       if (dress === 'raijin') {
         // a fur cuff and a gold band on each arm
-        furCuff(kit, vs(w + 0.06, D.armR * 0.82 + 0.014, D.armR * 0.8 + 0.014, 0, z), vs(w + 0.012, D.armR * 0.7 + 0.01, D.armR * 0.68 + 0.01, 0, z), pal.fur, bd, side + 9);
+        addFurCuff(kit, vs(w + 0.06, D.armR * 0.82 + 0.014, D.armR * 0.8 + 0.014, 0, z), vs(w + 0.012, D.armR * 0.7 + 0.01, D.armR * 0.68 + 0.01, 0, z), pal.fur, bd, side + 9);
         const y = D.shoulderY - 0.02 - D.upper * 0.42;
         kit.loft([vs(y - 0.016, D.armR * 1.06 + 0.012, D.armR * 1.03 + 0.012, 0, z), vs(y + 0.016, D.armR * 1.07 + 0.012, D.armR * 1.04 + 0.012, 0, z)], { sides: 12, start: null, end: null, color: pal.accentMetal, mat: 'gold', bind: bd });
       } else {

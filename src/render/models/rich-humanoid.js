@@ -16,6 +16,8 @@ import { flameMane, flamePieces, wingLayout, wingPieces } from './rich-regalia.j
 import { BEAST_HEADS } from './rich-heads.js';
 
 const RICH_BODIES = new Set(['humanoid', 'giant']);
+/** Upright beasts (the body beast_biped: a monkey king and his clones) are dressed on the humanoid rig by the pantheons listed here; the others keep their low-poly beasts. */
+const RICH_BEAST_BIPEDS = new Set(['chinese']);
 const RICH_HEADGEAR = new Set(['none', 'hood', 'horned_helmet', 'horns', 'helmet', 'winged_helmet', 'tiara', 'laurel', 'crown', 'tall_crown', 'nemes', 'sun_disk', 'feathers', 'topknot', 'crescent']);
 const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skirt', 'flames', 'eye_glow', 'wings', 'feather_cloak', 'jewelry', 'spikes', 'chains', 'third_eye', 'tail', 'multi_arms', 'aura_ring']);
 
@@ -24,12 +26,14 @@ const RICH_EXTRAS = new Set(['beard', 'long_hair', 'cape', 'armor', 'fur', 'skir
  * sample; the builder already dresses supported units of the others, which stay low-poly
  * until each has had its look pass (tools pin it for all with GameRenderer.setUnitDetail('rich')).
  */
-export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese']);
+export const RICH_PANTHEONS = new Set(['norse', 'greek', 'egyptian', 'hindu', 'japanese', 'chinese']);
 
 /** Whether the rich builder can dress this unit type (else it keeps its low-poly model). */
 export function richSupported(unitType) {
   const v = unitType.visual;
-  if (!v || !RICH_BODIES.has(v.body || 'humanoid')) return false;
+  if (!v) return false;
+  const body = v.body || 'humanoid';
+  if (!RICH_BODIES.has(body) && !(body === 'beast_biped' && RICH_BEAST_BIPEDS.has(unitType.pantheon))) return false;
   if (((v.head || 'human') !== 'human' && !BEAST_HEADS.has(v.head)) || (v.heads || 1) !== 1) return false;
   if (!RICH_HEADGEAR.has(v.headgear || 'none')) return false;
   return (v.extras || []).every((e) => RICH_EXTRAS.has(e));
@@ -131,19 +135,21 @@ export function buildRichTemplate(unitType, detail = 1) {
   if (wings) attach.push(...wingPieces(ctx, D, spec, wings));
   const P = D;
   const styleOf = (item) => (outfit.gear ? outfit.gear(ctx, item) : null);
+  const leftStyle = styleOf(items.left);
   const rightPiece = items.right.kind !== 'none' ? heldPiece(ctx, P, 1, items.right, 1, styleOf(items.right)) : null;
   if (rightPiece) attach.push({ name: 'weaponR', bone: B.handR, geo: rightPiece });
   if (items.left.kind === 'offhand' && items.left.id === 'shield') {
     attach.push({ name: 'shield', bone: B.foreL, geo: richShield(ctx, P, outfit.shield || {}), shield: true });
   } else if (items.left.kind !== 'none') {
-    const left = heldPiece(ctx, P, -1, items.left, 1, styleOf(items.left));
+    const left = heldPiece(ctx, P, -1, items.left, 1, leftStyle);
     if (left) attach.push({ name: 'weaponL', bone: B.handL, geo: left });
   }
   const rig = {
     hipY: P.hipY, thigh: P.thigh, lean: P.lean, shoulderY: P.shoulderY,
     weapon: v.weapon, offhand: v.offhand, info: WEAPON_INFO[v.weapon] || WEAPON_INFO.none,
     rightElbow: (WEAPON_INFO[v.weapon] || WEAPON_INFO.none).elbow,
-    leftElbow: v.weapon === 'bow' ? 0.15 : v.weapon === 'claws' ? 0.3 : OFFHAND_ELBOW[v.offhand] ?? 0.25,
+    // a crossbow is carried level before the body, the elbow square; a bow hangs at the side
+    leftElbow: leftStyle && leftStyle.crossbow ? 1 : v.weapon === 'bow' ? 0.15 : v.weapon === 'claws' ? 0.3 : OFFHAND_ELBOW[v.offhand] ?? 0.25,
     stride: name === 'giant' ? 1.1 : 1.25,
     heavy: name === 'giant',
     holdAloft: holdsAloft(v),
