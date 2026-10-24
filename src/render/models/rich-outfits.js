@@ -21,6 +21,7 @@ import { MESOPOTAMIAN } from './rich-outfits-mesopotamian.js';
 import { WEST_AFRICAN } from './rich-outfits-west-african.js';
 import { SPIRIT } from './rich-spirit.js';
 import { CENTAUR_OUTFITS } from './rich-centaur-outfits.js';
+import { SCORPION_OUTFITS } from './rich-scorpion-outfits.js';
 
 export { LAYERS };
 
@@ -30,10 +31,12 @@ export const OUTFITS = { greek: GREEK, egyptian: EGYPTIAN, hindu: HINDU, japanes
 /**
  * The layer functions (and shield style, or the function that makes one) for a pantheon. A spirit (the body 'spirit') wears
  * the one look of rich-spirit.js whatever its people: the dead are not dressed by their pantheon. A centaur (the body 'centaur')
- * wears its pantheon's outfit with the layers of rich-centaur-outfits.js laid over it.
+ * wears its pantheon's outfit with the layers of rich-centaur-outfits.js laid over it, and so does a scorpion man (the body 'insect' with
+ * a person's head: rich-scorpion-outfits.js).
  */
 export function outfitFor(pantheon, body = null) {
   if (body === 'spirit') return { ...DEFAULT, ...SPIRIT };
   if (body === 'centaur') return { ...DEFAULT, ...(OUTFITS[pantheon] || {}), ...(CENTAUR_OUTFITS[pantheon] || {}) };
+  if (body === 'insect') return { ...DEFAULT, ...(OUTFITS[pantheon] || {}), ...(SCORPION_OUTFITS[pantheon] || {}) };
   return { ...DEFAULT, ...(OUTFITS[pantheon] || {}) };
 }

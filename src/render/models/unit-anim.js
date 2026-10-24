@@ -796,6 +796,11 @@ export function animateModel(m, state, t, dt, ex) {
         else if (m.moving) walkArms(T, m.rig, phi, 0.3);
       }
       blendPose(m, T, dt, 24);
+      if (m.rich) {
+        // the skinned rich scarab or scorpion man: bones in place of rigid parts and morph hinges
+        applyCreature(m, m.cur, state, t, dt);
+        break;
+      }
       inf(body, 'ga', m.cur.ga);
       inf(body, 'la', m.cur.la);
       inf(body, 'lb', m.cur.lb);

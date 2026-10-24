@@ -81,7 +81,7 @@ const CHINESE = ['worshipper', 'warrior', 'archer', 'priest', 'chinese_sun_wukon
 const AZTEC = ['worshipper', 'warrior', 'archer', 'priest', 'aztec_huitzilopochtli', 'aztec_tezcatlipoca', 'aztec_tlaloc', 'aztec_tlaloque', 'aztec_eagle_warrior'];
 // every Celtic unit on the humanoid and giant bodies (the creatures have body plans of their own, rich-creatures.test.js; the banshee is a spirit: rich-spirits.test.js; the headless horseman is a centaur: rich-centaurs.test.js)
 const CELTIC = ['worshipper', 'warrior', 'archer', 'priest', 'celtic_the_dagda', 'celtic_the_morrigan', 'celtic_lugh', 'celtic_brigid', 'celtic_balor', 'celtic_woad_raider'];
-// every Mesopotamian unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; the scorpion man keeps its low-poly model, the ugallu is a beast biped: rich-beast-bipeds.test.js)
+// every Mesopotamian unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; the scorpion man is a person on a scorpion's body: rich-insects.test.js; the ugallu is a beast biped: rich-beast-bipeds.test.js)
 const MESOPOTAMIAN = ['worshipper', 'warrior', 'archer', 'priest', 'mesopotamian_marduk', 'mesopotamian_ishtar', 'mesopotamian_enki', 'mesopotamian_nergal', 'mesopotamian_apkallu', 'mesopotamian_slinger'];
 // every West African unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; the Sasabonsam and the Bultungin are beast bipeds: rich-beast-bipeds.test.js)
 const WEST_AFRICAN = ['worshipper', 'warrior', 'archer', 'priest', 'west_african_shango', 'west_african_oya', 'west_african_ogun', 'west_african_anansi', 'west_african_aziza', 'west_african_dart_hunter'];
@@ -276,9 +276,9 @@ test('the Egyptians dress their own way: kilts, corselets, collars and a wrapped
   assert.equal(base.skinPaint, undefined, 'no other people does');
 });
 
-test('every Egyptian humanoid is dressed in the Egyptian look, the scarab stays low-poly', () => {
+test('every Egyptian humanoid is dressed in the Egyptian look, the ram stays low-poly (the scarab has a body plan of its own: rich-insects.test.js)', () => {
   for (const id of EGYPTIAN) assert.ok(richSupported(egyptian(id)), `${id} is supported`);
-  for (const id of ['egyptian_scarab', 'battering_ram']) assert.ok(!richSupported(egyptian(id)), `${id} stays low-poly`);
+  for (const id of ['battering_ram']) assert.ok(!richSupported(egyptian(id)), `${id} stays low-poly`);
   // only the animal heads the kit builds (the jackal's, the falcon's ...) are let through
   const anubis = egyptian('egyptian_anubis');
   assert.ok(!richSupported({ ...anubis, visual: { ...anubis.visual, head: 'gorilla' } }));
@@ -1374,9 +1374,9 @@ test('the Mesopotamians dress their own way: kaunakes, fringed shawls, scale coa
   assert.ok(RICH_PANTHEONS.has('mesopotamian'), 'the Mesopotamian players get the new characters');
 });
 
-test('every Mesopotamian humanoid, the apkallu, the Slinger and the Ugallu are dressed in the Mesopotamian look; the scorpion man and the ram stay low-poly', () => {
-  for (const id of [...MESOPOTAMIAN, 'mesopotamian_ugallu']) assert.ok(richSupported(mesopotamian(id)), `${id} is supported`);
-  for (const id of ['mesopotamian_scorpion_man', 'battering_ram']) {
+test('every Mesopotamian humanoid, the apkallu, the Slinger, the Ugallu and the scorpion man are dressed in the Mesopotamian look; the ram stays low-poly', () => {
+  for (const id of [...MESOPOTAMIAN, 'mesopotamian_ugallu', 'mesopotamian_scorpion_man']) assert.ok(richSupported(mesopotamian(id)), `${id} is supported`);
+  for (const id of ['battering_ram']) {
     assert.ok(!richSupported(mesopotamian(id)), `${id} stays low-poly`);
   }
   // a Mesopotamian warrior is not a Celtic one

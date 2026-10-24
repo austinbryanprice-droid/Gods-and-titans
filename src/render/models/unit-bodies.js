@@ -375,6 +375,9 @@ export const PROFILES = {
   },
 };
 
+// (a scorpion man's torso rises from a scorpion's carapace: a person's build with its hip at its own origin, a little narrower; the low-poly body sets the torso on the carapace and the rich one, rich-scorpion.js, does the same; it has no legs of its own)
+PROFILES.scorpion = { ...PROFILES.humanoid, hipY: 0.0, shoulderY: 0.36, headY: 0.52, chestW: 0.34, waistW: 0.24 };
+
 function armColorFor(ctx, P) {
   const { pal, ex } = ctx;
   if (P.bare || ctx.v.body === 'spirit') return { upper: P.bare ? pal.skin : pal.primary, fore: P.bare ? pal.skin : pal.skin };
@@ -1945,7 +1948,7 @@ function insectTemplate(ctx) {
   parts[0].geo = bodyGeo;
   const rig = { humanTop: false, info: WEAPON_INFO[v.weapon] || WEAPON_INFO.none };
   if (humanTop) {
-    const P = { ...PROFILES.humanoid, hipY: 0.0, shoulderY: 0.36, headY: 0.52, chestW: 0.34, waistW: 0.24 };
+    const P = { ...PROFILES.scorpion };
     const tb = buildTorso(ctx, P, { noHips: true });
     parts.push({ name: 'torso', parent: 'body', pos: [0.16, cy + 0.05, 0], rot: [0, 0, -0.05], geo: tb.geo });
     const items = humanoidItems(v);
