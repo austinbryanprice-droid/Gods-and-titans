@@ -1061,6 +1061,21 @@ per-frame budget, so a revealed army appears over a few frames.
   cloth on a small one's back. A sprawling lizard's trunk wags from side to side as it walks, harder than a
   beast's. Anything else with a crocodile's or a dragon's head and four legs (a rider, a weapon, wings) keeps its
   low-poly model.
+  The beast bipeds (the Vanara, the Ugallu, the Sasabonsam and the Bultungin) are not a plan of their own: they ride the
+  humanoid's skeleton and pose code (`RICH_BODIES` in `rich-humanoid.js` takes `beast_biped` along with `humanoid` and
+  `giant`) on the low-poly rig's beast-biped proportions (a stooped trunk, a long digitigrade leg, the head carried
+  forward), except the monkey-headed ones (`UPRIGHT_BEASTS`: the Vanara and the Chinese monkeys keep the humanoid's
+  build, so the monkeys already built are unchanged). `BEAST_HEADS` in `rich-heads.js` gained the lion, wolf and demon
+  heads of a beast biped, built by `rich-beast-heads.js` (one table-driven carnivore skull: a skull, muzzle and jaw lofted
+  from stations, nose, brows, eyes that glow or slit, fangs, ears rooted inside the skull; tables for a lion, a hyena
+  with a dark mask and a bat with iron teeth). The shared pieces are `rich-beast.js` (claws on the hands, digitigrade
+  legs, talon feet and paws, a lion's or a hyena's tail, a lion's mane of scalloped locks, a hyena's crest) and
+  `rich-beast-wings.js` (the Sasabonsam's bat wings: an arm, four fingers and fans of scalloped leather, two rigid pieces
+  a side on the humanoid's wing bones, beaten by the pose's `wing` key like a feathered pair). Each pantheon's outfit
+  file dresses its beast: the Ugallu in a fleece skirt, a shawl and silver bands, the Bultungin in a spotted coat (a
+  `skinPaint` hook and denser lofts for the spots to show on), a crest and a bushy tail, the Sasabonsam in a rag, iron
+  bands, claws and hook feet. Costs: 5.4k triangles for the Vanara, 7.3k for the Sasabonsam, 7.6k for the Bultungin and
+  8.3k for the Ugallu (a minion's budget is 8.5k).
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

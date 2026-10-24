@@ -9,7 +9,7 @@
 import { TEAM, shadeC, mixC, tintC, withMat } from './unit-geo.js';
 import { vs } from './rich-kit.js';
 import { torsoStations, armStations, legRing, addSandals, addBareLegs } from './rich-body.js';
-import { addCape, addDrape, addLongSkirt, addHem, addWaistBelt, addDhoti, addCharAina, addGarland } from './rich-clothing.js';
+import { addCape, addDrape, addLongSkirt, addHem, addWaistBelt, addDhoti, addCharAina, addGarland, addArmBands } from './rich-clothing.js';
 import { addHairCap, addLongHair, addTiara, addTopknot, addCrescent, addKirita } from './rich-headgear.js';
 import { addJewelry, addTail, addPrabhavali, extraArmsPiece } from './rich-regalia.js';
 import { BEAST_HEADS } from './rich-heads.js';
@@ -29,6 +29,7 @@ const GODS = {
   hindu_vishnu: { dress: 'pitambara', arms: [[null, null], ['mace', 'lotus']] },
   hindu_durga: { dress: 'sari', arms: [['discus', 'lotus'], ['trident', 'mace']] },
   hindu_hanuman: { dress: 'loincloth' },
+  hindu_vanara: { dress: 'loincloth' },
   hindu_garuda: { dress: 'loincloth' },
 };
 
@@ -163,9 +164,11 @@ export function arms(E) {
   const { kit, D, ctx, pal, bind, armor, skin, skinPaint } = E;
   const gold = goldOf(E);
   const w = D.shoulderY - 0.02 - D.upper - D.fore;
+  // the Vanara's shoulders are round (his torso is too slight to hide the cut end of the tube)
+  const vanara = E.v.body === 'beast_biped';
   for (const side of [1, -1]) {
     const bd = bind.arm[side];
-    kit.loft(armStations(D, side), { rings: 8, start: null, end: null, color: skin, bind: bd, paint: skinPaint });
+    kit.loft(armStations(D, side), { rings: 8, start: null, end: vanara ? 'round' : null, capRings: 2, capDepth: 0.022, color: skin, bind: bd, paint: skinPaint });
     if (armor) {
       // a leather bracer on the forearm
       kit.loft([vs(w + 0.012, D.armR * 0.66 + 0.007, D.armR * 0.64 + 0.007, 0, side * D.shoulderZ), vs(w + D.fore * 0.52, D.armR * 0.86 + 0.007, D.armR * 0.84 + 0.007, 0.002, side * D.shoulderZ)],
@@ -179,6 +182,7 @@ export function arms(E) {
       }
     }
   }
+  if (vanara) addArmBands(kit, D, bind, { upper: gold, wrist: gold });
 }
 
 export function armorLayer(E) {

@@ -42,7 +42,7 @@ const scallop = (t) => Math.sqrt(Math.max(0, 1 - t ** 2.4)) * 0.9 + 0.1 * (1 - t
 /**
  * A lion's mane: rings of broad rounded locks laid over one another like shingles all round the neck, from the shoulders
  * to the head, lying back and standing out a little more about the face, their tips darker. o: { from, len, w, color, dark,
- * tip, bind }.
+ * tip, bind, skip(a, tt) (true: no lock at the ring angle a of the ring tt of the way up: a face to keep clear) }.
  */
 export function lionMane(kit, st, o) {
   const i0 = Math.max(1, st.findIndex((s) => s.c[0] >= o.from));
@@ -55,6 +55,7 @@ export function lionMane(kit, st, o) {
     for (let j = 0; j < n; j++) {
       const h = hash(i, j, 7);
       const a = ((j + (i % 2) * 0.5) / n) * 2 * Math.PI;
+      if (o.skip && o.skip(a, tt)) continue;
       const { p, n: nn, t, across } = ringPoint(st, i, a);
       const under = Math.cos(a) < -0.5 ? 0.75 : 1;
       const len = o.len * (0.5 + 0.7 * smoothstep(0, 0.8, tt)) * (0.82 + 0.36 * h) * under;
