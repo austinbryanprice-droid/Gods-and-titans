@@ -1,4 +1,4 @@
-// The heads of the rich serpents, dragons and (later) crocodiles, built the way the mammals' are (rich-mammal-heads.js):
+// The heads of the rich serpents, dragons and crocodiles, built the way the mammals' are (rich-mammal-heads.js):
 // one table of numbers per kind, a skull and snout lofted along the head's length, a lower jaw on its own bone, eyes
 // with slit pupils, nostrils, brows, fangs, a tongue, and what a unit wears on its head (horns, antlers, a crown) or
 // grows from it (whiskers, a mane, cheek fins). A head is modeled in a frame of its own, 1 long from the back of the skull
@@ -20,7 +20,9 @@ const IVORY = withMat('#efe8d4', 'bone');
 /**
  * Per kind (all in head lengths): skull = [x, yCenter, ryVertical, rzLateral] along the head; jaw = the same for the lower
  * jaw; jawAt = the jaw's hinge [x, y]; eye = [x, y, (unused), size]; fang = [x, length] (the upper canines); brow: how heavy
- * the ridge over each eye is; nostril: [x, z] of the pits (on the top of the snout); `bulb`: the nostrils stand up as bulbs.
+ * the ridge over each eye is (`browTone`: how far toward the back's tone it is painted, 1 by default); nostril: [x, z] of the pits (on the top of the snout); `bulb`: the nostrils stand up as bulbs and
+ * a row of teeth runs along the lip; `teeth`: [count a side, x of the first, step] of that row (a bulb's default is 4 from 0.42 by
+ * 0.13), `toothLen` its length, `lowerTeeth`: another row stands up from the lower jaw (a crocodile's).
  */
 export const REPTILES = {
   serpent: {
@@ -33,7 +35,22 @@ export const REPTILES = {
     jaw: [[0.1, -0.13, 0.07, 0.16], [0.3, -0.17, 0.07, 0.16], [0.55, -0.16, 0.06, 0.14], [0.78, -0.14, 0.05, 0.12], [0.93, -0.125, 0.04, 0.1]],
     jawAt: [0.1, -0.085], eye: [0.36, 0.1, 0, 0.065], fang: [0.9, 0.16], brow: 1, nostril: [0.9, 0.06], bulb: true,
   },
+  // flat and wide at the back, a long snout that swells at the tip, the eyes standing up on the brow ridges
+  crocodile: {
+    skull: [[0, 0.05, 0.11, 0.2], [0.08, 0.055, 0.125, 0.27], [0.2, 0.05, 0.12, 0.275], [0.32, 0.035, 0.1, 0.22], [0.46, 0.02, 0.085, 0.165], [0.62, 0.01, 0.075, 0.13], [0.8, 0.0, 0.07, 0.14], [0.93, -0.005, 0.066, 0.145], [0.99, -0.008, 0.058, 0.105]],
+    jaw: [[0.08, -0.07, 0.045, 0.21], [0.25, -0.082, 0.05, 0.215], [0.5, -0.072, 0.042, 0.15], [0.75, -0.062, 0.04, 0.14], [0.92, -0.056, 0.036, 0.125]],
+    jawAt: [0.08, -0.04], eye: [0.3, 0.12, 0, 0.055], fang: null, brow: 0.7, browTone: 0.45, nostril: [0.965, 0.05], bulb: true, teeth: [9, 0.3, 0.072], toothLen: 0.06, lowerTeeth: true,
+  },
 };
+
+/** The lower jaw's [yCenter, ryVertical, rzLateral] at x (straight between its stations). */
+function jawProfileAt(S, x) {
+  const k = S.jaw;
+  let i = 0;
+  while (i < k.length - 2 && x > k[i + 1][0]) i++;
+  const t = clamp((x - k[i][0]) / (k[i + 1][0] - k[i][0]));
+  return [lerp(k[i][1], k[i + 1][1], t), lerp(k[i][2], k[i + 1][2], t), lerp(k[i][3], k[i + 1][3], t)];
+}
 
 /** Head-local positions the body plan needs before the head is built: the jaw's hinge, scaled by len. */
 export function reptileMetrics(kind, len) {
@@ -254,13 +271,27 @@ export function reptileHead(kit, o) {
       }
     }
     if (S.bulb && !lean) {
+      const [count, first, step] = S.teeth ?? [4, 0.42, 0.13];
+      const tl = S.toothLen ?? 0.065;
       for (const side of [1, -1]) {
-        for (let i = 0; i < 4; i++) {
-          const x = 0.42 + i * 0.13;
+        for (let i = 0; i < count; i++) {
+          const x = first + i * step;
           const sk0 = skullAt(S, x);
           const z = side * widthAt(S, x, sk0[0] - sk0[1] * 0.7) * 0.9;
           const y = sk0[0] - sk0[1] * 0.78;
-          kit.loft([ps(x, y, z, 0.012, 0.012), ps(x, y - 0.065, z, 0.0015, 0.0015)], { ref: [0, 0, 1], sides: 4, start: 'round', end: 'round', capRings: 1, capDepth: 0.005, color: IVORY, mat: 'bone', bind: o.bind.head });
+          kit.loft([ps(x, y, z, 0.012, 0.012), ps(x, y - tl, z, 0.0015, 0.0015)], { ref: [0, 0, 1], sides: 4, start: 'round', end: 'round', capRings: 1, capDepth: 0.005, color: IVORY, mat: 'bone', bind: o.bind.head });
+        }
+      }
+    }
+    // a crocodile's lower teeth stand up between the upper ones, outside the closed mouth
+    if (S.lowerTeeth && !lean) {
+      const [count, first, step] = S.teeth;
+      const tl = S.toothLen ?? 0.065;
+      for (const side of [1, -1]) {
+        for (let i = 0; i < count - 1; i++) {
+          const x = first + (i + 0.5) * step;
+          const [jy, jr, jz] = jawProfileAt(S, x);
+          kit.loft([ps(x, jy + jr * 0.7, side * jz * 0.9, 0.011, 0.011), ps(x, jy + jr * 0.7 + tl * 0.9, side * jz * 0.9, 0.0014, 0.0014)], { ref: [0, 0, 1], sides: 4, start: 'round', end: 'round', capRings: 1, capDepth: 0.005, color: IVORY, mat: 'bone', bind: jawBind });
         }
       }
     }
@@ -284,7 +315,7 @@ export function reptileHead(kit, o) {
       const [x, y, , r] = S.eye;
       const yb = y + r * 1.25;
       const keys = [[x - 0.09, 0.8], [x + 0.0, 1.15], [x + 0.12, 0.8]].map(([xi, k]) => ps(xi, yb + (k > 1 ? 0.008 : 0), side * (widthAt(eyeSpec, xi, yb) - r * 0.2), 0.012 + 0.016 * S.brow * k, 0.032));
-      kit.loft(keys, { ref: [0, 1, 0], rings: 3, sides: 5, capRings: 1, start: 'round', end: 'round', capDepth: 0.012, color: back, bind: o.bind.head });
+      kit.loft(keys, { ref: [0, 1, 0], rings: 3, sides: 5, capRings: 1, start: 'round', end: 'round', capDepth: 0.012, color: S.browTone ? mixC(skin, back, S.browTone) : back, bind: o.bind.head });
     }
     // what grows from it and what it wears
     if (o.whisker) whiskers(kit, S, o);

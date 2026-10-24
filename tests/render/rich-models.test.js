@@ -77,11 +77,11 @@ const HINDU = ['worshipper', 'warrior', 'archer', 'priest', 'hindu_shiva', 'hind
 const JAPANESE = ['worshipper', 'warrior', 'archer', 'priest', 'japanese_amaterasu', 'japanese_susanoo', 'japanese_raijin', 'japanese_inari', 'japanese_tengu', 'japanese_oni', 'japanese_samurai'];
 // every Chinese unit on the humanoid, giant and upright-monkey bodies (Nuwa, the lion, the phoenix and the dragon keep their low-poly models)
 const CHINESE = ['worshipper', 'warrior', 'archer', 'priest', 'chinese_sun_wukong', 'chinese_guan_yu', 'chinese_chang_e', 'chinese_pangu', 'chinese_monkey_clone', 'chinese_clay_warrior', 'chinese_crossbowman'];
-// every Aztec unit on the humanoid body (Quetzalcoatl, Cipactli, the jaguar spirit, the ahuizotl and Xiuhcoatl keep their low-poly models)
+// every Aztec unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; Quetzalcoatl keeps his low-poly model)
 const AZTEC = ['worshipper', 'warrior', 'archer', 'priest', 'aztec_huitzilopochtli', 'aztec_tezcatlipoca', 'aztec_tlaloc', 'aztec_tlaloque', 'aztec_eagle_warrior'];
 // every Celtic unit on the humanoid and giant bodies (the hound, the banshee, the headless horseman and the crow keep their low-poly models)
 const CELTIC = ['worshipper', 'warrior', 'archer', 'priest', 'celtic_the_dagda', 'celtic_the_morrigan', 'celtic_lugh', 'celtic_brigid', 'celtic_balor', 'celtic_woad_raider'];
-// every Mesopotamian unit on the humanoid body (Tiamat, the scorpion man, Anzu, the lamassu, the bull of heaven and the mushussu keep their low-poly models)
+// every Mesopotamian unit on the humanoid body (the creatures have body plans of their own, rich-creatures.test.js; the scorpion man and the ugallu keep their low-poly models)
 const MESOPOTAMIAN = ['worshipper', 'warrior', 'archer', 'priest', 'mesopotamian_marduk', 'mesopotamian_ishtar', 'mesopotamian_enki', 'mesopotamian_nergal', 'mesopotamian_apkallu', 'mesopotamian_slinger'];
 // every West African unit on the humanoid body (Ninki Nanka, the Sasabonsam, the Bultungin, Osebo and Onini keep their low-poly models)
 const WEST_AFRICAN = ['worshipper', 'warrior', 'archer', 'priest', 'west_african_shango', 'west_african_oya', 'west_african_ogun', 'west_african_anansi', 'west_african_aziza', 'west_african_dart_hunter'];
@@ -765,9 +765,9 @@ test('the Aztecs dress their own way: the loincloth, quilted armor, feathers and
   assert.ok(RICH_PANTHEONS.has('aztec'), 'the Aztec players get the new characters');
 });
 
-test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look; Quetzalcoatl and the crocodile stay low-poly', () => {
+test('every Aztec humanoid and the eagle warrior is dressed in the Aztec look; Quetzalcoatl stays low-poly', () => {
   for (const id of AZTEC) assert.ok(richSupported(aztec(id)), `${id} is supported`);
-  for (const id of ['aztec_quetzalcoatl', 'aztec_cipactli', 'battering_ram']) assert.ok(!richSupported(aztec(id)), `${id} stays low-poly`);
+  for (const id of ['aztec_quetzalcoatl', 'battering_ram']) assert.ok(!richSupported(aztec(id)), `${id} stays low-poly`);
   // an Aztec warrior is not a Chinese one
   assert.notEqual(buildRichTemplate(aztec('warrior')).triangles, buildRichTemplate(chinese('warrior')).triangles);
   assert.notEqual(buildRichTemplate(aztec('priest')).triangles, buildRichTemplate(chinese('priest')).triangles);
@@ -1374,9 +1374,9 @@ test('the Mesopotamians dress their own way: kaunakes, fringed shawls, scale coa
   assert.ok(RICH_PANTHEONS.has('mesopotamian'), 'the Mesopotamian players get the new characters');
 });
 
-test('every Mesopotamian humanoid, the apkallu and the Slinger are dressed in the Mesopotamian look; the scorpion man, the mushussu, the ugallu and the ram stay low-poly', () => {
+test('every Mesopotamian humanoid, the apkallu and the Slinger are dressed in the Mesopotamian look; the scorpion man, the ugallu and the ram stay low-poly', () => {
   for (const id of MESOPOTAMIAN) assert.ok(richSupported(mesopotamian(id)), `${id} is supported`);
-  for (const id of ['mesopotamian_scorpion_man', 'mesopotamian_mushussu', 'mesopotamian_ugallu', 'battering_ram']) {
+  for (const id of ['mesopotamian_scorpion_man', 'mesopotamian_ugallu', 'battering_ram']) {
     assert.ok(!richSupported(mesopotamian(id)), `${id} stays low-poly`);
   }
   // a Mesopotamian warrior is not a Celtic one

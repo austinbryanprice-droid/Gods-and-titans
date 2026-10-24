@@ -73,7 +73,7 @@ export function quadSupported(v) {
 // ---------------------------------------------------------------------------
 
 /** The barrel's half depth, half width and center height at x (the stations of Q.body, straight between them). */
-function barrelAt(Q, cy, x) {
+export function barrelAt(Q, cy, x) {
   const k = Q.body;
   const f = x / Q.L;
   let i = 0;
@@ -182,7 +182,7 @@ function skeleton(Lay) {
 // ---------------------------------------------------------------------------
 
 /** The stations of a leg loft: `list` of [u, rx, rz] (in units of r), u the fractional index along the points `pts` (1.5: halfway from pts[1] to pts[2]). */
-function legStations(pts, list, r) {
+export function legStations(pts, list, r) {
   return list.map(([u, rx, rz]) => {
     const p = atJoint(pts, u);
     return ps(p[0], p[1], p[2], rx * r, rz * r);
@@ -372,7 +372,7 @@ export function buildQuadrupedTemplate(unitType, ctx) {
 }
 
 /** The team's colored saddle cloth: a cloth draped over the back with a trimmed hem, hugging the barrel. */
-function saddle(kit, Q, cy, bind, pal) {
+export function saddle(kit, Q, cy, bind, pal) {
   const { L } = Q;
   const len = L * 0.25;
   const x0 = -L * 0.2;

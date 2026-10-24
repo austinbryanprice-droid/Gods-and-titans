@@ -1051,6 +1051,16 @@ per-frame budget, so a revealed army appears over a few frames.
   rigid pieces. The hydra is a mound with a tail, four stumpy legs and a three-bone neck to each head (960
   triangles a neck and head, so a class that cannot afford the necks keeps its low-poly model), moss and cypress
   on its back. The pose keys of the low-poly rig stay the source of truth.
+  The lizard plan (`rich-reptile.js`) dresses Cipactli, a crocodile, and the Mushussu, a dragon-headed beast, on the
+  four-legged beasts' skeleton (so the quadruped pose code drives them from the same pose keys): a barrel and a
+  short neck lofted as one body of plates (a crocodile) or scales (the Mushussu), a head from the reptile table
+  (a crocodile's long flat snout with a row of teeth along each jaw and the eyes standing up on ridges, or the
+  dragon's with its horns, antlers or crown), legs that stand out to the sides with the elbows beyond the body
+  and a foot of splayed toes with claws, a long tail of four bones, a row of spikes down a dragon's back and a
+  double row of low scutes down a crocodile's, the team's color in two bands round a big one's barrel or a
+  cloth on a small one's back. A sprawling lizard's trunk wags from side to side as it walks, harder than a
+  beast's. Anything else with a crocodile's or a dragon's head and four legs (a rider, a weapon, wings) keeps its
+  low-poly model.
   Test budgets for the tier are separate (`tests/render/rich-models.test.js`); the
   low-poly budgets are unchanged.
 - VFX: `src/render/vfx.js` exports `class VFXSystem(scene, getHeight)` with

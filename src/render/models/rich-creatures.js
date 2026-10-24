@@ -1,5 +1,5 @@
 // Which rich body plan builds a creature unit (everything that is not a standing humanoid): the four-legged
-// beasts today, the birds, serpents, dragons, half-human bodies ... as each plan lands. A plan is a pair of
+// beasts, the birds, the serpents, dragons and hydra and the lizards today, half-human bodies ... as each plan lands. A plan is a pair of
 // functions: `supported(visual)` (can it dress this look) and `build(unitType, ctx)` (its rich template, shaped
 // like a humanoid's: { kind, rich: { spec, geo, attach, plan, ix, ... }, rig, parts: [], triangles, meshes }).
 // rich-humanoid.js asks this file, so it must not import rich-humanoid.js back.
@@ -7,11 +7,13 @@ import { unitContext, normalizeVisual } from './unit-bodies.js';
 import { quadSupported, buildQuadrupedTemplate } from './rich-quadruped.js';
 import { birdSupported, buildBirdTemplate } from './rich-bird.js';
 import { serpentSupported, buildSerpentTemplate } from './rich-serpent.js';
+import { reptileSupported, buildReptileTemplate } from './rich-reptile.js';
 
 const PLANS = [
   { supported: quadSupported, build: buildQuadrupedTemplate },
   { supported: birdSupported, build: buildBirdTemplate },
   { supported: serpentSupported, build: buildSerpentTemplate },
+  { supported: reptileSupported, build: buildReptileTemplate },
 ];
 
 /** The plan that dresses this unit type, or null (the unit keeps its low-poly model). */

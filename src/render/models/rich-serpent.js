@@ -60,10 +60,10 @@ const SPINE = {
 const SPINE_BONES = ['head', 'n3', 'n2', 'n1', 's0', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7'];
 
 /** The color of a glowing eye: the unit's own aura, lit, rather than the washed-out tint the humanoids' glow uses. */
-const glowEye = (pal) => withMat(mixC(pal.glow, pal.eyeGlow, 0.3), 'gem');
+export const glowEye = (pal) => withMat(mixC(pal.glow, pal.eyeGlow, 0.3), 'gem');
 
 /** The pale underside of a reptile: its skin lifted toward cream (the palette's belly mixes in the second tone, which muddies a blue or a gold skin). */
-const underside = (skin) => mixC(tintC(skin, 0.5), '#efe6c8', 0.4);
+export const underside = (skin) => mixC(tintC(skin, 0.5), '#efe6c8', 0.4);
 
 const polyDist = (pts) => {
   const segs = [];
@@ -144,10 +144,13 @@ function spineSpec(K, o) {
   return spec;
 }
 
-/** Scale diamonds over the body, the back toward the second tone (see backTone), the belly pale: u runs from the head to the tail. */
-function scalesPaint(len, o) {
-  const rows = Math.round(len * 12.5);
-  const per = 9;
+/**
+ * Scale diamonds over the body (square plates, grooved deeper, with `o.plates`), the back toward the second tone (see backTone), the
+ * belly pale: u runs along the loft. `o.rowsK` rows of scales to the unit of length (12.5), `o.per` of them round the ring (9).
+ */
+export function scalesPaint(len, o) {
+  const rows = Math.round(len * (o.rowsK ?? 12.5));
+  const per = o.per ?? 9;
   const { k, lo, hi } = backTone(o.skin, o.back, o.backK);
   // a loft hands its paint the angle round the ring as a fraction (0 at the top), not radians
   return (out, x, y, z, u, a) => {
@@ -159,24 +162,30 @@ function scalesPaint(len, o) {
     const f = row - i;
     const col = a * per + (i & 1) * 0.5;
     const cc = col - Math.floor(col);
-    const dd = Math.abs(f - 0.5) + Math.abs(cc - 0.5);
-    mul(out, 0.78 + 0.3 * smoothstep(0.62, 0.12, dd) + 0.05 * (hash(i, Math.floor(col), 3) - 0.5));
+    const dd = o.plates ? Math.max(Math.abs(f - 0.5), Math.abs(cc - 0.5)) * 1.3 : Math.abs(f - 0.5) + Math.abs(cc - 0.5);
+    mul(out, (o.plates ? 0.62 : 0.78) + (o.plates ? 0.46 : 0.3) * smoothstep(0.62, 0.12, dd) + 0.05 * (hash(i, Math.floor(col), 3) - 0.5));
     if (o.mark) o.mark(out, x, y, z, u, a);
   };
 }
 
 /** A ring round the body over the stations i0 .. i1, `k` times as thick as the body there. */
-function ring(kit, st, i0, i1, k, color, bind, opts = {}) {
+export function ring(kit, st, i0, i1, k, color, bind, opts = {}) {
   const sub = st.slice(Math.max(0, i0), Math.min(st.length, i1 + 1)).map((s) => ({ ...s, rx: s.rx * k, rz: s.rz * k }));
   kit.loft(sub, { ref: [0, 1, 0], sides: opts.sides ?? 18, start: null, end: null, color, mat: opts.mat, glow: opts.glow ?? 0, bind });
 }
 
-/** Spikes or locks of a mane along the back, from station `from` to `to` every `step`. */
-function dorsal(kit, st, bind, o) {
+/**
+ * Spikes or locks of a mane along the back, from station `from` to `to` every `step`: down the middle, or in two rows `o.a` radians
+ * either side of it. They sweep toward the tail: `o.flip` when the stations run from the tail to the head. `o.w` thickens the spikes
+ * (a crocodile's scutes are low and broad).
+ */
+export function dorsal(kit, st, bind, o) {
   const n = st.length;
-  for (let i = o.from; i <= Math.min(o.to, n - 1); i += o.step) {
+  for (const side of o.a ? [-1, 1] : [0]) for (let i = o.from; i <= Math.min(o.to, n - 1); i += o.step) {
     const s = st[i];
-    const { p, n: up, t } = ringPoint(st, i, 0);
+    const rp = ringPoint(st, i, side * (o.a ?? 0));
+    const { p, n: up } = rp;
+    const t = o.flip ? rp.t.map((c) => -c) : rp.t;
     const fade = 1 - 0.55 * Math.max(0, (i - n * 0.6) / (n * 0.4));
     const rv = s.rx;
     const sway = Math.sin(i * 1.3) * 0.5;
@@ -191,7 +200,7 @@ function dorsal(kit, st, bind, o) {
       const len = (0.04 + 0.95 * rv) * o.k * fade;
       spike(kit, {
         at: [p[0] - up[0] * 0.012, p[1] - up[1] * 0.012, p[2] - up[2] * 0.012], dir: [up[0] + t[0] * 0.45, up[1] + t[1] * 0.45, up[2] + t[2] * 0.45], len,
-        r: 0.02 * o.k + 0.05 * rv, bend: [t[0] * len * 0.2, -len * 0.05, t[2] * len * 0.2], color: o.color, mat: 'bone', bind, sides: 5, ref: t, flat: 0.5,
+        r: (0.02 * o.k + 0.05 * rv) * (o.w ?? 1), bend: [t[0] * len * 0.2, -len * 0.05, t[2] * len * 0.2], color: o.color, mat: 'bone', bind, sides: 5, ref: t, flat: 0.5,
       });
     }
   }

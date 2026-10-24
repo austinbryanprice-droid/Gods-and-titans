@@ -1,4 +1,4 @@
-// Tests for the rich creatures (High and Ultra): the beasts, birds, serpents and half-human bodies that are not on the
+// Tests for the rich creatures (High and Ultra): the beasts, birds, serpents, lizards and half-human bodies that are not on the
 // humanoid rig. src/render/models/rich-creatures.js picks a body plan by what a unit looks like; each plan builds one
 // smooth skinned mesh on its own skeleton (rich-quadruped.js, rich-bird.js ...) plus a few rigid pieces, and
 // rich-creature-anim.js poses it from the same pose keys as the low-poly rig (unit-anim.js). Low and Medium keep the
@@ -45,9 +45,10 @@ const SERPENTS = [['egyptian', 'egyptian_apep'], ['aztec', 'aztec_xiuhcoatl'], [
 const HYDRAS = [['japanese', 'japanese_yamata_no_orochi']];
 const DRAGONS = [['chinese', 'chinese_celestial_dragon'], ['mesopotamian', 'mesopotamian_tiamat'], ['west_african', 'west_african_ninki_nanka']];
 const LONG_BODIES = [...SERPENTS, ...DRAGONS];
+const LIZARDS = [['mesopotamian', 'mesopotamian_mushussu'], ['aztec', 'aztec_cipactli']];
 
 const look = ([pantheon, id]) => unitLook(UNITS[id], pantheon);
-const BY_ID = Object.fromEntries([...QUADRUPEDS, ...BIRDS, ...SERPENTS, ...HYDRAS, ...DRAGONS].map((pair) => [pair[1], look(pair)]));
+const BY_ID = Object.fromEntries([...QUADRUPEDS, ...BIRDS, ...SERPENTS, ...HYDRAS, ...DRAGONS, ...LIZARDS].map((pair) => [pair[1], look(pair)]));
 const unit = (id) => BY_ID[id];
 const withVisual = (u, change) => ({ ...u, visual: { ...u.visual, ...change(u.visual) } });
 
@@ -638,4 +639,131 @@ test('what a serpent wears comes from its visual: flames, spikes, a mane, antler
   apep.dispose();
   // a titan is thicker and glows with rune rings: it costs more than a plain serpent of the same body
   assert.ok(tri(unit('egyptian_apep')) > tri(unit('west_african_onini')), 'a titan serpent is richer than a minion');
+});
+
+// ---------------------------------------------------------------------------
+// lizards: a crocodile and a dragon-headed beast on the four-legged skeleton (rich-reptile.js)
+// ---------------------------------------------------------------------------
+
+test('the lizards are built by the rich builder, as far as it can dress them', () => {
+  for (const pair of LIZARDS) {
+    const u = look(pair);
+    assert.ok(creatureSupported(u), `${u.id} is a rich creature`);
+    assert.ok(richSupported(u), `${u.id} is supported`);
+  }
+  // only what the plan builds is let through: any other lizard keeps its low-poly model
+  const croc = unit('aztec_cipactli');
+  assert.ok(!richSupported(withVisual(croc, () => ({ weapon: 'sword' }))), 'a lizard holds nothing');
+  assert.ok(!richSupported(withVisual(croc, () => ({ headgear: 'crown' }))), 'a crocodile wears nothing on its head');
+  assert.ok(!richSupported(withVisual(croc, (v) => ({ extras: [...v.extras, 'wings'] }))), 'wings are not built on a lizard');
+  assert.ok(!richSupported(withVisual(croc, () => ({ heads: 2 }))), 'a lizard has one head');
+  assert.ok(!richSupported(withVisual(croc, () => ({ head: 'gorilla' }))), 'a head no plan has a table for');
+  const mushussu = unit('mesopotamian_mushussu');
+  for (const headgear of ['none', 'horns', 'antlers', 'crown']) assert.ok(richSupported(withVisual(mushussu, () => ({ headgear }))), `a dragon's head in ${headgear} is built`);
+  assert.ok(!richSupported(withVisual(mushussu, () => ({ headgear: 'helmet' }))), 'a dragon wears no helmet');
+  assert.ok(!richSupported(withVisual(mushussu, (v) => ({ extras: [...v.extras, 'rider'] }))), 'nobody rides it');
+});
+
+test('every lizard builds a valid skinned mesh inside the rich budget, on the four-legged skeleton', () => {
+  for (const pair of LIZARDS) {
+    const u = look(pair);
+    const tpl = buildRichTemplate(u);
+    assert.equal(tpl.kind, 'quadruped', `${u.id} keeps its kind so the low-poly animate switch still dispatches`);
+    assert.equal(tpl.rich.plan, 'quadruped', `${u.id} is posed like a four-legged beast`);
+    checkSkinned(u, tpl);
+    for (const name of ['root', 'hips', 'spine', 'chest', 'neck1', 'neck2', 'head', 'jaw', 'tail1', 'tail4', 'F1u', 'F-1l', 'B1p', 'B-1u']) {
+      assert.ok(tpl.rich.ix[name] !== undefined, `${u.id} has a ${name} bone`);
+    }
+    assert.equal(tpl.rich.ix.earR, undefined, `${u.id} has no ears`);
+    // the team's color is on the body (bands round a big one, a cloth on a small one)
+    const fx = tpl.rich.geo.attributes.aFx.array;
+    let team = 0;
+    for (let i = 0; i < fx.length; i += 4) if (fx[i] > 0.5) team++;
+    assert.ok(team > 30, `${u.id} wears the team's color`);
+  }
+});
+
+test('Low and Medium keep the low-poly lizards; High and Ultra swap in the rich ones', () => {
+  for (const pair of LIZARDS) {
+    const u = look(pair);
+    const base = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'base' });
+    assert.equal(base.rich, null, `${u.id} stays low-poly on Low and Medium`);
+    const rich = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'rich' });
+    assert.ok(rich.rich, `${u.id} is rich on High and Ultra`);
+    assert.ok(rich.root.getObjectByName('body')?.isSkinnedMesh, `${u.id}: one skinned body`);
+    for (const m of [base, rich]) m.dispose();
+  }
+});
+
+test('every lizard animates every state without a NaN, through the same pose keys', () => {
+  for (const pair of LIZARDS) {
+    const u = look(pair);
+    const m = buildUnitModel(u, PLAYER_COLORS[2], { detail: 'rich' });
+    runStates(m, u.id);
+    m.dispose();
+  }
+});
+
+test('a lizard stands with its elbows out to the sides and its trunk wags harder than a beast\'s as it walks', () => {
+  for (const pair of LIZARDS) {
+    const tpl = buildRichTemplate(look(pair));
+    const { ix, spec } = tpl.rich;
+    for (const side of ['1', '-1']) {
+      const [shoulder, elbow] = [`F${side}u`, `F${side}l`].map((n) => spec.pos[ix[n]]);
+      assert.equal(Math.sign(elbow[2]), Math.sign(shoulder[2]), `${pair[1]}: the elbow is on its own side`);
+      assert.ok(Math.abs(elbow[2]) > Math.abs(shoulder[2]) * 1.5, `${pair[1]}: the elbow stands out from the shoulder`);
+    }
+    assert.equal(tpl.rig.sprawl, true, `${pair[1]} sprawls, so it wags`);
+  }
+  assert.equal(buildRichTemplate(unit('norse_wolf_of_fenrir')).rig.sprawl, false, 'a beast keeps the plain gait');
+  const yaw = (model) => {
+    const out = [];
+    model.animate('idle', 0, 0, {});
+    for (let i = 0; i < 90; i++) {
+      model.animate('move', i / 30, 1 / 30, { moving: true });
+      out.push(model.rich.bones[model.rich.ix.spine].rotation.y);
+    }
+    return Math.max(...out) - Math.min(...out);
+  };
+  const croc = buildUnitModel(unit('aztec_cipactli'), PLAYER_COLORS[1], { detail: 'rich' });
+  const wolf = buildUnitModel(unit('norse_wolf_of_fenrir'), PLAYER_COLORS[1], { detail: 'rich' });
+  assert.ok(yaw(croc) > yaw(wolf) * 1.5, 'the lizard\'s spine bends further from side to side');
+  for (const m of [croc, wolf]) m.dispose();
+});
+
+test('a crocodile opens its jaws to bite and its legs and tail follow the walk', () => {
+  const m = buildUnitModel(unit('aztec_cipactli'), PLAYER_COLORS[1], { detail: 'rich' });
+  const ix = m.rich.ix;
+  const jaw = m.rich.bones[ix.jaw];
+  m.animate('idle', 0, 0, {});
+  const closed = jaw.rotation.z;
+  let open = closed;
+  for (let i = 0; i < 40; i++) {
+    m.animate('attack', i / 30, 1 / 30, { attackPhase: i / 40 });
+    open = Math.min(open, jaw.rotation.z);
+  }
+  assert.ok(open < closed - 0.15, `the jaw opens (${closed.toFixed(2)} -> ${open.toFixed(2)})`);
+  m.animate('idle', 0, 0, {});
+  const swing = [];
+  const tail = [];
+  for (let i = 0; i < 90; i++) {
+    m.animate('move', i / 30, 1 / 30, { moving: true });
+    swing.push(['F1u', 'F-1u', 'B1u', 'B-1u'].map((n) => m.rich.bones[ix[n]].rotation.z));
+    tail.push(m.rich.bones[ix.tail3].rotation.y);
+  }
+  const range = (a) => Math.max(...a) - Math.min(...a);
+  for (let k = 0; k < 4; k++) assert.ok(range(swing.map((x) => x[k])) > 0.3, `leg ${k} swings`);
+  assert.ok(range(tail) > 0.05, 'the tail waves');
+  m.dispose();
+});
+
+test('what a lizard wears comes from its visual: scutes down the back, the gear on a dragon\'s head', () => {
+  const tri = (u) => buildRichTemplate(u).triangles;
+  const croc = unit('aztec_cipactli');
+  assert.ok(tri(withVisual(croc, (v) => ({ extras: v.extras.filter((e) => e !== 'spikes') }))) < tri(croc) - 100, 'scutes cost triangles on top of the same body');
+  const mushussu = unit('mesopotamian_mushussu');
+  assert.ok(tri(withVisual(mushussu, () => ({ headgear: 'antlers' }))) > tri(withVisual(mushussu, () => ({ headgear: 'none' }))) + 100, 'antlers');
+  assert.ok(tri(withVisual(mushussu, (v) => ({ extras: v.extras.filter((e) => e !== 'spikes') }))) < tri(mushussu), 'spikes');
+  // a big one is a crocodile of titan size: thicker legs, a team-colored band round its barrel
+  assert.ok(tri(croc) > tri(mushussu), 'the titan crocodile is richer than the minion');
 });
