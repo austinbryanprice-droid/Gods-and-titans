@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, intro: true });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -109,4 +109,20 @@ test('timeOfDay: the day and night cycle by default, only the known times accept
   saveSettings({ timeOfDay: 'night' });
   _resetSettingsForTests();
   assert.equal(getSettings().timeOfDay, 'night');
+});
+
+test('intro: the film plays by default, only booleans accepted, remembered across reloads', () => {
+  assert.equal(getSettings().intro, true);
+  assert.equal(saveSettings({ intro: 'no' }).intro, true);
+  assert.equal(saveSettings({ intro: 0 }).intro, true);
+  const seen = [];
+  onSettingsChange((s, changed) => seen.push(changed));
+  assert.equal(saveSettings({ intro: false }).intro, false);
+  assert.deepEqual(seen, [['intro']]);
+  _resetSettingsForTests();
+  assert.equal(getSettings().intro, false);
+  // a save made before the setting existed has no key: the film is on
+  globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3 }));
+  _resetSettingsForTests();
+  assert.equal(getSettings().intro, true);
 });

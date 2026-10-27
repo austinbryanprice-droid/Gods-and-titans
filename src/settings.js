@@ -25,10 +25,10 @@ function cleanName(name) {
  * Defaults; the name gets 3 random digits once and is then saved. `tipsDismissed`
  * becomes true once the player closes (or finishes) the in-game "getting started" tips.
  * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
- * or one fixed time of day.
+ * or one fixed time of day. `intro` plays the intro film when the game opens (src/ui/intro.js).
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, intro: true };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -42,6 +42,7 @@ function sanitize(raw, base) {
   if (typeof raw.edgeScroll === 'boolean') out.edgeScroll = raw.edgeScroll;
   if (typeof raw.showAllBars === 'boolean') out.showAllBars = raw.showAllBars;
   if (typeof raw.tipsDismissed === 'boolean') out.tipsDismissed = raw.tipsDismissed;
+  if (typeof raw.intro === 'boolean') out.intro = raw.intro;
   return out;
 }
 
@@ -83,7 +84,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, intro: boolean }}
  */
 export function getSettings() {
   return load();

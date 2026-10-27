@@ -1,7 +1,7 @@
 // Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
 // as an HTML overlay in #menu-root over an animated night-sky backdrop.
 //
-//   const menu = createMenu({ root, onStart })   // onStart(launch) when a lobby starts
+//   const menu = createMenu({ root, onStart, onIntro })   // onStart(launch) when a lobby starts; onIntro() replays the intro film
 //   showMenu(screen = 'title')  /  hideMenu()
 //
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
@@ -73,9 +73,9 @@ function closeLobby(lobby) {
 
 /**
  * Build the menu inside `root`.
- * @param {{ root: HTMLElement, onStart: (launch: object) => void }} opts
+ * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void }} opts
  */
-export function createMenu({ root, onStart }) {
+export function createMenu({ root, onStart, onIntro = null }) {
   const params = urlParams();
   const useMock = params.get('mockLobby') === '1';
   const tOverride = params.get('transport');
@@ -1020,6 +1020,9 @@ export function createMenu({ root, onStart }) {
           h('div.mw-range-row', volume, volValue, testBtn)),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
+        h('div.mw-field', h('span.mw-label', 'Intro film'),
+          toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen. Esc skips it.'),
+          onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-watch', { type: 'button', onclick: () => onIntro() }, '▶ Watch it now') : null),
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),

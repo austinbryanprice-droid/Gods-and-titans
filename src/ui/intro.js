@@ -1,0 +1,283 @@
+// The intro film on the page (DESIGN 11.1): a full-screen overlay over the menu that plays the
+// film (src/intro/film.js, the real renderer on a set the simulation runs) between letterbox
+// bars with a line of text at a time, then hands over to the title screen. Esc (or Enter,
+// Space, or the Skip button) cuts it short at any moment, even while it is still loading.
+//
+//   if (introWanted({ enabled: settings.intro, search: location.search, ... })) {
+//     const intro = playIntro({ root, quality, onHandover: () => showMenu('title') });
+//     await intro.done;                                  // 'finished' | 'skipped' | 'failed'
+//   }
+//
+// Light by design: no video files, the film is drawn live; the renderer and the stage load
+// only when the film plays, and the renderer's GL context is freed before the title shows.
+import { h } from './menu-dom.js';
+import { FILM_LENGTH, AUDIO_CUES } from '../intro/script.js';
+import { sfx } from '../audio/sfx.js';
+
+const SKIP_KEYS = new Set(['Escape', 'Enter', ' ']);
+const DIP_MS = 320; // a skip dips to black this fast
+const REVEAL_MS = 900; // the black lifts off the title screen this slowly
+const SLOW_FRAME = 0.2; // seconds: a film that averages worse than this (5 fps) is dropped
+const SLOW_AFTER = 3.5; // film seconds before the speed check starts (the first frames compile shaders)
+const SLOW_WINDOW = 24; // frames averaged by the check
+
+/**
+ * Whether the film plays on this page load: the player's setting, unless the address says
+ * otherwise. `?intro=0` never; `?intro=1` always (screenshots, looking at it on purpose);
+ * an invite link (`?join=`), an automated browser and a reduced-motion preference skip it.
+ * Without WebGL 2 there is nothing to draw it with.
+ * @param {{ enabled?: boolean, search?: string, webdriver?: boolean, reducedMotion?: boolean, webgl2?: boolean }} o
+ */
+export function introWanted({ enabled = true, search = '', webdriver = false, reducedMotion = false, webgl2 = true } = {}) {
+  let q;
+  try {
+    q = new URLSearchParams(search);
+  } catch {
+    q = new URLSearchParams('');
+  }
+  const forced = q.get('intro');
+  if (forced === '0' || !webgl2) return false;
+  if (forced === '1') return true;
+  if (q.has('join') || webdriver || reducedMotion) return false;
+  return enabled !== false;
+}
+
+/** The renderer and the film: fetched only when the film plays. */
+async function defaultLoad() {
+  const [{ IntroFilm }, { GameRenderer }] = await Promise.all([import('../intro/film.js'), import('../render/game-renderer.js')]);
+  return { IntroFilm, Renderer: GameRenderer };
+}
+
+/** Let the browser paint once (a timer covers a hidden tab, where frames do not run). */
+function nextPaint() {
+  return new Promise((resolve) => {
+    const fallback = setTimeout(resolve, 100);
+    if (typeof requestAnimationFrame !== 'function') return;
+    requestAnimationFrame(() => setTimeout(() => {
+      clearTimeout(fallback);
+      resolve();
+    }, 0));
+  });
+}
+
+function buildOverlay(onSkip) {
+  const canvas = h('canvas.mw-intro-canvas', { 'aria-hidden': 'true' });
+  const caption = h('p.mw-intro-caption', { 'aria-live': 'polite' });
+  const skip = h('button.mw-intro-skip.mw-silent', { type: 'button', onclick: onSkip }, h('kbd', 'Esc'), h('span', 'Skip'));
+  const fade = h('div.mw-intro-fade', { 'aria-hidden': 'true' });
+  const loading = h('div.mw-intro-loading', { role: 'status' }, h('span.mw-intro-mark', 'Mythic War'), h('span.mw-intro-pulse', { 'aria-hidden': 'true' }));
+  const root = h('section.mw-intro', { 'aria-label': 'Intro film' },
+    canvas,
+    h('div.mw-intro-vignette', { 'aria-hidden': 'true' }),
+    h('div.mw-intro-bar.is-top', { 'aria-hidden': 'true' }),
+    h('div.mw-intro-bar.is-bottom', { 'aria-hidden': 'true' }, caption),
+    skip, fade, loading);
+  root.id = 'intro-root';
+  return { root, canvas, caption, skip, fade };
+}
+
+/**
+ * Play the film.
+ * @param {object} o
+ * @param {HTMLElement} [o.root] where the overlay goes (the page's #app)
+ * @param {'low'|'medium'|'high'|'ultra'} [o.quality] the renderer's quality tier (the player's setting)
+ * @param {() => void} [o.onHandover] called once, behind the black, when the title screen should show
+ * @param {boolean} [o.manual] tools and tests drive the film themselves (intro.advance moves it on, intro.draw paints a frame); no frame loop runs
+ * @param {boolean} [o.guard] drop the film on a machine too slow to show it
+ * @param {() => Promise<{ IntroFilm: Function, Renderer: Function }>} [o.load]
+ * @param {(ms: number) => Promise<void>} [o.wait]
+ * @param {{ play: Function }} [o.audio]
+ * @returns {{ done: Promise<'finished'|'skipped'|'failed'>, ready: Promise<void>, skip: () => void, advance: (dt: number) => void, draw: () => void, film: object|null, root: HTMLElement }}
+ */
+export function playIntro({
+  root = document.getElementById('app'),
+  quality = 'medium',
+  onHandover = () => {},
+  manual = false,
+  guard = true,
+  load = defaultLoad,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  audio = sfx,
+} = {}) {
+  let state = 'loading'; // loading → playing → leaving → done
+  let film = null;
+  let raf = 0;
+  let outcome = 'finished';
+  let finished = null;
+  const ui = buildOverlay(() => finish('skipped'));
+  root.appendChild(ui.root);
+  const done = new Promise((resolve) => (finished = resolve));
+
+  // The menu underneath never sees a key that skips the film (nor one held down, or pressed again
+  // while the black lifts): a second Enter must not press the title screen's Play.
+  const onKey = (e) => {
+    if (!SKIP_KEYS.has(e.key)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.repeat) finish('skipped');
+  };
+  const onResize = () => film && film.resize(ui.root.clientWidth || window.innerWidth, ui.root.clientHeight || window.innerHeight);
+  document.addEventListener('keydown', onKey, true);
+  window.addEventListener('resize', onResize);
+
+  // ---------------------------------------------------------------- the overlay follows the film
+
+  const shown = { fade: -1, bars: -1, caption: '', alpha: -1 };
+  let cue = 0;
+  function paint(view) {
+    const fade = Math.round(view.fade * 200) / 200;
+    if (fade !== shown.fade) {
+      shown.fade = fade;
+      ui.fade.style.opacity = String(fade);
+    }
+    const bars = Math.round(view.bars * 200) / 200;
+    if (bars !== shown.bars) {
+      shown.bars = bars;
+      ui.root.style.setProperty('--bars', String(bars));
+    }
+    const text = view.caption ? view.caption.text : '';
+    if (text !== shown.caption) {
+      shown.caption = text;
+      ui.caption.textContent = text;
+    }
+    const alpha = view.caption ? Math.round(view.caption.alpha * 100) / 100 : 0;
+    if (alpha !== shown.alpha) {
+      shown.alpha = alpha;
+      ui.caption.style.opacity = String(alpha);
+    }
+    while (cue < AUDIO_CUES.length && AUDIO_CUES[cue].at <= view.t) {
+      const c = AUDIO_CUES[cue++];
+      try {
+        audio.play(c.name, { volume: c.volume });
+      } catch {
+        // a sound that cannot play must not stop the film
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- the frame loop
+
+  let last = 0;
+  let slowSum = 0;
+  let slowFrames = 0;
+  /** The film (and the overlay with it) moves on by dt seconds; the end of the film leaves. */
+  function tick(dt) {
+    film.advance(dt);
+    paint(film.view);
+    if (film.done) finish('finished');
+  }
+  function frame(ts) {
+    if (state !== 'playing') return;
+    raf = requestAnimationFrame(frame);
+    const raw = last ? (ts - last) / 1000 : 0;
+    last = ts;
+    try {
+      film.advance(Math.min(0.1, Math.max(0, raw)));
+      film.draw(ts);
+      paint(film.view);
+    } catch (err) {
+      console.warn('[intro] a frame failed; leaving the film', err);
+      finish('failed');
+      return;
+    }
+    if (film.done) {
+      finish('finished');
+      return;
+    }
+    // A machine that cannot keep five frames a second should not sit through a slide show. A gap
+    // (a tab left and come back to) counts for at most half a second, so one pause is not "slow".
+    if (guard && film.t > SLOW_AFTER) {
+      slowSum += Math.min(raw, 0.5);
+      slowFrames++;
+      if (slowFrames >= SLOW_WINDOW) {
+        if (slowSum / slowFrames > SLOW_FRAME) finish('skipped');
+        slowSum = 0;
+        slowFrames = 0;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- loading
+
+  const ready = (async () => {
+    try {
+      const { IntroFilm, Renderer } = await load();
+      if (state !== 'loading') return;
+      await nextPaint(); // the title card reaches the screen before the renderer builds its scene in one go
+      if (state !== 'loading') return;
+      film = new IntroFilm({ canvas: ui.canvas, Renderer, quality });
+      film.resize(ui.root.clientWidth || window.innerWidth, ui.root.clientHeight || window.innerHeight);
+      film.advance(0.001); // the first frame (shader compiling) happens behind the card
+      film.draw(0);
+      paint(film.view);
+      await nextPaint();
+      if (state !== 'loading') return;
+      state = 'playing';
+      ui.root.classList.add('is-playing');
+      if (!manual) raf = requestAnimationFrame(frame);
+    } catch (err) {
+      console.warn('[intro] the film could not start', err);
+      finish('failed');
+    }
+  })();
+
+  // ---------------------------------------------------------------- leaving
+
+  function finish(reason) {
+    if (state === 'leaving' || state === 'done') return;
+    const wasPlaying = state === 'playing';
+    state = 'leaving';
+    outcome = reason;
+    if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
+    raf = 0;
+    leave(wasPlaying && reason !== 'finished').catch((err) => console.warn('[intro] leaving failed', err));
+  }
+
+  async function leave(dip) {
+    if (dip) {
+      ui.root.classList.add('is-skipping');
+      await wait(DIP_MS);
+    }
+    ui.root.classList.add('is-black'); // the picture is gone: the card is solid black before the renderer goes
+    if (film) {
+      try {
+        film.dispose();
+      } catch (err) {
+        console.warn('[intro] disposing the film failed', err);
+      }
+      film = null;
+    }
+    ui.canvas.remove();
+    try {
+      onHandover();
+    } catch (err) {
+      console.error('[intro] the hand-over failed', err);
+    }
+    ui.root.classList.add('is-revealing');
+    await wait(REVEAL_MS);
+    document.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('resize', onResize);
+    ui.root.remove();
+    state = 'done';
+    finished(outcome);
+  }
+
+  return {
+    done,
+    ready,
+    root: ui.root,
+    skip: () => finish('skipped'),
+    advance(dt) {
+      if (film && state === 'playing') tick(dt);
+    },
+    draw() {
+      if (film && state === 'playing') film.draw(0);
+    },
+    get film() {
+      return film;
+    },
+    get length() {
+      return FILM_LENGTH;
+    },
+  };
+}

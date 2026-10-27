@@ -1,0 +1,147 @@
+/* Mythic War — the intro film's overlay (DESIGN 11.1). A black card over the menu (z 20) that holds
+   the film's canvas, the letterbox bars (--bars: 0 open .. 1 closed, set by src/ui/intro.js), one line of
+   text at a time and the Skip button. Its state is classes on .mw-intro: is-playing (the film is up),
+   is-skipping (dipping to black), is-black (the picture is gone), is-revealing (the black lifts off the title). */
+
+.mw-intro {
+  --bars: 0;
+  --bar-h: clamp(2.6em, 12vh, 10em);
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  background: #000;
+  color: var(--mw-ink);
+  font-family: var(--mw-font-ui);
+  font-size: clamp(13px, calc(1.25vmin + 5px), 40px);
+  line-height: 1.4;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mw-intro-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* a soft darkening toward the corners, so the picture sits in the frame */
+.mw-intro-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, transparent 58%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+.mw-intro-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: calc(var(--bars) * var(--bar-h));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+  pointer-events: none;
+}
+.mw-intro-bar.is-top { top: 0; }
+.mw-intro-bar.is-bottom { bottom: 0; }
+
+.mw-intro-caption {
+  margin: 0;
+  padding: 0 4%;
+  max-width: 100%;
+  font: 600 clamp(0.95em, 2.5vh, 2.1em) / 1.2 var(--mw-font-display);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em; /* the last letter's spacing would pull the line off centre */
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--mw-gold-hi);
+  text-shadow: 0 0 0.9em rgba(227, 184, 79, 0.4), 0 1px 2px rgba(0, 0, 0, 0.9);
+  opacity: 0;
+}
+
+.mw-intro-skip {
+  position: absolute;
+  top: 1.1em;
+  right: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.5em 0.9em 0.5em 0.6em;
+  font: 600 0.8em / 1 var(--mw-font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mw-ink-dim);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--mw-line-soft);
+  border-radius: 0.35em;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, opacity 0.3s;
+}
+.mw-intro-skip:hover { color: var(--mw-gold-hi); border-color: var(--mw-gold); }
+.mw-intro-skip:focus-visible { outline: none; box-shadow: var(--mw-focus); }
+
+/* the dips between shots, the fade in and the fade out: opacity is set each frame by the page */
+.mw-intro-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* the card shown while the film's code and its first frame are made */
+.mw-intro-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 1.4em;
+  background: radial-gradient(ellipse at 50% 42%, #101830, #000 72%);
+  transition: opacity 0.7s ease;
+}
+.mw-intro-mark {
+  font: 700 clamp(1.4em, 4.2vmin, 3em) / 1 var(--mw-font-display);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: uppercase;
+  color: var(--mw-gold-hi);
+  text-shadow: 0 0 0.8em rgba(227, 184, 79, 0.35);
+}
+.mw-intro-pulse {
+  width: 8em;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--mw-gold), transparent);
+  animation: mw-intro-pulse 1.6s ease-in-out infinite;
+}
+@keyframes mw-intro-pulse {
+  0%, 100% { transform: scaleX(0.3); opacity: 0.25; }
+  50% { transform: scaleX(1); opacity: 0.9; }
+}
+
+.mw-intro.is-playing .mw-intro-loading { opacity: 0; pointer-events: none; }
+
+/* a skip: the picture dips to black quickly (the page waits for this before it frees the renderer) */
+.mw-intro.is-skipping .mw-intro-fade { opacity: 1 !important; transition: opacity 0.32s ease-in; }
+.mw-intro.is-skipping .mw-intro-skip,
+.mw-intro.is-skipping .mw-intro-caption { opacity: 0 !important; transition: opacity 0.2s; }
+
+/* solid black, then the title screen under it comes up as the black lifts */
+.mw-intro.is-black .mw-intro-fade { opacity: 1 !important; transition: none; }
+.mw-intro.is-black .mw-intro-loading,
+.mw-intro.is-black .mw-intro-skip,
+.mw-intro.is-black .mw-intro-caption { opacity: 0 !important; transition: none; }
+.mw-intro.is-revealing { opacity: 0; pointer-events: none; transition: opacity 0.9s ease; }
+
+/* the Settings screen's "Watch it now" sits under its toggle, not stretched across the field */
+.mw-intro-watch { align-self: flex-start; margin-top: 0.3em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mw-intro-pulse { animation: none; opacity: 0.7; }
+}
