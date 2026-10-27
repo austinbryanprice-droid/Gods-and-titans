@@ -21,6 +21,7 @@ const { ViewState } = await import('../../src/game/view-state.js');
 const { PLAYER_COLORS, DT } = await import('../../src/config.js');
 const { DEFAULT_LOOK } = await import('../../src/render/post.js');
 const { pixelsPerTile } = await import('../../src/render/zoom-lod.js');
+const { SUN_DIR } = await import('../../src/render/shading.js');
 
 const W = 1280;
 const H = 720;
@@ -209,6 +210,69 @@ test('zoom: the original range keeps every model and detail level in a short win
   r.dispose();
 });
 
+test('zoom: a free camera (the intro film) keeps the look the game had, at any distance', () => {
+  const { world, r, webgl, step } = makeMatch({ quality: 'high' });
+  assert.ok(crowd(world, r) > 40);
+  r.resize(W, 360); // few pixels a tile: by the pixels alone every level would be in use
+  const t = r.camera.target;
+  r.camera.setDistance(CAMERA_DEFAULTS.defaultDistance, true);
+  step(0.2);
+  const hazeFar = r.scene.fog.far - r.camera.distance;
+  // the film's opening framing, far out
+  r.camera.setFree({ x: t.x, y: t.y, dist: 74, pitch: 26, yaw: 62, lift: 0, fov: 38 });
+  step(0.5);
+  assert.equal(r.camera.distance, 74);
+  assert.equal(r.zoomDistance, CAMERA_DEFAULTS.midDistance, 'the zoom curves see the old range at most');
+  assert.deepEqual({ stride: r.lod.stride, forestFar: r.lod.forestFar }, { stride: 1, forestFar: false });
+  assert.equal(r.terrain.stride, 1);
+  assert.equal(r.forest.far, false);
+  assert.equal(r.farUnits.mesh.count, 0, 'every model is drawn');
+  assert.equal(r.sun.shadow.intensity, 1, 'the sun shadow is whole');
+  assert.equal(webgl.shadowMap.autoUpdate, true);
+  assert.equal(r.post.look.aoStrength, DEFAULT_LOOK.aoStrength);
+  assert.ok(Math.abs((r.scene.fog.far - r.camera.distance) / hazeFar - 1) < 0.02, 'the haze is the one it was');
+  // handed back to the player's controls, the same distance is a wide view again
+  r.camera.setFree(null);
+  r.camera.setDistance(74, true);
+  step(0.5);
+  assert.equal(r.zoomDistance, 74);
+  assert.ok(r.sun.shadow.intensity < 0.5, `${r.sun.shadow.intensity}`);
+  assert.equal(r.lod.stride, 4);
+  assert.equal(r.forest.far, true);
+  assert.ok(r.farUnits.mesh.count > 20, `${r.farUnits.mesh.count} markers`);
+  r.dispose();
+});
+
+test('zoom: a marker reaches from the unit\'s foot to the top of its model, a flyer\'s too', () => {
+  const { world, r, step } = makeMatch();
+  const cx = r.camera.target.x;
+  const cy = r.camera.target.y;
+  const pegasus = world.spawnUnit(0, 'greek_pegasus', cx, cy, { silent: true });
+  const warrior = world.spawnUnit(0, 'warrior', cx + 3, cy, { silent: true });
+  assert.ok(pegasus && warrior);
+  r.lodPin = { unitFar: true };
+  step(0.4);
+  const a = r.farUnits.mesh.instanceMatrix.array;
+  const markerOf = (v) => {
+    for (let i = 0; i < r.farUnits.mesh.count; i++) {
+      if (Math.abs(a[i * 16 + 12] - v.x) < 0.01 && Math.abs(a[i * 16 + 14] - v.y) < 0.01) return { foot: a[i * 16 + 13], top: a[i * 16 + 13] + a[i * 16 + 5], width: a[i * 16] };
+    }
+    return null;
+  };
+  assert.equal(r.units.get(pegasus.id).air, true);
+  for (const e of [pegasus, warrior]) {
+    const v = r.units.get(e.id);
+    assert.ok(v && v.far, `${e.type} is a marker`);
+    const m = markerOf(v);
+    assert.ok(m, `${e.type} has its instance`);
+    assert.ok(Math.abs(m.top - (v.gh + v.height)) < 0.01, `${e.type}: the marker's top ${m.top.toFixed(2)} is the model's ${(v.gh + v.height).toFixed(2)}`);
+    assert.ok(m.foot > v.gh && m.foot < v.gh + v.height * 0.6, `${e.type}: it stands at the foot`);
+  }
+  const fp = markerOf(r.units.get(pegasus.id));
+  assert.ok(fp.foot - r.units.get(pegasus.id).gh > 1.5, 'the flyer\'s marker hovers');
+  r.dispose();
+});
+
 test('zoom: a unit that dies as a marker plays its death on the model', () => {
   const { world, r, step } = makeMatch();
   const cx = r.camera.target.x;
@@ -230,6 +294,31 @@ test('zoom: a unit that dies as a marker plays its death on the model', () => {
   assert.ok(dying, 'the death animation started');
   assert.equal(dying.far, false);
   assert.equal(dying.model.root.visible, true, 'the dying unit is drawn');
+  r.dispose();
+});
+
+test('zoom: the light still turns with the day while the sun shadow is not drawn', () => {
+  const { r, webgl, step } = makeMatch({ quality: 'high' });
+  const along = () => r.sun.position.clone().sub(r.sun.target.position).normalize();
+  r.camera.setDistance(CAMERA_DEFAULTS.defaultDistance, true);
+  r.setTimeOfDay(9);
+  step(0.2);
+  assert.equal(webgl.shadowMap.autoUpdate, true);
+  assert.ok(along().distanceTo(SUN_DIR.clone().normalize()) < 1e-6, 'the light is the sun with its shadow');
+  r.camera.setDistance(CAMERA_DEFAULTS.maxDistance, true);
+  step(0.2);
+  assert.equal(webgl.shadowMap.autoUpdate, false, 'the shadow pass is skipped');
+  const morning = along();
+  r.setTimeOfDay(16);
+  step(0.2);
+  const afternoon = along();
+  assert.ok(afternoon.distanceTo(morning) > 0.1, 'the light moved with the sun');
+  assert.ok(afternoon.distanceTo(SUN_DIR.clone().normalize()) < 1e-6, 'and is the sun, with no shadow fitted');
+  // zooming back in fits the shadow again, along the same light
+  r.camera.setDistance(CAMERA_DEFAULTS.defaultDistance, true);
+  step(0.2);
+  assert.equal(webgl.shadowMap.autoUpdate, true);
+  assert.ok(along().distanceTo(afternoon) < 1e-6);
   r.dispose();
 });
 

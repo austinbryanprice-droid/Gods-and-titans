@@ -22,7 +22,7 @@ import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
 import { CameraController, CAMERA_DEFAULTS } from './camera.js';
-import { hazeStretch, shadowShare, aoShare, overlayScale, crowdScale, ringLineScale, ringRadiusScale, detailPixels, terrainStride, forestFar, unitFar } from './zoom-lod.js';
+import { hazeStretch, shadowShare, aoShare, overlayScale, crowdScale, ringLineScale, ringRadiusScale, detailPixels, terrainStride, forestFar, unitFar, NEAR_RANGE } from './zoom-lod.js';
 import { FarUnits } from './far-units.js';
 import { FogOfWar, patchFowObject, FOW_UNIFORMS } from './fog.js';
 import { createTerrain, WATER_LEVEL } from './terrain.js';
@@ -1282,6 +1282,15 @@ export class GameRenderer {
   }
 
   /**
+   * The camera distance the zoom curves (zoom-lod.js) go by: the player's zoom. While the camera is free (the intro
+   * film) it is never past the original range: those framings are authored, and keep the look the game had for them.
+   */
+  get zoomDistance() {
+    const cam = this.camera;
+    return cam.free ? Math.min(cam.distance, NEAR_RANGE) : cam.distance;
+  }
+
+  /**
    * The detail levels of the zoom (zoom-lod.js): by pixels on the screen and only past the original zoom range, one
    * step for the whole ground mesh and all the forest, and the unit markers decided per unit in syncUnits. `lodPin`
    * overrides a level.
@@ -1289,7 +1298,7 @@ export class GameRenderer {
   updateLod() {
     const lod = this.lod;
     const pin = this.lodPin;
-    const ppt = (lod.ppt = detailPixels(this.camera.distance, this.viewH)); // Infinity inside the old zoom range
+    const ppt = (lod.ppt = detailPixels(this.zoomDistance, this.viewH)); // Infinity inside the old zoom range
     const stride = pin && pin.stride !== undefined ? pin.stride : terrainStride(ppt, lod.stride);
     if (stride !== lod.stride) {
       lod.stride = stride;
@@ -1409,8 +1418,10 @@ export class GameRenderer {
         if (far) {
           // (the fader shows the model again for each step of a fade: keep it hidden)
           v.model.root.visible = false;
-          const wide = Math.min(2.2, Math.max(1, v.radius / (0.28 * v.height)));
-          farUnits.add(x, footY, y, v.height, wide, v.model.teamColor, v.fade);
+          // (from the foot to the model's top: a flyer's height counts from the ground, but its foot is up at the hover)
+          const markerH = Math.max(0.3, gh + v.height - footY);
+          const wide = Math.min(2.2, Math.max(1, v.radius / (0.28 * markerH)));
+          farUnits.add(x, footY, y, markerH, wide, v.model.teamColor, v.fade);
           v.skipped = Math.min(0.5, v.skipped + dt);
         } else onScreen.push(v);
       } else {
@@ -1754,7 +1765,7 @@ export class GameRenderer {
 
   /** Size factor for screen-reading overlays: a bit bigger when zoomed out (zoom-lod.js). */
   zoomK() {
-    return overlayScale(this.camera.distance, CAMERA_DEFAULTS.defaultDistance);
+    return overlayScale(this.zoomDistance, CAMERA_DEFAULTS.defaultDistance);
   }
 
   updateOverlays(dt) {
@@ -1763,10 +1774,11 @@ export class GameRenderer {
     const bars = this.bars;
     const zk = this.zoomK();
     // what is drawn over a crowd (a unit's bar width, rank pips) grows with the zoom more slowly than the rest
-    const ck = crowdScale(this.camera.distance, CAMERA_DEFAULTS.defaultDistance);
+    const zd = this.zoomDistance;
+    const ck = crowdScale(zd, CAMERA_DEFAULTS.defaultDistance);
     // selection and hover rings: thicker, and for units wider, when the view is far (zoom-lod.js)
-    const ringLine = ringLineScale(this.camera.distance);
-    const ringRadius = ringRadiusScale(this.camera.distance);
+    const ringLine = ringLineScale(zd);
+    const ringRadius = ringRadiusScale(zd);
     const blobs = this.blobs;
     // (a unit's own shadow is the lighter blob's partner: when the sun's shadow fades out with the zoom the blob takes over)
     let blobAlpha = this.unitsCastShadows() ? 0.36 - 0.16 * this.shadowShare : 0.36;
@@ -1971,7 +1983,7 @@ export class GameRenderer {
     if (!this.sun.castShadow) return;
     // zoomed far out the shadows fade and then stop being drawn (their map would cover less than the view, and
     // they would be a pixel wide); a map that is not redrawn is never read at intensity 0
-    const share = shadowShare(this.camera.distance);
+    const share = shadowShare(this.zoomDistance);
     this.sun.shadow.intensity = share;
     this.shadowShare = share;
     const live = share > 0.002;
@@ -1979,7 +1991,11 @@ export class GameRenderer {
       this.renderer.shadowMap.autoUpdate = live;
       if (live) this.renderer.shadowMap.needsUpdate = true;
     }
-    if (!live) return;
+    if (!live) {
+      // nothing to fit, but the light still turns with the day (the map is redrawn, and fitted, on the way back in)
+      this.sun.position.copy(this.sun.target.position).addScaledVector(SUN_DIR, this.shadowR + 40);
+      return;
+    }
     const quad = this.camera.getViewQuad(this._quad || (this._quad = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }]));
     let cx = 0;
     let cy = 0;
@@ -2066,7 +2082,8 @@ export class GameRenderer {
     // the haze is measured from the point the camera looks at, so zooming out does not fog the middle of the view
     const fog = this.scene.fog;
     const lookDist = this.camera ? this.camera.distance : CAMERA_DEFAULTS.defaultDistance; // the first call comes before the camera exists
-    const stretch = hazeStretch(lookDist); // a wide view keeps its far edge out of the haze
+    const zoomDist = this.camera ? this.zoomDistance : lookDist;
+    const stretch = hazeStretch(zoomDist); // a wide view keeps its far edge out of the haze
     fog.color.copy(s.haze);
     fog.near = Math.max(0.5, lookDist + s.hazeNear * stretch);
     fog.far = Math.max(fog.near + 1, lookDist + s.hazeFar * stretch);
@@ -2086,7 +2103,7 @@ export class GameRenderer {
       look.highlightTint = s.highlightTint;
       look.vignette = s.vignette;
       look.glow = s.glow;
-      look.aoStrength = DEFAULT_LOOK.aoStrength * aoShare(lookDist); // gone when the view is wide (nothing to occlude at a pixel)
+      look.aoStrength = DEFAULT_LOOK.aoStrength * aoShare(zoomDist); // gone when the view is wide (nothing to occlude at a pixel)
       look.glowColor[0] = s.skyHorizon.r;
       look.glowColor[1] = s.skyHorizon.g;
       look.glowColor[2] = s.skyHorizon.b;

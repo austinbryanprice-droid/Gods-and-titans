@@ -1474,7 +1474,7 @@ per-frame budget, so a revealed army appears over a few frames.
   edge of a wide view keeps about the haze the old far view had instead of fading into it);
   `shadowShare` (the sun's shadow fades out between 48 and 88 tiles, the blob shadows under units
   take over, and from 88 the shadow pass is skipped: `shadowMap.autoUpdate` off, redrawn at once
-  when the camera comes back); `aoShare` (ambient occlusion on high / ultra fades out between 60
+  when the camera comes back; the light itself keeps turning with the day); `aoShare` (ambient occlusion on high / ultra fades out between 60
   and 110, the pass is skipped at 0); `overlayScale` (bars' thickness, status icons, floating
   text: the old curve, then growing with d^0.8 so the drawn size falls slowly); `crowdScale` (a
   unit's bar width and rank pips, d^0.5: an army of a hundred units a few pixels tall each does
@@ -1502,10 +1502,14 @@ per-frame budget, so a revealed army appears over a few frames.
   them. (3) `unitFar`: a unit under 11 pixels tall on the screen (back to the model from 14),
   once the camera is past the old range and the view is under 20 pixels a tile (back from 22), is a marker:
   `far-units.js`, one instanced 54-triangle figure in its team colour for all of them (fog of war,
-  fade-in and the blob shadow as for models); its model is hidden and not animated, and a unit
+  fade-in and the blob shadow as for models), as tall as the unit from its foot to the top of its
+  model (a flyer's from its hover, not from the ground); its model is hidden and not animated, and a unit
   that dies as a marker plays its death on its model. The levels are driven by
   `GameRenderer.updateLod()` and `syncUnits`; `renderer.lodPin = { stride, forestFar, unitFar }`
-  pins any of them (tools and tests). Measured at low, 1280x720, the late game, 170 tiles: 1830
+  pins any of them (tools and tests). Every curve above goes by `GameRenderer.zoomDistance`, the
+  camera's distance, except while the camera is free (the intro film, 11.1): its authored framings
+  (74 tiles out at the start) never see more than the old range, so the film keeps the look it was
+  made for. Measured at low, 1280x720, the late game, 170 tiles: 1830
   to 420 draw calls, 2.2 M to 0.5 M triangles, about 2.5 times less time per frame under software
   GL (`tools/shot-zoom.mjs`: the same view at any distances with the levels auto, pinned `full`
   or pinned `far`, stills and the cost table; the harness has a `late` scenario for it). Tests:
