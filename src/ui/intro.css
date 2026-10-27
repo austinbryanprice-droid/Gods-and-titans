@@ -1,4 +1,4 @@
-/* Mythic War — the intro film's overlay (DESIGN 11.1). A black card over the menu (z 20) that holds
+/* Mythic War — the intro film's overlay (DESIGN 11.1). A black card over the menu (z 30) that holds
    the film's canvas, the letterbox bars (--bars: 0 open .. 1 closed, set by src/ui/intro.js), one line of
    text at a time and the Skip button. Its state is classes on .mw-intro: is-playing (the film is up),
    is-skipping (dipping to black), is-black (the picture is gone), is-revealing (the black lifts off the title). */

@@ -1015,7 +1015,8 @@ const r = new GameRenderer(canvas, { viewState, setup, quality: 'low'|'medium'|'
 r.update(dtSeconds);   // sync meshes from viewState (interpolated positions), animate, VFX from events
 r.render(rafTimestamp); // the timestamp feeds adaptive resolution (optional)
 r.resize(w, h);
-r.camera              // CameraController: target {x, y}, pan(dx, dy) tiles, zoomBy(steps), centerOn(x, y), getViewQuad() → 4 {x,y} ground corners
+r.camera              // CameraController: target {x, y}, pan(dx, dy) tiles, zoomBy(steps), centerOn(x, y), getViewQuad() → 4 {x,y} ground corners,
+                       // setFree(pose | null): an orbit pose {x, y, dist, pitch, yaw, lift, fov} read every update (the intro film, 11.1)
 r.screenToWorld(sx, sy) → {x, y} | null      // ground point (raycast vs terrain)
 r.pickEntity(sx, sy) → id | null             // visible entity under the cursor (projected-position pick, buildings by footprint)
 r.entitiesInRect(x0, y0, x1, y1) → [ids]     // units whose projected position is inside the screen rect
@@ -1521,7 +1522,7 @@ per-frame budget, so a revealed army appears over a few frames.
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
-  (name, volume, graphics quality, time of day, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, intro film with a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier.
@@ -1699,6 +1700,98 @@ marker writes its words in the message area), see 7 and 9. Game over → overlay
 battlefield…" covers the empty canvas while the renderer's code loads and its scene builds. In a
 single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim.
 
+### 11.1 Intro film (src/intro/, src/ui/intro.js)
+
+A 47 s film plays when the page opens and ends on the title screen, before the player can press Play: a flyover
+of a Greek village at dawn, its worshippers praying and Zeus answering at the temple, the army marching out, the
+two hosts clashing, Kronos and Surtr stepping out of their gates, and ten gods, one of each mythology, called up
+in a line as the sun goes down. It is drawn live, by the real renderer on a world the real simulation runs, so it
+needs no video file, follows the quality tier and shows the game as it is. Esc, Enter, Space or the Skip button
+end it at any moment, even while it loads (a quick dip to black, then the title); the title screen under it never
+sees those keys, so a second Enter cannot press Play.
+
+**When it plays** (`introWanted`, `src/ui/intro.js`): once per page load, only at the start (never after a match).
+The `intro` setting (`src/settings.js`, default true; Settings, "Intro film") turns it off for good, and Settings
+has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
+the setting: `?intro=0` never, `?intro=1` always. Without `?intro=1`, an invite link (`?join=`), an automated
+browser (`navigator.webdriver`: the e2e tests) and `prefers-reduced-motion` skip it; a browser without WebGL 2
+never plays it. A film that cannot start, or whose frame throws, is dropped (`'failed'`); on a machine that averages worse than
+5 fps over 24 frames (after the first 3.5 film seconds, where shaders compile) the film is skipped (`'skipped'`).
+The menu is hidden while it plays and shown again behind the black when it ends; the game's own code is fetched
+(`warmUp`) after it, so the film has the machine to itself, and the film's renderer is freed before the title
+shows. Its sounds are cues in the game's synthesized set (`sfx`), silent on a first visit until a click or key
+lets the browser start audio.
+
+**The script** (`src/intro/script.js`, pure data and arithmetic, no DOM, three.js or simulation): `SHOTS` (each
+with its `from` / `to` seconds, the `cut` into it, `hours` of the day it runs through, `ease`, and a camera of
+specs `{ at, dx, dy, dist, pitch, yaw, lift, fov }`: the camera orbits a named point at `dist` and `pitch` degrees
+below the horizon, `yaw` degrees round from due south, `lift` above the ground), `CAPTIONS`, `AUDIO_CUES` and the
+curves `hourAt`, `fadeAt` (in from black, dips at `dip` cuts, out to black), `barsAt` (the letterbox), `captionAt`
+and `cameraAt(t, locate, out)`. The names are anchors of the set, actors (`zeus`, `kronos`, `surtr`, `thor`) or
+`crowd` (the middle of the soldiers, gods weighing three); the film resolves them every frame, so a camera on a
+god follows the real one.
+
+| shot | seconds | cut | what is on screen | hours |
+|---|---|---|---|---|
+| dawn | 0 – 8.6 | fade in | the village at work from far out, pulling in ("Raise a city of the faithful") | 6.9 – 8 |
+| prayer | 8.6 – 15 | hard | the temple and its faithful; at 11.5 a pillar of light and Zeus ("Pray. Summon the gods.") | 8 – 8.8 |
+| god | 15 – 19 | hard | Zeus in profile with the temple behind, lightning in hand, then marching out | 8.8 – 9.2 |
+| war | 19 – 25 | dip | the two hosts closing across the meadow, seen from the north ("Lead them to war") | 9.8 – 11.6 |
+| melee | 25 – 30 | hard | inside the clash, ultimates let off from 25 s | 11.6 – 14.4 |
+| titans | 30 – 36 | hard | Kronos and Surtr arrive at 29.5 ("Unleash the titans") | 14.4 – 17.2 |
+| lineup | 36 – 47 | dip | ten pillars of light in a ripple, ten gods in a line at dusk, a push in, fade out ("Ten mythologies. One war.") | 18.6 – 20.3 |
+
+The hour only moves forward through the film, and a jump between shots (the dips at 19 and 36 s hide them) is
+always behind a dip to black; the tests keep both rules, and that no caption straddles a dip.
+
+**The stage** (`src/intro/stage.js`, Node-runnable, no renderer): seed 12345 on the small map, a Greek village
+at the north-west start (a Town Center at tier 3 with a house or two under construction, barracks, shrine,
+temple, Titan Gate, towers, a crew mining, cutting and building) and a Norse host across a meadow, played by the
+real `World` with no AI and no player; `mapData.camps = []` and a glade of forest cut away for the finale
+(`clearForest`). A `ViewState` with `myIndex: -1` (a spectator: nothing hidden) is fed a snapshot per tick as in
+a match, minus the events a film does not want on screen (`levelUp`, `rankUp`, `bounty`, `error`). `advance(dt)`
+runs at most 12 ticks (a stalled frame does not make the sim catch up). The scripted cues (`CUE_TIMES`): Zeus is
+summoned at 11.5, the garrison and Zeus march at 17.5, the host marches at 19, Kronos and Surtr appear at 29.5
+and the ten gods at 36.7 + 0.3 s apiece (the Norse are removed at the first, the gods `hold`, and `stage.finale`
+keeps `castSpells` from drawing them into anything). Soldiers have 3× (Greek) and 2× (Norse) health so the clash
+lasts the film's seconds; gods are level 5 (everything unlocked) and cast a ready ability once a second at the
+nearest enemy, ultimates only from 25 s. The same film every time (the tests compare two runs). Density 0.6
+(low quality) thins the cast.
+
+**The film** (`src/intro/film.js`): `IntroFilm({ canvas, Renderer, quality })` owns the clock (`advance(dt)`,
+at most 0.1 s a frame; `draw`; `view` = `{ t, fade, bars, caption }` for the overlay). Each frame it advances the
+stage, eases each named subject's look-at point toward where it is (`FOLLOW` 5 per second; a cut clears them, so a
+shot starts on its subject), writes the script's camera into `pose`, which the renderer's camera reads through
+`CameraController.setFree(pose)` (it ignores the zoom limits, the map edge and the easing; `lift` raises the
+look-at point), sets the hour with `renderer.atmo.setMode(hourAt(t))` and `renderer.update(dt)` (not
+`setTimeOfDay` every frame, which would bake the environment map again each time). The renderer is otherwise
+the game's: shadows, post-processing, foliage and (high and ultra) the rich characters, with the overlays a film
+does not want taken out (health bars, rank pips, status icons) and the terrain's dark border mist hidden.
+`FilmSky` (`src/intro/sky.js`) is a dome round the camera painted from the hour's look (horizon to zenith, the sun
+and moon discs where they stand, cloud streaks, stars at night, the haze below the horizon), because the low shots
+look past the edge of the map, which the game's camera never does.
+
+**The page** (`src/ui/intro.js`, `src/ui/intro.css`): `playIntro({ root, quality, onHandover, … })` builds an
+overlay (z 30, over the menu) of a black card with the title and a pulse while the code loads (`import()`ed only
+when the film plays, so it costs nothing for players who skip it), the film's canvas, a vignette, letterbox bars
+that close over the film (the caption sits in the bottom bar), the Skip button and a black fade layer. It states
+`loading → playing → leaving → done`; `leave` dips to black (320 ms, unless the film ran to its own end), frees the film, calls
+`onHandover` once (the title appears underneath) and lifts the black over 900 ms. `manual: true` is for tools and
+tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no frame loop runs).
+
+**Looking at it**: `node tools/shot-intro.mjs --at 2,16,26,38 --sheet` renders stills (the film runs in manual
+mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
+changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
+plays, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`). Don't sample stills at
+19 or 36 s, the dips' black frames. Tests: `tests/intro/{script,stage,film}.test.js`,
+`tests/render/camera-free.test.js`, `tests/ui/intro.test.js`.
+
+Traps met while making it: the summon pillar of a god or titan (about 8 tiles tall, 1.75 s) washes out a close
+frame, so the finale starts wide; `summon_god` plays at most once a second; an idle or held god auto-acquires
+enemies, which is why the finale removes the Norse first; in software GL the page submits frames much faster than
+they are drawn, so freeing the renderer waits for the backlog (half a minute in headless Chromium, nothing on a
+GPU), which `--flow` allows for.
+
 ## 12. Repository layout & ownership
 
 ```
@@ -1713,8 +1806,10 @@ src/render/models/*.js             model owners
 src/render/vfx.js                  VFX owner
 src/ui/hud.js, hud.css, input.js, command-card.js, minimap.js  HUD owner
 src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
+src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)
+tools/shot-intro.mjs              stills of the intro film and its page flow (11.1)
 notes/                             decisions.md, interface-requests.md (append-only)
 ```

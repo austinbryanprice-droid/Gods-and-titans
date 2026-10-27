@@ -185,6 +185,33 @@ async function flow(browser, errors) {
     await ctx.close();
   }
 
+  // Settings: the toggle is saved, and "Watch it now" plays the film and comes back to Settings (not the title)
+  {
+    const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
+    const page = await ctx.newPage();
+    watchErrors(page, errors);
+    await page.goto(`${base}?intro=0`);
+    await page.waitForSelector('.mw-title-screen');
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.waitForSelector('.mw-intro-watch');
+    const row = page.locator('.mw-toggle', { hasText: 'Play it when the game opens' });
+    const box = row.locator('input');
+    ok('settings: the intro toggle starts on', await box.isChecked());
+    await page.screenshot({ path: join(out, 'flow-settings.png') });
+    await row.click(); // the checkbox itself is hidden under its styled track
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mythicwar-settings')).intro);
+    ok('settings: turning it off is saved', saved === false);
+    await row.click();
+    ok('settings: and on again', await box.isChecked());
+    await page.click('.mw-intro-watch');
+    await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
+    ok('settings: "Watch it now" plays the film', true);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.mw-intro', { state: 'detached', timeout: 180000 });
+    ok('settings: Esc comes back to the Settings screen', !!(await page.$('.mw-intro-watch')) && !(await page.$('.mw-title-screen')));
+    await ctx.close();
+  }
+
   // an automated browser and a ?join link skip the film by themselves; ?intro=0 always does
   for (const [label, q] of [['default (webdriver)', ''], ['?join=', '?join=ABCDE'], ['?intro=0', '?intro=0']]) {
     const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } });
