@@ -1,8 +1,9 @@
-// The message feed at the bottom left of the HUD (src/ui/hud.js message / chat / card, hud-data.js
+// The message feed at the bottom left of the HUD (src/ui/hud.js message / chat / feedCard, hud-data.js
 // messageIcon / messageDwell): every line is a card with an emblem, a colour by kind and its dwell;
 // the same line again counts instead of stacking; the feed keeps six cards. Fake DOM, mocked timers.
 import { test, mock, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { Hud } from '../../src/ui/hud.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { MESSAGE_ICONS, RESOURCE_ICONS, messageIcon, messageDwell, peaceStartText } from '../../src/ui/hud-data.js';
@@ -282,4 +283,34 @@ test('a Decade of Peace reminder is a warning card with the dove', () => {
   assert.match(warn.textContent, /ends in 5 minutes/);
   assert.equal(warn.dataset.icon, '🕊️');
   assert.equal(warn.className, 'hud-msg is-alert');
+});
+
+// ---------------------------------------------------------------- the stylesheet
+
+/** The inside of every block that `head` opens in `css` (braces matched), e.g. each reduced-motion media query. */
+function cssBlocks(css, head) {
+  const out = [];
+  for (let at = css.indexOf(head); at >= 0; at = css.indexOf(head, at + head.length)) {
+    const open = css.indexOf('{', at);
+    let depth = 0;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === '{') depth++;
+      else if (css[i] === '}' && --depth === 0) {
+        out.push(css.slice(open + 1, i));
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+test('reduced motion stops every card, the warning card that sets its own animation included', async () => {
+  const css = await readFile(new URL('../../src/ui/hud.css', import.meta.url), 'utf8');
+  // ".hud-msg.is-alert { animation: … }" outranks a plain ".hud-msg", so the override has to name it too
+  const own = [...css.matchAll(/(\.hud-msg\.is-[a-z]+)\s*\{[^}]*\banimation:/g)].map((m) => m[1]);
+  assert.ok(own.includes('.hud-msg.is-alert'), 'the warning card pulses with an animation of its own');
+  const override = cssBlocks(css, '@media (prefers-reduced-motion: reduce)').find((block) => block.includes('.hud-msg'));
+  assert.ok(override, 'the feed has a reduced-motion override');
+  const stopped = [...override.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{\s*animation:\s*none;?\s*\}/g)].flatMap((m) => m[1].split(',').map((sel) => sel.trim()));
+  for (const sel of ['.hud-msg', '.hud-msg::before', ...own]) assert.ok(stopped.includes(sel), `${sel} is switched off for reduced motion`);
 });

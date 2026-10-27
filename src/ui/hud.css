@@ -327,7 +327,8 @@
 /* the entrance of the tips, the checklist and the market panel */
 @keyframes hud-msg-in { from { opacity: 0; transform: translateY(0.4em); } }
 @media (prefers-reduced-motion: reduce) {
-  .hud-msg, .hud-msg::before { animation: none; }
+  /* .hud-msg.is-alert sets its own animation and outranks .hud-msg: name every kind that does */
+  .hud-msg, .hud-msg.is-alert, .hud-msg::before { animation: none; }
   .hud-msg.is-fading { transform: none; }
 }
 
