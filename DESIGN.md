@@ -413,8 +413,16 @@ Pop used = pop of living units + pop of everything queued in production.
   with their own, pickier threshold.
 
 ### 5.4 Production
-- `train` puts an item in the building's queue (max 5). Cost and population are reserved
-  when queued (refunded on `cancelTrain`). Units spawn at the footprint edge nearest the rally
+- `train` puts an item in the building's queue (max `MAX_QUEUE`, 50). Cost and population are reserved
+  when queued, so the purse and the population cap end a queue before the 50 do when they are short
+  (every trainable unit takes at least 1 population, so one player never holds more than `POP_MAX` queued
+  units in all of their buildings together). `cancelTrain` takes items back and refunds each at the cost it
+  was queued with, restoring a fallen god that was queued for a revive: `index` is the first item (default
+  the last), `count` how many from there on (default 1, clamped to the end of the queue), so a long run goes
+  back in one command. Units, research and growth share one queue, and research and a Town Center's growth
+  wait behind the units already in it. A building that is destroyed loses its queue: the population is
+  freed but nothing is paid back, which is the risk of queueing deep at the front line.
+  Units spawn at the footprint edge nearest the rally
   point and then follow the rally (rally on a mine/tree → worker gathers). When a rallied
   mine runs dry the rally moves to the nearest mine within 16 tiles (if any).
 - Creatures need tier ≥ their tier. Gods: unique per player (no duplicates alive or queued),
@@ -648,7 +656,7 @@ counted in `world.perf.commandErrors`.
 { type: 'returnCargo', units }
 { type: 'build',      units: [workerIds], building: typeId, tx, ty, queue, tx2?, ty2? } // footprint top-left tile; a wall type with tx2/ty2 is a line (5.3)
 { type: 'train',      building: id, unit: typeId }                // also creatures, gods, titan, revive
-{ type: 'cancelTrain', building: id, index }
+{ type: 'cancelTrain', building: id, index?, count? }  // take queue items back and refund them (5.4)
 { type: 'upgradeTier', building: id }
 { type: 'cancelBuild', building: id }                      // also takes a finished wall segment down (5.3)
 { type: 'upgradeWall', walls: [buildingIds] }             // wooden → stone on finished wall segments (5.3)
@@ -660,6 +668,7 @@ counted in `world.perf.commandErrors`.
 { type: 'rally',      building: id, x, y, target?: id }
 { type: 'stop',       units }
 { type: 'hold',       units }
+{ type: 'kill',       units }                                   // the Delete key: own units die, no killer (below)
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
 { type: 'surrender' }
 ```
@@ -668,6 +677,14 @@ tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker ca
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
 Units that cannot do the resolved action just move.
+
+**kill** destroys the issuing player's own living units among `units` (another player's unit, a building and a
+mine in the list are skipped) with `World.killEntity(unit, null)`: a normal death that has no killer. The `death`
+event plays the death animation and sound, the unit's population is free at once, a loss is counted, a fallen god
+stays in `fallen` to be revived at a Temple with its level, and its orders are cleaned up as in a fight (a paid
+building is refunded, a prayer slot is freed). Nobody earns anything from it: no kill, no experience for gods or
+soldiers, no plunder or sacrifice, no bounty. It works in a Decade of Peace and, like every command, not for a
+defeated player or once the game is over.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
@@ -721,7 +738,7 @@ EntityView = {
   // buildings:
   tx, ty,         // footprint top-left tile
   bp,             // build progress 0..1 (1 = complete)
-  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }] (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
+  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }], up to MAX_QUEUE items (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
   tr,             // town center tier 1..3
   pr,             // praying worshipper count
   rp,             // rally [x, y] or null
@@ -869,7 +886,12 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   packed by shape (`EVENT_SHAPES` order is wire format), felled trees; `tick` is omitted when
   it is the previous one + 1. Exact: `apply(prev, encode(prev, next))` deep-equals `next`, so
   new EntityView keys need no codec change. About 13–14 KB/s per client on average in an
-  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). Order is guaranteed (reliable
+  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). A production queue (`q`, up to 50 items) travels
+  as any array of one shape does: a tick of progress is only the column `q.0.p` (about 20 bytes), while a
+  change in its length resends the whole array (a 50-item queue is about 1.2 KB, so a unit queued or
+  finished costs 1.3–1.5 KB for that building) and a full snapshot carries each queue whole. Queued
+  units count against the population cap, so all queues of one player together hold at most `POP_MAX`
+  items (about 5 KB of a full snapshot). Order is guaranteed (reliable
   channel). `resync` → host sends `full` (also includes `felledAll`, every tree felled so far).
 - Lobby (`src/net/lobby.js`):
   ```js
@@ -1470,6 +1492,15 @@ per-frame budget, so a revealed army appears over a few frames.
   Town Center lists only the highest level of each upgrade line. A Worshipper also shows a "Work"
   stat (Normal, or +N% from the work upgrades), and the gold mine's rule line and the Gather
   tooltip quote the viewer's own trip ("1.3 s per 12 gold").
+  **Queue row** (own buildings with a queue of up to `MAX_QUEUE` = 50): the big button is the item in progress
+  (its bar, "Training Worshipper") with a "n / 50" count at the right once more than one is queued; after it,
+  the rest of the queue as runs of the same item, one button each with a count on the runs of two or more
+  (50 Worshippers are the one in progress and a single button with 49), at most `QUEUE_CHIPS` (12) buttons:
+  more runs than that fold into a last "+N" button. A click takes one unit of a run back (the last of it),
+  Shift-click the whole run; on the big button a click takes back the item in progress and Shift-click the
+  whole queue; on "+N" a click takes back the last item and Shift-click everything it folds. A Shift-click is
+  one `cancelTrain` with `count` (5.4), so a whole queue refunds in one command. Esc still takes back the
+  last queued unit, and Shift + a train hotkey or button still queues 5 at a time (a held hotkey repeats).
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
@@ -1482,6 +1513,16 @@ per-frame budget, so a revealed army appears over a few frames.
   step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan, minimap click/drag,
   Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
+  **Delete** destroys the selected own units (`kill`, 6.2; the whole selection, not only the active subgroup).
+  Buildings are not units: they stay, and a selection of nothing but buildings says so (`Delete destroys units,
+  not buildings.`; walls have D, an unfinished building Esc). Up to `DELETE_CONFIRM_ABOVE` (5) plain units go at
+  once. More than that, or any god or Titan, first says what it would destroy (`Press Delete again to destroy 12
+  units, including Zeus.`) and goes on a second press within `DELETE_CONFIRM_MS` (2.5 s) while every selected unit
+  was among those asked about: units lost or taken off the selection meanwhile do not matter, one added does. Esc
+  (which then does nothing else), waiting or leaving the window takes the question back. Key auto-repeat,
+  Ctrl / Alt / Cmd + Delete, typing in chat and an open menu do nothing. Destroying units also ends a pending
+  placement or targeting. Backspace is unchanged (it jumps to the Town Center), so on a Mac keyboard, whose delete
+  key is Backspace, Delete is fn + delete. Rules and texts in `src/ui/delete-key.js`.
   **Walls**: with a wall type chosen in the build menu (W) the left button goes down on the first
   tile and the line follows the cursor in the nearest of eight directions (`wallLine`); releasing
   orders it for all selected workers (`build` with `tx2` / `ty2`; Shift keeps laying walls). A tip by

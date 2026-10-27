@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MORTALS, godsFor, titanFor, creaturesFor, getUnitType } from '../../src/data/index.js';
-import { REVIVE_COST_MULT } from '../../src/config.js';
+import { REVIVE_COST_MULT, MAX_QUEUE } from '../../src/config.js';
 import { makeWorld, run, runCollect, runUntil, place, eventsOf, errorsOf, spawn, PLAIN_PANTHEONS } from './helpers.js';
 
 const tcOf = (w, p = 0) => w.buildingsOf(p).find((b) => b.type === 'town_center');
@@ -112,10 +112,11 @@ test('queue full, population and resource errors', () => {
   const w = makeWorld();
   const tc = tcOf(w);
   w.players[0].gold = 10000;
-  for (let i = 0; i < 5; i++) assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), []);
+  w.players[0].popCap = 100; // room for 5 workers + MAX_QUEUE queued
+  for (let i = 0; i < MAX_QUEUE; i++) assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), []);
   assert.deepEqual(cmd(w, { type: 'train', building: tc.id, unit: 'worshipper' }), ['Production queue is full.']);
   const b = place(w, 0, 'barracks', 20, 20);
-  w.players[0].popCap = 12; // 5 workers + 5 queued = 10 used
+  w.players[0].popCap = w.players[0].popUsed + 2; // room for one more warrior
   assert.deepEqual(cmd(w, { type: 'train', building: b.id, unit: 'warrior' }), []);
   assert.deepEqual(cmd(w, { type: 'train', building: b.id, unit: 'warrior' }), ['Not enough population. Build more Houses.']);
   w.players[0].gold = 0;

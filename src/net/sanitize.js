@@ -3,7 +3,7 @@
 // types and typed fields before they reach World.issueCommand. Clients check
 // what a (possibly buggy) host sends before it reaches the ViewState: the
 // GameSetup from `start` and every snapshot. Pure: runs in Node too.
-import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS, MAX_QUEUE } from '../config.js';
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { sanitizeName } from './protocol.js';
 
@@ -32,7 +32,8 @@ const FIELD = {
   tx: (v, b) => (Number.isFinite(v) ? Math.min(b.width - 1, Math.max(0, Math.floor(v))) : undefined),
   ty: (v, b) => (Number.isFinite(v) ? Math.min(b.height - 1, Math.max(0, Math.floor(v))) : undefined),
   bool: (v) => v === true,
-  index: (v) => (Number.isInteger(v) && v >= 0 && v < 64 ? v : undefined),
+  index: (v) => (Number.isInteger(v) && v >= 0 && v < 64 ? v : undefined), // a queue slot (MAX_QUEUE is below 64) or a player
+  count: (v) => (Number.isInteger(v) && v > 0 && v <= MAX_QUEUE ? v : undefined), // queue items taken back at once
   unitType: (v) => (hasOwn(UNITS, v) ? v : undefined),
   buildingType: (v) => (hasOwn(BUILDINGS, v) ? v : undefined),
   ability: (v) => (hasOwn(ABILITIES, v) ? v : undefined),
@@ -57,13 +58,14 @@ const COMMANDS = {
   returnCargo: { units: U, queue: Q },
   build: { units: U, building: ['buildingType', true], tx: ['tx', true], ty: ['ty', true], tx2: ['tx', false], ty2: ['ty', false], queue: Q },
   train: { building: ['id', true], unit: ['unitType', true] },
-  cancelTrain: { building: ['id', true], index: ['index', false] },
+  cancelTrain: { building: ['id', true], index: ['index', false], count: ['count', false] },
   upgradeTier: { building: ['id', true] },
   cancelBuild: { building: ['id', true] },
   upgradeWall: { walls: U },
   rally: { building: ['id', true], x: XO, y: YO, target: TGT },
   stop: { units: U },
   hold: { units: U, queue: Q },
+  kill: { units: U },
   cast: { unit: ['id', true], ability: ['ability', true], x: XO, y: YO, target: TGT, queue: Q },
   surrender: {},
   repair: { units: U, target: ['id', true], queue: Q },
