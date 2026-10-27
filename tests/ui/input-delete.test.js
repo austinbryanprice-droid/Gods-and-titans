@@ -9,6 +9,7 @@ import { ViewState } from '../../src/game/view-state.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { InputController } from '../../src/ui/input.js';
 import { deletePlan, DELETE_CONFIRM_ABOVE, DELETE_CONFIRM_MS } from '../../src/ui/delete-key.js';
+import { HINTS, hintParts, hintText } from '../../src/ui/hint-data.js';
 import { makeWorld, spawn, clearUnits } from '../sim/helpers.js';
 import { installFakeDom } from './fake-dom.js';
 
@@ -271,6 +272,12 @@ test('Home jumps to the Town Center, where Backspace used to, and kills nothing'
   key('Home', { repeat: true });
   assert.equal(centered.length, 1, 'holding the key is not another jump');
   input.dispose();
+});
+
+test('the tip that teaches the jump to the Town Center names Home, not the key that destroys units now', () => {
+  const tip = HINTS.find((h) => h.id === 'town-key');
+  const named = hintParts(hintText(tip, { pantheon: 'greek' })).filter((part) => typeof part !== 'string').map((part) => part.key);
+  assert.deepEqual(named, ['Home']);
 });
 
 test('deletePlan: who needs a second press and what the question says', () => {
