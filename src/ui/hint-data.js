@@ -75,7 +75,7 @@ export const HINTS = [
   { id: 'health-bars', text: 'Hold [[Alt]] to see every health bar on the field.' },
   { id: 'tab-cycle', text: '[[Tab]] steps through the unit types of a mixed selection, so you can order a god without losing the army.', when: (c) => c.gods >= 1 || c.army >= 6 },
   { id: 'god-keys', text: '[[F1]] [[F2]] [[F3]] select your gods. Press one twice to center the camera on it.', when: (c) => c.gods >= 1 },
-  { id: 'town-key', text: '[[Backspace]] jumps the camera back to your Town Center.' },
+  { id: 'town-key', text: '[[Home]] jumps the camera back to your Town Center. On a Mac laptop that is fn and the left arrow.' },
   { id: 'zoom', text: 'Roll the mouse wheel to zoom. The arrow keys, the screen edge and a middle-drag move the camera.' },
   { id: 'minimap', text: 'Click the minimap to move the camera. Right-click it to send your selected units there.' },
   { id: 'team-marks', text: `[[Alt]] + click the map or the minimap, or middle-click it, to ping your team. The buttons beside the minimap place a marker instead: ${orList(MARKER_NAMES)}.`, when: (c) => c.ally },
