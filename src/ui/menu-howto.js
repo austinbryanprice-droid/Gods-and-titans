@@ -2,6 +2,7 @@
 import { h } from './menu-dom.js';
 import { BUILDINGS } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
+import { MANOR, mergeRule } from '../data/houses.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME,
@@ -11,6 +12,8 @@ import {
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
 const kbd = (...k) => k.map((x, i) => [i ? h('span.mw-plus', '+') : null, h('kbd', x)]);
 const keys = (...k) => k.map((x, i) => [i ? h('span.mw-keysep') : null, h('kbd', x)]);
+
+const MANOR_TEXT = `In a Town, select four Houses that stand together in a square and press U to combine them into a Manor: ${BUILDINGS[MANOR].popProvided} population instead of the ${mergeRule().count * BUILDINGS.house.popProvided} they shelter apart (${mergeRule().time} seconds, and the Houses keep sheltering meanwhile).`;
 
 function faithRate(id) {
   const b = BUILDINGS[id];
@@ -44,6 +47,7 @@ const HOTKEYS = [
     [kbd('Shift', 'W'), 'Shift with any train hotkey or button queues up to 5 at once'],
     [kbd('U'), 'Town Center: grow to Town, then City'],
     [keys('U', 'D'), 'Wall segments: upgrade to stone (U) or dismantle (D), the whole selection at once'],
+    [keys('U', 'C'), 'Houses: combine four in a square into a Manor (U), or cancel it (C)'],
     [keys('K', 'H'), 'Town Center: Worshippers work faster (K) · have more health (H), three levels each'],
     [keys('A', 'P', 'R', 'E'), 'Barracks: Archer · Priest · Battering Ram · your pantheon\'s own soldier (Hoplite, Berserker ...)'],
     [keys('Q', 'W', 'E'), 'Shrine: creatures · Temple: gods (R for the fourth)'],
@@ -118,7 +122,7 @@ export function renderHowToContent() {
     step(2, '🙏', 'Pray for Faith',
       `Build a Shrine, then right-click it with worshippers (or press P). Every kneeling worshipper earns Faith each second (Shrine ${faithRate('shrine')}/s, Temple ${faithRate('temple')}/s) until you give them another order. Faith is what summons the divine.`),
     step(3, '🏛️', 'Grow from Village to Town to City',
-      `Houses raise your population limit (up to ${POP_MAX}). Barracks train Warriors, Archers, Priests and Battering Rams, and from the Town on one elite soldier that only your pantheon fields. Grow your Town Center (U) to unlock stronger creatures, more gods and finally the Titan Gate.`),
+      `Houses raise your population limit (up to ${POP_MAX}). ${MANOR_TEXT} Barracks train Warriors, Archers, Priests and Battering Rams, and from the Town on one elite soldier that only your pantheon fields. Grow your Town Center (U) to unlock stronger creatures, more gods and finally the Titan Gate.`),
     step(4, '✨', 'Summon creatures, gods and a Titan',
       'Shrines summon your pantheon\'s mythical creatures: one per tier, Village, Town and City. Temples summon gods: heroes who level up and cast spells.',
       `You may lead ${MAX_GODS} gods at once: ${godSlots()}. In the City, raise a Titan Gate and summon one colossal Titan.`),

@@ -507,13 +507,13 @@ test('construction site: only Cancel Construction (Esc)', () => {
   assert.deepEqual(card[11].action, { kind: 'cancelBuild' });
 });
 
-test('houses, storehouses and towers show only their upgrades', () => {
+test('houses, storehouses and towers show their upgrades (a House also offers to combine)', () => {
   const world = makeWorld();
   const h = place(world, 0, 'house', 6, 13);
   const t = place(world, 0, 'tower', 9, 13);
   const s = place(world, 0, 'storehouse', 12, 13);
   const vs = viewOf(world);
-  assert.deepEqual(slotsOf(getCommandCard([h.id], vs)), ['4:research:house_large_families', '5:research:house_stone_walls']);
+  assert.deepEqual(slotsOf(getCommandCard([h.id], vs)), ['0:house-merge', '4:research:house_large_families', '5:research:house_stone_walls']);
   assert.deepEqual(slotsOf(getCommandCard([t.id], vs)), ['4:research:tower_burning_arrows', '5:research:tower_lookout', '6:research:tower_iron_bracing']);
   assert.deepEqual(slotsOf(getCommandCard([s.id], vs)), ['4:research:storehouse_sharp_axes', '5:research:storehouse_handcarts']);
 });

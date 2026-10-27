@@ -7,11 +7,12 @@
 import { TERRAIN, MAX_QUEUE, MAX_WALL_SELECTION } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { isWallType } from '../data/walls.js';
+import { MANOR, houseBlocks } from '../data/houses.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { checkPlacement, checkWallLine, footprintAt } from '../game/placement.js';
 import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
-import { isComplete, isWallEntity } from './hud-data.js';
+import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 import { peaceNotice } from '../sim/peace.js';
 
@@ -1011,6 +1012,22 @@ export class InputController {
           else if ((e.q || []).length) this.command({ type: 'cancelTrain', building: e.id, index: 0 });
         }
         break;
+      case 'upgradeHouses': {
+        // Every finished House of the active type: the sim finds the squares among them and pays square by square.
+        const houses = this.activeHouses().map((e) => e.id);
+        if (houses.length) this.command({ type: 'upgradeHouses', houses });
+        break;
+      }
+      case 'cancelMerge': {
+        // Stopping any one House of a square stops all four: one order for each whole square among the
+        // selected Houses, and one for each House left over from a part of a square.
+        const merging = this.activeHouses().filter(isMergingEntity);
+        const squares = houseBlocks(merging);
+        const covered = new Set(squares.flatMap((sq) => sq.ids));
+        const stop = [...squares.map((sq) => sq.ids[0]), ...merging.filter((e) => !covered.has(e.id)).map((e) => e.id)];
+        for (const id of stop) this.command({ type: 'cancelTrain', building: id, index: vs.entities.get(id).q.findIndex((it) => it.u === MANOR) });
+        break;
+      }
       case 'research': {
         // The least busy finished building of the active group researches it.
         const group = this.sel.activeGroup();
@@ -1018,7 +1035,7 @@ export class InputController {
         for (const e of this.sel.ownBuildings()) {
           if (!group || e.t !== group.type || !isComplete(e)) continue;
           const q = e.q || [];
-          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE) continue;
+          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE || isMergingEntity(e)) continue;
           if (!pick || q.length < (pick.q || []).length) pick = e;
         }
         if (pick) this.command({ type: 'research', building: pick.id, upgrade: a.upgrade });
@@ -1030,6 +1047,12 @@ export class InputController {
       default:
         break;
     }
+  }
+
+  /** Own Houses of the active subgroup (the command card's combine buttons act on these). */
+  activeHouses() {
+    const group = this.sel.activeGroup();
+    return this.sel.ownBuildings().filter((e) => group && e.t === group.type && isComplete(e));
   }
 
   /** Own wall segments of the active subgroup (the command card's wall buttons act on these). */
@@ -1183,8 +1206,8 @@ export class InputController {
         return;
       }
       if (this.cancelMode()) return;
-      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade: Esc by habit would take it back.)
-      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x));
+      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade or Houses being combined: Esc by habit would take it back.)
+      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x) && !isMergingEntity(x));
       if (blds.length) {
         const bq = blds[0];
         this.command({ type: 'cancelTrain', building: bq.id, index: bq.q.length - 1 });
