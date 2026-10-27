@@ -10,7 +10,8 @@
 // patterns R (root), 5 (fifth), 8 (octave) and drum patterns X (accent) x (normal) o (ghost);
 // '.' is a rest. Drum entries are [drum, pattern, loudness = 1, pitch factor = 1].
 // A motif is [scale degree, length in steps] cells (null degree = rest) covering two bars; degree
-// 0 sounds at `leadBase`.
+// 0 sounds at `leadBase`. `inst.leadHot`, when a theme has one, is the lead of its tense sections: a
+// sharper relative of the usual lead (the erhu's tune turns to the dizi, the whistle's to the fiddle).
 
 const MODES = {
   dorian: [0, 2, 3, 5, 7, 9, 10],

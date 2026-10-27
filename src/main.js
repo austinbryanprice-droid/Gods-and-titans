@@ -2,7 +2,7 @@
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
 // completely, so matches can be played one after another without a reload.
 import { getSettings, onSettingsChange } from './settings.js';
-import { sfx } from './audio/sfx.js';
+import { initAudio, syncAudio } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 
 export { showMenu, hideMenu };
@@ -114,12 +114,8 @@ function hasWebGL2() {
 }
 
 function boot() {
-  const settings = getSettings();
-  sfx.init({ volume: settings.volume });
-  sfx.setVolume(settings.volume);
-  onSettingsChange((s, changed) => {
-    if (changed.includes('volume')) sfx.setVolume(s.volume);
-  });
+  initAudio(getSettings()); // the sound effects and the music: one audio context, armed to start on the first click
+  onSettingsChange(syncAudio);
   menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();

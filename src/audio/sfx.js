@@ -74,6 +74,7 @@ export function distanceGain(d) {
 export function kit(ctx, noiseBuf) {
   const k = {
     ctx,
+    noiseBuf,
     gain(value, dest) {
       const g = ctx.createGain();
       g.gain.value = value;

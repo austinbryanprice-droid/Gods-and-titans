@@ -33,10 +33,11 @@ function cleanName(name) {
  * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
  * or one fixed time of day. `alerts` is how much the game speaks up ('all', 'important', 'off'),
  * `hints` whether a gameplay tip appears now and then, `tabAlerts` what a background tab does
- * when the game needs the player ('off', 'title', 'notify').
+ * when the game needs the player ('off', 'title', 'notify'). `volume` is the sound effects;
+ * `musicVolume` (0..1) and `musicMuted` are the background music's own (src/audio/music.js).
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title' };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', musicVolume: 0.5, musicMuted: false };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -53,6 +54,8 @@ function sanitize(raw, base) {
   if (ALERT_LEVELS.includes(raw.alerts)) out.alerts = raw.alerts;
   if (typeof raw.hints === 'boolean') out.hints = raw.hints;
   if (TAB_ALERTS.includes(raw.tabAlerts)) out.tabAlerts = raw.tabAlerts;
+  if (typeof raw.musicVolume === 'number' && Number.isFinite(raw.musicVolume)) out.musicVolume = Math.min(1, Math.max(0, raw.musicVolume));
+  if (typeof raw.musicMuted === 'boolean') out.musicMuted = raw.musicMuted;
   return out;
 }
 
@@ -94,7 +97,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify' }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', musicVolume: number, musicMuted: boolean }}
  */
 export function getSettings() {
   return load();

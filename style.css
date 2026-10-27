@@ -1094,6 +1094,10 @@ kbd {
 .mw-range:focus-visible { outline: none; }
 .mw-range:focus-visible::-webkit-slider-thumb { box-shadow: var(--mw-focus); }
 .mw-range-value { width: 3em; text-align: right; font-variant-numeric: tabular-nums; color: var(--mw-gold-hi); font-weight: 600; }
+.mw-range.is-muted { opacity: 0.4; }
+.mw-music-listen { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em 0.7em; margin-top: 0.7em; }
+.mw-music-listen-label { color: var(--mw-ink-dim); }
+.mw-music-listen-name { min-width: 8.5em; text-align: center; font-weight: 600; color: var(--mw-gold-hi); }
 .mw-toggle { display: flex; align-items: center; gap: 0.85em; padding: 0.45em 0; cursor: pointer; }
 .mw-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .mw-toggle-track {

@@ -5,6 +5,7 @@
 //   node tools/music-render.mjs --out DIR [--themes greek,norse | all] [--seconds 60]
 //                                [--level 0.1] [--curve flat|story] [--seed 1] [--volume 0.5]
 //                                [--only perc,war]   solo some layers (pad drone bass arp lead perc war fx)
+//                                [--dry]             no reverb (to time the voices alone)
 //
 // Starts a small static server for the repo, opens tools/music-lab.html in headless Chromium
 // and calls its renderTheme(). Prints peak and RMS per file. Needs Playwright (global or local).
@@ -31,6 +32,7 @@ const seed = Number(opt('seed', '1'));
 const volume = Number(opt('volume', '0.5'));
 const wanted = opt('themes', 'all');
 const only = opt('only', '') ? opt('only', '').split(',') : null;
+const reverb = !args.includes('--dry');
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
@@ -64,13 +66,13 @@ try {
   await mkdir(out, { recursive: true });
   for (const id of ids) {
     const t0 = Date.now();
-    const b64 = await page.evaluate(async ({ id, seconds, level, curve, seed, volume, only }) => {
-      const r = await window.__lab.renderTheme(id, { seconds, level, curve, seed, volume, only });
+    const b64 = await page.evaluate(async ({ id, seconds, level, curve, seed, volume, only, reverb }) => {
+      const r = await window.__lab.renderTheme(id, { seconds, level, curve, seed, volume, only, reverb });
       let s = '';
       const chunk = 0x8000;
       for (let i = 0; i < r.wav.length; i += chunk) s += String.fromCharCode(...r.wav.subarray(i, i + chunk));
       return { peak: r.peak, rms: r.rms, b64: btoa(s) };
-    }, { id, seconds, level, curve, seed, volume, only });
+    }, { id, seconds, level, curve, seed, volume, only, reverb });
     const file = join(out, `${id}-${curve === 'story' ? 'story' : `L${level}`}${only ? `-${only.join('+')}` : ''}.wav`);
     await writeFile(file, Buffer.from(b64.b64, 'base64'));
     const db = (v) => (20 * Math.log10(Math.max(v, 1e-9))).toFixed(1);

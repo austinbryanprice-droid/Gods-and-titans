@@ -92,8 +92,8 @@ const curves = {
 };
 
 /** Render a theme offline; resolves { sampleRate, seconds, peak, rms, wav: Uint8Array }. */
-async function renderTheme(id, { seconds = 60, level = 0, curve = 'flat', seed = 1, sampleRate = 44100, volume = 0.5, only = null } = {}) {
-  const buf = await renderMusicOffline(id, { seconds, sampleRate, seed, volume, only, levelAt: curves[curve](level, seconds) });
+async function renderTheme(id, { seconds = 60, level = 0, curve = 'flat', seed = 1, sampleRate = 44100, volume = 0.5, only = null, reverb = true } = {}) {
+  const buf = await renderMusicOffline(id, { seconds, sampleRate, seed, volume, only, reverb, levelAt: curves[curve](level, seconds) });
   if (!buf) return null;
   let peak = 0, sum = 0, n = 0;
   for (let c = 0; c < buf.numberOfChannels; c++) {

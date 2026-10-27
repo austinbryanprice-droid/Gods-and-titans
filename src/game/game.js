@@ -23,6 +23,8 @@ import { tierName } from '../ui/hud-data.js';
 import { loadingHint, hintParts } from '../ui/hint-data.js';
 import { TabAttention } from '../ui/tab-attention.js';
 import { AlertEngine } from './alerts.js';
+import { MusicDirector } from './music-director.js';
+import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
 
@@ -203,6 +205,7 @@ export class Game {
     this.bareHud = false;
     this.tab = null; // TabAttention: the flashing title of a tab left in the background
     this.alerts = null; // AlertEngine
+    this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -263,6 +266,9 @@ export class Game {
       this.alerts.dispose();
       this.tab.dispose();
     });
+    // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
+    this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
+    this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) this.hud.chat(line);
     session.start();
@@ -504,6 +510,11 @@ export class Game {
       const cam = this.renderer.camera;
       if (cam && cam.target) sfx.setListener(cam.target.x, cam.target.y, hearingScale(cam));
       this.ambientSounds(now);
+    } catch (err) {
+      this.frameFault(err);
+    }
+    try {
+      if (this.director) this.director.update(dt);
     } catch (err) {
       this.frameFault(err);
     }

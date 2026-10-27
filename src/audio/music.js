@@ -17,13 +17,18 @@ import { THEMES, themeFor } from './music-themes.js';
 import { createScore, composeBar } from './music-composer.js';
 import { playVoice } from './music-voices.js';
 
-const HORIZON = 1.6; // seconds of music scheduled ahead of the clock: rides out a stalled frame
+const COMPOSE_AHEAD = 1.6; // seconds of music composed ahead of the clock: rides out a stalled frame
+const PLAY_AHEAD = 0.6; // a note is created this long before it sounds (a note waiting in the audio graph is not free)
+const LATE = 0.15; // a short note that is this late is dropped rather than played out of time
 const TICK_MS = 250;
 const MAX_ERRORS = 5; // scheduler faults before the music gives up (it must never break the game)
 const LEVEL_UP = 1.5; // seconds the intensity takes to close most of the way up ...
 const LEVEL_DOWN = 7; // ... and down: a fight ends slowly
-const MUSIC_GAIN = 0.63; // overall loudness of the music at full volume (balanced against the sound effects by measuring)
+export const MUSIC_GAIN = 0.63; // overall loudness of the music at full volume (balanced against the sound effects by measuring)
 const MIN_GAIN = 0.0001;
+const HALL_SECONDS = 2.0; // the reverb is a convolver, whose cost grows with the length of its impulse response
+const PAN_STEP = 0.15; // off-centre notes share a panner per layer and position, rounded to this
+const HIDDEN_QUIET = 1.5; // seconds after the tab is hidden (its fade-out is over) that the score stops making notes
 
 // Each layer of the score is a bus with its own loudness and how much of it goes to the reverb.
 const LAYERS = {
@@ -47,18 +52,16 @@ export const DUCKS = {
   horn: [0.3, 2.5],
 };
 
-/** A dark hall: noise that dies away, smoothed more the longer it lasts. */
-function makeHall(ctx, seconds = 2.8) {
+/** A dark hall: mono noise that dies away, smoothed more the longer it lasts. */
+function makeHall(ctx, seconds = HALL_SECONDS) {
   const len = Math.floor(ctx.sampleRate * seconds);
-  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-  for (let c = 0; c < 2; c++) {
-    const d = buf.getChannelData(c);
-    let lp = 0;
-    for (let i = 0; i < len; i++) {
-      const x = i / len;
-      lp += ((Math.random() * 2 - 1) - lp) * (1 - (0.35 + 0.6 * x));
-      d[i] = lp * Math.pow(1 - x, 2.4) * 1.6;
-    }
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  let lp = 0;
+  for (let i = 0; i < len; i++) {
+    const x = i / len;
+    lp += ((Math.random() * 2 - 1) - lp) * (1 - (0.35 + 0.6 * x));
+    d[i] = lp * Math.pow(1 - x, 2.4) * 1.6;
   }
   return buf;
 }
@@ -67,7 +70,7 @@ function makeHall(ctx, seconds = 2.8) {
  * The music's own part of the graph: layers → run mix → bus → duck → hide → the shared limiter, with
  * a reverb fed by each run's send. `out` is where the music joins (the sound effects' limiter).
  */
-function buildMusicGraph(ctx, out) {
+function buildMusicGraph(ctx, out, { reverb = true } = {}) {
   const hide = ctx.createGain();
   hide.connect(out);
   const duck = ctx.createGain();
@@ -76,7 +79,10 @@ function buildMusicGraph(ctx, out) {
   bus.connect(duck);
   let reverbIn = null;
   try {
+    if (!reverb) throw new Error('no reverb');
     const conv = ctx.createConvolver();
+    conv.channelCount = 1; // one convolution, not two: the reverb return is the same in both ears
+    conv.channelCountMode = 'explicit';
     conv.buffer = makeHall(ctx);
     const wet = ctx.createGain();
     wet.gain.value = 0.9;
@@ -117,33 +123,77 @@ class Run {
       }
       this.bus[name] = g;
     }
+    this.pans = new Map(); // layer and position → the StereoPanner that notes there share
+    this.pending = []; // composed notes not yet created: { at (clock time), ev }
     this.nextBar = now + 0.12;
     this.bars = 0;
     this.fading = false;
     this.bad = new Set(); // instruments that threw: left out from then on
+    this.only = null; // layers to play, when soloing some (renderMusicOffline)
   }
 
-  /** Compose and schedule every bar that starts before `until`. */
-  advance(until, level) {
-    const { ctx, kit } = this.env;
+  /** Where an event plays into: its layer's bus, or a shared panner on it for an off-centre note (none per note). */
+  destFor(ev) {
+    const bus = this.bus[ev.layer];
+    const step = ev.pan ? Math.round(Math.max(-1, Math.min(1, ev.pan)) / PAN_STEP) : 0;
+    const ctx = this.env.ctx;
+    if (!step || !ctx.createStereoPanner) return bus;
+    const key = `${ev.layer}:${step}`;
+    let panner = this.pans.get(key);
+    if (!panner) {
+      panner = ctx.createStereoPanner();
+      panner.pan.value = step * PAN_STEP;
+      panner.connect(bus);
+      this.pans.set(key, panner);
+    }
+    return panner;
+  }
+
+  /**
+   * Compose every bar that starts before `now + COMPOSE_AHEAD`, then create the notes that sound
+   * before `now + PLAY_AHEAD` (the rest wait in `pending`, as plain data).
+   */
+  advance(now, level) {
     if (this.fading) return;
     // After a stall (a hidden tab, a long frame) do not catch up: carry on from now.
-    if (this.nextBar < ctx.currentTime - 0.5) this.nextBar = ctx.currentTime + 0.1;
+    if (this.nextBar < now - 0.5) {
+      this.nextBar = now + 0.1;
+      this.pending.length = 0;
+    }
+    this.compose(now + COMPOSE_AHEAD, level);
+    this.play(now + PLAY_AHEAD, now);
+  }
+
+  /** Compose the bars that start before `until` into `pending`. */
+  compose(until, level) {
     while (this.nextBar < until) {
       const bar = composeBar(this.score, level);
-      const t0 = this.nextBar;
-      for (const ev of bar.events) {
-        if (this.bad.has(ev.inst)) continue;
-        try {
-          playVoice(kit, this.bus[ev.layer], t0 + ev.t, ev);
-        } catch (err) {
-          this.bad.add(ev.inst);
-          console.warn(`[music] ${ev.inst} failed and is muted`, err);
-        }
-      }
+      for (const ev of bar.events) this.pending.push({ at: this.nextBar + ev.t, ev });
       this.nextBar += bar.dur;
       this.bars++;
     }
+  }
+
+  /** Create the pending notes that start before `until`; `now` is the clock, for dropping what is too late. */
+  play(until, now = -Infinity) {
+    const { kit } = this.env;
+    let keep = 0;
+    for (const p of this.pending) {
+      if (p.at >= until) {
+        this.pending[keep++] = p;
+        continue;
+      }
+      const ev = p.ev;
+      if (this.bad.has(ev.inst) || (this.only && !this.only.includes(ev.layer))) continue;
+      if (p.at < now - LATE && ev.dur < 1.5) continue; // a short note long after its time is only a stumble
+      try {
+        playVoice(kit, this.destFor(ev), Math.max(p.at, now), ev);
+      } catch (err) {
+        this.bad.add(ev.inst);
+        console.warn(`[music] ${ev.inst} failed and is muted`, err);
+      }
+    }
+    this.pending.length = keep;
   }
 
   fadeOut(seconds, now) {
@@ -167,13 +217,15 @@ class Run {
       this.mix.disconnect();
       this.send.disconnect();
       for (const g of Object.values(this.bus)) g.disconnect();
+      for (const p of this.pans.values()) p.disconnect();
     } catch {
       // already gone
     }
   }
 }
 
-class MusicEngine {
+/** The engine's class, for tests that need one of their own; the game uses `music`. */
+export class MusicEngine {
   constructor() {
     this.ctx = null;
     this.env = null;
@@ -190,6 +242,7 @@ class MusicEngine {
     this.disabled = false;
     this.inited = false;
     this.hidden = false;
+    this.hiddenSince = null; // clock time the tab was hidden at, or null while it is shown
     this.fadeIn = 2.5;
     this.fadeOutSeconds = 2.2;
   }
@@ -258,6 +311,7 @@ class MusicEngine {
     if (!this.env) return;
     const p = this.env.nodes.hide.gain;
     const now = this.ctx.currentTime;
+    this.hiddenSince = this.hidden ? (this.hiddenSince ?? now) : null;
     try {
       p.cancelScheduledValues(now);
       p.setTargetAtTime(this.hidden ? 0 : 1, now, this.hidden ? 0.25 : 0.5);
@@ -403,7 +457,10 @@ class MusicEngine {
     this.lastTick = now;
     const tau = this.target > this.level ? LEVEL_UP : LEVEL_DOWN;
     this.level += (this.target - this.level) * (1 - Math.exp(-dt / tau));
-    this.run.advance(now + HORIZON, this.level);
+    // A hidden tab hears nothing (the music faded out when it was hidden): stop making notes for it.
+    // The score picks up from the clock when the tab is back (see Run.advance).
+    if (this.hiddenSince !== null && now - this.hiddenSince > HIDDEN_QUIET) return;
+    this.run.advance(now, this.level);
   }
 }
 
@@ -415,7 +472,7 @@ export const music = new MusicEngine();
  * measure levels and by the music lab). The intensity follows `levelAt(seconds)` when given.
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 44100, seed = 1, level = 0, levelAt = null, volume = 1, only = null } = {}) {
+export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 44100, seed = 1, level = 0, levelAt = null, volume = 1, only = null, reverb = true } = {}) {
   const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (!OAC) return null;
   const ctx = new OAC(2, Math.floor(sampleRate * seconds), sampleRate);
@@ -427,12 +484,13 @@ export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 4
   comp.attack.value = 0.003;
   comp.release.value = 0.25;
   comp.connect(ctx.destination);
-  const nodes = buildMusicGraph(ctx, comp);
+  const nodes = buildMusicGraph(ctx, comp, { reverb });
   nodes.bus.gain.value = MUSIC_GAIN * Math.pow(volume, 1.5);
   const env = { ctx, nodes, kit: makeKit(ctx, makeNoiseBuffer(ctx)) };
   const run = new Run(env, themeFor(themeId), seed, 0, 0.01);
-  if (only) for (const [name, g] of Object.entries(run.bus)) if (!only.includes(name)) g.gain.value = 0; // solo some layers
-  while (run.nextBar < seconds) run.advance(run.nextBar + 0.01, levelAt ? levelAt(run.nextBar) : level);
+  run.only = only; // solo some layers
+  while (run.nextBar < seconds) run.compose(run.nextBar + 0.01, levelAt ? levelAt(run.nextBar) : level);
+  run.play(Infinity);
   return ctx.startRendering();
 }
 
