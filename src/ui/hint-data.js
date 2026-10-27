@@ -9,10 +9,14 @@
 import { BUILDINGS, UNITS, eliteFor } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
 import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME, PEACE_BUILD_GAP } from '../config.js';
+import { MARKS, DEFAULT_MARK } from '../data/marks.js';
 import { isWallEntity } from './hud-data.js';
 
 const percent = (v) => Math.round(v * 100);
 const REVIVE_TEXT = REVIVE_COST_MULT === 0.5 ? 'half the price' : `${percent(REVIVE_COST_MULT)}% of the price`;
+// The marker buttons beside the minimap, less the plain ping that Alt+click already places.
+const MARKER_NAMES = Object.values(MARKS).filter((m) => m.id !== DEFAULT_MARK).map((m) => m.name);
+const orList = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`);
 
 /**
  * What the player has, for a tip's `when`. Counts only own things; `ally` is whether a teammate
@@ -74,6 +78,7 @@ export const HINTS = [
   { id: 'town-key', text: '[[Backspace]] jumps the camera back to your Town Center.' },
   { id: 'zoom', text: 'Roll the mouse wheel to zoom. The arrow keys, the screen edge and a middle-drag move the camera.' },
   { id: 'minimap', text: 'Click the minimap to move the camera. Right-click it to send your selected units there.' },
+  { id: 'team-marks', text: `[[Alt]] + click the map or the minimap, or middle-click it, to ping your team. The buttons beside the minimap place a marker instead: ${orList(MARKER_NAMES)}.`, when: (c) => c.ally },
   { id: 'autocast', text: 'Gods and creatures cast their abilities on their own. Right-click an ability button, or press [[`]], to cast by hand instead.', when: (c) => c.gods >= 1 || c.army >= 6 },
   { id: 'task-bar', text: 'The bar at the lower left counts what your Worshippers are doing. Click a number to select them.', when: (c) => c.workers >= 6 },
 

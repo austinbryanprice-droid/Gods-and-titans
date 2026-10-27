@@ -9,6 +9,7 @@ import { Hud } from '../../src/ui/hud.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { ViewState } from '../../src/game/view-state.js';
 import { BUILDINGS, eliteFor } from '../../src/data/index.js';
+import { MARKS, DEFAULT_MARK } from '../../src/data/marks.js';
 import { MAX_QUEUE, MINE_SLOTS, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME, PEACE_BUILD_GAP } from '../../src/config.js';
 import { getSettings, saveSettings } from '../../src/settings.js';
 import { sfx } from '../../src/audio/sfx.js';
@@ -84,6 +85,7 @@ test('tips that quote a build hotkey or a game number say what the data says', (
   assert.match(text('train-batch'), new RegExp(`up to ${MAX_QUEUE} units`));
   assert.match(text('manor'), new RegExp(`press \\[\\[${BUILDINGS.manor.hotkey}\\]\\] to combine them into a Manor: ${BUILDINGS.manor.popProvided} population in place of ${4 * BUILDINGS.house.popProvided}\\.`));
   assert.match(text('market'), new RegExp(`keeps ${TRADE_TAX_PCT}%`));
+  for (const m of Object.values(MARKS)) if (m.id !== DEFAULT_MARK) assert.ok(text('team-marks').includes(m.name), `team-marks names the ${m.id} marker`);
   assert.match(text('spells-buildings'), new RegExp(`only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings`));
   assert.match(text('peace'), new RegExp(PEACE_NAME));
   assert.match(text('peace-build'), new RegExp(`within ${PEACE_BUILD_GAP} tiles of an enemy Town Center`));
@@ -171,7 +173,7 @@ test('hintContext counts what the player has, and the tips that depend on it fit
   assert.equal(manor({ ...c, has: { house: 3 } }), false, 'three Houses make no square');
 });
 
-test('the Decade of Peace tips fit only a peace; the team Market tip only a team', () => {
+test('the Decade of Peace tips fit only a peace; the team Market and marker tips only a team', () => {
   const peace = hintContext(viewOf({ world: makeWorld({ peaceMinutes: 30 }) }).vs);
   const fits = (c, id) => HINTS.find((h) => h.id === id).when(c);
   assert.equal(peace.peace, true);
@@ -181,8 +183,10 @@ test('the Decade of Peace tips fit only a peace; the team Market tip only a team
   }
   const team = hintContext(viewOf({ world: makeWorld({ players: 3, teams: [1, 1, 2] }) }).vs);
   assert.equal(team.ally, true);
-  assert.equal(fits(team, 'market'), true);
-  assert.equal(fits(hintContext(viewOf().vs), 'market'), false);
+  for (const id of ['market', 'team-marks']) {
+    assert.equal(fits(team, id), true, id);
+    assert.equal(fits(hintContext(viewOf().vs), id), false, id);
+  }
 });
 
 test('the loading screen gets a tip that is true in any match', () => {
