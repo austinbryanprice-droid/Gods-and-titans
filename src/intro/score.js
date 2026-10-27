@@ -32,7 +32,7 @@ const ATTACK = 0.1; // time constant (s) of the step back: nearly done a third o
 const RELEASE = 0.55; // time constant (s) of the swell after it: back to the lift in about two seconds
 const RELEASE_AFTER = 0.2; // seconds after the last word before the swell begins
 const CUT_FADE = 0.3; // seconds the score takes to fade when the film is cut short (the dip to black is 0.32 s)
-const RESET_AFTER = 0.36; // seconds after a cut that the stage goes back to 1: the fading piece is 40 dB down and the title's own, begun with the end of the dip, barely heard
+const RESET_AFTER = 0.36; // seconds after a cut that the stage goes back to 1: the fading piece is 40 dB down and the title's own, which the engine brings in 0.9 s after the cut, is not up yet
 const GLIDE = 1.5; // time constant (s) of the lift going away once the film hands over to the title screen
 
 /**
@@ -163,7 +163,7 @@ export class FilmScore {
       m.setStingers(true);
       if (how === 'cut') {
         m.stop(CUT_FADE);
-        m.setStage(1, 0.05, RESET_AFTER); // behind the fade and as the title's own score begins, so it finds the stage as the settings have it
+        m.setStage(1, 0.05, RESET_AFTER); // behind the fade and before the title's own score is up, so it finds the stage as the settings have it
       } else {
         m.setStage(1, GLIDE);
       }

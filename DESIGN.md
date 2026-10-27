@@ -1955,8 +1955,8 @@ off (`setStingers(false)`: the cue table is the mix, the engine's rules are for 
 seconds (time constant 1.5 s) and `playTitleMusic()` finds the piece already playing at the same intensity (a film left while it
 still loads, skipped or failed, never began its score: there is nothing to hand over, and the title screen's own piece begins at
 the hand-over). `end('cut')` for a skip, a failure or the speed guard while the film is showing: the piece fades out in 0.3 s inside
-the dip to black, the stage is reset to 1 at 0.36 s (behind the fading piece and as the title's own begins), and the title screen
-fades its own piece in at the hand-over. `finish` tells the score first and stops the voice second, so a cut-off line cannot
+the dip to black, the stage is reset to 1 at 0.36 s (behind the fading piece, before the title's own is up), and the title screen
+fades its own piece in from the hand-over (it comes in 0.9 s after the cut began, the delay any new piece waits after one leaving). `finish` tells the score first and stops the voice second, so a cut-off line cannot
 swell it again.
 It obeys the settings: the Music slider and mute are the engine's own, so the film plays on without a score (and with no hint)
 while music is muted or at 0; "Intro film" and "Narration" decide whether there is a film and a voice (with no narration the
