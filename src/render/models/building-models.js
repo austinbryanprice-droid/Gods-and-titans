@@ -292,6 +292,46 @@ function buildHouse(k, P, st) {
   else flag(k, P, 0.72, y, -0.7, 1.1, 0.28, 0.17);
 }
 
+/**
+ * Four Houses combined (sim/homes.js): a courtyard manor. The main hall stands at the back with a wing
+ * on each side of a paved court, a fountain in the middle, clipped hedges along the path and the
+ * pantheon's gate ornaments at the front: three roofs in the pantheon's style round one yard, where a
+ * Town Center is a single hall inside its walls. Team color: the roofs, flags and banners.
+ */
+function buildManor(k, P, st) {
+  const y = PLINTH;
+  const round = isRound(st);
+  const dome = st.roof === 'dome';
+  const cz = round ? 1.0 : 0.95; // the court's middle
+  let top;
+  if (round) {
+    top = hall(k, P, st, { x: 0, z: -0.6, w: 2.15, d: 2.15, h: dome ? 0.9 : 0.82, rh: dome ? 0.95 : 1.4, grade: 'mid', doorW: 0.42, doorH: 0.6, lim: 1.9 });
+    for (const sx of [-1, 1]) hall(k, P, st, { x: sx * 1.32, z: 0.62, w: 0.95, d: 0.95, h: 0.5, rh: dome ? 0.42 : 0.62, door: false, team: false, lim: 1.9 });
+  } else {
+    top = hall(k, P, st, { x: 0, z: -0.82, w: 2.3, d: 1.4, h: 0.95, grade: 'mid', doorW: 0.44, doorH: 0.66, windows: 1, lim: 1.9 });
+    // the wings keep the walls and the roof of the pantheon but come plainer: a flat roof for the stepped one (its merlons are costly), one tier of a pagoda, no team parts
+    const wing = st.roof === 'stepped' ? { ...st, roof: 'flat' } : st;
+    for (const sx of [-1, 1]) {
+      hall(k, P, wing, { x: sx * 1.38, z: 0.42, w: 0.78, d: 1.45, h: 0.62, door: false, windows: 0, team: false, tiers: 1, ridge: st.roof === 'gable' ? 'z' : undefined, lim: 1.9, simple: true });
+    }
+    if (st.ornament !== 'columns') for (const sx of [-1, 1]) banner(k, P, sx * 0.72, y + 0.87, -0.82 + 0.7 + (st.wall === 'mudbrick' ? -0.02 : 0), 0.24, 0.42);
+  }
+  // the court: paving, a path to the door, a fountain, two clipped hedges
+  k.b(box(1.5, 0.014, 1.45, 0, y, cz), shade(P.yard, 0.95), 0.05);
+  k.b(box(0.46, 0.02, 1.0, 0, y, cz - 0.28), tint(P.yard, 0.12), 0.04);
+  k.b(cyl(0.3, 0.32, 0.17, 8, 0, y, cz + 0.12, false, true), P.stone, 0.1);
+  k.b(cyl(0.24, 0.24, 0.02, 8, 0, y + 0.16, cz + 0.12), made('#2a4a6a', SURF.water), 0);
+  k.b(cone(0.05, 0.3, 5, 0, y + 0.17, cz + 0.12, true), P.stoneL, 0.05);
+  const hedge = made(mix(P.leaf, '#7aa84a', 0.25), SURF.turf);
+  for (const sx of [-1, 1]) k.b(box(0.22, 0.13, 0.62, sx * 0.62, y, cz - 0.3), hedge, 0.12);
+  // gate ornaments at the front of the court, flags on the corners, goods by the wings
+  ornamentPair(k, P, st, 0.8, y, 1.58, 0.7);
+  for (const sx of [-1, 1]) flag(k, P, sx * 1.62, y, 1.6, 1.35, 0.3, 0.19);
+  barrel(k, P, -0.98, y, 1.2, 0.22);
+  sack(k, P, 0.98, y, 1.28, 0.22);
+  return top;
+}
+
 function buildStorehouse(k, P, st) {
   const y = PLINTH;
   if (isRound(st)) {
@@ -1453,6 +1493,7 @@ function getBuildingGeometry(type, pantheon, tier, mask = 0) {
       case 'stone_wall': top = buildStoneWall(k, P, mask & 255); break;
       case 'town_center': top = buildTownCenter(k, P, st, t); break;
       case 'house': top = buildHouse(k, P, st); break;
+      case 'manor': top = buildManor(k, P, st); break;
       case 'barracks': top = buildBarracks(k, P, st); break;
       case 'storehouse': top = buildStorehouse(k, P, st); break;
       case 'shrine': top = buildShrine(k, P, st); break;

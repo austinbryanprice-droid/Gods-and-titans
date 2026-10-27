@@ -61,7 +61,7 @@ function assertFinite(geo, label) {
 }
 
 test('building data has the types the models know about', () => {
-  for (const t of ['town_center', 'house', 'barracks', 'storehouse', 'shrine', 'temple', 'tower', 'titan_gate']) {
+  for (const t of ['town_center', 'house', 'manor', 'barracks', 'storehouse', 'shrine', 'temple', 'tower', 'titan_gate']) {
     assert.ok(BUILDINGS[t], `missing building ${t}`);
   }
   assert.ok(PANTHEON_LIST.length >= 10, 'expected the 10 roster pantheons');
@@ -90,6 +90,16 @@ test('town center tiers are clearly different and grow', () => {
     const [a, b, c] = [1, 2, 3].map((t) => getBuildingModelInfo('town_center', p, t));
     assert.ok(b.triangles > a.triangles && c.triangles > b.triangles, `${p.id}: tiers should add detail (${a.triangles}/${b.triangles}/${c.triangles})`);
     assert.ok(c.height >= a.height, `${p.id}: the city should not be lower than the village`);
+  }
+});
+
+test('the manor is a bigger house: it stands on the ground of four Houses and shows more of them in every pantheon', () => {
+  for (const p of PANTHEON_LIST) {
+    const house = getBuildingModelInfo('house', p);
+    const manor = getBuildingModelInfo('manor', p);
+    assert.equal(manor.size, BUILDINGS.house.size * 2, `${p.id}: a Manor covers the 2 x 2 Houses it replaces`);
+    assert.ok(manor.triangles > house.triangles * 1.5, `${p.id}: the Manor shows more detail (${manor.triangles}) than one House (${house.triangles})`);
+    assert.ok(manor.height >= house.height, `${p.id}: and stands as tall (${manor.height.toFixed(2)} against ${house.height.toFixed(2)})`);
   }
 });
 
@@ -661,7 +671,7 @@ function visibleTeamShare(model) {
 
 test('team color: every building shows some of it to the game camera, and the Celtic round roofs keep their band above the thatch courses', () => {
   const celtic = PANTHEON_LIST.find((q) => q.id === 'celtic');
-  const banded = ['house', 'barracks', 'town_center1', 'town_center2', 'town_center3', 'temple', 'tower'];
+  const banded = ['house', 'manor', 'barracks', 'town_center1', 'town_center2', 'town_center3', 'temple', 'tower'];
   for (const p of PANTHEON_LIST) {
     for (const [type, tier] of VARIANTS) {
       if (BUILDINGS[type].wall) continue; // a wall segment is team color in its own mesh, along both faces

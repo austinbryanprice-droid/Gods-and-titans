@@ -63,6 +63,7 @@ const COMMANDS = {
   upgradeTier: { building: ['id', true] },
   cancelBuild: { building: ['id', true] },
   upgradeWall: { walls: U },
+  upgradeHouses: { houses: U },
   rally: { building: ['id', true], x: XO, y: YO, target: TGT },
   stop: { units: U },
   hold: { units: U, queue: Q },
