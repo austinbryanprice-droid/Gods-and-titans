@@ -8,14 +8,15 @@
     Visual check page for the buildings and structures (src/render/models/building-models.js)
     under the real renderer: the real GameRenderer (sun, moon, sky, haze, lamp pools, post,
     fog of war, wall joins) on a generated map, with one pantheon's whole city laid out in
-    the open ground near the first start: a Town Center, houses, barracks, storehouse, shrine,
-    temple, tower, Titan Gate, three construction sites, and wall runs with towers.
+    the open ground near the first start: a Town Center, houses, a Manor beside the four Houses it
+    combines (the square view), barracks, storehouse, shrine, temple, tower, Titan Gate, three
+    construction sites, and wall runs with towers.
     (tools/gallery-buildings.html shows the same models under plain two-light lighting.)
     URL params:
       pantheon=greek|norse|...           the player's pantheon (default greek)
       quality=low|medium|high|ultra      render tier (default medium)
       tod=golden|day|dusk|night|dawn|13.5   time of day (default golden)
-      view=village|tc|tiers|house|barracks|storehouse|shrine|temple|tower|gate|walls|sites|row|far
+      view=village|tc|tiers|house|manor|square|barracks|storehouse|shrine|temple|tower|gate|walls|sites|row|far
                                          camera framing (default village)
       zoom=26                            camera distance (tiles), a default per view
       tier=3                             Town Center tier of the village's hall (default 3)
@@ -119,6 +120,10 @@
     put('house', -9, 12, 0.1);
     put('barracks', -4, 13, 0.45);
     put('temple', 1.5, 13.5, 0.8);
+    // a Manor, and the four Houses in a square it is made from
+    put('manor', -13, 2);
+    const sq = world.findPlacement(p, 'manor', tc.x - 13, tc.y + 9, 14);
+    if (sq) for (const [dx, dy] of [[0, 0], [2, 0], [0, 2], [2, 2]]) keep('house_square', world.createBuilding(p, 'house', sq.tx + dx, sq.ty + dy, true, true));
     keep('town_center', tc);
 
     // wall runs: tower — 7 wooden segments — tower, and a stone run beside it, with a short side spur
@@ -160,6 +165,8 @@
       tc: () => ({ x: tc.x + 0.5, y: tc.y + 1.2, d: 12 }),
       tiers: () => ({ x: tiersAt.tx + 12.5, y: tiersAt.ty + 3.5, d: 22 }),
       house: () => ({ x: first('house').x, y: first('house').y + 0.8, d: 8 }),
+      manor: () => ({ x: first('manor').x, y: first('manor').y + 1.2, d: 10 }),
+      square: () => { const m = mid(placed.house_square || [first('house')]); return { x: m.x, y: m.y + 1.2, d: 10 }; },
       barracks: () => ({ x: first('barracks').x, y: first('barracks').y + 1.2, d: 10 }),
       storehouse: () => ({ x: first('storehouse').x, y: first('storehouse').y + 0.8, d: 8 }),
       shrine: () => ({ x: first('shrine').x, y: first('shrine').y + 0.8, d: 8 }),

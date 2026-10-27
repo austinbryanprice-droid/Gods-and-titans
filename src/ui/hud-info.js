@@ -9,6 +9,7 @@ import {
 } from '../config.js';
 import { UNITS, BUILDINGS, GOLD_MINE, UPGRADES } from '../data/index.js';
 import { buildingMods, unitMods, upgradesFor } from '../data/upgrades.js';
+import { MANOR, mergeRule } from '../data/houses.js';
 import { canRank, rankBonus, rankName, nextRankXp, RANK_NUMERALS, RANK_COLORS } from '../data/ranks.js';
 import { sanitizeName } from '../net/protocol.js';
 import { el, setText, setStyle, setHidden, setClass, fmt, pct, hpColor, safeColor } from './hud-dom.js';
@@ -369,7 +370,9 @@ export class InfoView {
     } else if (e.t === 'storehouse' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', 'Gold and wood can be delivered here.'));
     } else if (e.t === 'house' && e.o === vs.myIndex) {
-      extra.appendChild(el('div', 'hi-note is-dim', `Provides housing for ${def.popProvided} population.`));
+      extra.appendChild(el('div', 'hi-note is-dim', `Provides housing for ${def.popProvided} population. Select four Houses that stand in a square to combine them into a Manor.`));
+    } else if (e.t === MANOR && e.o === vs.myIndex) {
+      extra.appendChild(el('div', 'hi-note is-dim', `Provides housing for ${def.popProvided} population: ${def.popProvided - mergeRule().count * BUILDINGS.house.popProvided} more than the Houses it replaced.`));
     } else if (def && def.wall && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', def.wallUpgrade ? 'Blocks the way. Upgrade it to stone for more health and armor.' : 'Blocks the way until enemies break through. A Tower built on it joins the wall.'));
     }
