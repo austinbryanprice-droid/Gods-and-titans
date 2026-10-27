@@ -82,6 +82,7 @@ test('tips that quote a build hotkey or a game number say what the data says', (
   assert.match(text('walls'), new RegExp(`\\[\\[B\\]\\], then \\[\\[${BUILDINGS.wooden_wall.hotkey}\\]\\]`));
   assert.match(text('mine-slots'), new RegExp(`Only ${MINE_SLOTS} Worshippers`));
   assert.match(text('train-batch'), new RegExp(`up to ${MAX_QUEUE} units`));
+  assert.match(text('manor'), new RegExp(`press \\[\\[${BUILDINGS.manor.hotkey}\\]\\] to combine them into a Manor: ${BUILDINGS.manor.popProvided} population in place of ${4 * BUILDINGS.house.popProvided}\\.`));
   assert.match(text('market'), new RegExp(`keeps ${TRADE_TAX_PCT}%`));
   assert.match(text('spells-buildings'), new RegExp(`only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings`));
   assert.match(text('peace'), new RegExp(PEACE_NAME));
@@ -145,6 +146,7 @@ test('hintContext counts what the player has, and the tips that depend on it fit
       for (let i = 0; i < 7; i++) snap.entities.push({ ...worker, id: 800 + i, t: 'warrior' });
       snap.entities.push({ ...town, id: 850, t: 'barracks', tx: 20, ty: 20, hp: 100, mhp: 1000 });
       snap.entities.push({ ...town, id: 851, t: 'wooden_wall', tx: 25, ty: 25, hp: 100, mhp: 100 });
+      for (let i = 0; i < 4; i++) snap.entities.push({ ...town, id: 860 + i, t: 'house', tx: 30 + (i % 2) * 2, ty: 30 + Math.floor(i / 2) * 2 });
       snap.players[0].tier = 2;
     },
   });
@@ -162,6 +164,10 @@ test('hintContext counts what the player has, and the tips that depend on it fit
   assert.equal(fits('walls'), false, 'walls are already up');
   assert.equal(fits('repair'), true);
   assert.equal(fits('peace'), false);
+  const manor = HINTS.find((h) => h.id === 'manor').when;
+  assert.equal(manor(c), true, 'four Houses and a Town');
+  assert.equal(manor({ ...c, tier: 1 }), false, 'a Village cannot combine them');
+  assert.equal(manor({ ...c, has: { house: 3 } }), false, 'three Houses make no square');
 });
 
 test('the Decade of Peace tips fit only a peace; the team Market tip only a team', () => {

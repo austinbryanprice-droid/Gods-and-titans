@@ -6,7 +6,7 @@
 //   hintContext(vs)       → what the player has and knows, for the `when`s
 //   pickHint({ ctx, seen }) → the next tip: unseen before seen, a fitting one before a general one
 //   hintParts(text)       → ['Press ', { key: 'Space' }, ' to …'] for building the DOM
-import { UNITS, eliteFor } from '../data/index.js';
+import { BUILDINGS, UNITS, eliteFor } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
 import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../config.js';
 import { isWallEntity } from './hud-data.js';
@@ -81,6 +81,7 @@ export const HINTS = [
   { id: 'mine-slots', text: `Only ${MINE_SLOTS} Worshippers dig in a gold mine at once. Send the rest to the forest, or to pray.`, when: (c) => c.workers >= 5 && c.time > 120 },
   { id: 'storehouse', text: 'A Storehouse ([[B]], then [[O]]) beside a forest or a mine shortens every trip your Worshippers make.', when: (c) => c.time > 180 && !c.has.storehouse },
   { id: 'houses', text: 'Houses raise your population limit. Raise the next one before you hit the cap, not after.', when: (c) => c.popCap > 0 && c.popCap < POP_MAX && c.popCap - c.pop <= 4 },
+  { id: 'manor', text: `Select four Houses that stand in a square and press [[${BUILDINGS.manor.hotkey}]] to combine them into a Manor: ${BUILDINGS.manor.popProvided} population in place of ${BUILDINGS.house.popProvided * BUILDINGS.manor.mergesFrom.count}. It needs a Town.`, when: (c) => c.tier >= 2 && (c.has.house || 0) >= BUILDINGS.manor.mergesFrom.count },
   { id: 'pray', text: 'Worshippers praying at a Shrine earn Faith, and Faith summons gods and creatures. Keep a few praying all game.', when: (c) => c.faithRate === 0 && c.time > 150 },
   { id: 'repair', text: 'Right-click a damaged building with Worshippers selected to repair it, or switch Auto-Repair on with [[T]].', when: (c) => c.damaged },
   { id: 'upgrades', text: 'Most buildings have their own upgrades, in the middle and bottom rows of the command card. Iron Picks at the Town Center bring more gold home on every trip.', when: (c) => c.upgrades === 0 && c.time > 240 },
