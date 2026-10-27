@@ -6,6 +6,10 @@
 //                                [--level 0.1] [--curve flat|story] [--seed 1] [--volume 0.5]
 //                                [--only perc,war]   solo some layers (pad drone bass arp lead perc war fx)
 //                                [--dry]             no reverb (to time the voices alone)
+//   node tools/music-render.mjs --film --out DIR [--volume 0.5] [--speech 1.4-3.8,9.6-11.5,...] [--seed N] [--dry]
+//                                the intro film's score (src/intro/score.js) instead of a theme: film-score.wav, with the
+//                                mix stepping back over the speech windows (film seconds; a guess from the captions by
+//                                default) and film-speech.json, the windows that were used
 //
 // Starts a small static server for the repo, opens tools/music-lab.html in headless Chromium
 // and calls its renderTheme(). Prints peak and RMS per file. Needs Playwright (global or local).
@@ -33,6 +37,8 @@ const volume = Number(opt('volume', '0.5'));
 const wanted = opt('themes', 'all');
 const only = opt('only', '') ? opt('only', '').split(',') : null;
 const reverb = !args.includes('--dry');
+const film = args.includes('--film');
+const speech = opt('speech', '') ? opt('speech', '').split(',').map((w) => w.split('-').map(Number)) : null;
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const server = createServer(async (req, res) => {
@@ -62,8 +68,24 @@ try {
   });
   await page.goto(`${base}/tools/music-lab.html`);
   await page.waitForFunction(() => window.__lab);
-  const ids = wanted === 'all' ? await page.evaluate(() => window.__lab.themes) : wanted.split(',');
+  const ids = film ? [] : wanted === 'all' ? await page.evaluate(() => window.__lab.themes) : wanted.split(',');
   await mkdir(out, { recursive: true });
+  const db = (v) => (20 * Math.log10(Math.max(v, 1e-9))).toFixed(1);
+  if (film) {
+    const t0 = Date.now();
+    const r = await page.evaluate(async ({ volume, speech, seed, reverb }) => {
+      const r = await window.__lab.renderFilm({ volume, speech, reverb, ...(seed === null ? {} : { seed }) });
+      let s = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < r.wav.length; i += chunk) s += String.fromCharCode(...r.wav.subarray(i, i + chunk));
+      return { peak: r.peak, rms: r.rms, windows: r.windows, b64: btoa(s) };
+    }, { volume, speech, seed: opt('seed', '') === '' ? null : seed, reverb });
+    const file = join(out, 'film-score.wav');
+    await writeFile(file, Buffer.from(r.b64, 'base64'));
+    await writeFile(join(out, 'film-speech.json'), JSON.stringify(r.windows));
+    console.log(`film score    peak ${db(r.peak)} dBFS  rms ${db(r.rms)} dBFS  (${((Date.now() - t0) / 1000).toFixed(1)} s)  ${file}`);
+    console.log(`speech windows ${JSON.stringify(r.windows.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]))}`);
+  }
   for (const id of ids) {
     const t0 = Date.now();
     const b64 = await page.evaluate(async ({ id, seconds, level, curve, seed, volume, only, reverb }) => {
@@ -75,7 +97,6 @@ try {
     }, { id, seconds, level, curve, seed, volume, only, reverb });
     const file = join(out, `${id}-${curve === 'story' ? 'story' : `L${level}`}${only ? `-${only.join('+')}` : ''}.wav`);
     await writeFile(file, Buffer.from(b64.b64, 'base64'));
-    const db = (v) => (20 * Math.log10(Math.max(v, 1e-9))).toFixed(1);
     console.log(`${id.padEnd(13)} peak ${db(b64.peak)} dBFS  rms ${db(b64.rms)} dBFS  (${((Date.now() - t0) / 1000).toFixed(1)} s)  ${file}`);
   }
 } finally {

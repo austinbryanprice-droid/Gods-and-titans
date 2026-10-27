@@ -141,6 +141,38 @@ export const AUDIO_CUES = Object.freeze([
   { at: 41.4, name: 'victory', volume: 0.7 },
 ]);
 
+/**
+ * The score under the film (src/intro/score.js plays it): the battle intensity, 0 calm .. 1 full battle, that the
+ * title theme is conducted at, as [film second, intensity] keyframes joined by straight lines. It builds with the
+ * story: the choir and the drone alone over the dawn, a frame drum for the prayer, the groove when Zeus marches
+ * out, the war drums and horns as the hosts close, the full battle for the titans, the ten gods at the height,
+ * then it settles to the title screen's own level (`SCORE_END`, kept equal to the title's by a test) by the last
+ * frame, so the music goes on under the title without a seam.
+ */
+export const SCORE_END = 0.25;
+export const MUSIC_CURVE = Object.freeze([
+  [0, 0.07],
+  [8.6, 0.16],
+  [15, 0.3],
+  [19, 0.42],
+  [25, 0.8],
+  [30, 0.97],
+  [36, 1],
+  [41.5, 0.9],
+  [44.5, 0.3],
+  [FILM_LENGTH, SCORE_END],
+]);
+
+/** The intensity the score is at for film second t (held at the first value before the film and the last after it). */
+export function musicAt(t) {
+  const k = MUSIC_CURVE;
+  if (!(t > k[0][0])) return k[0][1];
+  for (let i = 1; i < k.length; i++) {
+    if (t <= k[i][0]) return lerp(k[i - 1][1], k[i][1], (t - k[i - 1][0]) / (k[i][0] - k[i - 1][0]));
+  }
+  return k[k.length - 1][1];
+}
+
 /** The shot on screen at film second t. */
 export function shotAt(t) {
   let shot = SHOTS[0];

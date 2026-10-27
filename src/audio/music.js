@@ -9,7 +9,10 @@
 //   music.setIntensity(v)           0 calm .. 1 battle; the score eases toward it (quickly up, slowly down)
 //   music.setVolume(v) / music.mute(on)
 //   music.duck(depth, seconds)      dip under a stinger (sound effects named in DUCKS do it by themselves)
-//   music.state()                   { theme, level, target, playing, ready, muted, volume }
+//   music.conduct(v)                the intensity set exactly, no easing: for the intro film, which conducts the score
+//   music.setStage(gain, tc, delay) the film's own volume stage: ease everything to `gain` (1 = as the settings have it)
+//   music.setStingers(on)           whether the sound effects in DUCKS make the music step back (the film turns it off)
+//   music.state()                   { theme, level, target, stage, playing, ready, waiting, muted, volume }
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers). What plays is
 // composed bar by bar by music-composer.js from the themes in music-themes.js.
 import { sfx, kit as makeKit, makeNoiseBuffer } from './sfx.js';
@@ -17,7 +20,7 @@ import { THEMES, themeFor } from './music-themes.js';
 import { createScore, composeBar } from './music-composer.js';
 import { playVoice } from './music-voices.js';
 
-const COMPOSE_AHEAD = 1.6; // seconds of music composed ahead of the clock: rides out a stalled frame
+export const COMPOSE_AHEAD = 1.6; // seconds of music composed ahead of the clock: rides out a stalled frame
 const PLAY_AHEAD = 0.6; // a note is created this long before it sounds (a note waiting in the audio graph is not free)
 const LATE = 0.15; // a short note that is this late is dropped rather than played out of time
 const TICK_MS = 250;
@@ -67,14 +70,18 @@ function makeHall(ctx, seconds = HALL_SECONDS) {
 }
 
 /**
- * The music's own part of the graph: layers → run mix → bus → duck → hide → the shared limiter, with
- * a reverb fed by each run's send. `out` is where the music joins (the sound effects' limiter).
+ * The music's own part of the graph: layers → run mix → bus → duck → stage → hide → the shared limiter,
+ * with a reverb fed by each run's send. `out` is where the music joins (the sound effects' limiter).
+ * `bus` is the settings' volume, `duck` the stingers' dip, `stage` the intro film's mix (a voice speaking
+ * over it) and `hide` the hidden tab's fade: four gains that never touch each other's automation.
  */
 function buildMusicGraph(ctx, out, { reverb = true } = {}) {
   const hide = ctx.createGain();
   hide.connect(out);
+  const stage = ctx.createGain();
+  stage.connect(hide);
   const duck = ctx.createGain();
-  duck.connect(hide);
+  duck.connect(stage);
   const bus = ctx.createGain();
   bus.connect(duck);
   let reverbIn = null;
@@ -92,7 +99,7 @@ function buildMusicGraph(ctx, out, { reverb = true } = {}) {
   } catch {
     reverbIn = null;
   }
-  return { bus, duck, hide, reverbIn };
+  return { bus, duck, stage, hide, reverbIn };
 }
 
 /** One piece of music playing: a score, its layer buses, and the clock position of the next bar. */
@@ -245,6 +252,8 @@ export class MusicEngine {
     this.hiddenSince = null; // clock time the tab was hidden at, or null while it is shown
     this.fadeIn = 2.5;
     this.fadeOutSeconds = 2.2;
+    this.stageGain = 1; // the film's mix stage (see setStage); kept here so a context made later starts with it
+    this.stingers = true; // whether the sounds in DUCKS make the music step back
   }
 
   /**
@@ -263,7 +272,7 @@ export class MusicEngine {
     sfx.init();
     sfx.onPlay((name) => {
       const d = DUCKS[name];
-      if (d) this.duck(d[0], d[1]);
+      if (d && this.stingers) this.duck(d[0], d[1]);
     });
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('visibilitychange', () => {
@@ -292,6 +301,7 @@ export class MusicEngine {
     this.fading = [];
     this._applyVolume();
     this._applyHidden();
+    nodes.stage.gain.value = this.stageGain; // a new graph starts where the film's mix is now
     return true;
   }
 
@@ -350,6 +360,15 @@ export class MusicEngine {
     this.target = Math.min(1, Math.max(0, v));
   }
 
+  /**
+   * The intensity set exactly, with none of the easing of setIntensity (1.5 s up, 7 s down): whoever
+   * conducts the score (the intro film, src/intro/score.js) already shapes the curve it wants.
+   */
+  conduct(v) {
+    if (!Number.isFinite(v)) return;
+    this.target = this.level = Math.min(1, Math.max(0, v));
+  }
+
   setVolume(v) {
     if (!Number.isFinite(v)) return;
     this.volume = Math.min(1, Math.max(0, v));
@@ -379,14 +398,44 @@ export class MusicEngine {
     }
   }
 
+  /**
+   * The film's own volume stage, after the volume setting and the stingers' dip: everything eases to `gain`
+   * (1 = as the settings have it) with time constant `tc` seconds, starting `delay` seconds from now. The intro
+   * film lifts the score above its usual place and steps it back under a voice, then gives it back
+   * (src/intro/score.js). Remembered for a context that does not exist yet.
+   */
+  setStage(gain, tc = 0.3, delay = 0) {
+    if (!Number.isFinite(gain)) return;
+    this.stageGain = Math.min(4, Math.max(0, gain));
+    if (!this.env) return;
+    const p = this.env.nodes.stage.gain;
+    const now = this.ctx.currentTime;
+    const from = p.value; // read before the cancel: a running ease is dropped by it
+    try {
+      p.cancelScheduledValues(now);
+      p.setValueAtTime(from, now);
+      p.setTargetAtTime(this.stageGain, now + Math.max(0, delay || 0), Math.max(0.005, tc || 0));
+    } catch {
+      p.value = this.stageGain;
+    }
+  }
+
+  /** Whether the sound effects in DUCKS make the music step back (they do, except under the intro film, which mixes its own sounds). */
+  setStingers(on) {
+    this.stingers = !!on;
+  }
+
   state() {
     return {
       theme: this.run ? this.run.theme.id : null,
       wanted: this.want ? this.want.id : null,
       level: this.level,
       target: this.target,
+      stage: this.stageGain,
       playing: !!(this.run && !this.run.fading && this.ready),
       ready: this.ready,
+      // a theme is wanted, nothing mutes it and the browser has not allowed audio yet (the first click will)
+      waiting: !!(this.want && !this.muted && this.volume > 0 && !this.ready && (sfx.armed || this.ctx)),
       muted: this.muted,
       volume: this.volume,
       bars: this.run ? this.run.bars : 0,
@@ -469,10 +518,11 @@ export const music = new MusicEngine();
 
 /**
  * Render a theme into an AudioBuffer with an OfflineAudioContext (browser only; used by checks to
- * measure levels and by the music lab). The intensity follows `levelAt(seconds)` when given.
+ * measure levels and by the music lab). The intensity follows `levelAt(seconds)` when given, and the film's mix stage
+ * `stageAt(seconds)` (a gain; see setStage); `fadeIn` is the seconds the piece takes to come in (the live engine's is 2.5).
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 44100, seed = 1, level = 0, levelAt = null, volume = 1, only = null, reverb = true } = {}) {
+export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 44100, seed = 1, level = 0, levelAt = null, volume = 1, only = null, reverb = true, stageAt = null, fadeIn = 0.01 } = {}) {
   const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (!OAC) return null;
   const ctx = new OAC(2, Math.floor(sampleRate * seconds), sampleRate);
@@ -486,8 +536,15 @@ export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 4
   comp.connect(ctx.destination);
   const nodes = buildMusicGraph(ctx, comp, { reverb });
   nodes.bus.gain.value = MUSIC_GAIN * Math.pow(volume, 1.5);
+  if (stageAt) {
+    // the film's mix stage (a gain as a function of the second), as one value curve at 100 a second
+    const rate = 100;
+    const curve = new Float32Array(Math.max(2, Math.ceil(seconds * rate) + 1));
+    for (let i = 0; i < curve.length; i++) curve[i] = Math.max(0, stageAt(Math.min(seconds, i / rate)));
+    nodes.stage.gain.setValueCurveAtTime(curve, 0, seconds);
+  }
   const env = { ctx, nodes, kit: makeKit(ctx, makeNoiseBuffer(ctx)) };
-  const run = new Run(env, themeFor(themeId), seed, 0, 0.01);
+  const run = new Run(env, themeFor(themeId), seed, 0, fadeIn);
   run.only = only; // solo some layers
   while (run.nextBar < seconds) run.compose(run.nextBar + 0.01, levelAt ? levelAt(run.nextBar) : level);
   run.play(Infinity);

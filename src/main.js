@@ -115,18 +115,18 @@ function hasWebGL2() {
 }
 
 /**
- * Play the intro film (DESIGN 11.1) over the hidden menu, with its narration if the player has it on; the menu
- * comes back on `screen` behind the black when the film ends or is skipped. Resolves once the film is gone,
+ * Play the intro film (DESIGN 11.1) over the hidden menu, with its score and its narration if the player has it on;
+ * the menu comes back on `screen` behind the black when the film ends or is skipped. Resolves once the film is gone,
  * whatever its outcome.
  * @param {string} screen the menu screen to land on
  * @param {boolean} [guard] drop the film on a machine too slow to show it (not when the player asked to watch it)
  */
 function watchIntro(screen, guard = true) {
   hideMenu();
-  quietMusic(); // the film has sounds and a voice of its own: the title music comes back with the menu
+  quietMusic(); // whatever else is playing (a Settings audition) goes: the film starts its own score, the title theme as an overture
   const handover = () => {
     showMenu(screen);
-    playTitleMusic();
+    playTitleMusic(); // a film that ran to its end left that score playing, and this carries it on; one that was cut short faded it out, and the title's own comes in
   };
   try {
     const s = getSettings();

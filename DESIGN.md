@@ -1777,10 +1777,14 @@ per-frame budget, so a revealed army appears over a few frames.
   under the stingers in `DUCKS` (`summon_god`, `summon_titan`, `victory`, `defeat`, `tier_up`, `horn`; heard through
   `sfx.onPlay`). `initAudio(settings)` and `syncAudio(settings, changed)` (`main.js`) start both engines and carry the
   settings over; `playTitleMusic()` is what each menu screen calls (a no-op while it already plays);
-  `quietMusic()` is for the intro film (11.1), which plays over silence (`main.js` calls it as the film starts and
-  `playTitleMusic()` at the hand-over to the menu); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is `music.play(themeId)` (crossfades;
-  remembered until the browser allows audio), `stop(fade)`, `setIntensity(0..1)`, `setVolume`, `mute`, `duck`,
-  `state()`. All of it is a no-op where WebAudio is missing (Node), a voice that throws is muted from then on and five
+  `quietMusic()` clears whatever plays as the intro film (11.1) starts (the film starts a score of its own, under its
+  narration; `main.js` calls `playTitleMusic()` at the hand-over to the menu, which carries that score on or, after a
+  skip, starts the title's own); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is
+  `music.play(themeId)` (crossfades; remembered until the browser allows audio), `stop(fade)`, `setIntensity(0..1)`,
+  `setVolume`, `mute`, `duck`, `state()`, and three calls for the intro film: `conduct(v)` (the intensity set exactly, with
+  none of the easing), `setStage(gain, tc, delay)` (see below) and `setStingers(on)` (whether the sounds in `DUCKS` make
+  the music step back; the film turns it off). `state().waiting` is true while a theme is wanted and only the browser's
+  click is missing. All of it is a no-op where WebAudio is missing (Node), a voice that throws is muted from then on and five
   scheduler faults in a row switch the music off: it cannot break the game.
   **The score.** Eleven themes (`music-themes.js`: `menu`, the title screen's grand D minor with horns and a choir, and
   one per pantheon, each with its own mode, tempo, instruments and rhythms). A theme is data: mode, bar length, an
@@ -1796,6 +1800,10 @@ per-frame budget, so a revealed army appears over a few frames.
   of catching up, and a hidden tab fades the music out and stops making notes. Layers (pad, drone, bass, arp, lead,
   perc, war, fx) are buses with a gain and a send to one mono 2 s hall reverb; a new theme crossfades in; the intensity
   eases toward its target (1.5 s up, 7 s down: a fight ends slowly). The volume is `0.63 * v^1.5` into the limiter.
+  The graph is layers → run mix → `bus` (the volume) → `duck` (the stingers' dip) → `stage` (the intro film's mix, a
+  gain at 1 outside the film, moved by `setStage` and remembered for a context that does not exist yet) → `hide` (the
+  hidden tab's fade) → the limiter: four gains that never touch each other's automation, so the film's mix and a stinger
+  or a mute can overlap. `renderMusicOffline` takes a `stageAt(seconds)` for the same stage and a `fadeIn`.
   **The instruments** (`music-voices.js`, 49): plucked strings, a mallet, 14 breath, reed and bowed leads, 5 pads, 16
   drums, bells, gongs and horns, all oscillators, filters and noise. A score plays dozens of notes a second and every
   live node costs the audio thread for as long as it lives, so the recipes are lean: vibrato is a value curve, not an
@@ -1884,16 +1892,56 @@ own words, `en-US`, rate 0.9 and pitch 0.9, at the Settings volume (0 is silence
 queues a line behind one still being said, so they never overlap; no voice is picked by name, since the browser's
 default for English is its best and a list can open on a novelty voice). The overlay's `paint` hands the voice the film's second each frame, so it
 follows the picture, and a caption that came and went between two frames is not read late. Every way out of the film
-(`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first, with
-`speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
+(`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first (after telling the
+score, below), with `speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
 under the intro toggle) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
 film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
 throws is ignored. Chrome will not speak until the page has had a click or a key (the rule that keeps the film's
 sounds quiet on a first visit): the refused `speak` fires an `error` event (`not-allowed`), which puts up a "Click for
-narration" hint at the top left (class `needs-click` on the overlay); a click anywhere on the film then says the
-caption on screen (if it has 1.2 s left) and takes the hint down, and the later lines speak by themselves. "Watch it
-now" always speaks, for the player has just clicked. `createNarrator({ speech, volume, captions, onBlocked })` takes
-the speech synthesis as a parameter (tests pass a stand-in).
+sound" hint at the top left (class `needs-click` on the overlay, up while either the voice or the score below is waiting
+for a click); a click anywhere on the film then says the caption on screen (if it has 1.2 s left) and takes the hint
+down, and the later lines speak by themselves. "Watch it now" always speaks, for the player has just clicked.
+`createNarrator({ speech, volume, captions, onBlocked, onSpeaking })` takes the speech synthesis as a parameter (tests
+pass a stand-in). `onSpeaking(true)` is called as a line is handed to the browser, a moment before it is heard, and
+`onSpeaking(false)` when none is left: at the browser's `end` or `error` event, or when the line's caption has run out,
+whichever comes first (some browsers never report an end), or at `stop()`; events of a line already settled are ignored.
+
+**The score** (`src/intro/score.js`, `createFilmScore()`; the engine is the music engine of 9): the title theme (`menu`,
+D minor, the very piece the title screen goes on playing) as an overture under the film, so a hand-over has no seam.
+No recorded audio. It is the music engine, told three things.
+*The story*: `MUSIC_CURVE` / `musicAt(t)` in `script.js` (keyframes of the battle intensity, straight lines between) builds
+with the film: the choir and the drone alone over the dawn (0.07), a light pulse for the prayer (0.16 to 0.3), the groove
+as Zeus marches out (0.42 at 19 s), the war drums and horns for the clash (0.8 at 25 s), everything for the titans (0.97
+to 1 from 30 to 36 s), the ten gods at the height, then down to the title's own level (`SCORE_END` 0.25, which a test keeps
+equal to `TITLE_INTENSITY`) by the last frame. The engine composes a bar 1.6 s before it sounds and a bar lasts 3.8 s, so
+the score reads the story `LEAD` = 3.5 s ahead of the film's clock (the value for the middle of the bar being composed) and
+`conduct()`s the engine with it; a test checks that each bar is composed at the intensity of its middle. `SEED` (82) fixes
+the piece: the same overture every time, with its four-bar sections falling on the film's beats (a section of the calm
+progression with no tune over the dawn and the prayer; the tune coming in with the cut to Zeus at 15 s; a tense section, the tune
+an octave up, starting as the titans do at 30 s; a calm one again from 43 s, which the title screen carries on). A test pins that
+shape, and when a change to the composer breaks it, its failure message lists the seeds that fit.
+*The voice*: a `stage` gain (9) is at `LIFT` 1.4 (+2.9 dB, between the lines, and the opening) and steps back to `UNDER` 0.28
+of that (-11 dB, 8 dB under the music's usual place) while a line is with the browser: time constant 0.1 s when the narrator hands a
+line over, 0.55 s starting 0.2 s after its last word for the swell. `liftFor(volume)` holds the lift so that it is never
+louder than the Music slider's top. The film's own cues (`AUDIO_CUES`) play over the score with the stingers' ducking switched
+off (`setStingers(false)`: the cue table is the mix, the engine's rules are for a match).
+*The way out*: `end('handover')` for a film that ran to its end, or never began to show: the same run plays on, the lift
+glides away over a few seconds (time constant 1.5 s) and `playTitleMusic()` finds the piece already playing at the same
+intensity. `end('cut')` for a skip, a failure or the speed guard while the film is showing: the piece fades out in 0.3 s inside
+the dip to black, the stage is reset to 1 at 0.36 s (behind the fading piece and as the title's own begins), and the title screen
+fades its own piece in at the hand-over. `finish` tells the score first and stops the voice second, so a cut-off line cannot
+swell it again.
+It obeys the settings: the Music slider and mute are the engine's own, so the film plays on without a score (and with no hint)
+while music is muted or at 0; "Intro film" and "Narration" decide whether there is a film and a voice (with no narration the
+score simply stays at its lift). Every call is guarded: a failing engine costs a warning and a silent film. On a first visit
+the browser starts no audio before a click or key (the sound engine's rule), so the film is silent until then and shows the
+"Click for sound" hint (`state().waiting`); the first click starts the score at the film's moment, under the voice if one is
+being said. **Measured, not heard.** Nobody has listened to this: with a flite stand-in voice at -26 LUFS and the Music slider
+at its default (`node tools/music-render.mjs --film`, ffmpeg `ebur128`), the score is at -40 to -34 LUFS under the voice (14 to
+8 dB below it, closer as the story swells) and -29 to -23.5 LUFS between the lines (+10 to +14 dB), -26.7 LUFS over the whole film,
+true peak -11 dBFS before the voice is added; `tools/shot-intro.mjs --music` reads the same mix off the page's real Web Audio graph
+in Chromium (stage 0.39 under every line, 1.40 between). The constants are guesses at an unmeasured voice: if the voice proves
+quieter or louder than -26 LUFS, `UNDER` and `LIFT` in `score.js` are the knobs.
 
 **The script** (`src/intro/script.js`, pure data and arithmetic, no DOM, three.js or simulation): `SHOTS` (each
 with its `from` / `to` seconds, the `cut` into it, `hours` of the day it runs through, `ease`, and a camera of
@@ -1944,7 +1992,8 @@ does not want taken out (health bars, rank pips, status icons) and the terrain's
 and moon discs where they stand, cloud streaks, stars at night, the haze below the horizon), because the low shots
 look past the edge of the map, which the game's camera never does.
 
-**The page** (`src/ui/intro.js`, `src/ui/intro.css`): `playIntro({ root, quality, onHandover, … })` builds an
+**The page** (`src/ui/intro.js`, `src/ui/intro.css`): `playIntro({ root, quality, onHandover, createScore, … })` (the score,
+below, starts with the loading card, follows each frame's film second, and is told how the film was left) builds an
 overlay (z 30, over the menu) of a black card with the title and a pulse while the code loads (`import()`ed only
 when the film plays, so it costs nothing for players who skip it), the film's canvas, a vignette, letterbox bars
 that close over the film (the caption sits in the bottom bar), the Skip button and a black fade layer. It states
@@ -1957,9 +2006,15 @@ mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the ca
 changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
 plays, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
 voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
-screen, Esc cutting it before the dip, the hint and the click, the setting). Don't sample stills at
-19 or 36 s, the dips' black frames. Tests: `tests/intro/{script,stage,film,narrator}.test.js`,
-`tests/render/camera-free.test.js`, `tests/ui/intro.test.js`.
+screen, Esc cutting it before the dip, the hint and the click, the setting); `--music` plays the film without its renderer
+in real time (a stand-in voice that takes time) and reads the page's real Web Audio graph (the stage's gain, an analyser on
+the music's output) through the whole film, a skip in the middle of a line and a first visit before any click (about two
+minutes; `--scenes 2` runs one of the three). `node tools/music-render.mjs --film --out DIR [--speech from-to,…]` renders the
+score offline, with the mix stepping back over those speech windows, for ffmpeg to measure and mix (a stand-in voice from
+ffmpeg's `flite` filter makes a preview). Don't sample stills at 19 or 36 s, the dips' black frames. Tests:
+`tests/intro/{script,stage,film,narrator,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
+film on a strict fake audio context), `tests/render/camera-free.test.js`, `tests/ui/intro.test.js`, and the engine's
+side in `tests/audio/music-engine.test.js`.
 
 Traps met while making it: the summon pillar of a god or titan (about 8 tiles tall, 1.75 s) washes out a close
 frame, so the finale starts wide; `summon_god` plays at most once a second; an idle or held god auto-acquires

@@ -7,7 +7,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { FakeAudioContext, reaches } from './fake-audio.js';
 import { sfx } from '../../src/audio/sfx.js';
-import { MusicEngine, DUCKS, MUSIC_GAIN, MUSIC_THEME_IDS } from '../../src/audio/music.js';
+import { MusicEngine, DUCKS, MUSIC_GAIN, MUSIC_THEME_IDS, renderMusicOffline, COMPOSE_AHEAD } from '../../src/audio/music.js';
 import { THEMES } from '../../src/audio/music-themes.js';
 
 const warn = console.warn;
@@ -360,6 +360,154 @@ test('duck() dips the music and brings it back; the sound effects named in DUCKS
   ctx.currentTime += 5;
   sfx.play('click');
   assert.equal(engine.env.nodes.duck.gain.events.length, after, 'a click does not');
+});
+
+test('conduct() sets the intensity exactly, at once and for good: no easing up or down, garbage ignored', () => {
+  const { ctx, engine } = setup();
+  engine.conduct(0.9);
+  assert.equal(engine.state().level, 0.9, 'there at once, not 63% of the way after 1.5 s');
+  assert.equal(engine.state().target, 0.9);
+  engine.play('menu');
+  engine.tick();
+  assert.equal(engine.state().level, 0.9, 'a piece started afterwards opens there');
+  advance(ctx, engine, 5);
+  assert.equal(engine.state().level, 0.9, 'and the engine\'s own easing leaves it alone');
+  engine.conduct(0.1);
+  assert.equal(engine.state().level, 0.1, 'down at once too (setIntensity would take seconds: a fight ends slowly)');
+  advance(ctx, engine, 5);
+  assert.equal(engine.state().level, 0.1);
+  engine.conduct(Number.NaN);
+  engine.conduct(Infinity);
+  engine.conduct(undefined);
+  assert.equal(engine.state().level, 0.1);
+  engine.conduct(7);
+  assert.equal(engine.state().level, 1);
+  engine.conduct(-2);
+  assert.equal(engine.state().level, 0);
+  engine.setIntensity(0.6); // the ordinary call still eases from where the conductor left it
+  advance(ctx, engine, 1.5);
+  assert.ok(engine.state().level > 0.3 && engine.state().level < 0.5, `eased ${engine.state().level}`);
+});
+
+test('the stage is a gain of its own after the volume and the stingers\' dip: setStage eases it, with a delay, and touches no other gain', () => {
+  const { ctx, engine } = setup();
+  engine.play('menu');
+  engine.tick();
+  const { bus, duck, stage, hide } = engine.env.nodes;
+  assert.ok(reaches(bus, stage.gain.owner) && reaches(duck, stage.gain.owner) && reaches(stage.gain.owner, hide.gain.owner), 'volume → dip → stage → hidden-tab fade');
+  assert.ok(reaches(stage.gain.owner, sfx.shared.out), 'and on into the shared limiter');
+  const others = [bus, duck, hide].map((n) => n.gain.events.length);
+  ctx.currentTime = 10;
+  engine.setStage(0.28, 0.1);
+  let ev = stage.gain.events.at(-1);
+  assert.deepEqual(ev.slice(0, 2), ['target', 0.28]);
+  assert.equal(ev[2], 10, 'from now');
+  assert.equal(ev[3], 0.1, 'with the time constant asked for');
+  assert.equal(engine.state().stage, 0.28);
+  ctx.currentTime = 10.1;
+  engine.setStage(1.4, 0.55, 0.2);
+  ev = stage.gain.events.at(-1);
+  assert.deepEqual([ev[0], ev[1], ev[3]], ['target', 1.4, 0.55]);
+  assert.ok(Math.abs(ev[2] - 10.3) < 1e-9, 'a beat after now');
+  assert.ok(stage.gain.valueAt(10.25) > 0.28 && stage.gain.valueAt(10.25) < 0.7, 'held where the step back had got to, not yet swelling');
+  assert.ok(stage.gain.valueAt(13) > 1.35, 'and on its way up, a second and more later');
+  assert.deepEqual([bus, duck, hide].map((n) => n.gain.events.length), others, 'the volume, the dip and the fade belong to their own gains');
+  engine.setStage(Number.NaN, 1);
+  engine.setStage(Infinity, 1);
+  assert.equal(engine.state().stage, 1.4);
+  engine.setStage(99, 1);
+  assert.equal(engine.state().stage, 4, 'held to a sane ceiling');
+  engine.setStage(-1, 1);
+  assert.equal(engine.state().stage, 0);
+});
+
+test('the stage a film set before the engine had a graph is waiting on the new graph, and survives a replaced context', () => {
+  const { engine } = setup();
+  engine.setStage(0.4, 0.1);
+  assert.equal(engine.env, null, 'no graph yet: the first tick makes it');
+  engine.play('menu');
+  engine.tick();
+  assert.equal(engine.env.nodes.stage.gain.valueAt(0), 0.4, 'the graph is made with the stage as it was set');
+  const ctx2 = new FakeAudioContext({ state: 'running', sampleRate: 8000 });
+  sfx.init({ context: ctx2 });
+  engine.tick();
+  assert.equal(engine.ctx, ctx2);
+  assert.equal(engine.env.nodes.stage.gain.valueAt(0), 0.4, 'and so is the replacement');
+});
+
+test('setStingers(false): the sounds in DUCKS no longer make the music step back, and setStingers(true) gives it back', () => {
+  const { ctx, engine } = setup();
+  sfx.last.clear(); // the sound engine is one object for the whole file: forget when the other tests played these
+  sfx.active.clear();
+  engine.play('menu');
+  engine.tick();
+  const duck = engine.env.nodes.duck.gain;
+  assert.equal(engine.stingers, true, 'a match has them');
+  engine.setStingers(false);
+  const n = duck.events.length;
+  for (const name of Object.keys(DUCKS)) {
+    ctx.currentTime += 5;
+    assert.equal(sfx.play(name), true, `${name} plays`);
+  }
+  assert.equal(duck.events.length, n, 'and the music does not move');
+  engine.duck(0.5, 2);
+  assert.ok(duck.events.length > n, 'duck() itself still works');
+  engine.setStingers(true);
+  const m = duck.events.length;
+  ctx.currentTime += 5;
+  sfx.play('horn');
+  assert.ok(duck.events.length > m, 'with the stingers back, a horn does it again');
+});
+
+test('renderMusicOffline can follow a mix stage: one value curve over the whole render, from the function it is given', async () => {
+  class Offline extends FakeAudioContext {
+    constructor(channels, length, sampleRate) {
+      super({ sampleRate });
+      this.length = length;
+    }
+    startRendering() {
+      return Promise.resolve(this);
+    }
+  }
+  globalThis.OfflineAudioContext = Offline;
+  try {
+    const r = await renderMusicOffline('menu', { seconds: 6, sampleRate: 8000, stageAt: (t) => (t < 3 ? 1.4 : 0.4), levelAt: () => 0.5 });
+    const curves = r.nodes.flatMap((n) => (n.gain ? n.gain.events.filter((e) => e[0] === 'curve').map((e) => [n, e]) : []));
+    assert.equal(curves.length, 1, 'one curve, on one gain');
+    const [node, e] = curves[0];
+    assert.equal(e[2], 0);
+    assert.equal(e[3], 6, 'over the whole render');
+    assert.ok(Math.abs(node.gain.valueAt(1) - 1.4) < 1e-6 && Math.abs(node.gain.valueAt(5) - 0.4) < 1e-6);
+    assert.ok(e[4] instanceof Float32Array && e[4].every(Number.isFinite), 'a legal curve');
+    const plain = await renderMusicOffline('menu', { seconds: 2, sampleRate: 8000 });
+    assert.equal(plain.nodes.filter((n) => n.gain && n.gain.events.some((x) => x[0] === 'curve')).length, 0, 'without stageAt there is no curve');
+  } finally {
+    delete globalThis.OfflineAudioContext;
+  }
+});
+
+test('COMPOSE_AHEAD is the horizon the score is composed to (the film reads its story that far on)', () => {
+  assert.equal(COMPOSE_AHEAD, 1.6);
+});
+
+test('state() says when only the browser\'s click is missing: a theme is wanted, nothing mutes it, audio is not running', () => {
+  const { ctx, engine } = setup({ state: 'suspended' });
+  assert.equal(engine.state().waiting, false, 'nothing wanted yet');
+  engine.play('menu');
+  engine.tick();
+  assert.equal(engine.state().waiting, true, 'a click would start it');
+  engine.mute(true);
+  assert.equal(engine.state().waiting, false, 'a muted music is not waiting for anything');
+  engine.mute(false);
+  engine.setVolume(0);
+  assert.equal(engine.state().waiting, false, 'nor one at volume zero');
+  engine.setVolume(0.5);
+  assert.equal(engine.state().waiting, true);
+  ctx.state = 'running';
+  engine.tick();
+  assert.equal(engine.state().waiting, false, 'and once it plays, it is not');
+  engine.stop();
+  assert.equal(engine.state().waiting, false);
 });
 
 test('DUCKS names real sounds and sensible dips', () => {

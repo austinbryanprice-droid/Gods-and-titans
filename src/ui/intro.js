@@ -2,7 +2,8 @@
 // film (src/intro/film.js, the real renderer on a set the simulation runs) between letterbox
 // bars with a line of text at a time, then hands over to the title screen. Esc (or Enter,
 // Space, or the Skip button) cuts it short at any moment, even while it is still loading.
-// A voice (src/intro/narrator.js) reads each line aloud as it comes up, unless the player turned that off.
+// A voice (src/intro/narrator.js) reads each line aloud as it comes up, unless the player turned that off, and
+// the title theme plays under it as a score (src/intro/score.js) that steps back for the voice and swells between.
 //
 //   if (introWanted({ enabled: settings.intro, search: location.search, ... })) {
 //     const intro = playIntro({ root, quality, narrate: settings.narration, volume: settings.volume, onHandover: () => showMenu('title') });
@@ -14,6 +15,7 @@
 import { h } from './menu-dom.js';
 import { FILM_LENGTH, AUDIO_CUES } from '../intro/script.js';
 import { createNarrator } from '../intro/narrator.js';
+import { createFilmScore } from '../intro/score.js';
 import { sfx } from '../audio/sfx.js';
 
 const SKIP_KEYS = new Set(['Escape', 'Enter', ' ']);
@@ -66,8 +68,8 @@ function buildOverlay(onSkip) {
   const canvas = h('canvas.mw-intro-canvas', { 'aria-hidden': 'true' });
   const caption = h('p.mw-intro-caption', { 'aria-live': 'polite' });
   const skip = h('button.mw-intro-skip.mw-silent', { type: 'button', onclick: onSkip }, h('kbd', 'Esc'), h('span', 'Skip'));
-  // shown while the browser will not speak until the page has had a click (any click on the film does it)
-  const hint = h('p.mw-intro-hint', { 'aria-hidden': 'true' }, 'Click for narration');
+  // shown while the browser will not play sound (the score) or speak (the voice) until the page has had a click (any click on the film does it)
+  const hint = h('p.mw-intro-hint', { 'aria-hidden': 'true' }, 'Click for sound');
   const fade = h('div.mw-intro-fade', { 'aria-hidden': 'true' });
   const loading = h('div.mw-intro-loading', { role: 'status' }, h('span.mw-intro-mark', 'Mythic War'), h('span.mw-intro-pulse', { 'aria-hidden': 'true' }));
   const root = h('section.mw-intro', { 'aria-label': 'Intro film' },
@@ -93,7 +95,8 @@ function buildOverlay(onSkip) {
  * @param {() => Promise<{ IntroFilm: Function, Renderer: Function }>} [o.load]
  * @param {(ms: number) => Promise<void>} [o.wait]
  * @param {{ play: Function }} [o.audio]
- * @param {(o: { volume: number, onBlocked: (blocked: boolean) => void }) => { update: Function, retry: Function, stop: Function }} [o.createVoice] makes the narrator (tests pass a stand-in)
+ * @param {(o: { volume: number, onBlocked: (blocked: boolean) => void, onSpeaking: (speaking: boolean) => void }) => { update: Function, retry: Function, stop: Function }} [o.createVoice] makes the narrator (tests pass a stand-in)
+ * @param {(() => { start: Function, update: Function, speaking: Function, end: Function, waiting?: Function })|null} [o.createScore] makes the score under the film, which plays the music engine (tests pass a stand-in, or null for none)
  * @returns {{ done: Promise<'finished'|'skipped'|'failed'>, ready: Promise<void>, skip: () => void, advance: (dt: number) => void, draw: () => void, film: object|null, root: HTMLElement }}
  */
 export function playIntro({
@@ -108,6 +111,7 @@ export function playIntro({
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   audio = sfx,
   createVoice = createNarrator,
+  createScore = createFilmScore,
 } = {}) {
   let state = 'loading'; // loading → playing → leaving → done
   let film = null;
@@ -118,9 +122,25 @@ export function playIntro({
   root.appendChild(ui.root);
   const done = new Promise((resolve) => (finished = resolve));
 
+  // The score: the title theme, conducted by the film's clock (paint). It starts with the loading card, so the music is
+  // already up when the first frame is, and it steps back for the voice (below) and swells between the lines.
+  const score = createScore ? createScore() : null;
+  if (score) score.start();
+
   // The voice: it follows the film's clock (paint), and a click on the film lets a browser that refused to speak
   // before any click start. The hint says so while it is refusing.
-  const voice = narrate ? createVoice({ volume, onBlocked: (blocked) => ui.root.classList.toggle('needs-click', blocked) }) : null;
+  const hushed = { voice: false, score: false }; // who is waiting for a click; the hint is up while either is
+  const showHint = () => ui.root.classList.toggle('needs-click', hushed.voice || hushed.score);
+  const voice = narrate
+    ? createVoice({
+      volume,
+      onBlocked: (blocked) => {
+        hushed.voice = blocked;
+        showHint();
+      },
+      onSpeaking: (on) => score && score.speaking(on),
+    })
+    : null;
   ui.root.addEventListener('click', () => voice && voice.retry());
 
   // The menu underneath never sees a key that skips the film (nor one held down, or pressed again
@@ -166,6 +186,14 @@ export function playIntro({
         audio.play(c.name, { volume: c.volume });
       } catch {
         // a sound that cannot play must not stop the film
+      }
+    }
+    if (score) {
+      score.update(view.t);
+      const waiting = score.waiting ? score.waiting() : false;
+      if (waiting !== hushed.score) {
+        hushed.score = waiting;
+        showHint();
       }
     }
     if (voice) voice.update(view.t);
@@ -244,7 +272,11 @@ export function playIntro({
     const wasPlaying = state === 'playing';
     state = 'leaving';
     outcome = reason;
-    if (voice) voice.stop(); // the voice goes first, before the dip to black
+    // The score and the voice go first, before the dip to black: a film cut short fades its music out inside the dip
+    // (the title's own comes in after it); one that ran to its end, or never began to show, leaves its music playing.
+    // The score is told first, so the cut-off voice's last word does not make it swell again.
+    if (score) score.end(wasPlaying && reason !== 'finished' ? 'cut' : 'handover');
+    if (voice) voice.stop();
     if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
     raf = 0;
     leave(wasPlaying && reason !== 'finished').catch((err) => console.warn('[intro] leaving failed', err));

@@ -1,11 +1,12 @@
 // The intro film on the page (src/ui/intro.js): when it plays, the overlay that follows the film, and the
 // ways out of it (Esc, Enter, Space, the Skip button, the end, a failure) that must all hand over to the
-// title screen exactly once, and silence the narration as they do. A fake DOM and a stand-in film; the real
-// film is looked at in tools/shot-intro.mjs.
+// title screen exactly once, silence the narration and tell the score how the film was left. A fake DOM and a
+// stand-in film; the real film is looked at in tools/shot-intro.mjs.
 import { test, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeDom } from './fake-dom.js';
 import { FILM_LENGTH, AUDIO_CUES, CAPTIONS, fadeAt, barsAt, captionAt } from '../../src/intro/script.js';
+import { music } from '../../src/audio/music.js';
 
 let introWanted;
 let playIntro;
@@ -104,6 +105,21 @@ function gate() {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+/** A stand-in for the score under the film: everything the page tells it, in order (into `order` too, when given one). */
+function fakeScore(order = []) {
+  const s = { log: [], made: 0, waiting: false, order };
+  s.create = () => {
+    s.made++;
+    const note = (name) => (...args) => {
+      s.log.push([name, ...args]);
+      order.push(`score.${name}`);
+    };
+    return { start: note('start'), update: note('update'), speaking: note('speaking'), end: note('end'), waiting: () => s.waiting };
+  };
+  s.calls = (name) => s.log.filter((e) => e[0] === name);
+  return s;
+}
+
 function start(o = {}) {
   FakeFilm.made = [];
   FakeFilm.log = [];
@@ -119,6 +135,7 @@ function start(o = {}) {
     load: async () => ({ IntroFilm: FakeFilm, Renderer: class {} }),
     wait: () => Promise.resolve(),
     audio: { play: (name, opts) => plays.push([name, opts.volume]) },
+    createScore: fakeScore().create, // the page's music engine stays out of it unless a test asks for it
     onHandover: () => handovers.push(FakeFilm.log.length),
     ...o,
   });
@@ -437,7 +454,7 @@ test('a browser that will not speak before a click: a hint, and any click on the
   try {
     const { intro, overlay, find } = start();
     caption = find('mw-intro-caption');
-    assert.equal(find('mw-intro-hint').textContent, 'Click for narration');
+    assert.equal(find('mw-intro-hint').textContent, 'Click for sound');
     await intro.ready;
     assert.equal(overlay.classList.contains('needs-click'), false, 'no hint while nothing has been refused');
     const said = () => speech.spoken.filter((s) => s !== 'cancel');
@@ -476,6 +493,168 @@ test('the hint follows the narrator\'s word, clicks go to the narrator, and the 
   assert.equal(voice.retries, 2, 'each click goes to the voice');
   intro.skip();
   await intro.done;
+});
+
+// ---------------------------------------------------------------- the score
+
+test('the score starts with the loading card, follows the film\'s second every frame, and hears when the voice speaks', async () => {
+  const score = fakeScore();
+  const voice = fakeVoice();
+  const { intro } = start({ createScore: score.create, createVoice: voice.create });
+  assert.equal(score.made, 1);
+  assert.deepEqual(score.log, [['start']], 'it begins before the film has loaded: the music is up with the first frame');
+  await intro.ready;
+  const first = score.calls('update').length;
+  assert.equal(first, 1, 'the first frame, drawn behind the card');
+  intro.advance(0.1);
+  intro.advance(0.1);
+  intro.advance(0.1);
+  const updates = score.calls('update');
+  assert.equal(updates.length, first + 3);
+  assert.ok(Math.abs(updates.at(-1)[1] - FakeFilm.made[0].t) < 1e-9, 'it hears the film\'s own second');
+  assert.ok(updates.every((u, i) => !i || u[1] >= updates[i - 1][1]), 'forward in time');
+  voice.made.onSpeaking(true);
+  voice.made.onSpeaking(false);
+  assert.deepEqual(score.log.slice(-2), [['speaking', true], ['speaking', false]], 'and when the voice takes a line and finishes it');
+  intro.skip();
+  await intro.done;
+});
+
+test('the film plays on with no score at all, and with no narration the score still plays', async () => {
+  const none = start({ createScore: null });
+  await none.intro.ready;
+  for (let i = 0; i < 20; i++) none.intro.advance(0.1);
+  none.intro.skip();
+  assert.equal(await none.intro.done, 'skipped');
+
+  const score = fakeScore();
+  const quiet = start({ narrate: false, createScore: score.create });
+  await quiet.intro.ready;
+  quiet.intro.advance(0.1);
+  assert.ok(score.calls('update').length >= 2, 'it follows the film');
+  quiet.intro.skip();
+  await quiet.intro.done;
+  assert.deepEqual(score.calls('speaking'), [], 'with no voice there is nothing to step back for');
+  assert.deepEqual(score.calls('end'), [['end', 'cut']]);
+});
+
+test('every way out tells the score how the film was left, once and before the voice is cut: a cut for a film cut short, a hand-over for one that ran out', async () => {
+  const exits = {
+    Escape: ['cut', () => press('Escape')],
+    Enter: ['cut', () => press('Enter')],
+    Space: ['cut', () => press(' ')],
+    'the Skip button': ['cut', ({ find }) => find('mw-intro-skip').click()],
+    'skip()': ['cut', ({ intro }) => intro.skip()],
+    'a frame that throws': ['cut', ({ frames }) => {
+      FakeFilm.throwOn = 0;
+      frames.pump(2000);
+    }],
+    'the end of the film': ['handover', ({ intro }) => {
+      while (!FakeFilm.made[0].done) intro.advance(0.1);
+    }],
+  };
+  for (const [label, [how, exit]] of Object.entries(exits)) {
+    const order = [];
+    const score = fakeScore(order);
+    const voice = fakeVoice();
+    const frames = fakeFrames();
+    const run = start({
+      createScore: score.create,
+      createVoice: (o) => {
+        const v = voice.create(o);
+        return { ...v, stop: () => { order.push('voice.stop'); v.stop(); } };
+      },
+      manual: label !== 'a frame that throws',
+    });
+    await run.intro.ready;
+    run.intro.advance(1.5);
+    if (label === 'a frame that throws') frames.pump(1000);
+    assert.deepEqual(score.calls('end'), [], `${label}: not before`);
+    exit({ ...run, frames });
+    assert.deepEqual(score.calls('end'), [['end', how]], `${label}: ${how}`);
+    assert.ok(order.indexOf('score.end') < order.indexOf('voice.stop'), `${label}: the score is told before the voice is cut (the cut-off line must not swell it again)`);
+    await run.intro.done;
+    assert.equal(score.calls('end').length, 1, `${label}: once`);
+  }
+  // a film that never began to show has nothing to fade: the music it started is left for the title screen
+  const early = fakeScore();
+  const skipped = start({ createScore: early.create, load: () => new Promise(() => {}) });
+  press('Escape');
+  assert.equal(await skipped.intro.done, 'skipped');
+  assert.deepEqual(early.calls('end'), [['end', 'handover']], 'a skip while the card is still up');
+  const broke = fakeScore();
+  const failed = start({ createScore: broke.create, load: async () => { throw new Error('the module did not load'); } });
+  assert.equal(await failed.intro.done, 'failed');
+  assert.deepEqual(broke.calls('end'), [['end', 'handover']], 'a film that cannot start');
+});
+
+test('the hint is up while the score or the voice waits for a click, says "sound", and goes when neither does', async () => {
+  const score = fakeScore();
+  const voice = fakeVoice();
+  const { intro, overlay, find } = start({ createScore: score.create, createVoice: voice.create });
+  assert.equal(find('mw-intro-hint').textContent, 'Click for sound');
+  await intro.ready;
+  const hinted = () => overlay.classList.contains('needs-click');
+  assert.equal(hinted(), false, 'nothing waits');
+  score.waiting = true; // the browser has not allowed the music yet
+  intro.advance(0.1);
+  assert.equal(hinted(), true);
+  voice.made.onBlocked(true);
+  score.waiting = false; // the click came ...
+  intro.advance(0.1);
+  assert.equal(hinted(), true, '... but the voice has not been let through');
+  voice.made.onBlocked(false);
+  assert.equal(hinted(), false, 'both are');
+  score.waiting = true;
+  intro.advance(0.1);
+  voice.made.onBlocked(true);
+  voice.made.onBlocked(false);
+  assert.equal(hinted(), true, 'the voice speaking does not take the score\'s hint down');
+  score.waiting = false;
+  intro.advance(0.1);
+  assert.equal(hinted(), false);
+  overlay.click();
+  assert.equal(voice.retries, 1, 'a click on the film still goes to the voice');
+  intro.skip();
+  await intro.done;
+});
+
+test('with no narration the hint is for the score alone', async () => {
+  const score = fakeScore();
+  const { intro, overlay } = start({ narrate: false, createScore: score.create });
+  await intro.ready;
+  score.waiting = true;
+  intro.advance(0.1);
+  assert.equal(overlay.classList.contains('needs-click'), true);
+  overlay.click(); // there is no voice to retry: the click only lets the browser allow the music
+  score.waiting = false;
+  intro.advance(0.1);
+  assert.equal(overlay.classList.contains('needs-click'), false);
+  intro.skip();
+  await intro.done;
+});
+
+test('by default the score is the page\'s music engine playing the title theme: let go of when the film is cut, left playing when it ends', async () => {
+  music.stop();
+  const cut = start({ createScore: undefined });
+  await cut.intro.ready;
+  assert.equal(music.state().wanted, 'menu', 'the title theme is up with the film');
+  assert.ok(music.state().stage > 1, 'in the film\'s own mix');
+  assert.equal(music.stingers, false, 'whose own sounds the music does not duck for');
+  cut.intro.skip();
+  assert.equal(music.state().wanted, null, 'a cut film lets go of it, for the title screen\'s own to come in');
+  assert.equal(music.state().stage, 1);
+  assert.equal(music.stingers, true);
+  await cut.intro.done;
+
+  const ran = start({ createScore: undefined });
+  await ran.intro.ready;
+  while (!FakeFilm.made[0].done) ran.intro.advance(0.1);
+  await ran.intro.done;
+  assert.equal(music.state().wanted, 'menu', 'a film that ran to its end leaves the piece playing for the title screen');
+  assert.equal(music.state().stage, 1);
+  assert.equal(music.stingers, true);
+  music.stop();
 });
 
 // ---------------------------------------------------------------- the ways out
