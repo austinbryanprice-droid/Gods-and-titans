@@ -8,6 +8,9 @@ const DESIGN_NAMES = ['click', 'select', 'move', 'attack_melee', 'attack_ranged'
   'train', 'summon_god', 'summon_titan', 'lightning', 'fire', 'magic', 'heal', 'error', 'victory', 'defeat', 'tier_up',
   'chop', 'mine', 'pray', 'horn'];
 
+// src/audio/sfx-alerts.js: the alert, tip and milestone sounds.
+const ALERT_NAMES = ['nudge', 'drums', 'gong', 'research', 'tip', 'milestone'];
+
 function finite(v, what) {
   if (typeof v !== 'number' || !Number.isFinite(v)) throw new TypeError(`${what}: non-finite ${v}`);
 }
@@ -149,7 +152,7 @@ const ctx = new FakeAudioContext();
 sfx.init({ context: ctx, volume: 0.7 });
 
 test('every DESIGN 9 sound name exists', () => {
-  assert.deepEqual([...SFX_NAMES].sort(), [...DESIGN_NAMES].sort());
+  assert.deepEqual([...SFX_NAMES].sort(), [...DESIGN_NAMES, ...ALERT_NAMES].sort());
 });
 
 test('every sound schedules valid nodes and stops every source', () => {
