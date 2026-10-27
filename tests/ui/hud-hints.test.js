@@ -9,7 +9,7 @@ import { Hud } from '../../src/ui/hud.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { ViewState } from '../../src/game/view-state.js';
 import { BUILDINGS, eliteFor } from '../../src/data/index.js';
-import { MAX_QUEUE, MINE_SLOTS, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../../src/config.js';
+import { MAX_QUEUE, MINE_SLOTS, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME, PEACE_BUILD_GAP } from '../../src/config.js';
 import { getSettings, saveSettings } from '../../src/settings.js';
 import { sfx } from '../../src/audio/sfx.js';
 import { makeWorld } from '../sim/helpers.js';
@@ -86,6 +86,7 @@ test('tips that quote a build hotkey or a game number say what the data says', (
   assert.match(text('market'), new RegExp(`keeps ${TRADE_TAX_PCT}%`));
   assert.match(text('spells-buildings'), new RegExp(`only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings`));
   assert.match(text('peace'), new RegExp(PEACE_NAME));
+  assert.match(text('peace-build'), new RegExp(`within ${PEACE_BUILD_GAP} tiles of an enemy Town Center`));
   assert.match(text('elite'), new RegExp(eliteFor('greek').name));
   assert.match(text('temple'), /half the price/);
 });
@@ -174,8 +175,10 @@ test('the Decade of Peace tips fit only a peace; the team Market tip only a team
   const peace = hintContext(viewOf({ world: makeWorld({ peaceMinutes: 30 }) }).vs);
   const fits = (c, id) => HINTS.find((h) => h.id === id).when(c);
   assert.equal(peace.peace, true);
-  assert.equal(fits(peace, 'peace'), true);
-  assert.equal(fits(hintContext(viewOf().vs), 'peace'), false);
+  for (const id of ['peace', 'peace-build', 'peace-creeps']) {
+    assert.equal(fits(peace, id), true, id);
+    assert.equal(fits(hintContext(viewOf().vs), id), false, id);
+  }
   const team = hintContext(viewOf({ world: makeWorld({ players: 3, teams: [1, 1, 2] }) }).vs);
   assert.equal(team.ally, true);
   assert.equal(fits(team, 'market'), true);

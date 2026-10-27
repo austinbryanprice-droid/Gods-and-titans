@@ -8,7 +8,7 @@
 //   hintParts(text)       → ['Press ', { key: 'Space' }, ' to …'] for building the DOM
 import { BUILDINGS, UNITS, eliteFor } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
-import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../config.js';
+import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME, PEACE_BUILD_GAP } from '../config.js';
 import { isWallEntity } from './hud-data.js';
 
 const percent = (v) => Math.round(v * 100);
@@ -114,6 +114,7 @@ export const HINTS = [
 
   // ---- the Decade of Peace
   { id: 'peace', text: `The ${PEACE_NAME} is on: nobody can attack yet. Expand, grow and mass your army. A horn sounds when it ends.`, when: (c) => c.peace },
+  { id: 'peace-build', text: `During the ${PEACE_NAME} nobody can build within ${PEACE_BUILD_GAP} tiles of an enemy Town Center, so expand elsewhere until the horn sounds.`, when: (c) => c.peace },
   { id: 'peace-creeps', text: `Neutral creatures still fight during the ${PEACE_NAME}, so they remain fair game.`, when: (c) => c.peace },
 ];
 
