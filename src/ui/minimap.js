@@ -1,10 +1,12 @@
 // Minimap (DESIGN 9): a 2D canvas with the pre-rendered terrain (repainted when
 // trees fall), gold mines, team-coloured units and buildings that the local
-// player can see (or remembers), the fog of war, the camera's view quad and
-// alert pings. Left click / drag moves the camera, right click issues a smart
-// order; the input controller receives both through `onPointer`.
+// player can see (or remembers), the fog of war, the camera's view quad, alert
+// pings and the team's pings and markers. Left click / drag moves the camera,
+// right click issues a smart order, Alt+click or a middle click pings the team;
+// the input controller receives them all through `onPointer`.
 import { TERRAIN, NEUTRAL_COLOR } from '../config.js';
 import { BUILDINGS, UNITS } from '../data/index.js';
+import { MARKS } from '../data/marks.js';
 import { safeColor } from './hud-dom.js';
 
 const DRAW_INTERVAL_MS = 100; // entities + fog layer (10 Hz); the camera quad redraws every frame
@@ -32,14 +34,17 @@ export class Minimap {
    * @param {HTMLCanvasElement} o.canvas
    * @param {object} o.viewState
    * @param {() => object|null} o.getCamera returns the renderer's camera (getViewQuad)
-   * @param {(info: {button: number, phase: 'down'|'drag'|'up', x: number, y: number, shift: boolean}) => void} [o.onPointer]
+   * @param {(info: {button: number, phase: 'down'|'drag'|'up', x: number, y: number, shift: boolean, ctrl: boolean, alt: boolean}) => void} [o.onPointer]
+   * @param {object} [o.marks] TeamMarks: the pings and markers to draw
    */
-  constructor({ canvas, viewState, getCamera, onPointer }) {
+  constructor({ canvas, viewState, getCamera, onPointer, marks }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.vs = viewState;
     this.getCamera = getCamera || (() => null);
     this.onPointer = onPointer || null;
+    this.marks = marks || null;
+    this.marksShown = false;
     this.W = viewState.width;
     this.H = viewState.height;
     this.pings = [];
@@ -69,10 +74,12 @@ export class Minimap {
     };
     on(canvas, 'contextmenu', (e) => e.preventDefault());
     on(canvas, 'mousedown', (e) => {
-      if (e.button !== 0 && e.button !== 2) return;
+      if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
       e.preventDefault();
       e.stopPropagation();
-      this.dragging = e.button + 1;
+      // A ping (Alt+click, or the middle button) is one press: nothing is dragged after it.
+      const ping = e.button === 1 || (e.button === 0 && e.altKey);
+      this.dragging = ping ? 0 : e.button + 1;
       this.emit(e, 'down');
     });
     on(window, 'mousemove', (e) => {
@@ -105,7 +112,7 @@ export class Minimap {
   emit(e, phase, button = e.button) {
     if (!this.onPointer) return;
     const p = this.worldAt(e.clientX, e.clientY);
-    this.onPointer({ button, phase, x: p.x, y: p.y, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+    this.onPointer({ button, phase, x: p.x, y: p.y, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: !!e.altKey });
   }
 
   /** Flash an alert ring at a world position. */
@@ -278,9 +285,12 @@ export class Minimap {
       this.quadSig = quadSig;
       dirty = true;
     }
-    // Nothing moved: keep the last frame (pings animate, so they always redraw).
-    if (!dirty && !this.pings.length && !this.pingsShown) return;
+    // Nothing moved: keep the last frame (pings and marks animate, so they always redraw).
+    const marks = this.marks ? this.marks.active(now) : null;
+    const marked = !!marks && marks.length > 0;
+    if (!dirty && !this.pings.length && !this.pingsShown && !marked && !this.marksShown) return;
     this.pingsShown = this.pings.length > 0;
+    this.marksShown = marked;
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -325,6 +335,51 @@ export class Minimap {
         ctx.globalAlpha = 1;
       }
     }
+    if (marked) this.drawMarks(ctx, marks, w, h, now);
+  }
+
+  /**
+   * The team's pings and markers: two rings spreading in the sender's colour, and a badge with the
+   * kind's icon on the spot (kept inside the map when the spot is at its edge). A mark fades out
+   * over its last moments.
+   */
+  drawMarks(ctx, marks, w, h, now) {
+    const k = w / this.W;
+    const unit = w / 200;
+    const r = Math.max(6, w * 0.036);
+    ctx.save();
+    ctx.lineWidth = Math.max(1.5, w / 120);
+    for (const m of marks) {
+      const fade = Math.min(1, Math.max(0, (m.t1 - now) / 800));
+      const t = (now - m.t0) / 1000;
+      ctx.strokeStyle = this.colorOf(m.from);
+      for (let i = 0; i < 2; i++) {
+        const tt = (t * 0.8 + i * 0.5) % 1;
+        ctx.beginPath();
+        ctx.arc(m.x * k, m.y * k, r * 0.8 + tt * 13 * unit, 0, Math.PI * 2);
+        ctx.globalAlpha = (1 - tt) * 0.9 * fade;
+        ctx.stroke();
+      }
+    }
+    ctx.font = `${Math.round(r * 1.25)}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const m of marks) {
+      const def = MARKS[m.kind];
+      if (!def) continue;
+      const x = Math.min(w - r - 1, Math.max(r + 1, m.x * k));
+      const y = Math.min(h - r - 1, Math.max(r + 1, m.y * k));
+      ctx.globalAlpha = Math.min(1, Math.max(0, (m.t1 - now) / 800));
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(8, 10, 16, 0.88)';
+      ctx.fill();
+      ctx.strokeStyle = this.colorOf(m.from);
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(def.icon, x, y + 0.5);
+    }
+    ctx.restore();
   }
 
   dispose() {

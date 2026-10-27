@@ -1,12 +1,13 @@
 // Game sessions (DESIGN 7). The host runs the authoritative World and the AIs
 // on a fixed-rate ticker and streams delta snapshots; clients only decode them
 // into their ViewState and send commands. Both expose the same surface:
-//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text),
-//     onChat(cb), onEnd(cb), start(), stop(), pingMs, isHost }
+//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark(mark),
+//     onChat(cb), onMark(cb), onEnd(cb), start(), stop(), pingMs, isHost }
 // Everything that arrives over the network is untrusted: the host validates and
 // rate-limits each client's messages (sanitize.js); clients validate snapshots
 // and drop what they cannot use (a bad host can end the game, not crash it).
 import { INTERP_DELAY_MS, SNAPSHOT_EVERY_TICKS } from '../config.js';
+import { MARK_RATE } from '../data/marks.js';
 import { ViewState } from '../game/view-state.js';
 import * as mapgen from '../sim/mapgen.js';
 import { encode, apply } from './delta.js';
@@ -14,7 +15,7 @@ import {
   MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, STALL_NOTICE_MS, MAX_CLIENT_BUFFER_BYTES,
   RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
 } from './protocol.js';
-import { sanitizeCommand, isValidSnapshot, sanitizeFelled } from './sanitize.js';
+import { sanitizeCommand, sanitizeMark, isValidSnapshot, sanitizeFelled } from './sanitize.js';
 import { Ticker } from './ticker.js';
 
 export const HOST_VIEW_DELAY_MS = 50;
@@ -26,9 +27,11 @@ export const CLIENT_LIMITS = {
   cmd: [40, 80],
   chat: [1, 5],
   ping: [4, 8],
+  mark: MARK_RATE, // team pings and markers: a few a second is plenty to talk with
 };
 export const RESYNC_MIN_INTERVAL_MS = 1000; // at most one full snapshot per client per second
 const CLIENT_CHAT_LIMIT = [10, 30]; // chat lines a client shows per second (bad host flooding)
+const CLIENT_MARK_LIMIT = [8, 20]; // teammates' marks a client shows per second (bad host flooding)
 // Events and felled trees of snapshots held back from a congested client; past this the
 // client gets a full snapshot instead (it repairs everything).
 const MAX_HELD_ITEMS = 2000;
@@ -40,6 +43,7 @@ class SessionBase {
     this.setup = setup;
     this.myIndex = myIndex;
     this.chatCbs = new Set();
+    this.markCbs = new Set();
     this.endCbs = new Set();
     this.chatLog = [];
     this.ended = false;
@@ -64,6 +68,28 @@ class SessionBase {
   onEnd(cb) {
     this.endCbs.add(cb);
     return () => this.endCbs.delete(cb);
+  }
+
+  /** cb({ from, name, kind, x, y }) for every team mark: a teammate's, and my own the moment I send it. */
+  onMark(cb) {
+    this.markCbs.add(cb);
+    return () => this.markCbs.delete(cb);
+  }
+
+  emitMark(mark) {
+    for (const cb of [...this.markCbs]) {
+      try {
+        cb(mark);
+      } catch (err) {
+        console.error('[net] mark listener failed', err);
+      }
+    }
+  }
+
+  /** Team number (setup) of a player index, or null. */
+  teamOf(i) {
+    const p = Number.isInteger(i) ? this.setup.players[i] : null;
+    return p && Number.isInteger(p.team) ? p.team : null;
   }
 
   emitChat(line) {
@@ -162,8 +188,9 @@ export class HostSession extends SessionBase {
         cmd: new RateLimiter(...CLIENT_LIMITS.cmd),
         chat: new RateLimiter(...CLIENT_LIMITS.chat),
         ping: new RateLimiter(...CLIENT_LIMITS.ping),
+        mark: new RateLimiter(...CLIENT_LIMITS.mark),
       },
-      dropped: { cmd: 0, chat: 0, ping: 0, invalid: 0, resync: 0 },
+      dropped: { cmd: 0, chat: 0, ping: 0, mark: 0, invalid: 0, resync: 0 },
       skipped: 0, // snapshots held back while this client's send queue was full
     };
     if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(this.connTimeoutMs);
@@ -212,6 +239,20 @@ export class HostSession extends SessionBase {
         }
         const text = sanitizeChat(msg.text);
         if (text) this.broadcastChat({ from: c.index, name: this.playerName(c.index), text, system: false });
+        break;
+      }
+      case MSG.MARK: {
+        if (!this.started) return;
+        if (!c.limits.mark.take()) {
+          c.dropped.mark++;
+          return;
+        }
+        const clean = sanitizeMark(msg, this.bounds);
+        if (!clean) {
+          c.dropped.invalid++;
+          return;
+        }
+        this.relayMark(c.index, clean); // always the sender's own player index
         break;
       }
       case MSG.PING:
@@ -269,6 +310,23 @@ export class HostSession extends SessionBase {
     this.emitChat(line);
     const msg = { t: MSG.CHAT, ...line };
     for (const c of this.clients.values()) c.conn.send(msg);
+  }
+
+  /**
+   * A team mark (DESIGN 7, 9) goes to the sender's teammates and nobody else: the other teams'
+   * connections never see it, so it cannot tell an enemy where an attack is called. The host's own
+   * screen shows it when the host is on the team; the sender has shown it to itself already.
+   */
+  relayMark(from, mark) {
+    const team = this.teamOf(from);
+    if (team === null) return;
+    const msg = { t: MSG.MARK, from, kind: mark.kind, x: mark.x, y: mark.y };
+    for (const c of this.clients.values()) {
+      if (c.index !== from && c.conn.open && this.teamOf(c.index) === team) c.conn.send(msg);
+    }
+    if (from !== this.myIndex && this.teamOf(this.myIndex) === team) {
+      this.emitMark({ from, name: this.playerName(from), kind: mark.kind, x: mark.x, y: mark.y });
+    }
   }
 
   tickOnce() {
@@ -418,6 +476,19 @@ export class HostSession extends SessionBase {
   }
 
   /**
+   * Mark a spot for my teammates ({ kind, x, y }, kinds in src/data/marks.js): shown on my own
+   * screen at once and relayed to the rest of the team. Returns the clean mark, or null if unusable.
+   */
+  sendMark(mark) {
+    if (this.stopped) return null;
+    const clean = sanitizeMark(mark, this.bounds);
+    if (!clean) return null;
+    this.emitMark({ from: this.myIndex, name: this.playerName(this.myIndex), ...clean });
+    this.relayMark(this.myIndex, clean);
+    return clean;
+  }
+
+  /**
    * Stop the game: clients get `end` and their connections close.
    * @param {string} [reason] defaults to 'game-over' after a victory, else 'host-quit'
    */
@@ -474,6 +545,7 @@ export class ClientSession extends SessionBase {
     this.readyCbs = new Set();
     this.ready = new Promise((resolve) => this.readyCbs.add(resolve));
     this.chatLimit = new RateLimiter(...CLIENT_CHAT_LIMIT);
+    this.markLimit = new RateLimiter(...CLIENT_MARK_LIMIT);
     this.badMessages = 0;
     if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(connTimeoutMs);
     this.offs = [
@@ -531,6 +603,15 @@ export class ClientSession extends SessionBase {
         const system = msg.system === true;
         const from = Number.isInteger(msg.from) && msg.from >= -1 && msg.from < this.setup.players.length ? msg.from : -1;
         this.emitChat({ from, name: system ? '' : sanitizeName(msg.name, this.playerName(from)), text, system });
+        break;
+      }
+      case MSG.MARK: {
+        // The host relays a mark to the sender's teammates only; a mark from anyone else is not shown.
+        if (!this.markLimit.take()) return;
+        const from = msg.from;
+        if (!Number.isInteger(from) || from === this.myIndex || this.teamOf(from) === null || this.teamOf(from) !== this.teamOf(this.myIndex)) return;
+        const clean = sanitizeMark(msg, { width: this.mapData.width, height: this.mapData.height });
+        if (clean) this.emitMark({ from, name: this.playerName(from), ...clean });
         break;
       }
       case MSG.PONG:
@@ -618,6 +699,20 @@ export class ClientSession extends SessionBase {
   sendChat(text) {
     const t = sanitizeChat(text);
     if (t && !this.stopped) this.conn.send({ t: MSG.CHAT, text: t });
+  }
+
+  /**
+   * Mark a spot for my teammates ({ kind, x, y }, kinds in src/data/marks.js): shown on my own
+   * screen at once, then relayed by the host to the rest of the team. Returns the clean mark, or
+   * null if unusable.
+   */
+  sendMark(mark) {
+    if (this.stopped) return null;
+    const clean = sanitizeMark(mark, { width: this.mapData.width, height: this.mapData.height });
+    if (!clean) return null;
+    this.conn.send({ t: MSG.MARK, ...clean });
+    this.emitMark({ from: this.myIndex, name: this.playerName(this.myIndex), ...clean });
+    return clean;
   }
 
   finish(info) {

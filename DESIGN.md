@@ -907,8 +907,8 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   events and felled trees carried over (a full snapshot, once the queue drains, if too many).
 - **Untrusted input**: a reassembled message may be at most 1 MB from a client and 32 MB from
   the host; more than 100 malformed frames in 10 s closes with 'protocol-error'. Token buckets
-  per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `resync` at most one
-  per second (deferred); in the lobby `lobby` patches 5/10, `chat` 1/5, `ping` 4/8, one `hello`.
+  per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `mark` 1.5/5 (`MARK_RATE`),
+  `resync` at most one per second (deferred); in the lobby `lobby` patches 5/10, `chat` 1/5, `ping` 4/8, one `hello`.
   The host rebuilds every client command from a whitelist (src/net/sanitize.js: 20 types, typed
   fields, unit lists deduped and capped at 256, coordinates clamped, type ids own keys of the
   data tables, `player` never from the client). Names ≤ 20 and chat ≤ 200 code points with
@@ -918,11 +918,27 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
 - Messages are JSON objects with `t`:
   - client→host: `hello {name, version}` (`version` is `PROTOCOL_VERSION` from
     src/net/wire-version.js: `GAME_VERSION` plus an 8-digit fingerprint of the message names,
-    `EVENT_SHAPES`, the command whitelist and the unit / building / ability / pantheon ids, so
-    a stale tab after a deploy is refused with the "Version mismatch" text; it is only ever
-    compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`, `resync {}`
+    `EVENT_SHAPES`, the command whitelist, the team mark kinds and the unit / building / ability /
+    pantheon ids, so a stale tab after a deploy is refused with the "Version mismatch" text; it is
+    only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`,
+    `mark {kind, x, y}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
-    `delta {d}`, `chat {from, text}`, `pong {ts}`, `kick {reason}`, `end {reason}`
+    `delta {d}`, `chat {from, text}`, `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
+    teammates only), `kick {reason}`, `end {reason}`
+- **Team marks** (pings and markers, 9): a mark is a signal, not world state, so it never rides in a
+  snapshot (snapshots go to everyone). The kinds are the table `MARKS` in `src/data/marks.js`. The sender's
+  session shows its own mark at once (`onMark` fires with `from` = me, a local echo) and sends `mark {kind, x, y}`.
+  The host takes it through the client's `mark` bucket, rebuilds it with `sanitizeMark` (a kind that is an own
+  key of `MARKS`, a finite spot clamped to the map and rounded to a hundredth of a tile; anything else counts as
+  invalid) and `relayMark`s `mark {from, kind, x, y}` with `from` always the connection's own player index, never
+  a field of the message, to the open connections of the sender's teammates (same `team` in the setup) and
+  nobody else, and to its own screen when the host is on that team. Other teams' connections never receive it,
+  so an enemy client learns nothing from the wire; a player alone on a team marks for themselves only. A client
+  shows a relayed mark only when `from` is an integer other than itself, on its own team, and the spot
+  sanitizes, and drops more than `CLIENT_MARK_LIMIT` (8/s, burst 20) from a flooding host. A player sends at most
+  `MARK_SEND_RATE` (1/s, burst 4, in `Game.sendMark`), a little under the host's bucket so a mark the sender saw
+  go up is never one the host silently dropped; past it the HUD says "Slow down: too many pings." A client's mark
+  that reaches the host before the match has started is ignored.
 - Delta codec (`src/net/delta.js`, wire format v2; the header comment lists every key): host
   keeps the last snapshot sent to each client and sends only changes: movement as integer
   hundredth deltas in flat columns (`m`, `mf` with facing), other changed or added EntityView
@@ -972,7 +988,8 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
     `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
     'host-left' (connection lost), 'host-quit', 'game-over', or the host's sanitized reason.
-  - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), onChat(cb), onEnd(cb), start(), stop() }`.
+  - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark({ kind, x, y }), onChat(cb), onMark(cb), onEnd(cb), start(), stop() }`
+    (`sendMark` returns the clean mark or null; `onMark(cb({ from, name, kind, x, y }))` hears teammates' marks and my own).
 - `ViewState` (`src/game/view-state.js`, used identically on host and client):
   ```js
   const vs = new ViewState({ setup, mapData, myIndex });
@@ -1600,14 +1617,42 @@ per-frame budget, so a revealed army appears over a few frames.
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
+- Team pings and markers (`src/data/marks.js`, `src/game/team-marks.js`, `src/ui/hud-marks.js`; the wire is in 7).
+  Five kinds: Ping 📍 (stands 6 s), Attack ⚔️, Defend 🛡️, Help 🆘 (the urgent one: a louder chime) and Gather 🚩
+  (12 s each). **Placing**: Alt+click or a middle click on the map or the minimap pings that spot (a unit or
+  building under the cursor is marked where it stands). A middle press that ends within `PING_CLICK_MS` (350 ms)
+  without moving more than `DRAG_THRESHOLD` (5 px) is the ping, anything else was a camera drag and pans as it
+  always did (it starts to pan once it passes the threshold). Alt+click pings only while no order or placement
+  is pending, because Alt held also shows every health bar and a click that aims an order stays an order; the
+  middle button works in every mode. On the minimap either gesture is one press with no drag after it. The five
+  marker buttons beside the minimap (`MarkPalette`) arm a targeting mode `{ kind: 'target', order: 'mark', mark }`
+  that reuses the Esc / right-click / Shift plumbing: the next click on the map or the minimap places that marker
+  (the button again, or Esc, puts it away), and a refused one (the pace limit) leaves it armed. **Who sees them**:
+  the sender and their teammates (7); with no human teammate the buttons' tooltips say that only you see it, and
+  the "Team ping: Alt+click or middle-click…" hint is shown once at the start of a match only when a teammate
+  has a screen. **How they stand** (`TeamMarks`, one per `Game`): a mark lives `MARKS[kind].life` seconds; a
+  player holds at most `MARK_MAX_PER_PLAYER` (3) marks, a new one retiring their oldest; a marker (not a ping)
+  replaces its sender's earlier marker of the same kind, so each player has one Attack, one Defend and so on;
+  at most `MARK_MAX_TOTAL` (16) stand on a screen. **On the map** (`MarksLayer`, DOM under the panels, projected
+  each frame with `renderer.worldToScreen`): a pin with the sender's name, a round badge with the kind's icon
+  (the kind's colour on the badge, the sender's colour on the ring), a stem and a ring on the ground. A mark out
+  of view or under the top bar or bottom console becomes a chip on the edge of the play area with an arrow towards
+  it (a spot behind the camera is aimed by where it lies on the ground, since it projects mirrored), and a click
+  on the chip centres the camera on the mark. Chips of marks in one direction can overlap (accepted). **On the
+  minimap** (`Minimap.drawMarks`): two rings spreading in the sender's colour and a badge with the icon, kept
+  inside the map. Every mark fades over its last 0.8 s. **Sound and text**: `ping`, or `ping_urgent` for Help,
+  not positional; my own mark plays quieter; a teammate's marker (not a ping) also writes its words ("Attack
+  here!") in the message area in their colour for a player with the sound off. The How to Play screen has a
+  "Team signals" group.
 - `input.js`: left click select, drag box select, shift add/remove, double-click selects same
   type on screen, Ctrl+1–9 groups, 1–9 recall (double tap centers), right-click smart command
   (shift queues), hotkeys from the command card, targeting modes (attack-move A, ability
   targeting, build placement with ghost (a refused click shows the client-side
   `checkPlacement(...).message`); Esc cancels; right-click cancels targeting; another command
   hotkey replaces the pending order), camera: edge scroll, arrow keys, mouse wheel zoom (one
-  step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan, minimap click/drag,
-  Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
+  step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan (a middle click that does not move
+  pings the team instead), minimap click/drag, Space centers on selection or last alert, F1–F3 select gods,
+  Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
   **Delete** destroys the selected own units (`kill`, 6.2; the whole selection, not only the active subgroup).
   Buildings are not units: they stay, and a selection of nothing but buildings says so (`Delete destroys units,
@@ -1655,14 +1700,15 @@ per-frame budget, so a revealed army appears over a few frames.
   The Town Center card therefore reads Worshipper W, Grow U / Iron Picks I, Palisade L, Work
   K, Health H / Rally Y.
 - `minimap.js`: 2D canvas: terrain colors, mines, trees, units/buildings as team-colored dots
-  (visible only; wall segments as thin squares), fog, camera quad; click/drag moves camera, right-click issues smart move.
+  (visible only; wall segments as thin squares), fog, camera quad, the team's marks (rings and badges);
+  click/drag moves camera, right-click issues smart move, Alt+click or middle-click pings the team.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with
   distance attenuation from `sfx.setListener(x, y, scale)` (the camera target; `scale` follows the
   zoom, 0.8 close to 1.8 far, and stretches the hearing range so a zoomed-out view still hears its
   far side).
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
-  tier_up, chop, mine, pray, horn.
+  tier_up, chop, mine, pray, horn, ping, ping_urgent.
 
 ## 10. AI (src/ai/)
 
@@ -1692,7 +1738,9 @@ enemy Town Center keeps clear is closed to its building too: every site it tries
 ClientSession, then `new Game({ session, settings })`: creates GameRenderer on a canvas, HUD,
 InputController, sfx listener; requestAnimationFrame loop: `viewState.update(now)`,
 `renderer.update(dt)`, `renderer.render()`, `hud.update()`. Events from `viewState.on('*')`
-drive VFX, sounds and HUD messages. Game over → overlay → back to menu. "Preparing the
+drive VFX, sounds and HUD messages. The game also keeps the team's marks: `sendMark(kind, x, y)` (paced by
+`MARK_SEND_RATE`, then `session.sendMark`) and `onMark(mark)` (stands it in `game.marks`, chimes, and for a teammate's
+marker writes its words in the message area), see 7 and 9. Game over → overlay → back to menu. "Preparing the
 battlefield…" covers the empty canvas while the renderer's code loads and its scene builds (with a
 gameplay tip under it unless the player turned tips off). In a
 single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim. `init()` also

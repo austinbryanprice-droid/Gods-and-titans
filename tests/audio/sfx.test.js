@@ -6,7 +6,7 @@ import { sfx, SFX_NAMES, distanceGain } from '../../src/audio/sfx.js';
 
 const DESIGN_NAMES = ['click', 'select', 'move', 'attack_melee', 'attack_ranged', 'hit', 'death', 'build', 'building_complete',
   'train', 'summon_god', 'summon_titan', 'lightning', 'fire', 'magic', 'heal', 'error', 'victory', 'defeat', 'tier_up',
-  'chop', 'mine', 'pray', 'horn'];
+  'chop', 'mine', 'pray', 'horn', 'ping', 'ping_urgent'];
 
 // src/audio/sfx-alerts.js: the alert, tip and milestone sounds.
 const ALERT_NAMES = ['nudge', 'drums', 'gong', 'research', 'tip', 'milestone'];
