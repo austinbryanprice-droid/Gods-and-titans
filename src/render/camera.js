@@ -1,8 +1,10 @@
 // RTS camera (DESIGN 8): a perspective camera south of its ground target,
 // looking north and down, Warcraft III style. Smooth wheel-step zoom between a
-// close and a far limit (pitch steepens a little as it zooms out), pan speed
-// that scales with zoom, smooth damping, the target clamped to the map, and an
-// optional shake offset. Pure math on a THREE.PerspectiveCamera (runs in Node).
+// close and a far limit (pitch steepens as it zooms out: gently up to the
+// original far limit, then on toward a map-table view that holds a whole medium
+// map), clip planes that follow the zoom, pan speed that scales with zoom,
+// smooth damping, the target clamped to the map, and an optional shake offset.
+// Pure math on a THREE.PerspectiveCamera (runs in Node).
 import * as THREE from 'three';
 
 const DEG = Math.PI / 180;
@@ -10,15 +12,26 @@ const DEG = Math.PI / 180;
 export const CAMERA_DEFAULTS = Object.freeze({
   fov: 40, // vertical field of view, degrees
   minDistance: 10, // distance from the camera to its ground target (close zoom)
-  maxDistance: 44, // far zoom
+  maxDistance: 170, // far zoom: a whole medium (128 tile) map fits a 16:9 window above the HUD
+  midDistance: 44, // where the original zoom range ended: the pitch curve keeps its shape up to here
   defaultDistance: 25,
   pitchNear: 50, // degrees below the horizon at the closest zoom
-  pitchFar: 58, // … and at the farthest
+  pitchMid: 58, // … at midDistance
+  pitchFar: 66, // … and at maxDistance (it must stay under 70: the view's bottom edge would pass the vertical)
   zoomStep: 1.16, // distance factor per wheel step
   panDamping: 16, // 1/s, how fast the view follows pan / centerOn goals
   zoomDamping: 10, // 1/s
   edgeMargin: 3, // the target stays this far inside the map edge (tiles)
 });
+
+// Clip planes: the near plane stays at 0.5 up to the default zoom and moves out with the camera's height
+// (the nearest ground is then tens of tiles away and the depth buffer keeps its precision for the far
+// view); the far plane stays 400 until the farthest ground the view can show would pass it.
+const NEAR_MIN = 0.5;
+const NEAR_MAX = 6;
+const NEAR_PER_TILE = 0.04; // near plane growth a tile of distance beyond the default zoom
+const FAR_MIN = 400;
+const FAR_PER_TILE = 3.2; // a wide window sees ground up to about 2.2 times the distance
 
 const _ndc = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -41,8 +54,8 @@ export class CameraController {
     this.mapHeight = mapHeight;
     this.heightFn = heightFn;
     camera.fov = this.opts.fov;
-    camera.near = 0.5;
-    camera.far = 400;
+    camera.near = NEAR_MIN;
+    camera.far = FAR_MIN;
     camera.updateProjectionMatrix();
     /** Current (smoothed) look-at ground point, sim coords. */
     this.target = { x: mapWidth / 2, y: mapHeight / 2 };
@@ -55,6 +68,8 @@ export class CameraController {
     this.shakeY = 0;
     this.viewportWidth = 1;
     this.viewportHeight = 1;
+    /** The framing set by setFree (the intro film), or null while the player's controls frame the view. */
+    this.free = null;
     this.apply();
   }
 
@@ -66,11 +81,29 @@ export class CameraController {
     return (this.distance - a) / (b - a);
   }
 
-  /** Current pitch in radians (below the horizon). */
+  /**
+   * Current pitch in radians (below the horizon): linear in the distance from pitchNear to pitchMid up to
+   * midDistance, then it keeps rising at the rate it ended with and settles toward pitchFar at maxDistance
+   * (x m / (1 + x m / a), a rational curve with the same slope at midDistance and pitchFar - pitchMid at the end).
+   * While the camera is free (setFree, the intro film) it is the pose's own pitch.
+   */
   get pitch() {
-    const { pitchNear, pitchFar } = this.opts;
-    const z = Math.max(0, Math.min(1, this.zoom));
-    return (pitchNear + (pitchFar - pitchNear) * z) * DEG;
+    if (this.free) return this.free.pitch * DEG;
+    const { pitchNear, pitchMid, pitchFar, minDistance, midDistance, maxDistance } = this.opts;
+    const d = this.distance;
+    if (d <= midDistance) {
+      const t = Math.max(0, (d - minDistance) / (midDistance - minDistance));
+      return (pitchNear + (pitchMid - pitchNear) * t) * DEG;
+    }
+    const span = maxDistance - midDistance;
+    const rise = pitchFar - pitchMid;
+    if (!(span > 0) || !(rise > 0)) return pitchMid * DEG;
+    const x = Math.min(d - midDistance, span);
+    const m = (pitchMid - pitchNear) / (midDistance - minDistance); // degrees a tile where the near range ended
+    const ml = m * span;
+    if (!(ml > rise * 1.001)) return (pitchMid + (rise * x) / span) * DEG; // the near slope is too gentle to ease out of
+    const a = (rise * ml) / (ml - rise);
+    return (pitchMid + (m * x) / (1 + (m * x) / a)) * DEG;
   }
 
   /** Pan speed factor: 1 at the default zoom, more when zoomed out. */
@@ -147,6 +180,23 @@ export class CameraController {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * Frame the view directly instead of by the player's controls (the intro film): the camera orbits
+   * the ground point (x, y), `lift` above it, at `dist` from it, `yaw` degrees round from due south
+   * (the RTS view is yaw 0) and `pitch` degrees below the horizon, through a lens of `fov` degrees.
+   * The pose is read on every update, so the caller moves it by changing its fields; it ignores the
+   * zoom limits, the map edge and the easing. null hands the camera back to the player.
+   * @param {{ x: number, y: number, dist: number, pitch: number, yaw?: number, lift?: number, fov?: number } | null} pose
+   */
+  setFree(pose) {
+    this.free = pose || null;
+    if (!pose && this.camera.fov !== this.opts.fov) {
+      this.camera.fov = this.opts.fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.update(0);
+  }
+
   /** Shake offset in world units (applied to the camera, not the target). */
   setShake(x, y) {
     this.shakeX = x;
@@ -155,6 +205,10 @@ export class CameraController {
 
   /** Ease toward the goal and update the camera matrices. */
   update(dt) {
+    if (this.free) {
+      this.followFree();
+      return;
+    }
     const d = Math.max(0, Math.min(0.25, dt || 0));
     const kp = 1 - Math.exp(-this.opts.panDamping * d);
     const kz = 1 - Math.exp(-this.opts.zoomDamping * d);
@@ -171,13 +225,43 @@ export class CameraController {
     this.apply();
   }
 
+  /** Near and far clip planes for the current distance (the projection is rebuilt only when they change). */
+  updateClipPlanes() {
+    const cam = this.camera;
+    const near = Math.min(NEAR_MAX, NEAR_MIN + Math.max(0, this.distance - this.opts.defaultDistance) * NEAR_PER_TILE);
+    const far = Math.max(FAR_MIN, this.distance * FAR_PER_TILE);
+    if (Math.abs(cam.near - near) < 1e-3 && Math.abs(cam.far - far) < 1e-3) return;
+    cam.near = near;
+    cam.far = far;
+    cam.updateProjectionMatrix();
+  }
+
+  /** The free pose becomes the camera's state at once, so everything that reads target, distance and groundY sees the film's view. */
+  followFree() {
+    const f = this.free;
+    this.target.x = this.goal.x = f.x;
+    this.target.y = this.goal.y = f.y;
+    this.distance = this.goalDistance = f.dist;
+    this.groundY = this.heightFn ? Math.max(-0.2, this.heightFn(f.x, f.y)) : 0;
+    const fov = f.fov || this.opts.fov;
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.apply();
+  }
+
   apply() {
     const cam = this.camera;
+    this.updateClipPlanes();
     const p = this.pitch;
+    const yaw = this.free ? (this.free.yaw || 0) * DEG : 0;
     const tx = this.target.x + this.shakeX;
     const tz = this.target.y + this.shakeY;
-    cam.position.set(tx, this.groundY + this.distance * Math.sin(p), tz + this.distance * Math.cos(p));
-    cam.lookAt(tx, this.groundY, tz);
+    const ty = this.groundY + (this.free ? this.free.lift || 0 : 0);
+    const flat = this.distance * Math.cos(p);
+    cam.position.set(tx + flat * Math.sin(yaw), ty + this.distance * Math.sin(p), tz + flat * Math.cos(yaw));
+    cam.lookAt(tx, ty, tz);
     cam.updateMatrixWorld(true);
   }
 

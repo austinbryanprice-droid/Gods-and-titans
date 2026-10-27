@@ -22,6 +22,8 @@ import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
 import { CameraController, CAMERA_DEFAULTS } from './camera.js';
+import { hazeStretch, shadowShare, aoShare, overlayScale, crowdScale, ringLineScale, ringRadiusScale, detailPixels, terrainStride, forestFar, unitFar, NEAR_RANGE } from './zoom-lod.js';
+import { FarUnits } from './far-units.js';
 import { FogOfWar, patchFowObject, FOW_UNIFORMS } from './fog.js';
 import { createTerrain, WATER_LEVEL } from './terrain.js';
 import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } from './overlays.js';
@@ -29,7 +31,7 @@ import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
-import { PostFX, RESIZE_SETTLE_MS } from './post.js';
+import { PostFX, RESIZE_SETTLE_MS, DEFAULT_LOOK } from './post.js';
 import { createEnvironment, setCloudShadows, applyAtmosphere, setLampSpots, LAMP_SPOTS, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 import { Atmosphere } from './atmosphere.js';
 
@@ -195,6 +197,7 @@ export class GameRenderer {
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 140;
     this.shadowR = 0;
+    this.shadowShare = 1; // the share of the sun's shadow drawn at this zoom (zoom-lod.js)
     scene.add(this.sun);
     scene.add(this.sun.target);
     // image-based lighting from a procedural sky (reflections on metal, stone, lacquer)
@@ -254,6 +257,10 @@ export class GameRenderer {
     this.entityRoot = new THREE.Group();
     this.entityRoot.name = 'entities';
     scene.add(this.entityRoot);
+    // the zoom's detail levels (zoom-lod.js): the ground mesh step, plain forest crowns, far unit markers
+    this.lod = { stride: 1, forestFar: false, unitFar: false, ppt: Infinity };
+    this.lodPin = null; // tools and tests pin a level: { stride?, forestFar?, unitFar? }
+    this.farUnits = new FarUnits(this.entityRoot);
     // world-space overlays that belong to the lit, post-processed picture
     this.groundFxRoot = new THREE.Group();
     this.groundFxRoot.name = 'ground-fx';
@@ -1218,6 +1225,7 @@ export class GameRenderer {
     _vp.multiplyMatrices(this.threeCamera.projectionMatrix, this.threeCamera.matrixWorldInverse);
     // the zoom too: the VFX lights go to what is on screen
     this.vfx.setFocus(this.camera.target.x, this.camera.target.y, this.camera.distance);
+    this.updateLod();
 
     const fresh = vs.snapshotCount !== this.lastSnapshot;
     if (fresh) {
@@ -1273,6 +1281,36 @@ export class GameRenderer {
     }
   }
 
+  /**
+   * The camera distance the zoom curves (zoom-lod.js) go by: the player's zoom. While the camera is free (the intro
+   * film) it is never past the original range: those framings are authored, and keep the look the game had for them.
+   */
+  get zoomDistance() {
+    const cam = this.camera;
+    return cam.free ? Math.min(cam.distance, NEAR_RANGE) : cam.distance;
+  }
+
+  /**
+   * The detail levels of the zoom (zoom-lod.js): by pixels on the screen and only past the original zoom range, one
+   * step for the whole ground mesh and all the forest, and the unit markers decided per unit in syncUnits. `lodPin`
+   * overrides a level.
+   */
+  updateLod() {
+    const lod = this.lod;
+    const pin = this.lodPin;
+    const ppt = (lod.ppt = detailPixels(this.zoomDistance, this.viewH)); // Infinity inside the old zoom range
+    const stride = pin && pin.stride !== undefined ? pin.stride : terrainStride(ppt, lod.stride);
+    if (stride !== lod.stride) {
+      lod.stride = stride;
+      this.terrain.setStride(stride);
+    }
+    const far = pin && pin.forestFar !== undefined ? pin.forestFar : forestFar(ppt, lod.forestFar);
+    if (far !== lod.forestFar) {
+      lod.forestFar = far;
+      this.forest.setFar(far);
+    }
+  }
+
   syncUnits(dt) {
     const vs = this.vs;
     const frame = this.frame;
@@ -1285,6 +1323,10 @@ export class GameRenderer {
     const onScreen = this._onScreen || (this._onScreen = []);
     const fadeStep = dt / FADE_SECONDS;
     const fadeMats = this.fadeMats;
+    const farUnits = this.farUnits;
+    const pin = this.lodPin;
+    const lodPpt = this.lod.ppt;
+    farUnits.begin();
     let createMs = 0;
     for (const e of vs.entities.values()) {
       if (e.k !== 'u') continue;
@@ -1367,11 +1409,26 @@ export class GameRenderer {
         const dist = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
         const pxPerWorld = H / (2 * dist * tanHalf);
         v.pr = Math.max(10, (v.radius * 1.15 + 0.18) * pxPerWorld);
-        onScreen.push(v);
+        // a unit only a few pixels tall is a marker in its team's color: its model is hidden and idle
+        const far = pin && pin.unitFar !== undefined ? pin.unitFar : unitFar(v.fy - v.hy, lodPpt, v.far);
+        if (far !== v.far) {
+          v.far = far;
+          v.model.root.visible = !far && v.fade > 0;
+        }
+        if (far) {
+          // (the fader shows the model again for each step of a fade: keep it hidden)
+          v.model.root.visible = false;
+          // (from the foot to the model's top: a flyer's height counts from the ground, but its foot is up at the hover)
+          const markerH = Math.max(0.3, gh + v.height - footY);
+          const wide = Math.min(2.2, Math.max(1, v.radius / (0.28 * markerH)));
+          farUnits.add(x, footY, y, markerH, wide, v.model.teamColor, v.fade);
+          v.skipped = Math.min(0.5, v.skipped + dt);
+        } else onScreen.push(v);
       } else {
         v.skipped = Math.min(0.5, v.skipped + dt);
       }
     }
+    farUnits.end();
     // Animate on-screen units. With many on screen, each animates every
     // `stride`-th frame (round robin, accumulated dt) to bound the CPU cost;
     // big-on-screen units (close zoom, titans) always animate every frame.
@@ -1426,6 +1483,11 @@ export class GameRenderer {
       this.units.delete(id);
       if (v.visible && this.deaths.has(id)) {
         v.dyingT = 0;
+        // (a marker no more: the death plays on the model)
+        if (v.far) {
+          v.far = false;
+          v.model.root.visible = v.fade > 0;
+        }
         this.dying.push(v);
       } else v.dispose();
     }
@@ -1701,9 +1763,9 @@ export class GameRenderer {
     return out.set(-hx / 0.7, 1, -hy / 0.7).normalize();
   }
 
-  /** Size factor for screen-reading overlays: a bit bigger when zoomed out. */
+  /** Size factor for screen-reading overlays: a bit bigger when zoomed out (zoom-lod.js). */
   zoomK() {
-    return clamp((this.camera.distance / CAMERA_DEFAULTS.defaultDistance) ** 0.55, 0.78, 1.45);
+    return overlayScale(this.zoomDistance, CAMERA_DEFAULTS.defaultDistance);
   }
 
   updateOverlays(dt) {
@@ -1711,8 +1773,15 @@ export class GameRenderer {
     const rings = this.rings;
     const bars = this.bars;
     const zk = this.zoomK();
+    // what is drawn over a crowd (a unit's bar width, rank pips) grows with the zoom more slowly than the rest
+    const zd = this.zoomDistance;
+    const ck = crowdScale(zd, CAMERA_DEFAULTS.defaultDistance);
+    // selection and hover rings: thicker, and for units wider, when the view is far (zoom-lod.js)
+    const ringLine = ringLineScale(zd);
+    const ringRadius = ringRadiusScale(zd);
     const blobs = this.blobs;
-    let blobAlpha = this.unitsCastShadows() ? 0.2 : 0.36;
+    // (a unit's own shadow is the lighter blob's partner: when the sun's shadow fades out with the zoom the blob takes over)
+    let blobAlpha = this.unitsCastShadows() ? 0.36 - 0.16 * this.shadowShare : 0.36;
     // blended in linear light (post-processed qualities): same perceived darkening
     if (this.post && this.post.enabled) blobAlpha = 1 - (1 - blobAlpha) ** 2.2;
     const stars = this.stars;
@@ -1752,21 +1821,26 @@ export class GameRenderer {
       }
       const fx = e.fx;
       if (fx && fx.length) this.statusOverlay(v, fx, fade, zk, n);
-      // a ranked soldier's pips sit just over its health bar
-      if (e.rk > 0) this.status.addRank(v.x, v.gh + v.height + 0.48 * zk, v.y, e.rk, 0.7 * zk, fade);
+      // a ranked soldier's pips sit just over its health bar (not on a far marker: a few pixels tall, its
+      // pips would be bigger than it is)
+      if (e.rk > 0 && !v.far) this.status.addRank(v.x, v.gh + v.height + 0.48 * zk, v.y, e.rk, 0.7 * ck, fade);
       if (selected || hovered) {
         const col = RELATION_COLORS[v.relation] || RELATION_COLORS.neutral;
-        const r = v.radius * 1.22 + 0.14;
+        const r0 = v.radius * 1.22 + 0.14;
+        const r = r0 * ringRadius;
         // flyers: a level ring at their flying height, right under the body
         // (on the ground it reads as an empty circle far below the unit)
         const ry = v.air ? v.gh + AIR_RING_LIFT : v.gh + 0.05 + r * 0.12 * (1 - n.y) * 4;
-        if (selected) rings.add(v.x, ry, v.y, n, r, col, 0.95 * fade, 0.075 * Math.max(1, r * 0.6));
-        if (hovered && !selected) rings.add(v.x, ry, v.y, n, r, col, 0.55 * fade, 0.05 * Math.max(1, r * 0.6), 0.6);
+        const line = Math.max(1, r0 * 0.6) * ringLine;
+        if (selected) rings.add(v.x, ry, v.y, n, r, col, 0.95 * fade, 0.075 * line);
+        if (hovered && !selected) rings.add(v.x, ry, v.y, n, r, col, 0.55 * fade, 0.05 * line, 0.6);
       }
       const mhp = e.mhp || 1;
       const damaged = e.hp < mhp;
-      if (all || selected || hovered || damaged || e.sh > 0) {
-        const w = clamp(0.55 + v.radius * 1.25, 0.72, 2.6) * zk;
+      // (a far marker's bar is for what it says, hurt or shielded: the ring shows the selection, and a bar on
+      // every unit of a selected army would hide it)
+      if (all || (selected && !v.far) || hovered || damaged || e.sh > 0) {
+        const w = clamp(0.55 + v.radius * 1.25, 0.72, 2.6) * ck;
         const h = (v.def.class === 'god' || v.def.class === 'titan' ? 0.13 : 0.105) * zk;
         const y = v.gh + v.height + 0.22 * zk;
         const frac = e.hp / mhp;
@@ -1790,8 +1864,8 @@ export class GameRenderer {
       if (selected || hovered) {
         const col = RELATION_COLORS[b.relation] || RELATION_COLORS.neutral;
         const r = wall ? 0.6 : b.size * 0.66;
-        if (selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.95, wall ? 0.07 : 0.1);
-        if (hovered && !selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.55, wall ? 0.05 : 0.07, 0.6);
+        if (selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.95, (wall ? 0.07 : 0.1) * ringLine);
+        if (hovered && !selected) rings.add(bx, b.baseY + 0.06, by, null, r, col, 0.55, (wall ? 0.05 : 0.07) * ringLine, 0.6);
       }
       const mhp = e.mhp || 1;
       const unfinished = (e.bp ?? 1) < 1;
@@ -1824,8 +1898,8 @@ export class GameRenderer {
       if (!selected && !hovered) continue;
       const col = RELATION_COLORS.neutral;
       const by = m.model.root.position.y;
-      if (selected) rings.add(m.x, by + 0.06, m.y, null, 2.0, col, 0.95, 0.1);
-      else rings.add(m.x, by + 0.06, m.y, null, 2.0, col, 0.55, 0.07, 0.6);
+      if (selected) rings.add(m.x, by + 0.06, m.y, null, 2.0, col, 0.95, 0.1 * ringLine);
+      else rings.add(m.x, by + 0.06, m.y, null, 2.0, col, 0.55, 0.07 * ringLine, 0.6);
     }
 
     // dying units keep their blob while they fall, fading out
@@ -1901,11 +1975,27 @@ export class GameRenderer {
       }
     }
     // (a ranked soldier's pips take the slot under the row)
-    this.status.addIcons(v.x, v.gh + v.height + (v.e.rk > 0 ? 0.88 : 0.6) * zk, v.y, fx, 0.42 * zk, fade, v.id * 0.37);
+    // (a far marker keeps the warnings, debuff / slow / damage over time, but not the buff that half an army wears)
+    this.status.addIcons(v.x, v.gh + v.height + (v.e.rk > 0 && !v.far ? 0.88 : 0.6) * zk, v.y, fx, 0.42 * zk, fade, v.id * 0.37, v.far ? 'buff' : null);
   }
 
   updateShadowCamera() {
     if (!this.sun.castShadow) return;
+    // zoomed far out the shadows fade and then stop being drawn (their map would cover less than the view, and
+    // they would be a pixel wide); a map that is not redrawn is never read at intensity 0
+    const share = shadowShare(this.zoomDistance);
+    this.sun.shadow.intensity = share;
+    this.shadowShare = share;
+    const live = share > 0.002;
+    if (this.renderer.shadowMap.autoUpdate !== live) {
+      this.renderer.shadowMap.autoUpdate = live;
+      if (live) this.renderer.shadowMap.needsUpdate = true;
+    }
+    if (!live) {
+      // nothing to fit, but the light still turns with the day (the map is redrawn, and fitted, on the way back in)
+      this.sun.position.copy(this.sun.target.position).addScaledVector(SUN_DIR, this.shadowR + 40);
+      return;
+    }
     const quad = this.camera.getViewQuad(this._quad || (this._quad = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }]));
     let cx = 0;
     let cy = 0;
@@ -1992,9 +2082,11 @@ export class GameRenderer {
     // the haze is measured from the point the camera looks at, so zooming out does not fog the middle of the view
     const fog = this.scene.fog;
     const lookDist = this.camera ? this.camera.distance : CAMERA_DEFAULTS.defaultDistance; // the first call comes before the camera exists
+    const zoomDist = this.camera ? this.zoomDistance : lookDist;
+    const stretch = hazeStretch(zoomDist); // a wide view keeps its far edge out of the haze
     fog.color.copy(s.haze);
-    fog.near = Math.max(0.5, lookDist + s.hazeNear);
-    fog.far = Math.max(fog.near + 1, lookDist + s.hazeFar);
+    fog.near = Math.max(0.5, lookDist + s.hazeNear * stretch);
+    fog.far = Math.max(fog.near + 1, lookDist + s.hazeFar * stretch);
     this.scene.background.copy(s.background);
     this.scene.environmentIntensity = s.envIntensity;
     this.renderer.toneMappingExposure = s.exposure; // the low path's Neutral tone mapping
@@ -2011,6 +2103,7 @@ export class GameRenderer {
       look.highlightTint = s.highlightTint;
       look.vignette = s.vignette;
       look.glow = s.glow;
+      look.aoStrength = DEFAULT_LOOK.aoStrength * aoShare(zoomDist); // gone when the view is wide (nothing to occlude at a pixel)
       look.glowColor[0] = s.skyHorizon.r;
       look.glowColor[1] = s.skyHorizon.g;
       look.glowColor[2] = s.skyHorizon.b;
@@ -2241,6 +2334,7 @@ export class GameRenderer {
     this.collapsing.length = 0;
     for (const m of this.mines.values()) m.model.dispose();
     this.mines.clear();
+    this.farUnits.dispose();
     this.placement.dispose();
     this.blobs.dispose();
     this.stars.dispose();
@@ -2323,6 +2417,7 @@ class UnitView {
     this.ny = 1;
     this.nOk = false;
     this.fade = 1; // 0 hidden … 1 fully drawn (vision-edge fade)
+    this.far = false; // drawn as a far marker (far-units.js), the model hidden and not animated
     this.fader = new UnitFader(model.root);
   }
 

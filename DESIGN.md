@@ -46,7 +46,8 @@ the authoritative simulation.
   its center is `(tx + 0.5, ty + 0.5)`. Tile index = `ty * width + tx`.
 - `x` grows east, `y` grows **south** (minimap top = north = y 0).
 - 3D: sim `(x, y)` → Three `(x, h, y)` where `h` = terrain height at that point.
-  Camera sits south of its target looking north and down (~56° pitch).
+  Camera sits south of its target looking north and down (50° pitch close up, 58° at 44 tiles,
+  steeper still out to 66° at the 170 tile far limit; DESIGN 8, "Far zoom").
 - `facing` is radians, `atan2(dy, dx)` in sim coords. Models are built facing **+X**;
   set `object.rotation.y = -facing`.
 - Sim tick = 1/20 s (`TICK_RATE = 20`, `DT = 0.05`). Data durations are **seconds**,
@@ -1015,7 +1016,8 @@ const r = new GameRenderer(canvas, { viewState, setup, quality: 'low'|'medium'|'
 r.update(dtSeconds);   // sync meshes from viewState (interpolated positions), animate, VFX from events
 r.render(rafTimestamp); // the timestamp feeds adaptive resolution (optional)
 r.resize(w, h);
-r.camera              // CameraController: target {x, y}, pan(dx, dy) tiles, zoomBy(steps), centerOn(x, y), getViewQuad() → 4 {x,y} ground corners
+r.camera              // CameraController: target {x, y}, pan(dx, dy) tiles, zoomBy(steps), centerOn(x, y), getViewQuad() → 4 {x,y} ground corners,
+                       // setFree(pose | null): an orbit pose {x, y, dist, pitch, yaw, lift, fov} read every update (the intro film, 11.1)
 r.screenToWorld(sx, sy) → {x, y} | null      // ground point (raycast vs terrain)
 r.pickEntity(sx, sy) → id | null             // visible entity under the cursor (projected-position pick, buildings by footprint)
 r.entitiesInRect(x0, y0, x1, y1) → [ids]     // units whose projected position is inside the screen rect
@@ -1459,6 +1461,60 @@ per-frame budget, so a revealed army appears over a few frames.
   after post). Tests: `tests/render/atmosphere.test.js`, `tests/render/game-renderer-lighting.test.js`;
   `tools/shot-lighting.mjs` captures any scene at any time of day and quality (`--canvas` for
   high / ultra under software GL).
+- Far zoom (`camera.js`, `zoom-lod.js`, `far-units.js`, `models/props-far.js`; render-only: no sim,
+  protocol or data change). The camera zooms from 10 to 170 tiles (`CAMERA_DEFAULTS`; the range
+  used to end at 44, which is `midDistance` now): at 170 a whole medium map (128 tiles) fits a
+  16:9 window with its border around it. The pitch keeps its old line (50° to 58°) up to 44, then
+  rises on a rational curve to 66° at 170 (it has to stay under 70°: the bottom of the view would
+  pass the vertical); the clip planes follow the zoom (`updateClipPlanes`: near 0.5 up to the
+  default zoom, then 0.04 more a tile of distance up to 6; far 3.2 times the distance, never under
+  400), so the depth buffer keeps its precision. `zoom-lod.js` holds every curve that follows the
+  distance, as pure functions the renderer and the tests share; each gives the look the game
+  always had up to `NEAR_RANGE` (44): `hazeStretch` (haze distances times (d/44)^0.7, so the far
+  edge of a wide view keeps about the haze the old far view had instead of fading into it);
+  `shadowShare` (the sun's shadow fades out between 48 and 88 tiles, the blob shadows under units
+  take over, and from 88 the shadow pass is skipped: `shadowMap.autoUpdate` off, redrawn at once
+  when the camera comes back; the light itself keeps turning with the day); `aoShare` (ambient occlusion on high / ultra fades out between 60
+  and 110, the pass is skipped at 0); `overlayScale` (bars' thickness, status icons, floating
+  text: the old curve, then growing with d^0.8 so the drawn size falls slowly); `crowdScale` (a
+  unit's bar width and rank pips, d^0.5: an army of a hundred units a few pixels tall each does
+  not vanish under its own bars); `ringLineScale` and `ringRadiusScale` (selection and hover rings
+  are in tiles: the line grows with the distance and keeps the two pixels it had at 44, a unit's
+  ring radius with its square root; buildings keep their radius); and the sound's hearing scale
+  (`hearingScale` in `game.js`, up to 4.5, so a fight anywhere on a medium map is still heard). The
+  terrain's border mist fades out past 80 tiles. What a wide view costs is what the far view is
+  about: the late game (four AIs, ten minutes, 231 units, walls of forest) drew 1830 draw calls and
+  2.2 M triangles at low from 170 tiles. Three detail levels go by *pixels on the screen*
+  (`detailPixels`: `pixelsPerTile` in CSS pixels, so a bigger window keeps its detail longer; and
+  none at all up to 44, so the old zoom range keeps every level at full detail in a short window
+  too, where a 600 pixel high one has under 19 pixels a tile at the old limit), each with a
+  way back at a different value (hysteresis) so a camera resting on an edge does not flicker:
+  (1) `terrainStride`: the ground mesh draws every 2nd field sample below 16 pixels a tile (back
+  above 19) and every 4th below 7 (back above 8.5): `createTerrain().setStride(n)` swaps each
+  chunk's index (`buildTerrainLodIndex`, cached per step) over the same vertices, one step for the
+  whole map so chunk edges, which lie on whole tiles, always meet; positions, normals, the data
+  texture and the shader are shared, so only the triangle count changes. (2) `forestFar`: below 11
+  pixels a tile (back above 13) the forest is drawn as plain crowns (`props-far.js`: smooth
+  vertex-coloured shapes, 18 to 30 triangles a tree against 76 to 144, in the leaf colours of the
+  full tree times 0.93, lit by the same foliage light, with no wind and no shadow), one
+  InstancedMesh a variant for the whole map that copies the matrices and tints of the chunk
+  meshes the first time it is wanted and is kept in step by `fell()`; `forest.setFar(on)` swaps
+  them. (3) `unitFar`: a unit under 11 pixels tall on the screen (back to the model from 14),
+  once the camera is past the old range and the view is under 20 pixels a tile (back from 22), is a marker:
+  `far-units.js`, one instanced 54-triangle figure in its team colour for all of them (fog of war,
+  fade-in and the blob shadow as for models), as tall as the unit from its foot to the top of its
+  model (a flyer's from its hover, not from the ground); its model is hidden and not animated, and a unit
+  that dies as a marker plays its death on its model. The levels are driven by
+  `GameRenderer.updateLod()` and `syncUnits`; `renderer.lodPin = { stride, forestFar, unitFar }`
+  pins any of them (tools and tests). Every curve above goes by `GameRenderer.zoomDistance`, the
+  camera's distance, except while the camera is free (the intro film, 11.1): its authored framings
+  (74 tiles out at the start) never see more than the old range, so the film keeps the look it was
+  made for. Measured at low, 1280x720, the late game, 170 tiles: 1830
+  to 420 draw calls, 2.2 M to 0.5 M triangles, about 2.5 times less time per frame under software
+  GL (`tools/shot-zoom.mjs`: the same view at any distances with the levels auto, pinned `full`
+  or pinned `far`, stills and the cost table; the harness has a `late` scenario for it). Tests:
+  `tests/render/zoom-lod.test.js`, `game-renderer-zoom.test.js`, `far-units.test.js`, `props.test.js`,
+  `game-renderer-parts.test.js`.
 - Vision-edge fade (`src/render/unit-fade.js`): enemy and neutral units that come into sight
   after load fade in over `FADE_SECONDS` (0.25 s) and fade out the same way when they leave
   it (own and allied units, and everything visible at load, never fade). A fading-out unit is
@@ -1521,7 +1577,7 @@ per-frame budget, so a revealed army appears over a few frames.
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
-  (name, volume, graphics quality, time of day, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier.
@@ -1652,7 +1708,8 @@ per-frame budget, so a revealed army appears over a few frames.
   targeting, build placement with ghost (a refused click shows the client-side
   `checkPlacement(...).message`); Esc cancels; right-click cancels targeting; another command
   hotkey replaces the pending order), camera: edge scroll, arrow keys, mouse wheel zoom (one
-  step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan (a middle click that does not move
+  step per ~100 px of scroll, so trackpads zoom gently; each step is 16% of the distance, from 10
+  tiles to 170, where a whole medium map is in view), middle-drag pan (a middle click that does not move
   pings the team instead), minimap click/drag, Space centers on selection or last alert, F1–F3 select gods,
   Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
@@ -1708,8 +1765,8 @@ per-frame budget, so a revealed army appears over a few frames.
   click/drag moves camera, right-click issues smart move, Alt+click or middle-click pings the team.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with
   distance attenuation from `sfx.setListener(x, y, scale)` (the camera target; `scale` follows the
-  zoom, 0.8 close to 1.8 far, and stretches the hearing range so a zoomed-out view still hears its
-  far side).
+  zoom, 0.8 close, 1 at the default zoom, 4.5 at the 170 tile far limit, and stretches the hearing
+  range so a zoomed-out view still hears its far side).
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
   tier_up, chop, mine, pray, horn, ping, ping_urgent.
@@ -1798,6 +1855,117 @@ while the player is under pressure. It also makes the `MusicDirector` (section 9
 `update(dt)` each frame turns the match's fighting into the score's intensity, and the director plays the player's
 pantheon theme.
 
+### 11.1 Intro film (src/intro/, src/ui/intro.js)
+
+A 47 s film plays when the page opens and ends on the title screen, before the player can press Play: a flyover
+of a Greek village at dawn, its worshippers praying and Zeus answering at the temple, the army marching out, the
+two hosts clashing, Kronos and Surtr stepping out of their gates, and ten gods, one of each mythology, called up
+in a line as the sun goes down. It is drawn live, by the real renderer on a world the real simulation runs, so it
+needs no video file, follows the quality tier and shows the game as it is. Esc, Enter, Space or the Skip button
+end it at any moment, even while it loads (a quick dip to black, then the title); the title screen under it never
+sees those keys, so a second Enter cannot press Play.
+
+**When it plays** (`introWanted`, `src/ui/intro.js`): once per page load, only at the start (never after a match).
+The `intro` setting (`src/settings.js`, default true; Settings, "Intro film") turns it off for good, and Settings
+has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
+the setting: `?intro=0` never, `?intro=1` always. Without `?intro=1`, an invite link (`?join=`), an automated
+browser (`navigator.webdriver`: the e2e tests) and `prefers-reduced-motion` skip it; a browser without WebGL 2
+never plays it. A film that cannot start, or whose frame throws, is dropped (`'failed'`); on a machine that averages worse than
+5 fps over 24 frames (after the first 3.5 film seconds, where shaders compile) the film is skipped (`'skipped'`).
+The menu is hidden while it plays and shown again behind the black when it ends; the game's own code is fetched
+(`warmUp`) after it, so the film has the machine to itself, and the film's renderer is freed before the title
+shows. Its sounds are cues in the game's synthesized set (`sfx`), silent on a first visit until a click or key
+lets the browser start audio.
+
+**Narration** (`src/intro/narrator.js`): a voice reads each caption of `CAPTIONS` aloud, with the browser's own speech
+synthesis (`speechSynthesis`; no audio files), as the film's clock reaches the caption's `from` second: the caption's
+own words, `en-US`, rate 0.9 and pitch 0.9, at the Settings volume (0 is silence), a line at a time (the browser
+queues a line behind one still being said, so they never overlap; no voice is picked by name, since the browser's
+default for English is its best and a list can open on a novelty voice). The overlay's `paint` hands the voice the film's second each frame, so it
+follows the picture, and a caption that came and went between two frames is not read late. Every way out of the film
+(`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first, with
+`speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
+under the intro toggle) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
+film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
+throws is ignored. Chrome will not speak until the page has had a click or a key (the rule that keeps the film's
+sounds quiet on a first visit): the refused `speak` fires an `error` event (`not-allowed`), which puts up a "Click for
+narration" hint at the top left (class `needs-click` on the overlay); a click anywhere on the film then says the
+caption on screen (if it has 1.2 s left) and takes the hint down, and the later lines speak by themselves. "Watch it
+now" always speaks, for the player has just clicked. `createNarrator({ speech, volume, captions, onBlocked })` takes
+the speech synthesis as a parameter (tests pass a stand-in).
+
+**The script** (`src/intro/script.js`, pure data and arithmetic, no DOM, three.js or simulation): `SHOTS` (each
+with its `from` / `to` seconds, the `cut` into it, `hours` of the day it runs through, `ease`, and a camera of
+specs `{ at, dx, dy, dist, pitch, yaw, lift, fov }`: the camera orbits a named point at `dist` and `pitch` degrees
+below the horizon, `yaw` degrees round from due south, `lift` above the ground), `CAPTIONS`, `AUDIO_CUES` and the
+curves `hourAt`, `fadeAt` (in from black, dips at `dip` cuts, out to black), `barsAt` (the letterbox), `captionAt`
+and `cameraAt(t, locate, out)`. The names are anchors of the set, actors (`zeus`, `kronos`, `surtr`, `thor`) or
+`crowd` (the middle of the soldiers, gods weighing three); the film resolves them every frame, so a camera on a
+god follows the real one.
+
+| shot | seconds | cut | what is on screen | hours |
+|---|---|---|---|---|
+| dawn | 0 – 8.6 | fade in | the village at work from far out, pulling in ("Raise a city of the faithful") | 6.9 – 8 |
+| prayer | 8.6 – 15 | hard | the temple and its faithful; at 11.5 a pillar of light and Zeus ("Pray. Summon the gods.") | 8 – 8.8 |
+| god | 15 – 19 | hard | Zeus in profile with the temple behind, lightning in hand, then marching out | 8.8 – 9.2 |
+| war | 19 – 25 | dip | the two hosts closing across the meadow, seen from the north ("Lead them to war") | 9.8 – 11.6 |
+| melee | 25 – 30 | hard | inside the clash, ultimates let off from 25 s | 11.6 – 14.4 |
+| titans | 30 – 36 | hard | Kronos and Surtr arrive at 29.5 ("Unleash the titans") | 14.4 – 17.2 |
+| lineup | 36 – 47 | dip | ten pillars of light in a ripple, ten gods in a line at dusk, a push in, fade out ("Ten mythologies. One war.") | 18.6 – 20.3 |
+
+The hour only moves forward through the film, and a jump between shots (the dips at 19 and 36 s hide them) is
+always behind a dip to black; the tests keep both rules, and that no caption straddles a dip.
+
+**The stage** (`src/intro/stage.js`, Node-runnable, no renderer): seed 12345 on the small map, a Greek village
+at the north-west start (a Town Center at tier 3 with a house or two under construction, barracks, shrine,
+temple, Titan Gate, towers, a crew mining, cutting and building) and a Norse host across a meadow, played by the
+real `World` with no AI and no player; `mapData.camps = []` and a glade of forest cut away for the finale
+(`clearForest`). A `ViewState` with `myIndex: -1` (a spectator: nothing hidden) is fed a snapshot per tick as in
+a match, minus the events a film does not want on screen (`levelUp`, `rankUp`, `bounty`, `error`). `advance(dt)`
+runs at most 12 ticks (a stalled frame does not make the sim catch up). The scripted cues (`CUE_TIMES`): Zeus is
+summoned at 11.5, the garrison and Zeus march at 17.5, the host marches at 19, Kronos and Surtr appear at 29.5
+and the ten gods at 36.7 + 0.3 s apiece (the Norse are removed at the first, the gods `hold`, and `stage.finale`
+keeps `castSpells` from drawing them into anything). Soldiers have 3× (Greek) and 2× (Norse) health so the clash
+lasts the film's seconds; gods are level 5 (everything unlocked) and cast a ready ability once a second at the
+nearest enemy, ultimates only from 25 s. The same film every time (the tests compare two runs). Density 0.6
+(low quality) thins the cast.
+
+**The film** (`src/intro/film.js`): `IntroFilm({ canvas, Renderer, quality })` owns the clock (`advance(dt)`,
+at most 0.1 s a frame; `draw`; `view` = `{ t, fade, bars, caption }` for the overlay). Each frame it advances the
+stage, eases each named subject's look-at point toward where it is (`FOLLOW` 5 per second; a cut clears them, so a
+shot starts on its subject), writes the script's camera into `pose`, which the renderer's camera reads through
+`CameraController.setFree(pose)` (it ignores the zoom limits, the map edge and the easing; `lift` raises the
+look-at point), sets the hour with `renderer.atmo.setMode(hourAt(t))` and `renderer.update(dt)` (not
+`setTimeOfDay` every frame, which would bake the environment map again each time). The renderer is otherwise
+the game's: shadows, post-processing, foliage and (high and ultra) the rich characters, with the overlays a film
+does not want taken out (health bars, rank pips, status icons) and the terrain's dark border mist hidden.
+`FilmSky` (`src/intro/sky.js`) is a dome round the camera painted from the hour's look (horizon to zenith, the sun
+and moon discs where they stand, cloud streaks, stars at night, the haze below the horizon), because the low shots
+look past the edge of the map, which the game's camera never does.
+
+**The page** (`src/ui/intro.js`, `src/ui/intro.css`): `playIntro({ root, quality, onHandover, … })` builds an
+overlay (z 30, over the menu) of a black card with the title and a pulse while the code loads (`import()`ed only
+when the film plays, so it costs nothing for players who skip it), the film's canvas, a vignette, letterbox bars
+that close over the film (the caption sits in the bottom bar), the Skip button and a black fade layer. It states
+`loading → playing → leaving → done`; `leave` dips to black (320 ms, unless the film ran to its own end), frees the film, calls
+`onHandover` once (the title appears underneath) and lifts the black over 900 ms. `manual: true` is for tools and
+tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no frame loop runs).
+
+**Looking at it**: `node tools/shot-intro.mjs --at 2,16,26,38 --sheet` renders stills (the film runs in manual
+mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
+changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
+plays, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
+voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
+screen, Esc cutting it before the dip, the hint and the click, the setting). Don't sample stills at
+19 or 36 s, the dips' black frames. Tests: `tests/intro/{script,stage,film,narrator}.test.js`,
+`tests/render/camera-free.test.js`, `tests/ui/intro.test.js`.
+
+Traps met while making it: the summon pillar of a god or titan (about 8 tiles tall, 1.75 s) washes out a close
+frame, so the finale starts wide; `summon_god` plays at most once a second; an idle or held god auto-acquires
+enemies, which is why the finale removes the Norse first; in software GL the page submits frames much faster than
+they are drawn, so freeing the renderer waits for the backlog (half a minute in headless Chromium, nothing on a
+GPU), which `--flow` allows for.
+
 ## 12. Repository layout & ownership
 
 ```
@@ -1807,14 +1975,16 @@ src/data/pantheons/<id>.js         content owners
 src/sim/*.js                       simulation owner (mapgen.js: map owner)
 src/ai/*.js                        AI owner
 src/net/*.js, src/game/view-state.js  network owner
-src/render/game-renderer.js, terrain.js, camera.js, fog.js, overlays.js  renderer owner
+src/render/game-renderer.js, terrain.js, camera.js, zoom-lod.js, far-units.js, fog.js, overlays.js  renderer owner
 src/render/models/*.js             model owners
 src/render/vfx.js                  VFX owner
 src/ui/hud.js, hud.css, input.js, command-card.js, minimap.js  HUD owner
 src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
 src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
+src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)
+tools/shot-intro.mjs              stills of the intro film and its page flow (11.1)
 notes/                             decisions.md, interface-requests.md (append-only)
 ```

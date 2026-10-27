@@ -22,6 +22,7 @@ export async function resolve(spec, ctx, next) {
 const THREE = await import('three');
 const { heightAt, footprintHeight } = await import('../../src/render/height.js');
 const { createForest, createDecor, decorOffOutcrops, getPropInfo } = await import('../../src/render/models/props.js');
+const { farTreeGeometry, farTreeMaterial, FAR_TREE_TRIS } = await import('../../src/render/models/props-far.js');
 const { createGroundCover, getGroundCoverInfo, GROUND_COVER_UNIFORMS } = await import('../../src/render/models/ground-cover.js');
 const { patchFowObject } = await import('../../src/render/fog.js');
 const { WATER_LEVEL } = await import('../../src/render/terrain.js');
@@ -255,6 +256,107 @@ test('prop geometries stay low-poly', () => {
   assert.ok(Object.keys(info.trees).length >= 3, '3–4 tree variants');
   assert.ok(info.stump <= 100, `stump: ${info.stump} triangles`);
   for (const [k, list] of Object.entries(info.decor)) for (const t of list) assert.ok(t <= 200, `${k}: ${t} triangles`);
+});
+
+// ------------------------------------------------------------------ far crowns
+
+test('far crowns: a few dozen triangles a tree, smooth, colored, on the same ground as the full trees', () => {
+  const full = getPropInfo();
+  for (const v of ['pine', 'broadleaf', 'birch', 'palm']) {
+    const g = farTreeGeometry(v);
+    const tris = g.index.count / 3;
+    assert.equal(tris, FAR_TREE_TRIS[v], `${v} crown triangles`);
+    assert.ok(tris <= 30 && tris * 3 < full.trees[v], `${v}: ${tris} triangles against ${full.trees[v]}`);
+    for (const name of ['position', 'normal', 'color', 'aFol']) assert.ok(g.attributes[name], `${v} has ${name}`);
+    const n = g.attributes.normal;
+    const pos = g.attributes.position;
+    for (let i = 0; i < n.count; i++) {
+      assert.ok(Math.abs(Math.hypot(n.getX(i), n.getY(i), n.getZ(i)) - 1) < 1e-4, `${v} normal ${i} is a unit vector`);
+      assert.equal(g.attributes.aFol.getX(i), 1, 'all leaf');
+      assert.equal(g.attributes.aFol.getY(i), 0, 'no bend');
+      assert.equal(g.attributes.aFol.getZ(i), 0, 'no flutter');
+    }
+    // the faces turn outward (counter-clockwise seen from outside): away from the middle of a ball, from the axis of a cone
+    g.computeBoundingBox();
+    const mid = g.boundingBox.getCenter(new THREE.Vector3());
+    const ball = v === 'broadleaf' || v === 'birch';
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const fn = new THREE.Vector3();
+    const idx = g.index.array;
+    let bad = 0;
+    for (let t = 0; t < idx.length; t += 3) {
+      a.fromBufferAttribute(pos, idx[t]);
+      b.fromBufferAttribute(pos, idx[t + 1]);
+      c.fromBufferAttribute(pos, idx[t + 2]);
+      fn.subVectors(b, a).cross(c.clone().sub(a));
+      const m = a.clone().add(b).add(c).multiplyScalar(1 / 3);
+      const away = ball ? m.sub(mid) : new THREE.Vector3(m.x, 0, m.z);
+      if (fn.lengthSq() > 1e-12 && fn.dot(away) <= 0) bad++;
+    }
+    assert.equal(bad, 0, `${v}: faces wound against the outside`);
+    // the same size as the full tree: it stands on the ground and is about as tall and wide
+    g.computeBoundingBox();
+    const box = g.boundingBox;
+    assert.ok(box.min.y >= -0.01 && box.min.y < 0.9, `${v} base ${box.min.y}`);
+    assert.ok(box.max.y > 1.6 && box.max.y < 2.4, `${v} top ${box.max.y}`);
+    assert.ok(Math.max(box.max.x, box.max.z) > 0.3 && Math.max(box.max.x, box.max.z) < 1, `${v} half width`);
+  }
+  assert.equal(farTreeGeometry('pine'), farTreeGeometry('pine'), 'shared');
+  const m = farTreeMaterial();
+  assert.equal(m, farTreeMaterial(), 'one shared material');
+  assert.ok(m.userData.__foliage && m.userData.__world && m.userData.__fow, 'foliage light, world light and the fog of war');
+});
+
+test('far crowns: setFar swaps the chunk meshes for one mesh a variant with the same trees', () => {
+  const map = synthMap();
+  const f = createForest(map);
+  const chunkMeshes = () => instancedOf(f.object3d).filter((m) => /^forest-(pine|broadleaf|birch|palm)$/.test(m.name));
+  const farMeshes = () => instancedOf(f.object3d).filter((m) => m.name.startsWith('forest-far-'));
+  assert.equal(f.far, false);
+  assert.equal(farMeshes().length, 0, 'nothing built until asked for');
+  const stands = chunkMeshes().reduce((n, m) => n + visibleInstances(m).length, 0);
+  assert.equal(stands, f.count);
+  f.setFar(true);
+  assert.equal(f.far, true);
+  assert.ok(chunkMeshes().every((m) => !m.visible), 'the full trees are hidden');
+  const far = farMeshes();
+  assert.ok(far.length >= 3 && far.length <= 4, `${far.length} far meshes`);
+  assert.ok(far.every((m) => m.visible && m.parent.visible && !m.castShadow && !m.receiveShadow), 'drawn, no shadows');
+  assert.equal(far.reduce((n, m) => n + visibleInstances(m).length, 0), f.count, 'every tree has its crown');
+  // a crown stands where its tree stands, with its tint
+  const key = (p) => `${p.x.toFixed(3)},${p.z.toFixed(3)}`;
+  const nearAt = new Set(chunkMeshes().flatMap((m) => visibleInstances(m).map(key)));
+  for (const m of far) for (const p of visibleInstances(m)) assert.ok(nearAt.has(key(p)), `a far crown at ${key(p)} has a tree`);
+  for (const m of far) {
+    assert.ok(m.instanceColor && m.instanceColor.count >= m.count, 'tinted per tree');
+    assert.equal(m.frustumCulled, false);
+  }
+  f.setFar(false);
+  assert.equal(f.far, false);
+  assert.ok(chunkMeshes().every((m) => m.visible), 'the full trees are back');
+  assert.ok(far.every((m) => !m.parent.visible), 'the crowns are hidden');
+  f.dispose();
+});
+
+test('far crowns: felled trees stay gone, before and after the crowns are built', () => {
+  const map = synthMap();
+  const f = createForest(map);
+  const farCount = () => instancedOf(f.object3d).filter((m) => m.name.startsWith('forest-far-')).reduce((n, m) => n + visibleInstances(m).length, 0);
+  assert.equal(f.fell(3, 3), true, 'felled while the crowns do not exist yet');
+  f.setFar(true);
+  const total = f.count;
+  const standing = farCount();
+  assert.ok(total - standing >= 1 && total - standing <= 2, 'the crowns are built without the tree that is gone');
+  assert.equal(f.fell(4, 4), true, 'felled with the crowns up');
+  const after = farCount();
+  assert.ok(standing - after >= 1 && standing - after <= 2, 'its crown goes too');
+  f.setFar(false);
+  assert.equal(f.fell(5, 5), true, 'felled with the full trees showing');
+  f.setFar(true);
+  assert.ok(after - farCount() >= 1, 'and the crown is gone when they are swapped back');
+  f.dispose();
 });
 
 // ------------------------------------------------------------------ wind and materials

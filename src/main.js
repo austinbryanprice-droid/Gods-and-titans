@@ -2,8 +2,9 @@
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
 // completely, so matches can be played one after another without a reload.
 import { getSettings, onSettingsChange } from './settings.js';
-import { initAudio, syncAudio } from './audio/audio.js';
+import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
+import { introWanted, playIntro } from './ui/intro.js';
 
 export { showMenu, hideMenu };
 
@@ -113,16 +114,54 @@ function hasWebGL2() {
   }
 }
 
+/**
+ * Play the intro film (DESIGN 11.1) over the hidden menu, with its narration if the player has it on; the menu
+ * comes back on `screen` behind the black when the film ends or is skipped. Resolves once the film is gone,
+ * whatever its outcome.
+ * @param {string} screen the menu screen to land on
+ * @param {boolean} [guard] drop the film on a machine too slow to show it (not when the player asked to watch it)
+ */
+function watchIntro(screen, guard = true) {
+  hideMenu();
+  quietMusic(); // the film has sounds and a voice of its own: the title music comes back with the menu
+  const handover = () => {
+    showMenu(screen);
+    playTitleMusic();
+  };
+  try {
+    const s = getSettings();
+    const intro = playIntro({ root: document.getElementById('app'), quality: s.quality, guard, narrate: s.narration, volume: s.volume, onHandover: handover });
+    return intro.done;
+  } catch (err) {
+    console.error('[main] the intro film could not start', err);
+    handover();
+    return Promise.resolve('failed');
+  }
+}
+
+function prefersReducedMotion() {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
 function boot() {
-  initAudio(getSettings()); // the sound effects and the music: one audio context, armed to start on the first click
+  const settings = getSettings();
+  initAudio(settings); // the sound effects and the music: one audio context, armed to start on the first click
   onSettingsChange(syncAudio);
-  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame });
+  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onIntro: () => watchIntro('settings', false) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
-  if (!hasWebGL2()) {
+  const webgl2 = hasWebGL2();
+  if (!webgl2) {
     menu.setNotice('This game needs WebGL 2, which this browser is not providing. Turn on hardware acceleration in your browser settings, or try a current Chrome, Edge, Firefox or Safari.');
   }
-  warmUp();
+  const intro = introWanted({ enabled: settings.intro, search: location.search, webdriver: navigator.webdriver === true, reducedMotion: prefersReducedMotion(), webgl2 });
+  // the film has the machine to itself; the game's code is fetched once it is over
+  if (intro) watchIntro('title').then(warmUp);
+  else warmUp();
 }
 
 /**

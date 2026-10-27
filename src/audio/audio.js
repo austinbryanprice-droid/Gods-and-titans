@@ -5,6 +5,8 @@
 //   initAudio(settings)             once at boot: start both engines from the saved settings
 //   syncAudio(settings, changed)    apply a settings change (the arguments of onSettingsChange)
 //   playTitleMusic()                the title screen's score (the menu calls it on every screen of the menu)
+//   quietMusic(fade)                fade the music out and keep it quiet (the intro film plays over silence;
+//                                   the next playTitleMusic() or match brings it back)
 //   previewMusic(themeId, mood)     audition any theme at a calm, tense or battle moment (Settings)
 import { sfx } from './sfx.js';
 import { music } from './music.js';
@@ -32,6 +34,10 @@ export function syncAudio(settings, changed) {
 export function playTitleMusic() {
   music.setIntensity(TITLE_INTENSITY);
   music.play('menu');
+}
+
+export function quietMusic(fade = 0.8) {
+  music.stop(fade);
 }
 
 export function previewMusic(themeId, intensity) {
