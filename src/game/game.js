@@ -19,7 +19,7 @@ import { Overlays } from '../ui/hud-overlays.js';
 import { el } from '../ui/hud-dom.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
-import { tierName } from '../ui/hud-data.js';
+import { tierName, RESOURCE_ICONS } from '../ui/hud-data.js';
 import { loadingHint, hintParts } from '../ui/hint-data.js';
 import { TabAttention } from '../ui/tab-attention.js';
 import { AlertEngine } from './alerts.js';
@@ -724,7 +724,7 @@ export class Game {
         if (ev.player !== me) break;
         const e = vs.entities.get(ev.id);
         const base = e && e.k === 'b';
-        hud.message(base ? 'Your base is under attack!  (Space)' : 'Your forces are under attack!  (Space)', 'alert');
+        hud.message(base ? 'Your base is under attack!  [[Space]]' : 'Your forces are under attack!  [[Space]]', 'alert', { icon: '⚔️' });
         sfx.play('horn');
         hud.minimap.ping(ev.x, ev.y, '#ff3a2a');
         if (this.input) this.input.noteAlert(ev.x, ev.y);
@@ -747,7 +747,7 @@ export class Game {
         const e = vs.entities.get(ev.id);
         if (!e || e.o !== me) break;
         const t = UNITS[e.t];
-        hud.message(`${t ? t.name : 'Your god'} reached level ${ev.level}!`, 'good');
+        hud.message(`${t ? t.name : 'Your god'} reached level ${ev.level}!`, 'good', { icon: t && t.icon });
         sfx.play('tier_up', { volume: 0.55 });
         break;
       }
@@ -766,7 +766,7 @@ export class Game {
         const t = UNITS[ev.t];
         if (!t) break;
         if (t.class === 'god') {
-          hud.message(`${t.name}, ${t.title || 'god'}, answers your call!`, 'good');
+          hud.message(`${t.name}, ${t.title || 'god'}, answers your call!`, 'good', { icon: t.icon });
           sfx.play('summon_god');
         } else if (t.class === 'titan') {
           hud.showBanner(`${t.name} has risen!`, 'titan');
@@ -782,7 +782,7 @@ export class Game {
       case 'buildingComplete':
         if (ev.o === me) {
           const b = BUILDINGS[ev.t];
-          hud.message(`${b ? b.name : 'Building'} completed.`, 'info');
+          hud.message(`${b ? b.name : 'Building'} completed.`, 'info', { icon: b && b.icon });
           sfx.play('building_complete');
         }
         break;
@@ -795,13 +795,13 @@ export class Game {
       case 'trade': {
         const what = `${ev.got} ${ev.res}`;
         if (ev.to === me) {
-          hud.message(`${this.playerName(ev.from)} sent you ${what}.`, 'good');
+          hud.message(`${this.playerName(ev.from)} sent you ${what}.`, 'good', { icon: RESOURCE_ICONS[ev.res] });
           sfx.play('mine', { volume: 0.8 });
-        } else if (ev.from === me) hud.message(`Sent ${what} to ${this.playerName(ev.to)} (the market kept ${ev.amt - ev.got}).`, 'info');
+        } else if (ev.from === me) hud.message(`Sent ${what} to ${this.playerName(ev.to)} (the market kept ${ev.amt - ev.got}).`, 'info', { icon: '⚖️' });
         break;
       }
       case 'playerDefeated':
-        if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system');
+        if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system', { icon: '🏳️' });
         break;
       case 'peaceEnd':
         hud.showBanner(`The ${PEACE_NAME} is over: war begins!`, 'danger');
@@ -814,7 +814,7 @@ export class Game {
       case 'resourceDepleted': {
         // The mine has already left the view: where it was comes from the view's memory.
         const m = vs.mineMemory.get(ev.id);
-        if (m && vs.isExplored(m.x, m.y)) hud.message('A gold mine has collapsed.', 'info');
+        if (m && vs.isExplored(m.x, m.y)) hud.message('A gold mine has collapsed.', 'info', { icon: '⛏️' });
         break;
       }
       case 'death': {
@@ -823,9 +823,9 @@ export class Game {
           const t = ev.k === 'b' ? BUILDINGS[ev.t] : UNITS[ev.t];
           // A wall falls piece by piece: one message for the breach, not one per segment.
           if (ev.k === 'b' && t && t.wall) this.noteBreach(hud);
-          else if (ev.k === 'b' && t) hud.message(`Your ${t.name} was destroyed.`, 'alert');
-          else if (t && t.class === 'god') hud.message(`${t.name} has fallen! Revive them at a Temple.`, 'alert');
-          else if (t && t.class === 'titan') hud.message(`${t.name} has fallen!`, 'alert');
+          else if (ev.k === 'b' && t) hud.message(`Your ${t.name} was destroyed.`, 'alert', { icon: '💥' });
+          else if (t && t.class === 'god') hud.message(`${t.name} has fallen! Revive them at a Temple.`, 'alert', { icon: '💀' });
+          else if (t && t.class === 'titan') hud.message(`${t.name} has fallen!`, 'alert', { icon: '💀' });
         }
         this.worldSound('death', ev.x, ev.y, ev.k === 'b' ? (BUILDINGS[ev.t] && BUILDINGS[ev.t].wall ? 0.5 : 1) : 0.8);
         break;
@@ -861,7 +861,7 @@ export class Game {
     const now = performance.now();
     if (now - this.lastBreach < BREACH_MESSAGE_MS) return;
     this.lastBreach = now;
-    hud.message('Your wall was breached!', 'alert');
+    hud.message('Your wall was breached!', 'alert', { icon: '🧱' });
   }
 
   /**
@@ -871,7 +871,7 @@ export class Game {
   onAlert(a) {
     const hud = this.hud;
     if (this.disposed || !hud) return;
-    if (a.text) hud.message(a.text, a.kind);
+    if (a.text) hud.message(a.text, a.kind, { icon: a.icon });
     if (a.sound) sfx.play(a.sound, { volume: a.volume });
     if (a.ping) hud.minimap.ping(a.ping.x, a.ping.y, a.ping.color);
     if (a.jump && this.input) this.input.noteAlert(a.jump.x, a.jump.y);
