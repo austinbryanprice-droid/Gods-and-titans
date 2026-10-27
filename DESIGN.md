@@ -1550,6 +1550,53 @@ per-frame budget, so a revealed army appears over a few frames.
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
   (src/settings.js), and Settings or the F10 menu can turn them back on. Hidden for spectators
   and defeated players.
+- Alerts, tips and sounds: ways to pull a player back into the match and keep them company. All of it is
+  client-side, driven by the ViewState and three settings (`alerts`, `hints`, `tabAlerts`, in Settings and
+  the F10 menu); nothing is sent over the wire and the sim knows nothing of it.
+  **Alerts** (`src/game/alerts.js`, `AlertEngine`, created in `Game.init()`; `Game.onAlert` carries each one
+  out: HUD line, sound, minimap ping, the spot Space jumps to, the tab flash). It listens to ViewState events
+  and, once per snapshot at least 0.5 s of game time after the last, surveys what the player holds and can see.
+  Time is game time, so a paused or stalled match neither nags nor forgets, and a hidden tab (whose frames stop
+  but whose snapshots do not) still gets its alerts. The first survey is the baseline: a match joined part-way
+  announces nothing already behind it. `alerts` is `'all'` (default), `'important'` (warnings only) or `'off'`
+  (no extra line, sound or ping; the game's own battle warnings still sound). Warnings: **enemies near**
+  (a hostile unit in sight within 18 tiles of one of my buildings: line with "(Space)", war drums, an amber
+  ping and the Space jump; not within 8 s of an under-attack alert, at most once per 45 s, and a new sighting
+  needs 10 s without enemies), **ally under attack** (softer drums, a ping in the ally's colour, once per 20 s
+  per ally; Space only if my own alert is older than 15 s), and the **Decade of Peace marks** (a gong, louder
+  at each of 5:00 / 1:00 / 0:10; the HUD writes the line). Reminders (`'all'` only): **idle Worshippers**
+  (standing idle for 20 s, then every 60 s), **population cap** (at the cap below `POP_MAX` for 10 s
+  with no House going up, every 120 s), **a god or Titan you can afford** (an idle Temple or Titan Gate and
+  the means for 8 s; every 180 s / 240 s), **an idle army** (from 6:00, 6 or more soldiers, gods and
+  creatures, 80% of them idle for 2 min, no peace and no enemy near; every 5 min), **research finished**,
+  and **milestones** (kills 1, 10, 25 … 1000; population 25 … `POP_MAX`; gold and wood gathered; units
+  trained; one cheer per 20 s). One alert sound per 2 s unless the next matters more (`PRIORITY`).
+  **A tab left behind** (`src/ui/tab-attention.js`, `TabAttention`): while the page is hidden or the window
+  unfocused, the alerts that need the player (an attack on the base or the forces, enemies near, an ally
+  attacked, an enemy Titan rising, the peace ending, a god or Titan of mine arriving, a tier grown, the last two
+  peace marks, the end of the match) flash the tab title ("(n) ⚠ Your base is under attack!", once a second) until
+  the player returns. `tabAlerts` is `'title'` (default), `'off'` or `'notify'`, which also raises a silent
+  desktop notification (one at a time, at most one per 15 s, closing itself after 8 s; a click focuses the
+  window). The browser's permission is asked when the player picks Notification in the settings (a click);
+  if it is refused, blocked or missing, the choice falls back to `'title'` and the note under it says why
+  (a pick made while the prompt is still open stands: the late answer does not overwrite it).
+  A single-player match pauses itself in a hidden tab (section 11), so the flash serves multiplayer and a
+  window left unfocused beside the game.
+  **Gameplay tips** (`src/ui/hint-data.js`, `src/ui/hud-hints.js`): about 40 one- or two-sentence tips
+  (controls, economy, gods, war, walls, the Decade of Peace) in the card at the top right, under the
+  getting-started checklist while that is up: the first 90 s into a match (30 s after joining part-way), then
+  one every 150 s of game time. The tips heard least come first, and one that fits the match (it has
+  Worshippers, an army, walls, a god, a Barracks, a damaged building, is in a peace or in a team) before a
+  general one; none is told more than twice across matches (`localStorage` key `mythicwar-hints`). The card
+  yields to a fight (30 s after the player's things were hit, and whenever a warning is shown to the player;
+  one the settings silenced does not count), stays 9 to 18 s by
+  length (while the pointer rests on it, and 4 s after), and has ✕ and "Turn tips off" (saves `hints: false`).
+  A soft chime goes with it when `alerts` is `'all'`. A tip is text with `[[Key]]` markers drawn as `<kbd>`;
+  the hotkeys and numbers it quotes come from the data (`tests/ui/hud-hints.test.js` checks them). The
+  loading screen ("Preparing the battlefield…") shows one general tip under the spinner.
+  **Sounds** (`src/audio/sfx-alerts.js`, merged into the tables of `sfx.js`): `nudge` (two soft notes: a
+  reminder), `drums` (four war-drum beats), `gong` (the peace is about to end), `research` (an upgrade
+  finished), `tip` (a tip appeared) and `milestone` (a short fanfare).
 - Info panel (`src/ui/hud-info.js`): a selected gold mine shows "Gold left", "Miners n/2"
   (snapshot `mn` / `MINE_SLOTS`), how many of your Worshippers work there, and the
   2-at-once rule. A worker's state line reads "Gathering gold", "Chopping wood", "Repairing", or
@@ -1696,8 +1743,12 @@ InputController, sfx listener; requestAnimationFrame loop: `viewState.update(now
 drive VFX, sounds and HUD messages. The game also keeps the team's marks: `sendMark(kind, x, y)` (paced by
 `MARK_SEND_RATE`, then `session.sendMark`) and `onMark(mark)` (stands it in `game.marks`, chimes, and for a teammate's
 marker writes its words in the message area), see 7 and 9. Game over → overlay → back to menu. "Preparing the
-battlefield…" covers the empty canvas while the renderer's code loads and its scene builds. In a
-single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim.
+battlefield…" covers the empty canvas while the renderer's code loads and its scene builds (with a
+gameplay tip under it unless the player turned tips off). In a
+single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim. `init()` also
+creates the `AlertEngine` and the `TabAttention` (section 9, "Alerts, tips and sounds"); `onAlert(alert)` turns each alert into a HUD
+line, a sound, a minimap ping, the spot Space jumps to and a tab flash, and tells the HUD to hold its tips
+while the player is under pressure.
 
 ## 12. Repository layout & ownership
 

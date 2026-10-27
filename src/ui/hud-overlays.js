@@ -8,6 +8,8 @@ import { sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { el, fmt, safeColor } from './hud-dom.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
+import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
+import { chooseTabAlerts, notificationState } from './tab-attention.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -53,7 +55,7 @@ function choiceRow(label, options, value, onChange) {
     return b;
   });
   const row = el('div', 'hud-choice', el('b', 'hud-choice-label', label), el('div', 'mw-segmented', ...buttons), note);
-  return { row, buttons };
+  return { row, buttons, note };
 }
 
 export class Overlays {
@@ -137,6 +139,15 @@ export class Overlays {
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
+    const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
+    const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
+    const tabAlerts = choiceRow('When this tab is in the background', TAB_ALERT_OPTIONS, s.tabAlerts, async (v) => {
+      const got = await chooseTabAlerts(v); // 'notify' asks the browser for permission first
+      if (got === null || got === v) return; // (null: picked again meanwhile, that pick stands)
+      tabAlerts.buttons.forEach((x) => x.classList.toggle('is-active', x.dataset.id === got));
+      tabAlerts.note.textContent = tabAlertNote(v, notificationState(), true);
+    });
+    tabAlerts.note.textContent = tabAlertNote(s.tabAlerts);
     const vol = el('input', 'hud-range');
     vol.type = 'range';
     vol.min = '0';
@@ -181,6 +192,9 @@ export class Overlays {
         bars.row,
         edge.row,
         tips.row,
+        hints.row,
+        alerts.row,
+        tabAlerts.row,
         el('label', 'hud-vol', el('span', null, 'Volume'), vol, volText),
       ),
       el('div', 'hud-ohint', 'Press F10 or Esc to resume.'));
