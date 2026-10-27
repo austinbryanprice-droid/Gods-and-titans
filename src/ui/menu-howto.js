@@ -5,7 +5,7 @@ import { RANK_NAMES } from '../data/ranks.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME,
-  MAX_WALL_LINE, WALL_PLACE_RANGE,
+  MAX_WALL_LINE, WALL_PLACE_RANGE, MAX_QUEUE,
 } from '../config.js';
 
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
@@ -42,6 +42,7 @@ const HOTKEYS = [
   ['Buildings', [
     [kbd('W'), 'Town Center: Worshipper · Barracks: Warrior'],
     [kbd('Shift', 'W'), 'Shift with any train hotkey or button queues up to 5 at once'],
+    [kbd('Shift', 'Click'), `A queued unit under a building's name: take back its whole run (the big button: the whole queue). A building queues up to ${MAX_QUEUE}`],
     [kbd('U'), 'Town Center: grow to Town, then City'],
     [keys('U', 'D'), 'Wall segments: upgrade to stone (U) or dismantle (D), the whole selection at once'],
     [keys('K', 'H'), 'Town Center: Worshippers work faster (K) · have more health (H), three levels each'],
