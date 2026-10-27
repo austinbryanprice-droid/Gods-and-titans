@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Music lab</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; background: #10131c; color: #e8e2d0; margin: 0; padding: 24px; max-width: 760px; }
+  h1 { font-size: 22px; letter-spacing: .08em; text-transform: uppercase; color: #d9b45a; margin: 0 0 4px; }
+  p { color: #a9a591; margin: 0 0 16px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 12px 0; }
+  label { display: flex; align-items: center; gap: 8px; }
+  select, button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #3b4258; background: #1b2132; color: inherit; cursor: pointer; }
+  button:hover { border-color: #d9b45a; }
+  input[type=range] { width: 200px; }
+  output { min-width: 3em; color: #d9b45a; font-variant-numeric: tabular-nums; }
+  pre { background: #0b0e15; border: 1px solid #262c3f; border-radius: 6px; padding: 12px; min-height: 8em; overflow: auto; }
+  a.dl { color: #d9b45a; }
+</style>
+</head>
+<body>
+<h1>Music lab</h1>
+<p>The game's own music engine (src/audio/music.js), for listening to each theme at any battle intensity without starting a match.
+Click Play (browsers start audio only after a click). Intensity 0 is a quiet building day, 1 is a full battle.</p>
+<div class="row">
+  <label>Theme <select id="theme"></select></label>
+  <button id="play" type="button">Play</button>
+  <button id="stop" type="button">Stop</button>
+</div>
+<div class="row">
+  <label>Intensity <input id="level" type="range" min="0" max="100" value="0"><output id="levelOut">0.00</output></label>
+  <label>Music volume <input id="vol" type="range" min="0" max="100" value="60"><output id="volOut">60%</output></label>
+</div>
+<div class="row">
+  <label>Seconds <select id="secs"><option>30</option><option selected>60</option><option>120</option></select></label>
+  <label>Render <select id="curve"><option value="flat">at the intensity above</option><option value="story">calm, then battle, then calm</option></select></label>
+  <button id="render" type="button">Render to a WAV file</button>
+  <span id="dl"></span>
+</div>
+<pre id="state">idle</pre>
+<script type="module">
+import { music, renderMusicOffline, MUSIC_THEME_IDS } from '../src/audio/music.js';
+import { sfx } from '../src/audio/sfx.js';
+import { THEMES } from '../src/audio/music-themes.js';
+
+const $ = (id) => document.getElementById(id);
+for (const id of MUSIC_THEME_IDS) $('theme').add(new Option(THEMES[id].name === 'Mythic War' ? 'Title screen (Mythic War)' : THEMES[id].name, id));
+
+music.init({ volume: 0.6 });
+sfx.init({ volume: 0.7 });
+
+$('play').onclick = () => {
+  sfx.unlock();
+  music.setVolume($('vol').value / 100);
+  music.setIntensity($('level').value / 100);
+  music.play($('theme').value);
+};
+$('stop').onclick = () => music.stop();
+$('theme').onchange = () => { if (music.state().wanted) music.play($('theme').value); };
+$('level').oninput = () => { $('levelOut').textContent = ($('level').value / 100).toFixed(2); music.setIntensity($('level').value / 100); };
+$('vol').oninput = () => { $('volOut').textContent = `${$('vol').value}%`; music.setVolume($('vol').value / 100); };
+
+setInterval(() => {
+  const s = music.state();
+  $('state').textContent = JSON.stringify({ ...s, level: +s.level.toFixed(2) }, null, 2);
+}, 300);
+
+/** 16-bit stereo WAV bytes of an AudioBuffer. */
+function wavBytes(buf) {
+  const n = buf.length, ch = Math.min(2, buf.numberOfChannels);
+  const out = new DataView(new ArrayBuffer(44 + n * ch * 2));
+  const w = (o, s) => [...s].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); out.setUint32(4, 36 + n * ch * 2, true); w(8, 'WAVEfmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, ch, true);
+  out.setUint32(24, buf.sampleRate, true); out.setUint32(28, buf.sampleRate * ch * 2, true);
+  out.setUint16(32, ch * 2, true); out.setUint16(34, 16, true); w(36, 'data'); out.setUint32(40, n * ch * 2, true);
+  const data = [...Array(ch).keys()].map((c) => buf.getChannelData(c));
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) out.setInt16(44 + (i * ch + c) * 2, Math.max(-1, Math.min(1, data[c][i])) * 32767, true);
+  return new Uint8Array(out.buffer);
+}
+
+const curves = {
+  flat: (level) => () => level,
+  story: (level, secs) => (t) => {
+    const x = t / secs;
+    if (x < 0.3) return 0.05;
+    if (x < 0.4) return 0.05 + 0.85 * ((x - 0.3) / 0.1);
+    if (x < 0.7) return 0.9;
+    if (x < 0.8) return 0.9 - 0.85 * ((x - 0.7) / 0.1);
+    return 0.05;
+  },
+};
+
+/** Render a theme offline; resolves { sampleRate, seconds, peak, rms, wav: Uint8Array }. */
+async function renderTheme(id, { seconds = 60, level = 0, curve = 'flat', seed = 1, sampleRate = 44100, volume = 0.5, only = null } = {}) {
+  const buf = await renderMusicOffline(id, { seconds, sampleRate, seed, volume, only, levelAt: curves[curve](level, seconds) });
+  if (!buf) return null;
+  let peak = 0, sum = 0, n = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; sum += d[i] * d[i]; n++; }
+  }
+  return { sampleRate, seconds, peak, rms: Math.sqrt(sum / n), wav: wavBytes(buf) };
+}
+window.__lab = { renderTheme, themes: MUSIC_THEME_IDS };
+
+$('render').onclick = async () => {
+  $('dl').textContent = 'rendering…';
+  const secs = Number($('secs').value);
+  const r = await renderTheme($('theme').value, { seconds: secs, level: $('level').value / 100, curve: $('curve').value, volume: $('vol').value / 100 });
+  if (!r) { $('dl').textContent = 'this browser has no OfflineAudioContext'; return; }
+  const a = document.createElement('a');
+  a.className = 'dl';
+  a.href = URL.createObjectURL(new Blob([r.wav], { type: 'audio/wav' }));
+  a.download = `${$('theme').value}-${$('curve').value}.wav`;
+  a.textContent = `download ${a.download} (peak ${r.peak.toFixed(2)}, rms ${r.rms.toFixed(3)})`;
+  $('dl').replaceChildren(a);
+};
+</script>
+</body>
+</html>
