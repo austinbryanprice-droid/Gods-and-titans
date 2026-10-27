@@ -1707,15 +1707,17 @@ per-frame budget, so a revealed army appears over a few frames.
   Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
   **Delete** destroys the selected own units (`kill`, 6.2; the whole selection, not only the active subgroup).
-  Buildings are not units: they stay, and a selection of nothing but buildings says so (`Delete destroys units,
-  not buildings.`; walls have D, an unfinished building Esc). Up to `DELETE_CONFIRM_ABOVE` (5) plain units go at
-  once. More than that, or any god or Titan, first says what it would destroy (`Press Delete again to destroy 12
-  units, including Zeus.`) and goes on a second press within `DELETE_CONFIRM_MS` (2.5 s) while every selected unit
-  was among those asked about: units lost or taken off the selection meanwhile do not matter, one added does. Esc
-  (which then does nothing else), waiting or leaving the window takes the question back. Key auto-repeat,
-  Ctrl / Alt / Cmd + Delete, typing in chat and an open menu do nothing. Destroying units also ends a pending
-  placement or targeting. Backspace is unchanged (it jumps to the Town Center), so on a Mac keyboard, whose delete
-  key is Backspace, Delete is fn + delete. Rules and texts in `src/ui/delete-key.js`.
+  **Backspace** does the same: it is the key a Mac keyboard labels "delete" (fn + delete sends Delete), and a
+  question one of the two keys asked is answered by a press of either. Buildings are not units: they stay, and a
+  selection of nothing but buildings says so (`Delete destroys units, not buildings.`; walls have D, an unfinished
+  building Esc). Up to `DELETE_CONFIRM_ABOVE` (5) plain units go at once. More than that, or any god or Titan,
+  first says what it would destroy (`Press Delete again to destroy 12 units, including Zeus.`) and goes on a second
+  press within `DELETE_CONFIRM_MS` (2.5 s) while every selected unit was among those asked about: units lost or
+  taken off the selection meanwhile do not matter, one added does. Esc (which then does nothing else), waiting or
+  leaving the window takes the question back. Key auto-repeat, Ctrl / Alt / Cmd + either key, typing in chat and an
+  open menu do nothing. Destroying units also ends a pending placement or targeting. The jump to your Town Center
+  that Backspace used to be is **Home** now (fn + the left arrow on a Mac laptop). Rules and texts in
+  `src/ui/delete-key.js`.
   **Walls**: with a wall type chosen in the build menu (W) the left button goes down on the first
   tile and the line follows the cursor in the nearest of eight directions (`wallLine`); releasing
   orders it for all selected workers (`build` with `tx2` / `ty2`; Shift keeps laying walls). A tip by

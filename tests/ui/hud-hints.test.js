@@ -66,7 +66,7 @@ test('every tip is well formed: unique id, words, balanced key markers, a boolea
 });
 
 test('every key a tip names is a real key', () => {
-  const NAMED = new Set(['Shift', 'Ctrl', 'Alt', 'Tab', 'Space', 'Backspace', 'Delete', 'F1', 'F2', 'F3', '.', '`']);
+  const NAMED = new Set(['Shift', 'Ctrl', 'Alt', 'Tab', 'Space', 'Home', 'Backspace', 'Delete', 'F1', 'F2', 'F3', '.', '`']);
   for (const h of HINTS) {
     for (const part of hintParts(hintText(h, { pantheon: 'greek' }))) {
       if (typeof part === 'string') continue;

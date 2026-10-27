@@ -1197,9 +1197,10 @@ export class InputController {
   }
 
   /**
-   * Delete: destroy the selected own units (the sim's `kill`). A few plain units go at once; a bigger
-   * group, a god or a Titan first says what it would destroy and needs a second press (DELETE_CONFIRM_MS)
-   * with nothing new in the selection. Buildings are not units and stay.
+   * Delete, or Backspace (the delete key of a Mac keyboard): destroy the selected own units (the sim's
+   * `kill`). A few plain units go at once; a bigger group, a god or a Titan first says what it would
+   * destroy and needs a second press (of either key, DELETE_CONFIRM_MS) with nothing new in the
+   * selection. Buildings are not units and stay.
    */
   deleteSelected() {
     const units = this.ownUnits().map((id) => this.vs.entities.get(id)).filter(Boolean);
@@ -1285,7 +1286,7 @@ export class InputController {
       if (!rep) this.selectGod(Number(key[1]) - 1, false, e.shiftKey);
       return;
     }
-    if (key === 'Backspace') {
+    if (key === 'Home') {
       e.preventDefault();
       if (rep) return;
       const tc = [...this.vs.entities.values()].find((x) => x.k === 'b' && x.o === this.vs.myIndex && x.t === 'town_center');
@@ -1325,7 +1326,7 @@ export class InputController {
       if (!rep) this.toggleAllAutocast();
       return;
     }
-    if (key === 'Delete') {
+    if (key === 'Delete' || key === 'Backspace') {
       e.preventDefault();
       if (!rep) this.deleteSelected();
       return;
