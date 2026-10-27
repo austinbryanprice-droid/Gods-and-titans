@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
 import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, researchCheck, CARD_SLOTS } from '../../src/ui/command-card.js';
 import { subgroups } from '../../src/ui/hud-data.js';
-import { POP_MAX } from '../../src/config.js';
+import { POP_MAX, MAX_QUEUE } from '../../src/config.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
 import { PANTHEON_LIST, godsFor } from '../../src/data/index.js';
@@ -259,10 +259,10 @@ test('population cap and queue limit make training unavailable', () => {
   assert.equal(card[0].reason, 'Not enough population. Build more Houses.');
 
   world.players[0].popCap = 100;
-  for (let i = 0; i < 5; i++) world.issueCommand(0, { type: 'train', building: tc.id, unit: 'worshipper' });
+  for (let i = 0; i < MAX_QUEUE; i++) world.issueCommand(0, { type: 'train', building: tc.id, unit: 'worshipper' });
   run(world, 0.1);
   card = getCommandCard([tc.id], viewOf(world));
-  assert.equal(card[0].queued, 5);
+  assert.equal(card[0].queued, MAX_QUEUE);
   assert.equal(card[0].reason, 'Production queue is full.');
 });
 
@@ -507,13 +507,13 @@ test('construction site: only Cancel Construction (Esc)', () => {
   assert.deepEqual(card[11].action, { kind: 'cancelBuild' });
 });
 
-test('houses, storehouses and towers show only their upgrades', () => {
+test('houses, storehouses and towers show their upgrades (a House also offers to combine)', () => {
   const world = makeWorld();
   const h = place(world, 0, 'house', 6, 13);
   const t = place(world, 0, 'tower', 9, 13);
   const s = place(world, 0, 'storehouse', 12, 13);
   const vs = viewOf(world);
-  assert.deepEqual(slotsOf(getCommandCard([h.id], vs)), ['4:research:house_large_families', '5:research:house_stone_walls']);
+  assert.deepEqual(slotsOf(getCommandCard([h.id], vs)), ['0:house-merge', '4:research:house_large_families', '5:research:house_stone_walls']);
   assert.deepEqual(slotsOf(getCommandCard([t.id], vs)), ['4:research:tower_burning_arrows', '5:research:tower_lookout', '6:research:tower_iron_bracing']);
   assert.deepEqual(slotsOf(getCommandCard([s.id], vs)), ['4:research:storehouse_sharp_axes', '5:research:storehouse_handcarts']);
 });

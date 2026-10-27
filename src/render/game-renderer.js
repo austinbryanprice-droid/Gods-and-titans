@@ -830,6 +830,15 @@ export class GameRenderer {
     this.placement.hide();
   }
 
+  /**
+   * The enemy Town Centers whose surroundings stay clear of building in a Decade of Peace (game/placement.js
+   * peaceAnchors): that ground is tinted under the placement ghost; [] clears it.
+   * @param {{ tx: number, ty: number, size: number }[]} anchors
+   */
+  setNoBuildZones(anchors) {
+    this.placement.setZones(anchors);
+  }
+
   /** What one owner has on a tile for the wall's sake: 0 nothing, 1 a wall segment, 2 a tower that joined the wall. */
   wallKindAt(owner, tx, ty) {
     return this.wallTiles.get(wallKey(owner, tx, ty)) || 0;

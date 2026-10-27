@@ -19,7 +19,9 @@ The host's browser runs the game for everyone, so the host should have the stead
 
 Destroy every enemy building. Worshippers mine gold (two at a time per mine), chop wood and pray. Houses raise your population limit, the Barracks trains mortal soldiers (who earn ranks as they fight), a Shrine summons creatures, a Temple summons your gods (up to three, and they level up), and a City can raise a Titan Gate for your titan. Worshippers can also lay **walls**: pick Wooden Wall in the build menu and drag out a line, then upgrade it to stone; a Tower raised on a wall, or in line with one, becomes part of it. The in-game **How to Play** screen and the first-game checklist cover the rest.
 
-The host can pick the **Decade of Peace** game mode in the lobby: for the first 30, 45 or 60 minutes no player can harm another, so everyone can build up and mass armies for one great battle (neutral creatures still fight).
+Houses can grow, too: in a Town, select four Houses that stand together in a square and press **U** to combine them into a **Manor**. It shelters 48 people where the four Houses sheltered 32, so a big city needs less ground, and the Houses keep housing everyone while it is built.
+
+The host can pick the **Decade of Peace** game mode in the lobby: for the first 30, 45 or 60 minutes no player can harm another and nobody can build near an enemy Town Center, so everyone can build up and mass armies for one great battle (neutral creatures still fight).
 
 ## Controls
 
@@ -29,6 +31,7 @@ The host can pick the **Decade of Peace** game mode in the lobby: for the first 
 | Right-click | Move, attack, gather, pray or help build, depending on the target |
 | Shift + right-click | Queue orders |
 | A, M, S, H | Attack-move, move, stop, hold position |
+| Delete | Destroy the selected units (press twice for a big group, a god or a Titan) |
 | Q, W, E, R | Abilities (and units on a selected building) |
 | B | Build menu for a Worshipper |
 | Ctrl + 1–9, 1–9 | Assign / select a control group |

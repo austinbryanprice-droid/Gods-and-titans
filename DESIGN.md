@@ -144,6 +144,15 @@ building be raised on, or in line with, the owner's wall segments and be joined 
 `wallConnections` (the neighbours a segment runs on to). Walls do not count as buildings for
 defeat (5.8), for the AI's targets (10), for population, or for the buildings stat.
 
+**The Manor** (`manor`, `size: 4`, tier 2) is four Houses combined: it is not on the build menu and
+only comes from the upgrade in 5.3. Its `mergesFrom: { building: 'house', count: 4, cost, time }` is
+the rule (which House, how many, the price and the time of the upgrade); the `cost` it carries is the
+whole price of the four Houses and the upgrade, which repairs go by. It has no `upgrades` of its own:
+it researches the House's (`researchHostOf`, which `upgradesFor` follows), and every effect on the
+House counts again for it (`COMBINED` in `src/data/upgrades.js`). `src/data/houses.js` holds the pure
+helpers the sim, HUD and renderer share: `mergeRule`, `researchHostOf`, `houseBlocks` and `planMerges`
+(the squares among some Houses, or why there is none) and `MERGE_TEXT` (the refusals, word for word).
+
 ### 4.4 Ability
 ```js
 {
@@ -302,7 +311,8 @@ Each player: Town Center (tier 1, Village) at its start position, 5 Worshippers,
 200 wood, 50 faith. A gold mine (12000) 2–4 tiles from the Town Center, a forest edge 6–10
 tiles away. Population cap = sum of `popProvided` of completed buildings, max `POP_MAX` (200): a Town
 Center gives 12 and a House 8 (10 with Large Families), so 24 Houses and a Town Center reach it (19 with
-Large Families).
+Large Families). Four Houses in a square can be combined into a Manor (5.3) that gives 48 instead of
+their 32, so a Town Center and four Manors (204) reach it with sixteen Houses' worth of ground.
 Pop used = pop of living units + pop of everything queued in production.
 
 ### 5.2 Economy
@@ -342,10 +352,13 @@ Pop used = pop of living units + pop of everything queued in production.
 - Placement: all footprint tiles in bounds, ground-passable (not forest/water/rock), no
   building/mine footprint overlap, no enemy units on it (own units are pushed out), and every
   drop-off (Town Center, Storehouse) keeps a gap of ≥ `DROPOFF_MINE_GAP` (3) empty tiles
-  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. The error names the reason,
-  the first that applies of: water, rock or the map edge (`Can't build there.`), `Trees in the
-  way.`, `Another building is in the way.`, `A gold mine is in the way.`, `Something is in the
-  way.` (an enemy or neutral unit), `Too close to a gold mine.` (the gap alone);
+  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. In a Decade of Peace no tile of
+  the footprint may lie within `PEACE_BUILD_GAP` (20) empty tiles of an enemy Town Center (5.10).
+  The error names the reason, the first that applies of: water, rock or the map edge (`Can't build
+  there.`), `Trees in the way.`, `Another building is in the way.`, `A gold mine is in the way.`,
+  `Something is in the way.` (an enemy or neutral unit), `The Decade of Peace holds for another
+  m:ss: no building near an enemy Town Center yet.` (the peace's ground), `Too close to a gold
+  mine.` (the gap alone);
   `world.placementError(i, typeId, tx, ty)` returns that text (null = valid) and
   src/game/placement.js `checkPlacement(...).message` gives the same on the client, which also
   says `Unexplored ground.` first for any fogged tile (the sim does not know the fog, and the
@@ -388,6 +401,36 @@ Pop used = pop of living units + pop of everything queued in production.
   - `cancelBuild` on a *finished* wall segment takes it down, refunding `WALL_REMOVE_REFUND` (50%) of
     its cost (an upgrade under way is refunded in full): walls block the owner's own units too, so
     this is how a gap is opened. Dismantling is not an attack and costs no time.
+- **Manors** (`src/sim/homes.js`, `src/data/houses.js`): four Houses that stand in a *square*, a 2×2
+  block of the owner's finished Houses touching edge to edge (so one 4×4-tile square: each House is one
+  House-width, 2 tiles, from its neighbours), are combined into one Manor in place. Houses merely near
+  each other, in a row or in an L are not grouped. `upgradeHouses { houses: [ids] }` takes any selection
+  of Houses and finds the squares among them (`houseBlocks`: row by row from the top, left to right, no
+  House in two squares; other Houses may stand anywhere), then starts every square that can, paying
+  `mergesFrom.cost` (100 gold, 60 wood) for each at once, for as many squares as the purse allows
+  (`Not enough gold. Combined 1 of 2 squares.`). It needs a Town (`Requires Town.`: the Manor's `tier`),
+  and the four Houses must be finished and *idle*: not researching and not part of a combining already.
+  The refusals cost nothing: `Select four Houses that stand together in a square.`, `Those Houses do not
+  make a square, two by two.`, `A House in the square is busy: wait for its research or upgrade to finish.`
+  - The upgrade needs no worker. It is a queue item (`upgrade: true`, `u` = `manor`, 45 s, quickened by
+    Imperial Bureaucracy's `techSpeed` like any growth) on each of the four Houses, all sharing one `group`
+    object (`ids`, the square's top-left tile, `cost`, `owner`): the top-left House runs the timer and the
+    other three copy its progress, so any one of them can be selected to watch it and the queue panel shows
+    it like any item. The Houses keep sheltering their people while it runs. The price belongs to the group:
+    `cancelTrain` on any of the four items stops the whole upgrade and returns the price once, and so does a
+    House that falls meanwhile (`releaseBuilding`), while the other three carry on as Houses. Researching at
+    a House being combined is refused (`That House is being combined into a Manor.`).
+  - When the time is up the four Houses are removed (no death, like a wall taken down) and one Manor stands
+    on their ground, finished, announced by a `buildingComplete` ("Manor completed."), with the average of
+    the four health fractions (combining does not heal; repair does). A Manor shelters 48
+    population against the 32 of four Houses (+16, so the limit of 200 is reached with a Town Center and four
+    Manors), has 2400 health (against 2000) and armor 4, and costs 420 gold and 180 wood to replace: four
+    Houses and the upgrade. It cannot be built from scratch (`build` takes only `BUILD_MENU` types).
+  - A Manor holds what the Houses held: every upgrade, blessing or perk effect on the House counts again for
+    it, as often as the Houses it replaced for population and health and once for armor (`COMBINED`, so
+    Large Families +2 becomes +8 and Mesopotamian Crowded Cities too, whether researched before or after),
+    and it researches the House's upgrades (`researchHostOf`), each once per player. The AI never combines
+    Houses (10).
 - **Repair:** worshippers ordered to `repair` an own completed, damaged building walk to it and
   mend it (state `build`, view task `tk: 'repair'`). One worshipper restores the full health bar
   in `REPAIR_TIME` (75%) of the build time (shorter with work speed); each extra adds `BUILD_HELPER_BONUS`. A full bar
@@ -411,8 +454,16 @@ Pop used = pop of living units + pop of everything queued in production.
   with their own, pickier threshold.
 
 ### 5.4 Production
-- `train` puts an item in the building's queue (max 5). Cost and population are reserved
-  when queued (refunded on `cancelTrain`). Units spawn at the footprint edge nearest the rally
+- `train` puts an item in the building's queue (max `MAX_QUEUE`, 50). Cost and population are reserved
+  when queued, so the purse and the population cap end a queue before the 50 do when they are short
+  (every trainable unit takes at least 1 population, so one player never holds more than `POP_MAX` queued
+  units in all of their buildings together). `cancelTrain` takes items back and refunds each at the cost it
+  was queued with, restoring a fallen god that was queued for a revive: `index` is the first item (default
+  the last), `count` how many from there on (default 1, clamped to the end of the queue), so a long run goes
+  back in one command. Units, research and growth share one queue, and research and a Town Center's growth
+  wait behind the units already in it. A building that is destroyed loses its queue: the population is
+  freed but nothing is paid back, which is the risk of queueing deep at the front line.
+  Units spawn at the footprint edge nearest the rally
   point and then follow the rally (rally on a mine/tree → worker gathers). When a rallied
   mine runs dry the rally moves to the nearest mine within 16 tiles (if any).
 - Creatures need tier ≥ their tier. Gods: unique per player (no duplicates alive or queued),
@@ -556,6 +607,39 @@ for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the 
   Attack-move walks through rivals without stopping.
 - Neutral creatures (owner −1) are never protected or held back: camps still wake, fight and
   pay bounty, and units fight them as usual.
+- **Ground kept clear.** While the peace lasts nobody builds within `PEACE_BUILD_GAP` (20) empty
+  tiles of an enemy Town Center, finished or still a site (`PEACE_ANCHOR`), so a rival cannot
+  wall a base in, put towers on its doorstep or plant a camp beside it while attacking is
+  off. The gap is the straight distance between the nearest tiles of the two footprints (0 when
+  they touch), so the ground is a square around the Town Center with rounded corners, 44 tiles
+  across. Only enemy Town Centers keep ground: not houses, towers or walls (any building would let
+  a player creep a line of cheap ones across the map and claim it), not a teammate's, not your
+  own (build as close to your own as you like). Rules: `peaceBlocksFootprint` in `src/sim/peace.js`
+  (the footprint test shared with the client), `world.peaceBuildBlocks(i, tx, ty, size)` (the
+  enemy Town Centers of player `i`, only while `world.peace` holds) and one line in
+  `placementError`, so everything that places a building obeys it with the text above: a player's
+  `build` and each tile of a wall line (tiles inside are left out like any tile that cannot be
+  built on; the peace is the error when none can go up), a queued build when the worker arrives
+  (cost refunded, 5.3), `findPlacement` and the AI (`canPlaceBuilding`), and the commands of a
+  remote player, since the host's sim has the last word. When the peace ends the ground is free
+  at once. Measured: starts of the generated maps are at least 62 tiles apart (small map, four
+  players; 66 between enemies in a 2v2), and in four AI-vs-AI peace games of 20 minutes (small and
+  medium maps, 2 to 4 players, Normal and Hard) no placement was ever refused for the peace, the
+  nearest an AI building came to an enemy Town Center was 25 tiles, and every game played out
+  exactly as with the rule switched off (same buildings, population and gold), so the AI's
+  base and expansions never meet it; only a Town Center planted on purpose beside an enemy's does.
+  Limits, kept on purpose: the rule is symmetric, so a Town Center planted just outside your 20
+  tiles claims ground of its own that overlaps the strip between (no "older Town Center wins"
+  rule); the refusal tells you a Town Center is within 20 tiles even if you have not seen it (the
+  same leak as `Another building is in the way.`); a far chokepoint stays open to walls.
+- The client shows the ground before the click (`src/game/placement.js` `checkFootprint` and
+  `peaceAnchors`): the ghost's tiles inside it are red with the sim's text, from the enemy Town
+  Centers the player has seen or remembers (`lastSeen`); one never scouted is refused only by the
+  sim, which names the reason. While a building or wall line is placed the renderer tints the
+  whole zone (`NoBuildZone` in `src/render/no-build-zone.js`: red, hatched, with a bright edge line
+  on its rim; one mesh of tile quads on the terrain, rebuilt only when the known Town Centers
+  change) and a tip by the cursor says why the ghost is red. A refused click shows the message
+  and keeps the placement open. None of it is on the wire (no snapshot field or event).
 - The peace ends at the start of the first tick with `time >= peaceEnd`: `world.peace` turns
   false and one `{ type: 'peaceEnd' }` event is emitted. There is no new snapshot field: clients
   derive the countdown from `setup.peaceMinutes` and the snapshot `time`
@@ -613,10 +697,11 @@ counted in `world.perf.commandErrors`.
 { type: 'returnCargo', units }
 { type: 'build',      units: [workerIds], building: typeId, tx, ty, queue, tx2?, ty2? } // footprint top-left tile; a wall type with tx2/ty2 is a line (5.3)
 { type: 'train',      building: id, unit: typeId }                // also creatures, gods, titan, revive
-{ type: 'cancelTrain', building: id, index }
+{ type: 'cancelTrain', building: id, index?, count? }  // take queue items back and refund them (5.4)
 { type: 'upgradeTier', building: id }
 { type: 'cancelBuild', building: id }                      // also takes a finished wall segment down (5.3)
 { type: 'upgradeWall', walls: [buildingIds] }             // wooden → stone on finished wall segments (5.3)
+{ type: 'upgradeHouses', houses: [buildingIds] }          // each square of four Houses among them becomes a Manor (5.3)
 { type: 'repair',     units, target: buildingId, queue }   // on a construction site: help build
 { type: 'research',   building: id, upgrade: upgradeId }
 { type: 'autoRepair', on: bool }
@@ -625,6 +710,7 @@ counted in `world.perf.commandErrors`.
 { type: 'rally',      building: id, x, y, target?: id }
 { type: 'stop',       units }
 { type: 'hold',       units }
+{ type: 'kill',       units }                                   // the Delete key: own units die, no killer (below)
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
 { type: 'surrender' }
 ```
@@ -633,6 +719,14 @@ tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker ca
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
 Units that cannot do the resolved action just move.
+
+**kill** destroys the issuing player's own living units among `units` (another player's unit, a building and a
+mine in the list are skipped) with `World.killEntity(unit, null)`: a normal death that has no killer. The `death`
+event plays the death animation and sound, the unit's population is free at once, a loss is counted, a fallen god
+stays in `fallen` to be revived at a Temple with its level, and its orders are cleaned up as in a fight (a paid
+building is refunded, a prayer slot is freed). Nobody earns anything from it: no kill, no experience for gods or
+soldiers, no plunder or sacrifice, no bounty. It works in a Decade of Peace and, like every command, not for a
+defeated player or once the game is over.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
@@ -645,7 +739,11 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
 `That building is not damaged.` `Not enough gold to repair.` (wood / faith) `Already researched.`
-`Already being researched.` `Requires <Upgrade name>.` (a line's earlier level, e.g. `Requires Work Songs.`) Trades: `Choose a teammate to send to.` `You can only send resources
+`Already being researched.` `Requires <Upgrade name>.` (a line's earlier level, e.g. `Requires Work Songs.`)
+`Select four Houses that stand together in a square.` `Those Houses do not make a square, two by two.`
+`A House in the square is busy: wait for its research or upgrade to finish.`
+`That House is being combined into a Manor.` (and `Not enough gold. Combined 1 of 2 squares.` when the purse
+runs short part way) Trades: `Choose a teammate to send to.` `You can only send resources
 to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
 `Choose gold, wood or faith to send.` `You cannot trade now.`
 
@@ -686,7 +784,7 @@ EntityView = {
   // buildings:
   tx, ty,         // footprint top-left tile
   bp,             // build progress 0..1 (1 = complete)
-  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }] (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
+  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }], up to MAX_QUEUE items (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
   tr,             // town center tier 1..3
   pr,             // praying worshipper count
   rp,             // rally [x, y] or null
@@ -733,7 +831,9 @@ EntityView = {
 (owner indices), `world.canPlaceBuilding(i, typeId, tx, ty)`,
 `world.placementError(i, typeId, tx, ty)` → the refusal text (5.3: `"Can't build there."`, `"Trees in the way."`,
 `"Another building is in the way."`, `"A gold mine is in the way."`, `"Something is in the way."`,
-`"Too close to a gold mine."`) `| null`,
+`"The Decade of Peace holds for another m:ss: no building near an enemy Town Center yet."`,
+`"Too close to a gold mine."`) `| null`, `world.peaceBuildBlocks(i, tx, ty, size)` (5.10: is that
+footprint within `PEACE_BUILD_GAP` of an enemy Town Center while the peace holds),
 `world.findPlacement(i, typeId, nearX, nearY, maxR)` → `{tx, ty} | null`,
 `world.canAfford(i, cost)`, `world.hasBuilding(i, typeId, completedOnly = true)`,
 `world.isGameOver()`, `world.winningTeam`.
@@ -832,7 +932,12 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   packed by shape (`EVENT_SHAPES` order is wire format), felled trees; `tick` is omitted when
   it is the previous one + 1. Exact: `apply(prev, encode(prev, next))` deep-equals `next`, so
   new EntityView keys need no codec change. About 13–14 KB/s per client on average in an
-  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). Order is guaranteed (reliable
+  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). A production queue (`q`, up to 50 items) travels
+  as any array of one shape does: a tick of progress is only the column `q.0.p` (about 20 bytes), while a
+  change in its length resends the whole array (a 50-item queue is about 1.2 KB, so a unit queued or
+  finished costs 1.3–1.5 KB for that building) and a full snapshot carries each queue whole. Queued
+  units count against the population cap, so all queues of one player together hold at most `POP_MAX`
+  items (about 5 KB of a full snapshot). Order is guaranteed (reliable
   channel). `resync` → host sends `full` (also includes `felledAll`, every tree felled so far).
 - Lobby (`src/net/lobby.js`):
   ```js
@@ -1286,6 +1391,11 @@ per-frame budget, so a revealed army appears over a few frames.
   a building, 700 a wall segment (two meshes), 6 meshes; a style whose detailed build does not fit
   is built at the plain level (`getBuildingModelInfo(...).level`), which no roster pantheon needs.
   A test casts rays from the game camera to check that team color stays visible on every building.
+  The Manor (four Houses combined, 4×4 tiles; `buildManor`) is a courtyard house in the pantheon's own
+  style: a hall at the back with the door and the team banners, a lower wing on each side (round halls
+  and cones for the round-roofed styles) around a paved court with a fountain, hedges, a barrel and
+  sacks, the ornament pair at the gate and a flag on each side. It shows more than a House (1.1k to 1.9k
+  triangles plain, 1.6k to 2.6k detailed) and stays in the same budgets.
   Terrain (`terrain.js`, `ground-field.js`, `terrain-textures.js`, `terrain-water.js`): the sim's
   vertex heights stay as they are, and the renderer builds one smooth ground field from them
   (`groundField(mapData)`, 4 samples a tile: a Catmull-Rom surface through the vertices, so the
@@ -1428,6 +1538,13 @@ per-frame budget, so a revealed army appears over a few frames.
   Alt held, and a progress bar only when hovered. `PlacementLayer.showLine(typeId, tiles, kindAt)` is
   the ghost of the dragged line: a segment per tile to build (red where blocked), joined to its
   neighbours and to the walls that stand, over a per-tile grid.
+  In a Decade of Peace (5.10) `GameRenderer.setNoBuildZones(anchors)` (→ `PlacementLayer.setZones`)
+  gives the layer the enemy Town Centers whose surroundings stay clear; `NoBuildZone`
+  (`src/render/no-build-zone.js`) drapes one mesh of tile quads on the terrain over every tile within
+  `PEACE_BUILD_GAP` of them (`zoneMask`, the sim's own `peaceBlocksFootprint` per tile): a red tint with
+  diagonal hatching and a brighter pulsing line only where the zone ends (not along the map's edge),
+  drawn in the overlay scene under the footprint grid, visible exactly while a building or wall ghost
+  is, rebuilt only when the Town Centers change.
 
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
@@ -1454,7 +1571,10 @@ per-frame budget, so a revealed army appears over a few frames.
   it turns amber and pulses for the last minute and is gone when the peace ends); one line as the
   game opens, a reminder at 5:00, 1:00 and 0:10 (not for marks already passed when the HUD
   opens), and a "war begins" banner with the horn on `peaceEnd`. Right-clicking or attack-ordering a
-  protected player marks a walk, and the sword cursor does not show over it.
+  protected player marks a walk, and the sword cursor does not show over it. Placing a building shows
+  the ground an enemy Town Center keeps clear: tinted under the ghost, the ghost's tiles inside it red,
+  and a red tip by the cursor with the reason (`InputController.showPeaceZone` / `peaceTip`; the same
+  text a refused click and the sim give).
   God portraits top-left (click selects, double-click centers). Messages (errors, alerts,
   "Kronos is being summoned!"), chat (Enter), game-over overlay with stats, menu (surrender, quit).
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
@@ -1470,7 +1590,17 @@ per-frame budget, so a revealed army appears over a few frames.
   damage / range, housing and faith rates include the owner's upgrades (`players[i].up`); a
   Town Center lists only the highest level of each upgrade line. A Worshipper also shows a "Work"
   stat (Normal, or +N% from the work upgrades), and the gold mine's rule line and the Gather
-  tooltip quote the viewer's own trip ("1.3 s per 12 gold").
+  tooltip quote the viewer's own trip ("1.3 s per 12 gold"). A House's note tells how to combine four
+  into a Manor and a Manor's says how much more housing it gives than the Houses it replaced (+16).
+  **Queue row** (own buildings with a queue of up to `MAX_QUEUE` = 50): the big button is the item in progress
+  (its bar, "Training Worshipper") with a "n / 50" count at the right once more than one is queued; after it,
+  the rest of the queue as runs of the same item, one button each with a count on the runs of two or more
+  (50 Worshippers are the one in progress and a single button with 49), at most `QUEUE_CHIPS` (12) buttons:
+  more runs than that fold into a last "+N" button. A click takes one unit of a run back (the last of it),
+  Shift-click the whole run; on the big button a click takes back the item in progress and Shift-click the
+  whole queue; on "+N" a click takes back the last item and Shift-click everything it folds. A Shift-click is
+  one `cancelTrain` with `count` (5.4), so a whole queue refunds in one command. Esc still takes back the
+  last queued unit, and Shift + a train hotkey or button still queues 5 at a time (a held hotkey repeats).
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
@@ -1484,6 +1614,16 @@ per-frame budget, so a revealed army appears over a few frames.
   tiles to 170, where a whole medium map is in view), middle-drag pan, minimap click/drag,
   Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
+  **Delete** destroys the selected own units (`kill`, 6.2; the whole selection, not only the active subgroup).
+  Buildings are not units: they stay, and a selection of nothing but buildings says so (`Delete destroys units,
+  not buildings.`; walls have D, an unfinished building Esc). Up to `DELETE_CONFIRM_ABOVE` (5) plain units go at
+  once. More than that, or any god or Titan, first says what it would destroy (`Press Delete again to destroy 12
+  units, including Zeus.`) and goes on a second press within `DELETE_CONFIRM_MS` (2.5 s) while every selected unit
+  was among those asked about: units lost or taken off the selection meanwhile do not matter, one added does. Esc
+  (which then does nothing else), waiting or leaving the window takes the question back. Key auto-repeat,
+  Ctrl / Alt / Cmd + Delete, typing in chat and an open menu do nothing. Destroying units also ends a pending
+  placement or targeting. Backspace is unchanged (it jumps to the Town Center), so on a Mac keyboard, whose delete
+  key is Backspace, Delete is fn + delete. Rules and texts in `src/ui/delete-key.js`.
   **Walls**: with a wall type chosen in the build menu (W) the left button goes down on the first
   tile and the line follows the cursor in the nearest of eight directions (`wallLine`); releasing
   orders it for all selected workers (`build` with `tx2` / `ty2`; Shift keeps laying walls). A tip by
@@ -1506,6 +1646,13 @@ per-frame budget, so a revealed army appears over a few frames.
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
   Wall segments: U upgrade to stone (every idle segment of the active subgroup, as many as the purse
   allows), D dismantle finished segments, C cancel unfinished segments or upgrades.
+  Houses: U combine into a Manor (5.3), C cancel the combining. The button reads the same rule as the
+  sim (`planMerges` in `src/data/houses.js`) from the finished Houses of the active subgroup: it says
+  how many squares of four they make ("Combine into 2 Manors"; the cost is the sum), and is greyed out
+  with the sim's own text when they make none (too few Houses, not a square, one of them busy) or locked
+  until a Town; when the purse covers fewer squares than there are, the tooltip says how many it can pay
+  for. A House being combined shows the upgrade in its queue and a Cancel button; a Manor's card
+  offers the House upgrades (the Houses' list, shared) in the same slots.
   Each building's upgrades fill the free middle / bottom slots with their data hotkey (no two
   buttons of a card share a key); researched ones stay as dim "(researched)" buttons. An upgrade
   line takes one slot and shows its next level to research ("Level 2 of 3."), keeping the line's
@@ -1534,13 +1681,15 @@ second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/cre
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
 games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, ultimates in
-big fights); retreat badly hurt gods to base. It builds no walls, and wall segments are invisible to its scans (`worldDigest`,
+big fights); retreat badly hurt gods to base. It combines no Houses into Manors (5.3: it keeps building Houses ahead of its cap) and builds no walls, and wall segments are invisible to its scans (`worldDigest`,
 `scanWorld`, team targeting): they are neither buildings it counts nor targets it picks, and an army shut out by a
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
 population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
-home until the peace ends: the army keeps growing and masses at the rally point.
+home until the peace ends: the army keeps growing and masses at the rally point. The ground an
+enemy Town Center keeps clear is closed to its building too: every site it tries goes through
+`canPlaceBuilding`, so it simply takes another spot.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 

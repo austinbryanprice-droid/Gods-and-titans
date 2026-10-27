@@ -3,10 +3,12 @@
 // the local player knows: the terrain as seen (trees felled in the fog still
 // stand until seen), explored tiles, gold mines,
 // own / allied buildings, enemy buildings that are visible or remembered, and
-// visible enemy / neutral ground units. Pure: runs in Node tests.
+// visible enemy / neutral ground units. In a Decade of Peace the enemy Town Centers
+// I know keep the ground around them clear too (sim/peace.js). Pure: runs in Node tests.
 import { TERRAIN, DROPOFF_MINE_GAP, WALL_PLACE_RANGE } from '../config.js';
 import { BUILDINGS, UNITS, GOLD_MINE } from '../data/index.js';
 import { wallLine } from '../data/walls.js';
+import { PEACE_ANCHOR, peaceBlocksFootprint, peaceBuildNotice } from '../sim/peace.js';
 
 /** Minimum Chebyshev gap (empty tiles) between a drop-off (Town Center, Storehouse) and a gold mine. */
 export const MINE_GAP = DROPOFF_MINE_GAP;
@@ -65,6 +67,29 @@ function knownFootprints(vs, planned) {
 }
 
 /**
+ * The enemy Town Centers I know of while the Decade of Peace lasts, [{ tx, ty, size }]: the ground
+ * around each stays clear of building (sim/peace.js peaceBlocksFootprint). Like the enemy buildings
+ * that block a site, only those in sight or remembered count; the sim knows them all and has the
+ * last word. Empty in a normal game and once the peace is over.
+ */
+export function peaceAnchors(vs) {
+  const out = [];
+  if (!vs.peaceActive()) return out;
+  const size = BUILDINGS[PEACE_ANCHOR].size;
+  for (const e of vs.entities.values()) {
+    if (e.k !== 'b' || e.t !== PEACE_ANCHOR || !vs.isEnemy(e.o)) continue;
+    if (!(vs.lastSeen && vs.lastSeen.has(e.id)) && !vs.isEntityVisible(e)) continue;
+    out.push({ tx: e.tx, ty: e.ty, size });
+  }
+  if (vs.lastSeen) {
+    for (const [id, ls] of vs.lastSeen) {
+      if (ls.t === PEACE_ANCHOR && !vs.entities.has(id)) out.push({ tx: ls.tx, ty: ls.ty, size });
+    }
+  }
+  return out;
+}
+
+/**
  * Can `playerIndex` place `buildingTypeId` with its footprint top-left at (tx, ty)?
  * @param {object} vs ViewState
  * @param {number} playerIndex
@@ -73,20 +98,21 @@ function knownFootprints(vs, planned) {
  * @param {number} ty
  * @param {{ b: string, tx: number, ty: number }[]} [planned] my own buildings ordered but not placed yet
  *   (Shift-queued in this placement, workers' pending builds): they block like buildings
- * @returns {{ valid: boolean, tiles: boolean[], size: number, message: string|null }} tiles: size×size
- *   row-major, true = this tile is fine; message: null when valid, else the reason, in this order of
- *   preference: UNEXPLORED (fog; checked before the terrain so the text does not tell what lies in it),
+ * @returns {{ valid: boolean, tiles: boolean[], size: number, message: string|null, peace: boolean }} tiles:
+ *   size×size row-major, true = this tile is fine; message: null when valid, else the reason, in this order
+ *   of preference: UNEXPLORED (fog; checked before the terrain so the text does not tell what lies in it),
  *   CANT_BUILD (water, rock, map edge), TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY,
- *   TOO_CLOSE_TO_MINE (the mine gap alone). The sim words the same reasons the same way.
+ *   the Decade of Peace's notice (near an enemy Town Center; peace is true then), TOO_CLOSE_TO_MINE (the
+ *   mine gap alone). The sim words the same reasons the same way.
  */
 export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned = null) {
   const def = typeof buildingTypeId === 'string' && Object.hasOwn(BUILDINGS, buildingTypeId) ? BUILDINGS[buildingTypeId] : null;
-  if (!def || !Number.isFinite(tx) || !Number.isFinite(ty)) return { valid: false, tiles: [], size: 0, message: CANT_BUILD };
-  return checkFootprint(vs, def, Math.floor(tx), Math.floor(ty), knownFootprints(vs, planned));
+  if (!def || !Number.isFinite(tx) || !Number.isFinite(ty)) return { valid: false, tiles: [], size: 0, message: CANT_BUILD, peace: false };
+  return checkFootprint(vs, def, Math.floor(tx), Math.floor(ty), knownFootprints(vs, planned), peaceAnchors(vs));
 }
 
-/** checkPlacement for a known building def, with the blocking footprints worked out once. */
-function checkFootprint(vs, def, tx, ty, footprints) {
+/** checkPlacement for a known building def, with the blocking footprints and kept-clear Town Centers worked out once. */
+function checkFootprint(vs, def, tx, ty, footprints, anchors) {
   const s = def.size;
   const tiles = new Array(s * s).fill(true);
   const map = vs.map;
@@ -167,8 +193,21 @@ function checkFootprint(vs, def, tx, ty, footprints) {
     }
   }
 
+  // Decade of Peace: the ground around an enemy Town Center stays clear until the peace is over.
+  let peaceBlock = false;
+  if (anchors.length) {
+    for (let dy = 0; dy < s; dy++) {
+      for (let dx = 0; dx < s; dx++) {
+        if (!peaceBlocksFootprint(anchors, tx + dx, ty + dy, 1)) continue;
+        tiles[dy * s + dx] = false;
+        peaceBlock = true;
+      }
+    }
+  }
+
   const valid = tiles.every(Boolean);
   let message = null;
+  let peace = false;
   if (!valid) {
     if (fog) message = UNEXPLORED;
     else if (hardTerrain) message = CANT_BUILD;
@@ -176,9 +215,12 @@ function checkFootprint(vs, def, tx, ty, footprints) {
     else if (buildingBlock) message = BUILDING_IN_WAY;
     else if (mineBlock) message = MINE_IN_WAY;
     else if (unitBlock) message = UNIT_IN_WAY;
-    else message = mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD;
+    else if (peaceBlock) {
+      message = peaceBuildNotice(vs.peaceLeft());
+      peace = true;
+    } else message = mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD;
   }
-  return { valid, tiles, size: s, message };
+  return { valid, tiles, size: s, message, peace };
 }
 
 /**
@@ -198,6 +240,7 @@ export function checkWallLine(vs, playerIndex, typeId, x0, y0, x1, y1, planned =
   const none = { tiles: [], build: 0, cost: { gold: 0, wood: 0, faith: 0 }, message: CANT_BUILD };
   if (!def || !def.wall || ![x0, y0, x1, y1].every(Number.isFinite)) return none;
   const footprints = knownFootprints(vs, planned);
+  const anchors = peaceAnchors(vs);
   const held = (tx, ty) => footprints.some((f) => f.joins && tx >= f.tx && tx < f.tx + f.size && ty >= f.ty && ty < f.ty + f.size);
   const inReach = (tx, ty) => !workers || workers.some((w) => Math.hypot(w.x - (tx + 0.5), w.y - (ty + 0.5)) <= WALL_PLACE_RANGE);
   const tiles = [];
@@ -213,7 +256,7 @@ export function checkWallLine(vs, playerIndex, typeId, x0, y0, x1, y1, planned =
       tiles.push({ tx, ty, state: 'blocked', message: WALL_TOO_FAR });
       continue;
     }
-    const chk = checkFootprint(vs, def, tx, ty, footprints);
+    const chk = checkFootprint(vs, def, tx, ty, footprints, anchors);
     if (chk.valid) build++;
     else reason = reason || chk.message;
     tiles.push({ tx, ty, state: chk.valid ? 'build' : 'blocked', message: chk.message });

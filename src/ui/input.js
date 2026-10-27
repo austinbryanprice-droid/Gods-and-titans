@@ -7,12 +7,14 @@
 import { TERRAIN, MAX_QUEUE, MAX_WALL_SELECTION } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { isWallType } from '../data/walls.js';
+import { MANOR, houseBlocks } from '../data/houses.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { checkPlacement, checkWallLine, footprintAt } from '../game/placement.js';
+import { checkPlacement, checkWallLine, footprintAt, peaceAnchors } from '../game/placement.js';
 import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
-import { isComplete, isWallEntity } from './hud-data.js';
+import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
+import { deletePlan, DELETE_CONFIRM_MS } from './delete-key.js';
 import { peaceNotice } from '../sim/peace.js';
 
 const DRAG_THRESHOLD = 5; // px before a left press becomes a box
@@ -70,7 +72,9 @@ export class InputController {
     this.hoverMoved = true;
     this.placeAt = 0;
     this.placeSig = '';
+    this.zoneSig = ''; // the enemy Town Centers whose kept-clear ground the renderer has been given
     this.queuedBuilds = []; // [{ b, tx, ty }] placed with Shift in this placement mode
+    this.deleteArmed = null; // { ids: Set, until } after a first Delete press that asks for a second
     this.shiftHeld = false;
     this.cursor = '';
     this.disposed = false;
@@ -868,6 +872,34 @@ export class InputController {
     }
   }
 
+  /**
+   * In a Decade of Peace, tint the ground kept clear around the enemy Town Centers I know of under the
+   * placement ghost (it only goes to the renderer when those Town Centers change).
+   */
+  showPeaceZone(r) {
+    if (!r.setNoBuildZones) return;
+    const anchors = peaceAnchors(this.vs);
+    const sig = anchors.map((a) => `${a.tx},${a.ty}`).join(';');
+    if (sig === this.zoneSig) return;
+    this.zoneSig = sig;
+    r.setNoBuildZones(anchors);
+  }
+
+  /** The tip beside the cursor says why the ghost is red when it is the peace's kept-clear ground (the sim says the same). */
+  peaceTip(chk) {
+    const tip = this.wallTip;
+    if (!chk.peace) {
+      tip.hidden = true;
+      return;
+    }
+    const text = chk.message.replace(': ', ':\n');
+    if (tip.textContent !== text) tip.textContent = text;
+    tip.classList.add('is-bad');
+    tip.style.left = `${this.mx + 18}px`;
+    tip.style.top = `${this.my + 18}px`;
+    tip.hidden = false;
+  }
+
   /** The dragged line's ghost, and the tip beside the cursor with what it would build and cost. */
   previewWallLine(tx, ty) {
     const m = this.mode;
@@ -1011,6 +1043,22 @@ export class InputController {
           else if ((e.q || []).length) this.command({ type: 'cancelTrain', building: e.id, index: 0 });
         }
         break;
+      case 'upgradeHouses': {
+        // Every finished House of the active type: the sim finds the squares among them and pays square by square.
+        const houses = this.activeHouses().map((e) => e.id);
+        if (houses.length) this.command({ type: 'upgradeHouses', houses });
+        break;
+      }
+      case 'cancelMerge': {
+        // Stopping any one House of a square stops all four: one order for each whole square among the
+        // selected Houses, and one for each House left over from a part of a square.
+        const merging = this.activeHouses().filter(isMergingEntity);
+        const squares = houseBlocks(merging);
+        const covered = new Set(squares.flatMap((sq) => sq.ids));
+        const stop = [...squares.map((sq) => sq.ids[0]), ...merging.filter((e) => !covered.has(e.id)).map((e) => e.id)];
+        for (const id of stop) this.command({ type: 'cancelTrain', building: id, index: vs.entities.get(id).q.findIndex((it) => it.u === MANOR) });
+        break;
+      }
       case 'research': {
         // The least busy finished building of the active group researches it.
         const group = this.sel.activeGroup();
@@ -1018,7 +1066,7 @@ export class InputController {
         for (const e of this.sel.ownBuildings()) {
           if (!group || e.t !== group.type || !isComplete(e)) continue;
           const q = e.q || [];
-          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE) continue;
+          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE || isMergingEntity(e)) continue;
           if (!pick || q.length < (pick.q || []).length) pick = e;
         }
         if (pick) this.command({ type: 'research', building: pick.id, upgrade: a.upgrade });
@@ -1030,6 +1078,12 @@ export class InputController {
       default:
         break;
     }
+  }
+
+  /** Own Houses of the active subgroup (the command card's combine buttons act on these). */
+  activeHouses() {
+    const group = this.sel.activeGroup();
+    return this.sel.ownBuildings().filter((e) => group && e.t === group.type && isComplete(e));
   }
 
   /** Own wall segments of the active subgroup (the command card's wall buttons act on these). */
@@ -1067,6 +1121,38 @@ export class InputController {
     sfx.play('click');
     this.command({ type: 'autocast', units, on: !anyOn });
     this.hud.message(anyOn ? 'Abilities set to manual.' : 'Abilities set to autocast.', 'info');
+  }
+
+  /** The Delete question still waiting for its second press, or null (it lapses after DELETE_CONFIRM_MS). */
+  pendingDelete() {
+    if (this.deleteArmed && performance.now() >= this.deleteArmed.until) this.deleteArmed = null;
+    return this.deleteArmed;
+  }
+
+  /**
+   * Delete: destroy the selected own units (the sim's `kill`). A few plain units go at once; a bigger
+   * group, a god or a Titan first says what it would destroy and needs a second press (DELETE_CONFIRM_MS)
+   * with nothing new in the selection. Buildings are not units and stay.
+   */
+  deleteSelected() {
+    const units = this.ownUnits().map((id) => this.vs.entities.get(id)).filter(Boolean);
+    if (!units.length) {
+      this.deleteArmed = null;
+      if (this.sel.ownBuildings().length) this.error('Delete destroys units, not buildings.');
+      return;
+    }
+    const plan = deletePlan(units);
+    const armed = this.pendingDelete();
+    if (plan.confirm && !(armed && plan.ids.every((id) => armed.ids.has(id)))) {
+      this.deleteArmed = { ids: new Set(plan.ids), until: performance.now() + DELETE_CONFIRM_MS };
+      this.hud.message(plan.prompt, 'error');
+      return;
+    }
+    this.deleteArmed = null;
+    // The units are about to be gone: a pending placement or target would have nobody to order.
+    if (this.mode.kind !== 'normal') this.setMode({ kind: 'normal' });
+    this.menu = 'root';
+    this.command({ type: 'kill', units: plan.ids });
   }
 
   // ---------------------------------------------------------------- keyboard
@@ -1172,9 +1258,18 @@ export class InputController {
       if (!rep) this.toggleAllAutocast();
       return;
     }
+    if (key === 'Delete') {
+      e.preventDefault();
+      if (!rep) this.deleteSelected();
+      return;
+    }
     if (key === 'Escape') {
       e.preventDefault();
       if (rep) return;
+      if (this.pendingDelete()) {
+        this.deleteArmed = null; // Esc takes back the question and nothing else
+        return;
+      }
       const card = hud.currentCard();
       const b = buttonForKey(card, 'Escape');
       if (b) {
@@ -1183,8 +1278,8 @@ export class InputController {
         return;
       }
       if (this.cancelMode()) return;
-      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade: Esc by habit would take it back.)
-      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x));
+      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade or Houses being combined: Esc by habit would take it back.)
+      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x) && !isMergingEntity(x));
       if (blds.length) {
         const bq = blds[0];
         this.command({ type: 'cancelTrain', building: bq.id, index: bq.q.length - 1 });
@@ -1229,6 +1324,7 @@ export class InputController {
 
   onBlur() {
     this.shiftHeld = false;
+    this.deleteArmed = null;
     this.endShiftMode();
     this.keys.clear();
     if (this.altHeld) {
@@ -1305,6 +1401,7 @@ export class InputController {
         const w = this.ground(p.x, p.y);
         if (w) {
           const { tx, ty } = footprintAt(this.mode.building, w.x, w.y);
+          this.showPeaceZone(r);
           if (isWallType(this.mode.building)) this.previewWallLine(tx, ty);
           else {
             const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty, this.plannedBuilds(this.shiftHeld));
@@ -1313,6 +1410,7 @@ export class InputController {
               this.placeSig = sig;
               r.showPlacement(this.mode.building, tx, ty, chk.valid, chk.tiles);
             }
+            this.peaceTip(chk);
           }
           this.placeAt = now;
         }

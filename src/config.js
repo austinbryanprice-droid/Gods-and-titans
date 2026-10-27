@@ -36,7 +36,7 @@ export const CHOP_INTERVAL = 0.6; // seconds per 1 wood
 export const TREE_WOOD = 50; // wood per forest tile
 export const GOLD_MINE_AMOUNT = 12000; // start mines
 export const EXPANSION_MINE_AMOUNT = 15000;
-export const MAX_QUEUE = 5; // production queue length
+export const MAX_QUEUE = 50; // production queue length per building; cost and population are charged when an item is queued, so the purse and the population cap are the real limits
 export const BUILD_HELPER_BONUS = 0.5; // each extra builder adds +50% build speed
 export const CANCEL_BUILD_REFUND = 0.75;
 export const REPAIR_COST = 0.35; // repairing a building from 0 to full health costs this share of its build cost
@@ -91,6 +91,7 @@ export const CREEP_LEASH_RANGE = 10;
 // ---- Decade of Peace (game mode) ----
 export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can choose; a setup without one is a normal game
 export const PEACE_NAME = 'Decade of Peace';
+export const PEACE_BUILD_GAP = 20; // while the peace lasts nobody builds within this many empty tiles of an enemy Town Center (kept clear around it; DESIGN 5.10)
 
 // ---- Map ----
 export const MAP_SIZES = { small: 96, medium: 128 };

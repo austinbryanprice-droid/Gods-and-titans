@@ -19,7 +19,7 @@ export default {
         id: 'mesopotamian_crowded_cities',
         name: 'Crowded Cities',
         icon: '🏘️',
-        description: 'Every House shelters 2 more population.',
+        description: 'Every House shelters 2 more population, and every Manor 8 more.',
         effects: [{ type: 'building', building: 'house', stat: 'pop', amount: 2 }],
       },
       {
