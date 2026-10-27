@@ -13,13 +13,18 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
 import { el } from '../ui/hud-dom.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
 import { tierName } from '../ui/hud-data.js';
-import { MSG, REASONS, sanitizeName, sanitizeReason } from '../net/protocol.js';
+import { loadingHint, hintParts } from '../ui/hint-data.js';
+import { TabAttention } from '../ui/tab-attention.js';
+import { AlertEngine } from './alerts.js';
+import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
+import { TeamMarks } from './team-marks.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -77,6 +82,20 @@ export function describeStartFailure(err) {
   if (GRAPHICS_FAILURE.test(detail)) text = 'Your browser could not start 3D graphics. Check that hardware acceleration is on, or try another browser.';
   else if (LOADING_FAILURE.test(detail)) text = 'Some of the game files could not be loaded. Check your internet connection and reload the page.';
   return { text, detail };
+}
+
+/** The loading screen's tip: "Tip: …" with the keys drawn as <kbd>. */
+function loadingTip(text) {
+  const p = document.createElement('p');
+  p.style.cssText = 'max-width:36em;margin:0;padding:0 1em;text-align:center;font:italic 400 16px/1.5 var(--mw-font-body);'
+    + 'letter-spacing:0;text-transform:none;color:var(--mw-ink-dim)';
+  p.append('Tip: ', ...hintParts(text).map((part) => {
+    if (typeof part === 'string') return part;
+    const key = document.createElement('kbd');
+    key.textContent = part.key;
+    return key;
+  }));
+  return p;
 }
 
 /** AI players that never move: for clients, which run no AI, and the fallback when the AI module is missing. */
@@ -169,6 +188,8 @@ export class Game {
     this.input = null;
     this.selection = null;
     this.viewState = null;
+    this.marks = new TeamMarks(); // the pings and markers standing on this screen (mine and my teammates')
+    this.markLimit = new RateLimiter(...MARK_SEND_RATE);
     this.raf = 0;
     this.lastFrame = 0;
     this.disposed = false;
@@ -180,6 +201,8 @@ export class Game {
     this.loadingEl = null;
     this.failed = false;
     this.bareHud = false;
+    this.tab = null; // TabAttention: the flashing title of a tab left in the background
+    this.alerts = null; // AlertEngine
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -230,8 +253,16 @@ export class Game {
     this.hud = new Hud({ root: this.hudRoot, game: this });
     if (session.mapMismatch) this.hud.setMapMismatch(true);
     this.offs.push(session.onChat((line) => this.onChat(line)));
+    if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
     this.offs.push(session.onEnd((info) => this.onEnd(info)));
     this.offs.push(this.viewState.on('*', (ev) => this.onEvent(ev)));
+    // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
+    this.tab = new TabAttention();
+    this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
+    this.offs.push(() => {
+      this.alerts.dispose();
+      this.tab.dispose();
+    });
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) this.hud.chat(line);
     session.start();
@@ -285,14 +316,19 @@ export class Game {
     if (this.loadingEl || typeof document === 'undefined' || !root || typeof root.appendChild !== 'function') return;
     const node = document.createElement('div');
     node.setAttribute('role', 'status');
-    node.style.cssText = 'position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;gap:0.9em;'
+    node.style.cssText = 'position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.6em;'
       + 'font:600 18px/1.4 var(--mw-font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--mw-gold);'
       + 'background:radial-gradient(ellipse at 50% 40%,#121a33,#05070d 70%)';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:0.9em';
     const spin = document.createElement('span');
     spin.className = 'hud-spinner';
     const text = document.createElement('span');
     text.textContent = 'Preparing the battlefield…';
-    node.append(spin, text);
+    row.append(spin, text);
+    node.append(row);
+    const tip = getSettings().hints ? loadingHint() : null;
+    if (tip) node.append(loadingTip(tip.text));
     root.appendChild(node);
     this.loadingEl = node;
   }
@@ -519,6 +555,24 @@ export class Game {
     if (this.session && !this.ended) this.session.sendChat(text);
   }
 
+  /**
+   * Ping or mark a spot for my team (DESIGN 9). The session shows it here at once and, when I have
+   * teammates, tells only them. Returns false when it was not sent: too many in a row (the same pace
+   * the host would drop at, so a mark I see is a mark my team sees), or the match is over.
+   * @param {string} kind a key of MARKS
+   * @param {number} x tile
+   * @param {number} y tile
+   */
+  sendMark(kind, x, y) {
+    const s = this.session;
+    if (this.disposed || !s || this.ended || typeof s.sendMark !== 'function' || !Object.hasOwn(MARKS, kind)) return false;
+    if (!this.markLimit.take()) {
+      if (this.hud) this.hud.message('Slow down: too many pings.', 'error');
+      return false;
+    }
+    return !!s.sendMark({ kind, x, y });
+  }
+
   surrender() {
     this.command({ type: 'surrender' });
   }
@@ -574,6 +628,20 @@ export class Game {
     if (!this.hud) return;
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
+  }
+
+  /**
+   * A ping or marker from my team (or my own, echoed by the session): stand it up and chime. A teammate's
+   * marker also says its words in the message area, in their colour, for a player with the sound off.
+   */
+  onMark(mark) {
+    if (this.disposed || !this.hud || !mark) return;
+    const placed = this.marks.add(mark);
+    if (!placed) return;
+    const def = MARKS[placed.kind];
+    const own = placed.from === this.myIndex;
+    sfx.play(def.urgent ? 'ping_urgent' : 'ping', { volume: own ? 0.5 : 1 });
+    if (!own && def.id !== 'ping') this.hud.chat({ from: placed.from, name: mark.name, text: def.text });
   }
 
   onEnd({ reason } = {}) {
@@ -782,6 +850,22 @@ export class Game {
     if (now - this.lastBreach < BREACH_MESSAGE_MS) return;
     this.lastBreach = now;
     hud.message('Your wall was breached!', 'alert');
+  }
+
+  /**
+   * An alert from the AlertEngine (src/game/alerts.js), already cut down to what the settings allow:
+   * its HUD line, sound, minimap ping, the spot Space jumps to, and the flash of a tab left behind.
+   */
+  onAlert(a) {
+    const hud = this.hud;
+    if (this.disposed || !hud) return;
+    if (a.text) hud.message(a.text, a.kind);
+    if (a.sound) sfx.play(a.sound, { volume: a.volume });
+    if (a.ping) hud.minimap.ping(a.ping.x, a.ping.y, a.ping.color);
+    if (a.jump && this.input) this.input.noteAlert(a.jump.x, a.jump.y);
+    if (a.attention && this.tab) this.tab.attention(a.attention);
+    // No tip while the player is under pressure (a warning that the settings silenced was never shown).
+    if (a.kind === 'alert' && (a.text || a.sound || a.ping || a.jump)) hud.holdHints();
   }
 
   worldSoundAt(id, name, volume = 1) {

@@ -396,6 +396,57 @@
 .hud-tips-step.is-done .hud-tips-check { border-color: #6fcf7f; background: rgba(80, 190, 100, 0.25); color: #b8f5c0; }
 .hud-tips-foot { margin-top: 0.45em; font: italic 0.78em/1.3 var(--mw-font-body); color: var(--mw-ink-mute); }
 
+/* ------------------------------------------------------------ gameplay tips (hud-hints.js)
+   One card in the top-right corner every couple of minutes; under the checklist while that is up
+   (the script sets `top` then). */
+
+.hud-hint {
+  position: absolute;
+  top: 3.1em;
+  right: 0.6em;
+  width: 21.5em;
+  max-width: 40vw;
+  padding: 0.45em 0.7em 0.5em;
+  border-radius: 5px;
+  border-color: var(--mw-bronze);
+  background: linear-gradient(180deg, rgba(22, 27, 40, 0.94), rgba(10, 12, 19, 0.94));
+  animation: hud-msg-in 0.35s ease-out;
+  transition: opacity 0.4s;
+}
+.hud-hint[hidden] { display: none; }
+.hud-hint.is-leaving { opacity: 0; }
+.hud-hint-head { display: flex; align-items: center; gap: 0.45em; margin-bottom: 0.25em; }
+.hud-hint-icon { font-family: var(--mw-emoji); font-size: 1.05em; line-height: 1; }
+.hud-hint-title { flex: 1; font: 600 0.82em/1.2 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold-hi); }
+.hud-hint-close {
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid rgba(196, 146, 72, 0.45);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--mw-ink-dim);
+}
+.hud-hint-close:hover { color: #fff; border-color: var(--mw-gold); }
+.hud-hint-text { margin: 0; font-size: 0.88em; line-height: 1.4; color: #f1e8d4; }
+.hud-hint-text kbd { font-size: 0.8em; padding: 0 0.3em; margin: 0 0.05em; }
+.hud-hint-foot { margin-top: 0.3em; text-align: right; }
+.hud-hint-off {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: italic 0.76em/1.2 var(--mw-font-body);
+  color: var(--mw-ink-mute);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.hud-hint-off:hover { color: var(--mw-gold-hi); }
+@media (prefers-reduced-motion: reduce) {
+  .hud-hint { animation: none; transition: none; }
+}
+
 /* ------------------------------------------------------------ floating text, drag box */
 
 
@@ -473,6 +524,137 @@
   cursor: crosshair;
   pointer-events: auto;
   image-rendering: auto;
+}
+
+/* ------------------------------------------------------------ team marks
+   Marker buttons beside the minimap, and the pins over the battlefield for the pings and markers
+   of my team (hud-marks.js). A pin is a zero-size anchor moved onto the spot; its parts hang off it. */
+
+.hud-markpad {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  margin-left: 0.8em;
+}
+.hud-markbtn {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 2.3em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #000;
+  border-bottom: 0.2em solid var(--k, #e3b84f);
+  border-radius: 3px;
+  background: linear-gradient(180deg, #2a2f44, #14172a);
+  box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.4), 0 0.15em 0.4em rgba(0, 0, 0, 0.5);
+  font-family: var(--mw-emoji);
+  font-size: 1.15em;
+  line-height: 1;
+}
+.hud-markbtn:hover { box-shadow: inset 0 0 0 1px #ffe39a, 0 0 0.6em rgba(227, 184, 79, 0.35); background: linear-gradient(180deg, #353b57, #1a1e35); }
+.hud-markbtn.is-armed { background: linear-gradient(180deg, #3d4466, #1d2240); box-shadow: inset 0 0 0 2px var(--k, #ffe39a), 0 0 0.9em var(--k, #ffe39a); }
+
+.hud-marks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.hud-mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  pointer-events: none;
+  font-family: var(--mw-font-ui);
+}
+.hud-mark-ring {
+  position: absolute;
+  left: -2em;
+  top: -1.1em;
+  width: 4em;
+  height: 2.2em;
+  box-sizing: border-box;
+  border: 0.2em solid var(--c, #f1e8d4);
+  border-radius: 50%;
+  box-shadow: 0 0 0.6em var(--c, #f1e8d4), inset 0 0 0.6em var(--c, #f1e8d4);
+  opacity: 0;
+  animation: hud-mark-ring 1.4s ease-out infinite;
+}
+.hud-mark.is-help .hud-mark-ring { animation-duration: 0.8s; }
+.hud-mark-pin {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+  transform: translate(-50%, 0);
+  animation: hud-mark-bob 1.1s ease-in-out infinite;
+}
+.hud-mark-pin::after {
+  /* the stem down to the ground */
+  content: '';
+  width: 0.16em;
+  height: 1em;
+  background: var(--k, #ffe066);
+  box-shadow: 0 0 0.3em #000;
+}
+.hud-mark-who {
+  max-width: 11em;
+  padding: 0.1em 0.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 700 0.8em/1.3 var(--mw-font-ui);
+  color: #fff;
+  background: rgba(8, 10, 16, 0.82);
+  border-bottom: 0.15em solid var(--c, #f1e8d4);
+  border-radius: 2px;
+  text-shadow: 0 1px 0 #000;
+}
+.hud-mark-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1em;
+  height: 2.1em;
+  box-sizing: border-box;
+  border: 0.17em solid var(--c, #f1e8d4);
+  border-radius: 50%;
+  background: rgba(8, 10, 16, 0.88);
+  box-shadow: 0 0 0.9em var(--k, #ffe066), 0 0.2em 0.5em rgba(0, 0, 0, 0.7);
+  font: 1.05em/1 var(--mw-emoji);
+}
+.hud-mark.is-help .hud-mark-chip { animation: hud-mark-pulse 0.7s ease-in-out infinite; }
+.hud-mark-arrow {
+  display: none;
+  position: absolute;
+  left: -0.45em;
+  top: -0.55em;
+  width: 0;
+  height: 0;
+  border-left: 0.9em solid var(--k, #ffe066);
+  border-top: 0.55em solid transparent;
+  border-bottom: 0.55em solid transparent;
+  filter: drop-shadow(0 0 2px #000);
+}
+
+/* Out of view: the chip rides the edge of the play area with an arrow toward the spot; click to go there. */
+.hud-mark.is-edge .hud-mark-ring, .hud-mark.is-edge .hud-mark-who, .hud-mark.is-edge .hud-mark-pin::after { display: none; }
+.hud-mark.is-edge .hud-mark-pin { bottom: auto; top: 0; transform: translate(-50%, -50%); animation: none; pointer-events: auto; cursor: pointer; }
+.hud-mark.is-edge .hud-mark-arrow { display: block; pointer-events: auto; cursor: pointer; }
+
+@keyframes hud-mark-ring { from { transform: scale(0.3); opacity: 0.95; } to { transform: scale(1.3); opacity: 0; } }
+@keyframes hud-mark-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -0.3em); } }
+@keyframes hud-mark-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+@media (prefers-reduced-motion: reduce) {
+  .hud-mark-ring { animation: none; opacity: 0.8; }
+  .hud-mark-pin, .hud-mark.is-help .hud-mark-chip { animation: none; }
 }
 
 .hud-bottom-info {
@@ -780,13 +962,18 @@
   border: 1px solid var(--mw-gold);
   background: linear-gradient(180deg, #2e3750, #141824);
 }
-.hi-q-main:hover, .hi-q-item:not(.is-empty):hover { border-color: #ff8a6a; box-shadow: 0 0 0.7em rgba(255, 110, 80, 0.5); }
+.hi-q-main:hover, .hi-q-item:hover { border-color: #ff8a6a; box-shadow: 0 0 0.7em rgba(255, 110, 80, 0.5); }
 .hi-q-icon { font-family: var(--mw-emoji); font-size: 1.8em; line-height: 1; }
 .hi-q-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.3em; justify-content: space-between; }
 .hi-q-info { display: flex; flex-direction: column; gap: 0.25em; }
-.hi-q-label { font-size: 0.86em; color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hi-q-rest { display: flex; gap: 0.25em; }
+.hi-q-head { display: flex; align-items: baseline; gap: 0.6em; }
+.hi-q-label { flex: 1; min-width: 0; font-size: 0.86em; color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hi-q-count { flex: none; font-size: 0.8em; color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
+/* the rest of the queue: runs of the same unit with a count, so 49 queued units are one button; the row keeps its height when empty */
+.hi-q-rest { display: flex; gap: 0.25em; min-height: 1.9em; }
 .hi-q-item {
+  position: relative;
+  flex: none;
   width: 1.9em;
   height: 1.9em;
   padding: 0;
@@ -797,7 +984,16 @@
   font-size: 0.95em;
   line-height: 1;
 }
-.hi-q-item.is-empty { border-color: rgba(196, 146, 72, 0.2); background: rgba(0, 0, 0, 0.35); cursor: default; }
+.hi-q-n {
+  position: absolute;
+  right: 0.12em;
+  bottom: 0.05em;
+  font: 800 0.8em/1 var(--mw-font-ui);
+  color: #fff;
+  text-shadow: 0 1px 0 #000, 0 0 3px #000, 0 0 3px #000;
+  pointer-events: none;
+}
+.hi-q-item.is-more { width: auto; min-width: 1.9em; padding: 0 0.45em; font: 800 0.8em/1 var(--mw-font-ui); color: var(--mw-gold-hi); }
 
 .hi-multi { display: flex; flex-direction: column; gap: 0.35em; height: 100%; }
 .hi-grid-label { font-size: 0.9em; color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1030,7 +1226,7 @@
   box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.5), inset 0 0 0 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(122, 90, 44, 0.6), 0 0.3em 0.9em rgba(0, 0, 0, 0.6);
 }
 .hud-god:hover, .hud-idle:hover { box-shadow: inset 0 0 0 1px #ffe39a, inset 0 0 1em rgba(255, 200, 100, 0.35), 0 0 0 1px rgba(122, 90, 44, 0.8), 0 0 0.9em rgba(227, 184, 79, 0.45); }
-.hud-tips, .hud-tip {
+.hud-tips, .hud-tip, .hud-hint {
   border-color: #000;
   background: linear-gradient(180deg, rgba(255, 220, 150, 0.05), transparent 30%), var(--orn-stone);
   box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.45), inset 0 0 0 3px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(122, 90, 44, 0.7), 0 0.5em 1.6em rgba(0, 0, 0, 0.7);

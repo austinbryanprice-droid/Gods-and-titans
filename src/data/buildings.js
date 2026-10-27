@@ -80,14 +80,43 @@ export const BUILDINGS = {
     upgrades: [
       { id: 'house_large_families', name: 'Large Families', icon: '👪', hotkey: 'F', cost: { gold: 120, wood: 80, faith: 0 }, time: 40, tier: 2,
         effects: [{ type: 'building', building: 'house', stat: 'pop', amount: 2 }],
-        description: 'Every House shelters 10 population instead of 8.' },
+        description: 'Every House shelters 10 population instead of 8, and every Manor 56 instead of 48.' },
       { id: 'house_stone_walls', name: 'Stone Walls', icon: '🧱', hotkey: 'W', cost: { gold: 75, wood: 100, faith: 0 }, time: 30, tier: 1,
         effects: [{ type: 'building', building: 'house', stat: 'hp', amount: 300 }, { type: 'building', building: 'house', stat: 'armor', amount: 3 }],
-        description: 'Houses are rebuilt in stone: +300 health and +3 armor.' },
+        description: 'Houses are rebuilt in stone: +300 health and +3 armor (a Manor: +1200 health and +3 armor).' },
     ],
     icon: '🏠',
     hotkey: 'H',
-    description: 'Homes for your people. Each House raises your population limit by 8.',
+    description: 'Homes for your people. Each House raises your population limit by 8. Four Houses in a square can be combined into a Manor.',
+  },
+
+  // Four Houses in a square (a 2x2 block, 4x4 tiles) are combined into one Manor: an upgrade in place
+  // that needs no worker (`mergesFrom`, data/houses.js, sim/homes.js). The Houses keep sheltering while
+  // it runs. A Manor shelters more than the four Houses did, and holds what they held: every bonus to a
+  // House counts again for it (data/upgrades.js). It researches the House upgrades. Its own `cost` is the
+  // whole price (the four Houses plus the merge): what repairs and spoils go by.
+  manor: {
+    id: 'manor',
+    name: 'Manor',
+    size: 4,
+    hp: 2400,
+    armor: 4,
+    cost: { gold: 420, wood: 180, faith: 0 },
+    buildTime: 45,
+    tier: 2, // the settlement must be a Town to combine Houses
+    requires: [],
+    produces: [],
+    popProvided: 48, // four Houses shelter 32
+    dropOff: false,
+    prayerSlots: 0,
+    faithRate: 0,
+    sight: 7,
+    attack: null,
+    upgrades: [],
+    mergesFrom: { building: 'house', count: 4, cost: { gold: 100, wood: 60, faith: 0 }, time: 45 },
+    icon: '🏡',
+    hotkey: 'U',
+    description: 'Four Houses combined. Shelters 48 population, 16 more than the four Houses it replaces, and takes the House upgrades.',
   },
 
   barracks: {

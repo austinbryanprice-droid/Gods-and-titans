@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
 import {
-  checkPlacement, footprintAt, MINE_GAP, CANT_BUILD, TOO_CLOSE_TO_MINE, TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY, UNEXPLORED,
+  checkPlacement, checkWallLine, footprintAt, peaceAnchors, MINE_GAP, CANT_BUILD, TOO_CLOSE_TO_MINE, TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY, UNEXPLORED,
 } from '../../src/game/placement.js';
 import * as simText from '../../src/sim/construction.js';
+import { peaceBuildNotice } from '../../src/sim/peace.js';
 import { makeWorld, spawn, place, clearUnits, run } from '../sim/helpers.js';
 
 /** A ViewState for player `me` fed one real snapshot from the world. */
@@ -259,4 +260,118 @@ test('the texts match the sim\'s (the fog text is the client\'s own)', () => {
   assert.equal(UNIT_IN_WAY, simText.UNIT_IN_WAY);
   const all = [CANT_BUILD, TOO_CLOSE_TO_MINE, TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY, UNEXPLORED];
   assert.equal(new Set(all).size, all.length, 'no two reasons share a text');
+});
+
+// ---------------------------------------------------------------- Decade of Peace
+
+/** Player 0's Town Center covers tiles 6..9 and player 1's 60..63 of a 96×96 map (the sim's own tests use the same). */
+function peaceArena(opts = {}) {
+  return makeWorld({ map: { width: 96, height: 96, starts: [{ x: 6, y: 6 }, { x: 60, y: 60 }] }, peaceMinutes: 30, ...opts });
+}
+
+test('Decade of Peace: ground near an enemy Town Center I can see is red, with the reason the sim gives', () => {
+  const world = peaceArena();
+  const vs = viewOf(world, 0, { seeAll: true });
+  assert.deepEqual(peaceAnchors(vs), [{ tx: 60, ty: 60, size: 4 }]);
+  const inside = checkPlacement(vs, 0, 'house', 39, 61); // covers 39..40: 19 empty tiles from the Town Center
+  assert.equal(inside.valid, false);
+  assert.equal(inside.peace, true);
+  assert.equal(inside.message, peaceBuildNotice(vs.peaceLeft()));
+  assert.equal(inside.message, world.placementError(0, 'house', 39, 61), 'the sim says the same');
+  // Only the tile inside is red: the one at x = 39 keeps 20 tiles away.
+  assert.deepEqual(inside.tiles, [true, false, true, false]);
+  const outside = checkPlacement(vs, 0, 'house', 38, 61);
+  assert.equal(outside.valid, true);
+  assert.equal(outside.peace, false);
+  assert.equal(outside.message, null);
+  // A bigger building shows exactly which of its tiles are over the line.
+  assert.deepEqual(checkPlacement(vs, 0, 'barracks', 38, 61).tiles, [true, true, false, true, true, false, true, true, false]);
+  // The Town Center's own ground is its owner's: nothing is red for player 1.
+  assert.equal(checkPlacement(viewOf(world, 1, { seeAll: true }), 1, 'house', 39, 61).valid, true);
+});
+
+test('Decade of Peace: other reasons come first, then the peace, then the mine gap', () => {
+  const world = peaceArena({ map: { width: 96, height: 96, starts: [{ x: 6, y: 6 }, { x: 60, y: 60 }], forest: [{ x: 45, y: 61, w: 1, h: 1 }], mines: [{ tx: 13, ty: 6, amount: 12000 }, { tx: 40, ty: 70, amount: 12000 }] } });
+  const vs = viewOf(world, 0, { seeAll: true });
+  assert.equal(checkPlacement(vs, 0, 'house', 45, 61).message, TREES_IN_WAY);
+  assert.equal(world.placementError(0, 'house', 45, 61), TREES_IN_WAY);
+  assert.equal(checkPlacement(vs, 0, 'house', 40, 70).message, MINE_IN_WAY);
+  assert.equal(world.placementError(0, 'house', 40, 70), MINE_IN_WAY);
+  // A Town Center near the mine and near the enemy's Town Center: the peace is named, not the mine gap.
+  assert.equal(checkPlacement(vs, 0, 'town_center', 40, 66).message, peaceBuildNotice(vs.peaceLeft()));
+  assert.equal(world.placementError(0, 'town_center', 40, 66), peaceBuildNotice(world.peaceLeft()));
+  // Far from it the mine gap is named again.
+  assert.equal(checkPlacement(vs, 0, 'town_center', 13, 6 + 3).message, world.placementError(0, 'town_center', 13, 9));
+});
+
+test('Decade of Peace: the ghost knows the Town Centers it has seen or remembers, the sim all of them', () => {
+  const world = peaceArena();
+  const vs = viewOf(world);
+  vs.explored.fill(1); // pretend the area was scouted before the enemy settled
+  assert.deepEqual(peaceAnchors(vs), [], 'never seen: unknown');
+  assert.equal(checkPlacement(vs, 0, 'house', 45, 61).valid, true, 'the ghost is green');
+  assert.match(world.placementError(0, 'house', 45, 61), /no building near an enemy Town Center/, 'and the sim refuses it, with the reason');
+  // A scout sees the Town Center, then leaves: it is remembered.
+  const scout = spawn(world, 0, 'worshipper', 56, 61);
+  vs.pushSnapshot(world.getSnapshot(), 50);
+  assert.ok(vs.lastSeen.size > 0);
+  assert.deepEqual(peaceAnchors(vs), [{ tx: 60, ty: 60, size: 4 }]);
+  scout.x = 10;
+  scout.y = 12;
+  vs.pushSnapshot(world.getSnapshot(), 100);
+  assert.equal(vs.isVisibleAt(61, 61), false);
+  assert.deepEqual(peaceAnchors(vs), [{ tx: 60, ty: 60, size: 4 }], 'remembered');
+  assert.equal(checkPlacement(vs, 0, 'house', 45, 61).peace, true);
+});
+
+test('Decade of Peace: teammates, a normal game and the end of the peace leave the ground free', () => {
+  const team = makeWorld({ players: 3, teams: [1, 1, 2], map: { width: 96, height: 96 }, peaceMinutes: 30 });
+  const vs = viewOf(team, 0, { seeAll: true });
+  assert.deepEqual(peaceAnchors(vs), [{ tx: 86, ty: 6, size: 4 }], 'only the enemy\'s');
+  assert.equal(checkPlacement(vs, 0, 'house', 80, 80).valid, true, 'beside a teammate\'s Town Center');
+  assert.equal(checkPlacement(vs, 0, 'house', 80, 12).valid, false, 'beside the enemy\'s');
+  const normal = peaceArena({ peaceMinutes: 0 });
+  const nv = viewOf(normal, 0, { seeAll: true });
+  assert.deepEqual(peaceAnchors(nv), []);
+  assert.equal(checkPlacement(nv, 0, 'house', 45, 61).valid, true);
+  // The peace runs out (its length is game time; the view reads it from the snapshot clock).
+  const world = peaceArena();
+  const wv = viewOf(world, 0, { seeAll: true });
+  assert.equal(checkPlacement(wv, 0, 'house', 45, 61).valid, false);
+  wv.pushSnapshot({ ...world.getSnapshot(), time: 30 * 60 }, 50);
+  assert.equal(wv.peaceActive(), false);
+  assert.deepEqual(peaceAnchors(wv), []);
+  assert.equal(checkPlacement(wv, 0, 'house', 45, 61).valid, true);
+});
+
+test('Decade of Peace: agrees with the sim on a sweep of the ground around an enemy Town Center', () => {
+  const world = peaceArena();
+  place(world, 1, 'house', 50, 50); // other enemy buildings are ordinary obstacles, not ground-keepers
+  const vs = viewOf(world, 0, { seeAll: true });
+  let red = 0;
+  for (const type of ['house', 'barracks', 'town_center', 'tower']) {
+    for (let ty = 30; ty < 96; ty++) {
+      for (let tx = 30; tx < 96; tx++) {
+        const c = checkPlacement(vs, 0, type, tx, ty);
+        const msg = world.placementError(0, type, tx, ty);
+        assert.equal(c.valid, msg === null, `${type} at ${tx},${ty}: client ${c.valid} sim ${msg}`);
+        assert.equal(c.message, msg, `${type} at ${tx},${ty}: message`);
+        if (c.peace) red++;
+      }
+    }
+  }
+  assert.ok(red > 2000, `${red} sites turned red for the peace`);
+});
+
+test('Decade of Peace: a wall line is blocked tile by tile in the ground, with the peace named when none can go up', () => {
+  const world = peaceArena();
+  const vs = viewOf(world, 0, { seeAll: true });
+  const part = checkWallLine(vs, 0, 'wooden_wall', 30, 61, 49, 61);
+  assert.equal(part.build, 10, 'tiles 30..39 can go up');
+  assert.equal(part.message, null);
+  assert.deepEqual(part.tiles.filter((t) => t.state === 'blocked').map((t) => t.tx), [40, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
+  assert.ok(part.tiles.filter((t) => t.state === 'blocked').every((t) => t.message === peaceBuildNotice(vs.peaceLeft())));
+  const none = checkWallLine(vs, 0, 'wooden_wall', 42, 61, 50, 61);
+  assert.equal(none.build, 0);
+  assert.equal(none.message, peaceBuildNotice(vs.peaceLeft()));
 });

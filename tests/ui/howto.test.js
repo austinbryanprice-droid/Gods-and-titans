@@ -38,6 +38,10 @@ test('controls that were undocumented are listed', () => {
     'keep placing more', // Shift + place
     'take back its last queued unit', // Esc on a producer
     'Shift or Ctrl: select all of them', // idle worshippers
+    'Destroy the selected units and free their population', // Delete
+    'press twice for more than 5 units, a god or a Titan',
+    'a Mac\'s delete key is Backspace',
+    'Jump to your Town Center', // Home
     'another command hotkey replaces the pending order',
     'Zoom in and out (smoothly on a trackpad)',
   ]) assert.ok(text.includes(part), part);
@@ -65,4 +69,13 @@ test('walls are explained: the build key, dragging a line, the stone upgrade, to
   assert.match(text, /upgrade it to stone \(1000 health and 6 armor instead of 350 and 1\)/);
   assert.match(text, /A Tower raised on a wall, or in line with one, becomes part of the wall/);
   assert.match(text, /Wall segments: upgrade to stone \(U\) or dismantle \(D\)/);
+});
+
+test('team pings and markers are explained: the gestures, the buttons and who sees them', () => {
+  assert.ok(text.includes('Team signals'));
+  assert.match(text, /Alt\+ClickPing your team at that spot on the map or the minimap/);
+  assert.match(text, /not while aiming an order or placing a building/);
+  assert.match(text, /Middle-clickThe same with the middle button/);
+  assert.match(text, /Beside the minimap: Ping, Attack, Defend, Help and Gather/);
+  assert.match(text, /Only your teammates/);
 });

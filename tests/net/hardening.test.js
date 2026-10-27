@@ -204,10 +204,11 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     smart: { units: [1], x: 1, y: 1 }, gather: { units: [1], target: 3 }, pray: { units: [1], target: 4 },
     returnCargo: { units: [1] }, build: { units: [1], building: 'barracks', tx: 3, ty: 3 }, train: { building: 2, unit: 'warrior' },
     cancelTrain: { building: 2, index: 0 }, upgradeTier: { building: 2 }, cancelBuild: { building: 2 }, rally: { building: 2, x: 3, y: 3 },
-    stop: { units: [1] }, hold: { units: [1] }, cast: { unit: 1, ability: 'greek_zeus_thunderbolt', target: 5 }, surrender: {},
+    stop: { units: [1] }, hold: { units: [1] }, kill: { units: [1, 2] }, cast: { unit: 1, ability: 'greek_zeus_thunderbolt', target: 5 }, surrender: {},
     repair: { units: [1], target: 2 }, research: { building: 2, upgrade: 'house_stone_walls' }, autoRepair: { on: true },
     trade: { to: 1, res: 'gold', amount: 100 },
     autocast: { units: [1], ability: 'greek_zeus_thunderbolt', on: true },
+    upgradeHouses: { houses: [7, 8, 9, 10] },
     upgradeWall: { walls: [4, 5, 6] },
   };
   assert.deepEqual(Object.keys(good).sort(), [...COMMAND_TYPES].sort());

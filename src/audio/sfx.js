@@ -6,11 +6,12 @@
 //   sfx.shared                       { ctx, out, noise } once the context exists: the music engine plays through it too
 //   sfx.onPlay(cb)                   cb(name, gain) after a sound starts (the music dips under big ones)
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers).
+import { ALERT_RECIPES, ALERT_LIMITS, ALERT_LEVEL } from './sfx-alerts.js';
 
 export const SFX_NAMES = [
   'click', 'select', 'move', 'attack_melee', 'attack_ranged', 'hit', 'death', 'build',
   'building_complete', 'train', 'summon_god', 'summon_titan', 'lightning', 'fire', 'magic',
-  'heal', 'error', 'victory', 'defeat', 'tier_up', 'chop', 'mine', 'pray', 'horn',
+  'heal', 'error', 'victory', 'defeat', 'tier_up', 'chop', 'mine', 'pray', 'horn', 'ping', 'ping_urgent',
 ];
 
 const HEAR_FULL = 8; // tiles: full volume within this distance of the listener
@@ -45,6 +46,8 @@ const LIMITS = {
   mine: { gap: 0.07, voices: 3 },
   pray: { gap: 0.6, voices: 2 },
   horn: { gap: 4, voices: 1, ui: true },
+  ping: { gap: 0.25, voices: 2, ui: true },
+  ping_urgent: { gap: 0.6, voices: 1, ui: true },
 };
 const DEFAULT_LIMIT = { gap: 0.05, voices: 4 };
 
@@ -53,7 +56,7 @@ const LEVEL = {
   click: 1.3, select: 1.0, move: 1.15, attack_melee: 0.45, attack_ranged: 1.1, hit: 0.85,
   death: 0.5, build: 0.5, building_complete: 0.8, train: 1.2, summon_god: 1, summon_titan: 1,
   lightning: 0.9, fire: 0.7, magic: 1.2, heal: 0.85, error: 0.65, victory: 0.9, defeat: 0.9,
-  tier_up: 1.1, chop: 0.85, mine: 1.0, pray: 1.0, horn: 1.0,
+  tier_up: 1.1, chop: 0.85, mine: 1.0, pray: 1.0, horn: 1.0, ping: 1.0, ping_urgent: 1.0,
 };
 
 const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12); // MIDI note → Hz
@@ -430,6 +433,24 @@ const RECIPES = {
     }
     return end;
   },
+  // A teammate's ping: two soft sonar blips a fifth apart, nothing like the war horn.
+  ping(k, t, out, rv) {
+    k.osc(out, t, { f: NOTE(81), a: 0.003, r: 0.16, peak: 0.26 });
+    k.osc(out, t, { type: 'triangle', f: NOTE(69), a: 0.003, r: 0.12, peak: 0.1 });
+    const end = k.osc(out, t + 0.1, { f: NOTE(88), a: 0.003, r: 0.3, peak: 0.24 });
+    if (rv) k.osc(rv, t + 0.1, { f: NOTE(88), a: 0.003, r: 0.5, peak: 0.07 });
+    return end;
+  },
+  // "Need help here": three quick blips, the last one higher and longer.
+  ping_urgent(k, t, out, rv) {
+    let end = t;
+    [[0, 84, 0.1], [0.09, 84, 0.1], [0.18, 91, 0.34]].forEach(([dt, n, r]) => {
+      end = Math.max(end, k.osc(out, t + dt, { f: NOTE(n), a: 0.002, r, peak: 0.28 }));
+      k.osc(out, t + dt, { type: 'triangle', f: NOTE(n - 12), a: 0.002, r: 0.08, peak: 0.1 });
+    });
+    if (rv) k.osc(rv, t + 0.18, { f: NOTE(91), a: 0.003, r: 0.5, peak: 0.07 });
+    return end;
+  },
 };
 
 // ------------------------------------------------------------------ engine
@@ -477,6 +498,12 @@ function buildGraph(ctx) {
   }
   return { master, comp, reverb, noise: makeNoiseBuffer(ctx) };
 }
+
+// The alert, tip and milestone sounds are written in sfx-alerts.js.
+SFX_NAMES.push(...Object.keys(ALERT_RECIPES));
+Object.assign(LIMITS, ALERT_LIMITS);
+Object.assign(LEVEL, ALERT_LEVEL);
+Object.assign(RECIPES, ALERT_RECIPES);
 
 function audioContextClass() {
   if (typeof globalThis === 'undefined') return null;
