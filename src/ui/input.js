@@ -1008,7 +1008,7 @@ export class InputController {
       return;
     }
     this.setMode({ kind: 'target', order: 'mark', mark: kind, target: 'point' });
-    this.hud.message(`${MARKS[kind].name}: click the map or the minimap. Esc cancels.`, 'info');
+    this.hud.message(`${MARKS[kind].name}: click the map or the minimap. Esc cancels.`, 'info', { icon: MARKS[kind].icon });
   }
 
   // ---------------------------------------------------------------- command card
@@ -1187,7 +1187,7 @@ export class InputController {
     if (!units.length) return;
     sfx.play('click');
     this.command({ type: 'autocast', units, on: !anyOn });
-    this.hud.message(anyOn ? 'Abilities set to manual.' : 'Abilities set to autocast.', 'info');
+    this.hud.message(anyOn ? 'Abilities set to manual.' : 'Abilities set to autocast.', 'info', { icon: '⚙️' });
   }
 
   /** The Delete question still waiting for its second press, or null (it lapses after DELETE_CONFIRM_MS). */
@@ -1300,7 +1300,7 @@ export class InputController {
       if (rep) return;
       const n = Number(m[2]);
       if (e.ctrlKey || e.metaKey) {
-        if (this.sel.saveGroup(n)) hud.message(`Group ${n} assigned.`, 'info');
+        if (this.sel.saveGroup(n)) hud.message(`Group ${n} assigned.`, 'info', { icon: '👥' });
       } else if (e.shiftKey) {
         this.sel.addToGroup(n);
       } else {

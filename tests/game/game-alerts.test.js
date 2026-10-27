@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { sfx } from '../../src/audio/sfx.js';
 import { HINTS, hintText } from '../../src/ui/hint-data.js';
+import { RESOURCE_ICONS } from '../../src/ui/hud-data.js';
+import { BUILDINGS, godsFor } from '../../src/data/index.js';
 import { saveSettings } from '../../src/settings.js';
 import { installFakeDom } from '../ui/fake-dom.js';
 
@@ -104,6 +106,63 @@ test('a Game without a tab flasher or an input, one that is gone, or one with no
   const early = fake({ hud: false });
   assert.doesNotThrow(() => onAlert(early.game, { text: 'Hello', kind: 'alert', sound: 'drums' }));
   assert.deepEqual(early.log, []);
+});
+
+test('an alert\'s emblem goes to its card: the line, its kind and the emblem together', () => {
+  const { game } = fake();
+  const lines = [];
+  game.hud.message = (text, kind, opts) => lines.push([text, kind, opts]);
+  onAlert(game, { text: '3 Worshippers are idle.  [[.]]', kind: 'info', icon: '🙏', sound: 'nudge' });
+  onAlert(game, { text: 'You can summon Thor at your Temple.', kind: 'good', icon: null });
+  onAlert(game, { kind: 'info', icon: '🙏', sound: 'nudge' });
+  assert.deepEqual(lines, [
+    ['3 Worshippers are idle.  [[.]]', 'info', { icon: '🙏' }],
+    ['You can summon Thor at your Temple.', 'good', { icon: null }],
+  ]);
+});
+
+// ---------------------------------------------------------------- the game's own lines
+
+/** A fake Game and a log of the cards its events ask the HUD for (sounds are muted). */
+function eventsGame(extra = {}) {
+  const cards = [];
+  const game = {
+    disposed: false,
+    viewState: { myIndex: 0, me: { defeated: false }, entities: new Map(), mineMemory: new Map(), isAlly: () => false, isExplored: () => true },
+    hud: { message: (text, kind, opts) => cards.push([text, kind, opts && opts.icon]), minimap: { ping() {} }, showBanner() {} },
+    input: null,
+    playerName: (i) => (i === 1 ? 'Freyja' : 'Me'),
+    worldSound() {},
+    worldSoundAt() {},
+    entityPos: () => null,
+    lastBreach: -Infinity,
+    ...extra,
+  };
+  sfx.play = () => true;
+  const send = (ev) => Game.prototype.onEvent.call(game, ev);
+  return { game, cards, send };
+}
+
+test('the game\'s own lines come with an emblem: the unit or building it is about, or a sign of what happened', () => {
+  const { cards, send } = eventsGame();
+  const god = godsFor('greek')[0];
+  send({ type: 'buildingComplete', o: 0, t: 'temple' });
+  send({ type: 'spawn', o: 0, t: god.id });
+  send({ type: 'underAttack', player: 0, id: 1, x: 3, y: 4 });
+  send({ type: 'trade', from: 1, to: 0, res: 'wood', amt: 100, got: 90 });
+  send({ type: 'trade', from: 0, to: 1, res: 'gold', amt: 100, got: 90 });
+  send({ type: 'playerDefeated', player: 1 });
+  send({ type: 'death', o: 0, k: 'b', t: 'house', x: 5, y: 5 });
+  send({ type: 'death', o: 0, k: 'u', t: god.id, x: 5, y: 5 });
+  const by = (re) => cards.find((c) => re.test(c[0]));
+  assert.equal(by(/Temple completed/)[2], BUILDINGS.temple.icon);
+  assert.equal(by(/answers your call/)[2], god.icon);
+  assert.deepEqual(by(/under attack/), ['Your forces are under attack!  [[Space]]', 'alert', '⚔️'], 'the key cap marker, the warning kind');
+  assert.equal(by(/sent you/)[2], RESOURCE_ICONS.wood);
+  assert.equal(by(/^Sent 90 gold/)[2], '⚖️');
+  assert.equal(by(/has been defeated/)[2], '🏳️');
+  assert.equal(by(/Your House was destroyed/)[2], '💥');
+  assert.equal(by(/has fallen/)[2], '💀');
 });
 
 // ---------------------------------------------------------------- the loading screen

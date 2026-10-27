@@ -150,6 +150,33 @@ export function peaceWarning(sec) {
   return `The ${PEACE_NAME} ends in ${when}. Get your armies ready.`;
 }
 
+// ---- The message feed (bottom-left of the HUD, drawn by hud.js)
+
+/** The emblem a message card wears when its sender names none, by kind. */
+export const MESSAGE_ICONS = { info: '📜', good: '✨', alert: '⚠️', system: '📢', chat: '💬' };
+
+/** The emblems of the three resources, for the cards that name one (a shipment from a teammate). */
+export const RESOURCE_ICONS = { gold: '💰', wood: '🌲', faith: '✨' };
+
+/** A card's emblem: the sender's own (a unit's or building's emoji) when it is a short string, else the kind's. */
+export function messageIcon(kind, icon) {
+  if (typeof icon === 'string' && icon !== '' && [...icon].length <= 8) return icon;
+  return Object.hasOwn(MESSAGE_ICONS, kind) ? MESSAGE_ICONS[kind] : MESSAGE_ICONS.info;
+}
+
+const MESSAGE_BASE_MS = 8500; // a card stays this long, plus a little per letter, between the next two
+const MESSAGE_MS_PER_CHAR = 45;
+const MESSAGE_MIN_MS = 10000;
+const MESSAGE_MAX_MS = 16000;
+const MESSAGE_ALERT_EXTRA_MS = 2500; // a warning stays a little longer than a note
+
+/** How long a message card stays on screen: 10 to 16 s by length ([[Key]] markers count as the key's name), 2.5 s more for a warning. */
+export function messageDwell(text, kind) {
+  const letters = String(text ?? '').replace(/\[\[(.+?)\]\]/g, '$1').length;
+  const ms = Math.min(MESSAGE_MAX_MS, Math.max(MESSAGE_MIN_MS, MESSAGE_BASE_MS + letters * MESSAGE_MS_PER_CHAR));
+  return kind === 'alert' ? ms + MESSAGE_ALERT_EXTRA_MS : ms;
+}
+
 /**
  * The connection warning for a joined (client) session while the host has been silent
  * for STALL_NOTICE_MS (session.stalled / stalledMs), else '' (also for a HostSession,

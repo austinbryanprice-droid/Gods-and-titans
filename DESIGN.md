@@ -1599,8 +1599,9 @@ per-frame budget, so a revealed army appears over a few frames.
   the ground an enemy Town Center keeps clear: tinted under the ghost, the ghost's tiles inside it red,
   and a red tip by the cursor with the reason (`InputController.showPeaceZone` / `peaceTip`; the same
   text a refused click and the sim give).
-  God portraits top-left (click selects, double-click centers). Messages (errors, alerts,
-  "Kronos is being summoned!"), chat (Enter), game-over overlay with stats, menu (surrender, quit).
+  God portraits top-left (click selects, double-click centers). Messages (alerts, "Kronos is being summoned!",
+  the game's other events, chat on Enter) are the stone cards at the bottom left ("The message feed" below);
+  an error is the red line over the console. Game-over overlay with stats, menu (surrender, quit).
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
@@ -1616,7 +1617,7 @@ per-frame budget, so a revealed army appears over a few frames.
   but whose snapshots do not) still gets its alerts. The first survey is the baseline: a match joined part-way
   announces nothing already behind it. `alerts` is `'all'` (default), `'important'` (warnings only) or `'off'`
   (no extra line, sound or ping; the game's own battle warnings still sound). Warnings: **enemies near**
-  (a hostile unit in sight within 18 tiles of one of my buildings: line with "(Space)", war drums, an amber
+  (a hostile unit in sight within 18 tiles of one of my buildings: line with a Space key cap, war drums, an amber
   ping and the Space jump; not within 8 s of an under-attack alert, at most once per 45 s, and a new sighting
   needs 10 s without enemies), **ally under attack** (softer drums, a ping in the ally's colour, once per 20 s
   per ally; Space only if my own alert is older than 15 s), and the **Decade of Peace marks** (a gong, louder
@@ -1653,6 +1654,21 @@ per-frame budget, so a revealed army appears over a few frames.
   **Sounds** (`src/audio/sfx-alerts.js`, merged into the tables of `sfx.js`): `nudge` (two soft notes: a
   reminder), `drums` (four war-drum beats), `gong` (the peace is about to end), `research` (an upgrade
   finished), `tip` (a tip appeared) and `milestone` (a short fanfare).
+  **The message feed** (`Hud.message`, `Hud.chat`; `src/ui/hud.js`, `src/ui/hud-data.js`, the "messages" block of
+  `hud.css`): everything the HUD tells the player (alerts and reminders, milestones, the game's own events, the
+  peace marks, chat) is a card at the bottom left, above the idle button and the task counts, in the tips' carved
+  stone: an emblem chip (the line's own sign, a unit's, building's or god's emoji or a resource's, else its kind's
+  from `messageIcon`; the stylesheet draws it from the card's `data-icon`), an edge in the colour of its kind
+  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat) and the text at
+  1.18 em. A card slides in with a flash of its colour (a warning pulses three times), stays 10 to 16 s by length
+  (`messageDwell`: 8.5 s plus 45 ms a letter, 2.5 s more for a warning; chat 14 s) and fades. A line that comes
+  again while its card is still up (enemies still near, a second "Temple completed.") counts up a ×N badge and
+  slides in again instead of stacking another card. At most 6 cards stand, the oldest going first. A `[[Key]]`
+  marker in a line is a key cap, as in a tip (the base-attack card ends in a Space cap, the idle-Worshipper card
+  in a . cap), and the cards are text nodes only, never markup. The feed is `role="log"`, `aria-live="polite"`, ignores the pointer (clicks go
+  through to the map) and keeps clear of the console, the minimap, the tips and the god portraits (measured from
+  800×600 to 3440×1440 and at the 170-tile zoom). The three settings decide what is written, not how it looks.
+  Reduced motion turns the animations off.
 - Info panel (`src/ui/hud-info.js`): a selected gold mine shows "Gold left", "Miners n/2"
   (snapshot `mn` / `MINE_SLOTS`), how many of your Worshippers work there, and the
   2-at-once rule. A worker's state line reads "Gathering gold", "Chopping wood", "Repairing", or

@@ -14,7 +14,7 @@ import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
@@ -22,6 +22,7 @@ import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
 import { HintsView, HintScheduler } from './hud-hints.js';
+import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
 import { TeamMarks } from '../game/team-marks.js';
@@ -32,12 +33,13 @@ import { POP_MAX, PEACE_NAME } from '../config.js';
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
 const GODS_REFRESH_MS = 100;
-const MESSAGE_MS = 8000;
 const CHAT_MS = 14000;
+const MESSAGE_FADE_MS = 600; // a card's fade-out (the CSS transition) before it leaves the page
 const ERROR_MS = 2600;
 const BANNER_MS = 4200;
-const MAX_MESSAGES = 7;
+const MAX_MESSAGES = 6;
 const MAX_MESSAGE_CHARS = 240;
+const PEACE_ICON = '🕊️'; // the Decade of Peace's card emblem, as on its clock chip
 const MARKS_HINT = 'Team ping: Alt+click or middle-click the map or minimap. The buttons beside the minimap mark where to attack, defend, gather or get help.';
 
 export class Hud {
@@ -95,7 +97,7 @@ export class Hud {
     this.clock = el('span', 'hud-clock');
     // Decade of Peace: counts down to the first moment players may attack each other; gone once it is over.
     this.peaceClock = el('span', 'hud-clock');
-    this.peaceChip = el('div', 'hud-time hud-peace', el('i', 'hud-res-i', '🕊️'), this.peaceClock);
+    this.peaceChip = el('div', 'hud-time hud-peace', el('i', 'hud-res-i', PEACE_ICON), this.peaceClock);
     this.peaceChip.title = `${PEACE_NAME}: no player can harm another, or build near an enemy Town Center, until this clock runs out. Neutral creatures still fight.`;
     this.peaceChip.hidden = true;
     this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
@@ -145,8 +147,10 @@ export class Hud {
     this.taskIds = workerTasks(this.vs).ids;
     this.workers = el('div', 'hud-workers', this.idleBtn, this.tasks);
 
-    // Messages.
+    // Messages: the feed of cards at the bottom left (a log for screen readers).
     this.msgs = el('div', 'hud-msgs');
+    this.msgs.setAttribute('role', 'log');
+    this.msgs.setAttribute('aria-live', 'polite');
     this.errorEl = el('div', 'hud-error');
     this.banner = el('div', 'hud-banner');
     this.banner.hidden = true;
@@ -312,10 +316,10 @@ export class Hud {
       // The lobby's Random is drawn at Start: name the pantheon once, as the game opens.
       this.leadShown = true;
       const lead = leadText(vs);
-      if (lead) this.message(lead, 'good');
-      if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good');
+      if (lead) this.message(lead, 'good', { icon: PANTHEON_EMBLEMS[this.pantheonId] });
+      if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good', { icon: PEACE_ICON });
       // Only a match with a teammate has anyone to ping.
-      if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info');
+      if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info', { icon: '📍' });
     }
 
     if (now - this.lastGods >= GODS_REFRESH_MS) {
@@ -372,7 +376,7 @@ export class Hud {
     setClass(this.peaceChip, 'is-ending', left <= PEACE_WARNINGS[1]);
     // A game seen first part-way through stays quiet about the marks already passed.
     const passed = PEACE_WARNINGS.filter((s) => left <= s).length;
-    if (this.peaceMarks !== null && passed > this.peaceMarks) this.message(peaceWarning(PEACE_WARNINGS[passed - 1]), 'alert');
+    if (this.peaceMarks !== null && passed > this.peaceMarks) this.message(peaceWarning(PEACE_WARNINGS[passed - 1]), 'alert', { icon: PEACE_ICON });
     this.peaceMarks = passed;
   }
 
@@ -505,10 +509,16 @@ export class Hud {
   // ---------------------------------------------------------------- messages
 
   /**
-   * Show a message. kind: 'error' (centre, short), 'info', 'alert', 'good', 'system'.
+   * Show a message. kind: 'error' (centre, short), 'info', 'alert', 'good', 'system'. The others become a
+   * card in the feed at the bottom left: an emblem chip (`opts.icon`, else the kind's), the words (with a
+   * key cap for each [[Key]]) and a colour by kind. The same line again while its card is still up does not
+   * stack another: the card takes a count (×2), slides in again at the bottom and stays a full dwell more.
+   * @param {string} text
+   * @param {string} [kind]
+   * @param {{ icon?: string }} [opts]
    * @returns {HTMLElement|null}
    */
-  message(text, kind = 'info') {
+  message(text, kind = 'info', opts = null) {
     if (text === null || text === undefined || text === '') return null;
     // Error texts arrive in snapshots from the host: keep them short, plain text.
     text = String(text);
@@ -522,17 +532,44 @@ export class Hud {
       this.errorTimer = setTimeout(() => this.errorEl.classList.remove('is-on'), ERROR_MS);
       return this.errorEl;
     }
-    const line = el('div', `hud-msg is-${kind}`, text);
-    this.pushLine(line, MESSAGE_MS);
+    const ms = messageDwell(text, kind);
+    const same = `${kind}|${text}`;
+    for (const again of this.msgs.children) {
+      if (again._same !== same || again.classList.contains('is-fading')) continue;
+      again.dataset.count = String((Number(again.dataset.count) || 1) + 1);
+      this.msgs.appendChild(again); // moved to the bottom: the card slides in again
+      this.arm(again, ms);
+      return again;
+    }
+    const line = this.feedCard(kind, opts && opts.icon, hintParts(text).map((part) => (typeof part === 'string' ? part : el('kbd', null, part.key))));
+    line._same = same;
+    this.pushLine(line, ms);
+    return line;
+  }
+
+  /** One card of the feed: the words (text nodes only) and, from its data-icon, the emblem the stylesheet draws. */
+  feedCard(kind, icon, content) {
+    const line = el('div', `hud-msg is-${kind}`, el('span', 'hud-msg-text', content));
+    line.dataset.icon = messageIcon(kind, icon);
     return line;
   }
 
   pushLine(line, ms) {
     this.msgs.appendChild(line);
-    while (this.msgs.children.length > MAX_MESSAGES) this.msgs.firstChild.remove();
+    while (this.msgs.children.length > MAX_MESSAGES) {
+      const old = this.msgs.children[0];
+      clearTimeout(old._timer);
+      old.remove();
+    }
+    this.arm(line, ms);
+  }
+
+  /** (Re)start a card's stay: it fades after `ms` and leaves a moment later. */
+  arm(line, ms) {
+    clearTimeout(line._timer);
     line._timer = setTimeout(() => {
       line.classList.add('is-fading');
-      line._timer = setTimeout(() => line.remove(), 600);
+      line._timer = setTimeout(() => line.remove(), MESSAGE_FADE_MS);
     }, ms);
   }
 
@@ -544,14 +581,19 @@ export class Hud {
     const text = sanitizeChat(line.text);
     if (!text) return;
     if (line.system) {
-      this.pushLine(el('div', 'hud-msg is-system', text), CHAT_MS);
+      this.pushLine(this.feedCard('system', null, text), CHAT_MS);
       return;
     }
     const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
     const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
     const who = el('b', 'hud-chat-from', `${sanitizeName(line.name || (p && p.name), 'Player')}:`);
-    if (p) who.style.color = safeColor(p.color, '#f1e8d4');
-    this.pushLine(el('div', 'hud-msg is-chat', who, ' ', el('span', null, text)), CHAT_MS);
+    const card = this.feedCard('chat', null, [who, ' ', el('span', null, text)]);
+    if (p) {
+      const color = safeColor(p.color, '#f1e8d4');
+      who.style.color = color;
+      card.style.setProperty('--msg-accent', color); // the card's edge and emblem take the player's colour
+    }
+    this.pushLine(card, CHAT_MS);
   }
 
   /** Big centred announcement under the top bar. */

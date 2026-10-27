@@ -53,12 +53,12 @@ const LEVEL_RANK = { off: 0, important: 1, all: 2 };
 /** Who matters more when two sounds want the same moment. */
 const PRIORITY = { enemies_near: 90, ally_attacked: 80, peace_mark: 70, god_ready: 40, titan_ready: 40, idle_workers: 30, pop_capped: 25, army_idle: 22, research: 20, milestone: 10 };
 
-/** Milestones: the player's counts, and the steps worth a cheer. */
+/** Milestones: the player's counts, the steps worth a cheer and the emblem of the card. */
 const MILESTONES = [
-  { key: 'kills', steps: [1, 10, 25, 50, 100, 250, 500, 1000], read: (me) => (me.stats && me.stats.kills) || 0, text: (n) => (n === 1 ? 'First blood! Your first enemy has fallen.' : `${n} enemies have fallen before your armies!`) },
-  { key: 'pop', steps: [25, 50, 100, 150, POP_MAX], read: (me) => me.pop || 0, text: (n) => `Your people number ${n}!` },
-  { key: 'gathered', steps: [1000, 5000, 10000, 25000, 50000, 100000], read: (me) => (me.stats && me.stats.gathered) || 0, text: (n) => `${n.toLocaleString('en-US')} gold and wood gathered.` },
-  { key: 'trained', steps: [25, 50, 100, 200, 400], read: (me) => (me.stats && me.stats.unitsTrained) || 0, text: (n) => `${n} units trained.` },
+  { key: 'kills', icon: '⚔️', steps: [1, 10, 25, 50, 100, 250, 500, 1000], read: (me) => (me.stats && me.stats.kills) || 0, text: (n) => (n === 1 ? 'First blood! Your first enemy has fallen.' : `${n} enemies have fallen before your armies!`) },
+  { key: 'pop', icon: '👥', steps: [25, 50, 100, 150, POP_MAX], read: (me) => me.pop || 0, text: (n) => `Your people number ${n}!` },
+  { key: 'gathered', icon: '💰', steps: [1000, 5000, 10000, 25000, 50000, 100000], read: (me) => (me.stats && me.stats.gathered) || 0, text: (n) => `${n.toLocaleString('en-US')} gold and wood gathered.` },
+  { key: 'trained', icon: '🪖', steps: [25, 50, 100, 200, 400], read: (me) => (me.stats && me.stats.unitsTrained) || 0, text: (n) => `${n} units trained.` },
 ];
 
 /** The highest step in `steps` that `value` has reached (0 = none). */
@@ -94,7 +94,8 @@ class Nag {
  * @typedef {object} Alert what `notify` receives
  * @property {string} id which alert it is ('enemies_near', 'idle_workers', …)
  * @property {'alert'|'good'|'info'} kind the HUD line's style
- * @property {string|null} text the HUD line (null: none)
+ * @property {string|null} text the HUD line (null: none); [[Key]] markers are drawn as key caps
+ * @property {string|null} icon the emblem on the HUD card (a unit's or building's emoji; null: the kind's own)
  * @property {string|null} sound a name for sfx.play (null: none)
  * @property {number} volume
  * @property {{ x: number, y: number, color: string }|null} ping a minimap ping
@@ -165,7 +166,7 @@ export class AlertEngine {
 
   /**
    * Hand an alert on, as far as the settings let it through.
-   * @param {object} a { id, level: 'important'|'all', kind, text, sound, volume, ping, jump, attention }
+   * @param {object} a { id, level: 'important'|'all', kind, text, icon, sound, volume, ping, jump, attention }
    */
   emit(a) {
     const vs = this.vs;
@@ -175,6 +176,7 @@ export class AlertEngine {
       id: a.id,
       kind: a.kind || 'info',
       text: speaks ? a.text || null : null,
+      icon: a.icon || null,
       sound: null,
       volume: a.volume === undefined ? 1 : a.volume,
       ping: speaks ? a.ping || null : null,
@@ -243,7 +245,7 @@ export class AlertEngine {
       case 'researched':
         if (ev.player === me) {
           const up = Object.hasOwn(UPGRADES, ev.up) ? UPGRADES[ev.up] : null;
-          this.emit({ id: 'research', level: 'all', kind: 'good', text: `${up ? up.name : 'An upgrade'} is researched.`, sound: 'research' });
+          this.emit({ id: 'research', level: 'all', kind: 'good', icon: up ? up.icon : '📜', text: `${up ? up.name : 'An upgrade'} is researched.`, sound: 'research' });
         }
         break;
       default:
@@ -264,6 +266,7 @@ export class AlertEngine {
       id: 'ally_attacked',
       level: 'important',
       kind: 'alert',
+      icon: '🛡️',
       text: `${name} is under attack!`,
       sound: 'drums',
       volume: 0.6,
@@ -368,7 +371,8 @@ export class AlertEngine {
       id: 'enemies_near',
       level: 'important',
       kind: 'alert',
-      text: `${n === 1 ? 'An enemy unit has' : `${n} enemy units have`} been sighted near your base!  (Space)`,
+      icon: '🚨',
+      text: `${n === 1 ? 'An enemy unit has' : `${n} enemy units have`} been sighted near your base!  [[Space]]`,
       sound: 'drums',
       ping: { x: best.x, y: best.y, color: '#ffae2e' },
       jump: { x: best.x, y: best.y },
@@ -413,7 +417,8 @@ export class AlertEngine {
       id: 'idle_workers',
       level: 'all',
       kind: 'info',
-      text: `${long} Worshipper${long === 1 ? ' is' : 's are'} idle.  (.)`,
+      icon: '🙏',
+      text: `${long} Worshipper${long === 1 ? ' is' : 's are'} idle.  [[.]]`,
       sound: 'nudge',
     });
   }
@@ -422,7 +427,7 @@ export class AlertEngine {
   population(t, me, s) {
     const capped = me.popCap > 0 && me.pop >= me.popCap && me.popCap < POP_MAX && !s.houseSite;
     if (!this.popCap.tick(capped, t)) return;
-    this.emit({ id: 'pop_capped', level: 'all', kind: 'info', text: 'Your population limit is reached. Build Houses to grow (B, then H).', sound: 'nudge' });
+    this.emit({ id: 'pop_capped', level: 'all', kind: 'info', icon: '🏠', text: 'Your population limit is reached. Build Houses to grow ([[B]], then [[H]]).', sound: 'nudge' });
   }
 
   /** A god (or a fallen one to revive) or the Titan the player can pay for now, with the Temple (Titan Gate) idle. */
@@ -436,7 +441,7 @@ export class AlertEngine {
       for (const g of gods) {
         const c = trainCheck(vs, g.id, s.temples);
         if (c.state === 'ready') {
-          god = { name: g.name, revive: c.revive !== null };
+          god = { name: g.name, icon: g.icon, revive: c.revive !== null };
           break;
         }
       }
@@ -446,6 +451,7 @@ export class AlertEngine {
         id: 'god_ready',
         level: 'all',
         kind: 'good',
+        icon: god.icon,
         text: god.revive ? `You can revive ${god.name} at your Temple.` : `You can summon ${god.name} at your Temple.`,
         sound: 'nudge',
       });
@@ -453,7 +459,7 @@ export class AlertEngine {
     const titan = titanFor(me.pantheon);
     const titanOk = !!(titan && s.gates.length && !s.gates.some((b) => (b.q || []).length) && trainCheck(vs, titan.id, s.gates).state === 'ready');
     if (this.titanReady.tick(titanOk, t)) {
-      this.emit({ id: 'titan_ready', level: 'all', kind: 'good', text: `You can summon ${titan.name} at your Titan Gate (T).`, sound: 'nudge' });
+      this.emit({ id: 'titan_ready', level: 'all', kind: 'good', icon: titan.icon, text: `You can summon ${titan.name} at your Titan Gate ([[T]]).`, sound: 'nudge' });
     }
   }
 
@@ -462,7 +468,7 @@ export class AlertEngine {
     const vs = this.vs;
     const on = t >= ARMY_MIN_TIME && !vs.peaceActive() && s.army >= ARMY_MIN && s.armyIdle >= s.army * ARMY_IDLE_SHARE && !this.incursion;
     if (!this.armyIdle.tick(on, t)) return;
-    this.emit({ id: 'army_idle', level: 'all', kind: 'info', text: 'Your army has been standing idle for a while. Attack (A), or send scouts.', sound: 'nudge' });
+    this.emit({ id: 'army_idle', level: 'all', kind: 'info', icon: '💤', text: 'Your army has been standing idle for a while. Attack ([[A]]), or send scouts.', sound: 'nudge' });
   }
 
   /** One cheer at a time: the first count to pass a new step, once the last cheer is a while behind. */
@@ -474,7 +480,7 @@ export class AlertEngine {
       if (step <= done) continue;
       this.milestones.set(m.key, step);
       this.lastMilestone = t;
-      this.emit({ id: 'milestone', level: 'all', kind: 'good', text: m.text(step), sound: 'milestone', volume: 0.8 });
+      this.emit({ id: 'milestone', level: 'all', kind: 'good', icon: m.icon, text: m.text(step), sound: 'milestone', volume: 0.8 });
       return;
     }
   }
