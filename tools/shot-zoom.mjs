@@ -7,12 +7,13 @@
 //
 //   node tools/shot-zoom.mjs [--port 8322] [--out DIR] [--prefix zoom] [--quality low] [--scenario late]
 //        [--size medium] [--dists 25,44,100,170] [--tod golden] [--width 1280] [--height 720] [--seed 4242]
-//        [--at X,Y] [--sel army] [--lod auto|full|far] [--frames 3] [--no-shots] [--eval 'h.renderer...'] [--timeout 600000]
+//        [--at X,Y] [--sel army] [--lod auto|full|far] [--fow] [--frames 3] [--no-shots] [--eval 'h.renderer...'] [--timeout 600000]
 //
 // --lod auto   the zoom's own levels (default); full: every level pinned to full detail (what the game drew
 //              before the far zoom); far: every level pinned to its far form (also at close zoom, to look at it).
 // --sel        select what the harness knows (army, workers, buildings, all): rings and bars at every zoom.
 // --at         the camera's target, tiles (default: the middle of the map).
+// --fow        look as player 0 with the fog of war on (the default shows everything, as a spectator).
 // Prints, per distance: draw calls, thousand triangles, the frame time under software GL (median of --frames
 // frames, each ended with a readPixels so the work is done: only ratios mean anything) and the update time.
 // Picture files are written as DIR/PREFIX-QUALITY-dDIST.png. High and ultra take about a minute a frame under
@@ -44,6 +45,7 @@ const frames = Number(opt('frames', '3'));
 const timeout = Number(opt('timeout', '600000'));
 const evalCode = opt('eval', ''); // JavaScript run in the page before the shots, with the harness as `h`
 const shots = !args.includes('--no-shots');
+const fow = args.includes('--fow');
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 mkdirSync(out, { recursive: true });
 
@@ -56,7 +58,7 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text()); });
 
 try {
-  const url = `http://localhost:${port}/tools/render-harness.html?manual=1&scenario=${scenario}&reveal=1&seed=${seed}&size=${size}&t=0&quality=${quality}&tod=${encodeURIComponent(timeOfDay)}${sel ? `&sel=${sel}` : ''}`;
+  const url = `http://localhost:${port}/tools/render-harness.html?manual=1&scenario=${scenario}&reveal=${fow ? 0 : 1}&seed=${seed}&size=${size}&t=0&quality=${quality}&tod=${encodeURIComponent(timeOfDay)}${sel ? `&sel=${sel}` : ''}`;
   await page.goto(url);
   await page.waitForFunction(() => window.harness && window.harness.ready === true, null, { timeout });
   await page.addStyleTag({ content: '#panel, #stats, #box { display: none !important; }' });
