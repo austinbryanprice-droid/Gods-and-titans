@@ -4,6 +4,7 @@
 //   sfx.setListener(x, y, scale)     usually the camera target; scale > 1 widens the hearing range (zoomed out)
 //   sfx.setVolume(v) / sfx.mute(bool)
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers).
+import { ALERT_RECIPES, ALERT_LIMITS, ALERT_LEVEL } from './sfx-alerts.js';
 
 export const SFX_NAMES = [
   'click', 'select', 'move', 'attack_melee', 'attack_ranged', 'hit', 'death', 'build',
@@ -495,6 +496,12 @@ function buildGraph(ctx) {
   }
   return { master, comp, reverb, noise: makeNoiseBuffer(ctx) };
 }
+
+// The alert, tip and milestone sounds are written in sfx-alerts.js.
+SFX_NAMES.push(...Object.keys(ALERT_RECIPES));
+Object.assign(LIMITS, ALERT_LIMITS);
+Object.assign(LEVEL, ALERT_LEVEL);
+Object.assign(RECIPES, ALERT_RECIPES);
 
 function audioContextClass() {
   if (typeof globalThis === 'undefined') return null;

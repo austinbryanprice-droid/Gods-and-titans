@@ -20,6 +20,9 @@ import { el } from '../ui/hud-dom.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
 import { tierName } from '../ui/hud-data.js';
+import { loadingHint, hintParts } from '../ui/hint-data.js';
+import { TabAttention } from '../ui/tab-attention.js';
+import { AlertEngine } from './alerts.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
 
@@ -79,6 +82,20 @@ export function describeStartFailure(err) {
   if (GRAPHICS_FAILURE.test(detail)) text = 'Your browser could not start 3D graphics. Check that hardware acceleration is on, or try another browser.';
   else if (LOADING_FAILURE.test(detail)) text = 'Some of the game files could not be loaded. Check your internet connection and reload the page.';
   return { text, detail };
+}
+
+/** The loading screen's tip: "Tip: …" with the keys drawn as <kbd>. */
+function loadingTip(text) {
+  const p = document.createElement('p');
+  p.style.cssText = 'max-width:36em;margin:0;padding:0 1em;text-align:center;font:italic 400 16px/1.5 var(--mw-font-body);'
+    + 'letter-spacing:0;text-transform:none;color:var(--mw-ink-dim)';
+  p.append('Tip: ', ...hintParts(text).map((part) => {
+    if (typeof part === 'string') return part;
+    const key = document.createElement('kbd');
+    key.textContent = part.key;
+    return key;
+  }));
+  return p;
 }
 
 /** AI players that never move: for clients, which run no AI, and the fallback when the AI module is missing. */
@@ -185,6 +202,8 @@ export class Game {
     this.loadingEl = null;
     this.failed = false;
     this.bareHud = false;
+    this.tab = null; // TabAttention: the flashing title of a tab left in the background
+    this.alerts = null; // AlertEngine
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -238,6 +257,13 @@ export class Game {
     if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
     this.offs.push(session.onEnd((info) => this.onEnd(info)));
     this.offs.push(this.viewState.on('*', (ev) => this.onEvent(ev)));
+    // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
+    this.tab = new TabAttention();
+    this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
+    this.offs.push(() => {
+      this.alerts.dispose();
+      this.tab.dispose();
+    });
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) this.hud.chat(line);
     session.start();
@@ -291,14 +317,19 @@ export class Game {
     if (this.loadingEl || typeof document === 'undefined' || !root || typeof root.appendChild !== 'function') return;
     const node = document.createElement('div');
     node.setAttribute('role', 'status');
-    node.style.cssText = 'position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;gap:0.9em;'
+    node.style.cssText = 'position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.6em;'
       + 'font:600 18px/1.4 var(--mw-font-display);letter-spacing:0.3em;text-transform:uppercase;color:var(--mw-gold);'
       + 'background:radial-gradient(ellipse at 50% 40%,#121a33,#05070d 70%)';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:0.9em';
     const spin = document.createElement('span');
     spin.className = 'hud-spinner';
     const text = document.createElement('span');
     text.textContent = 'Preparing the battlefield…';
-    node.append(spin, text);
+    row.append(spin, text);
+    node.append(row);
+    const tip = getSettings().hints ? loadingHint() : null;
+    if (tip) node.append(loadingTip(tip.text));
     root.appendChild(node);
     this.loadingEl = node;
   }
@@ -820,6 +851,22 @@ export class Game {
     if (now - this.lastBreach < BREACH_MESSAGE_MS) return;
     this.lastBreach = now;
     hud.message('Your wall was breached!', 'alert');
+  }
+
+  /**
+   * An alert from the AlertEngine (src/game/alerts.js), already cut down to what the settings allow:
+   * its HUD line, sound, minimap ping, the spot Space jumps to, and the flash of a tab left behind.
+   */
+  onAlert(a) {
+    const hud = this.hud;
+    if (this.disposed || !hud) return;
+    if (a.text) hud.message(a.text, a.kind);
+    if (a.sound) sfx.play(a.sound, { volume: a.volume });
+    if (a.ping) hud.minimap.ping(a.ping.x, a.ping.y, a.ping.color);
+    if (a.jump && this.input) this.input.noteAlert(a.jump.x, a.jump.y);
+    if (a.attention && this.tab) this.tab.attention(a.attention);
+    // No tip while the player is under pressure (a warning that the settings silenced was never shown).
+    if (a.kind === 'alert' && (a.text || a.sound || a.ping || a.jump)) hud.holdHints();
   }
 
   worldSoundAt(id, name, volume = 1) {
