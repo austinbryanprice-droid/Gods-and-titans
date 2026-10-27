@@ -35,6 +35,7 @@ The host can pick the **Decade of Peace** game mode in the lobby: for the first 
 | Ctrl + 1–9, 1–9 | Assign / select a control group |
 | Space, Backspace | Center on the selection or last alert / jump to your Town Center |
 | Enter | Chat |
+| Alt + click, middle-click | Ping your team at that spot on the map or the minimap (the buttons beside the minimap mark where to attack, defend, gather or get help) |
 | F10 | Game menu (pauses a game against the computer) |
 | Arrows, screen edge, mouse wheel | Move and zoom the camera |
 
