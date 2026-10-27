@@ -1,10 +1,11 @@
 // The intro film on the page (src/ui/intro.js): when it plays, the overlay that follows the film, and the
 // ways out of it (Esc, Enter, Space, the Skip button, the end, a failure) that must all hand over to the
-// title screen exactly once. A fake DOM and a stand-in film; the real film is looked at in tools/shot-intro.mjs.
+// title screen exactly once, and silence the narration as they do. A fake DOM and a stand-in film; the real
+// film is looked at in tools/shot-intro.mjs.
 import { test, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeDom } from './fake-dom.js';
-import { FILM_LENGTH, AUDIO_CUES, fadeAt, barsAt, captionAt } from '../../src/intro/script.js';
+import { FILM_LENGTH, AUDIO_CUES, CAPTIONS, fadeAt, barsAt, captionAt } from '../../src/intro/script.js';
 
 let introWanted;
 let playIntro;
@@ -260,6 +261,219 @@ test('the film is sized again when the window is', async () => {
   assert.deepEqual(FakeFilm.made[0].size, [900, 500]);
   globalThis.window.innerWidth = 1280;
   globalThis.window.innerHeight = 720;
+  intro.skip();
+  await intro.done;
+});
+
+// ---------------------------------------------------------------- the narration
+
+/** A stand-in narrator factory: what the page makes it with, tells it, and the calls it gets. */
+function fakeVoice() {
+  const v = { made: null, updates: [], retries: 0, stops: 0 };
+  v.create = (o) => {
+    v.made = o;
+    return { update: (t) => v.updates.push(t), retry: () => v.retries++, stop: () => v.stops++ };
+  };
+  return v;
+}
+
+/** The browser's speech synthesis in Node: what it is asked to say (and when the page shows which caption), until `restore()`. */
+function fakeBrowserSpeech({ allowed = true, caption = () => '' } = {}) {
+  const had = ['speechSynthesis', 'SpeechSynthesisUtterance'].map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]);
+  const spoken = [];
+  const synth = {
+    allowed,
+    speaking: false,
+    pending: false,
+    speak(u) {
+      spoken.push({ text: u.text, caption: caption(), volume: u.volume, allowed: synth.allowed });
+      if (!synth.allowed) u.onerror({ error: 'not-allowed' });
+      else {
+        synth.speaking = true;
+        u.onstart({});
+      }
+    },
+    cancel() {
+      spoken.push('cancel');
+      synth.speaking = false;
+    },
+  };
+  globalThis.speechSynthesis = synth;
+  globalThis.SpeechSynthesisUtterance = class {
+    constructor(text) {
+      this.text = text;
+    }
+  };
+  return {
+    synth,
+    spoken,
+    restore() {
+      for (const [k, d] of had) {
+        delete globalThis[k];
+        if (d) Object.defineProperty(globalThis, k, d);
+      }
+    },
+  };
+}
+
+test('the narration says what the caption on screen says, as the caption comes up, and is cut at the end', async () => {
+  let caption = null;
+  const speech = fakeBrowserSpeech({ caption: () => caption.textContent });
+  try {
+    const { intro, find } = start({ volume: 0.5 });
+    caption = find('mw-intro-caption');
+    await intro.ready;
+    const film = FakeFilm.made[0];
+    while (!film.done) intro.advance(0.1);
+    await intro.done;
+    const said = speech.spoken.filter((s) => s !== 'cancel');
+    assert.deepEqual(said.map((s) => s.text), CAPTIONS.map((c) => c.text), 'every caption of the script, once, in order');
+    for (const s of said) assert.equal(s.caption, s.text, `"${s.text}" is on the screen while it is said`);
+    assert.ok(said.every((s) => s.volume === 0.5), 'at the game\'s volume');
+    assert.equal(speech.spoken.at(-1), 'cancel', 'and the voice is cut as the film ends');
+  } finally {
+    speech.restore();
+  }
+});
+
+test('Esc silences the narration in the same breath, before the dip to black is over', async () => {
+  const speech = fakeBrowserSpeech();
+  try {
+    const wait = gate();
+    const { intro } = start({ wait });
+    await intro.ready;
+    for (let i = 0; i < 20; i++) intro.advance(0.1); // 2 s: the first line is being said
+    assert.equal(speech.spoken.length, 1);
+    assert.equal(speech.synth.speaking, true);
+    press('Escape');
+    assert.equal(speech.spoken.at(-1), 'cancel', 'cut at once');
+    assert.equal(speech.synth.speaking, false);
+    assert.equal(wait.pending.length, 1, 'while the dip to black is still waiting: the voice did not wait for it');
+    for (let i = 0; i < 120; i++) intro.advance(0.1); // the film is leaving: its clock no longer moves, and nothing is said
+    await wait.release();
+    await wait.release();
+    assert.equal(await intro.done, 'skipped');
+    assert.equal(speech.spoken.filter((s) => s !== 'cancel').length, 1, 'nothing said after the skip');
+  } finally {
+    speech.restore();
+  }
+});
+
+test('every way out of the film stops the voice: the keys, the button, skip(), the end, a failure to load, a frame that throws', async () => {
+  const exits = {
+    Escape: () => press('Escape'),
+    Enter: () => press('Enter'),
+    Space: () => press(' '),
+    'the Skip button': ({ find }) => find('mw-intro-skip').click(),
+    'skip()': ({ intro }) => intro.skip(),
+    'the end of the film': ({ intro }) => {
+      while (!FakeFilm.made[0].done) intro.advance(0.1);
+    },
+    'a frame that throws': ({ frames }) => {
+      FakeFilm.throwOn = 0;
+      frames.pump(2000);
+    },
+  };
+  for (const [label, exit] of Object.entries(exits)) {
+    const voice = fakeVoice();
+    const frames = fakeFrames();
+    const run = start({ createVoice: voice.create, manual: label !== 'a frame that throws' });
+    await run.intro.ready;
+    run.intro.advance(1.5);
+    if (label === 'a frame that throws') frames.pump(1000);
+    assert.equal(voice.stops, 0, `${label}: not before`);
+    exit({ ...run, frames });
+    assert.equal(voice.stops, 1, `${label}: the voice is stopped as the film is left`);
+    await run.intro.done;
+    assert.equal(voice.stops, 1, `${label}: once`);
+  }
+  const voice = fakeVoice();
+  const failed = start({ createVoice: voice.create, load: async () => { throw new Error('the module did not load'); } });
+  assert.equal(await failed.intro.done, 'failed');
+  assert.equal(voice.stops, 1, 'a film that cannot start stops the voice too');
+});
+
+test('the voice is on the film\'s clock: it is told the film\'s second each frame, and the game\'s volume', async () => {
+  const voice = fakeVoice();
+  const { intro } = start({ createVoice: voice.create, volume: 0.35 });
+  await intro.ready;
+  assert.equal(voice.made.volume, 0.35);
+  const first = voice.updates.length; // the first frame, drawn behind the card
+  intro.advance(0.1);
+  intro.advance(0.1);
+  intro.advance(0.1);
+  assert.equal(voice.updates.length, first + 3);
+  assert.ok(Math.abs(voice.updates.at(-1) - FakeFilm.made[0].t) < 1e-9, 'it hears the film\'s own second');
+  assert.ok(voice.updates.every((t, i) => !i || t >= voice.updates[i - 1]), 'forward in time');
+  intro.skip();
+  await intro.done;
+});
+
+test('narration off: no voice is made, and the browser is never asked to speak', async () => {
+  const speech = fakeBrowserSpeech();
+  try {
+    const voice = fakeVoice();
+    const run = start({ narrate: false, createVoice: voice.create });
+    await run.intro.ready;
+    for (let i = 0; i < 40; i++) run.intro.advance(0.1);
+    run.overlay.click();
+    press('Escape');
+    await run.intro.done;
+    assert.equal(voice.made, null, 'no voice');
+    const plain = start({ narrate: false });
+    await plain.intro.ready;
+    for (let i = 0; i < 40; i++) plain.intro.advance(0.1);
+    plain.intro.skip();
+    await plain.intro.done;
+    assert.deepEqual(speech.spoken, [], 'with the real narrator on the page, not a word and not even a cancel');
+  } finally {
+    speech.restore();
+  }
+});
+
+test('a browser that will not speak before a click: a hint, and any click on the film starts the voice at the caption on screen', async () => {
+  let caption = null;
+  const speech = fakeBrowserSpeech({ allowed: false, caption: () => caption.textContent });
+  try {
+    const { intro, overlay, find } = start();
+    caption = find('mw-intro-caption');
+    assert.equal(find('mw-intro-hint').textContent, 'Click for narration');
+    await intro.ready;
+    assert.equal(overlay.classList.contains('needs-click'), false, 'no hint while nothing has been refused');
+    const said = () => speech.spoken.filter((s) => s !== 'cancel');
+    for (let i = 0; i < 30; i++) intro.advance(0.1); // 3 s: the first line was refused at 1.4
+    assert.equal(said().length, 1);
+    assert.equal(overlay.classList.contains('needs-click'), true, 'the hint is up');
+    speech.synth.allowed = true;
+    overlay.click(); // a click anywhere on the film
+    assert.equal(overlay.classList.contains('needs-click'), false, 'and goes at once');
+    assert.equal(said().length, 2);
+    assert.equal(said()[1].text, CAPTIONS[0].text, 'the line on screen is said now');
+    assert.equal(said()[1].caption, CAPTIONS[0].text);
+    for (let i = 0; i < 80; i++) intro.advance(0.1); // on to 11 s: the second line is said without another click
+    assert.equal(said()[2].text, CAPTIONS[1].text);
+    assert.equal(overlay.classList.contains('needs-click'), false);
+    overlay.click();
+    assert.equal(said().length, 3, 'a click on a working voice does nothing');
+    intro.skip();
+    await intro.done;
+  } finally {
+    speech.restore();
+  }
+});
+
+test('the hint follows the narrator\'s word, clicks go to the narrator, and the hint is for the eye alone', async () => {
+  const voice = fakeVoice();
+  const { intro, overlay, find } = start({ createVoice: voice.create });
+  await intro.ready;
+  voice.made.onBlocked(true);
+  assert.equal(overlay.classList.contains('needs-click'), true);
+  voice.made.onBlocked(false);
+  assert.equal(overlay.classList.contains('needs-click'), false);
+  assert.equal(find('mw-intro-hint').getAttribute('aria-hidden'), 'true', 'a hint for a click, not for a screen reader (the captions are read to it)');
+  overlay.click();
+  overlay.click();
+  assert.equal(voice.retries, 2, 'each click goes to the voice');
   intro.skip();
   await intro.done;
 });

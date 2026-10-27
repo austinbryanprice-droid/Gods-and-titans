@@ -115,15 +115,17 @@ function hasWebGL2() {
 }
 
 /**
- * Play the intro film (DESIGN 11.1) over the hidden menu; the menu comes back on `screen` behind the
- * black when the film ends or is skipped. Resolves once the film is gone, whatever its outcome.
+ * Play the intro film (DESIGN 11.1) over the hidden menu, with its narration if the player has it on; the menu
+ * comes back on `screen` behind the black when the film ends or is skipped. Resolves once the film is gone,
+ * whatever its outcome.
  * @param {string} screen the menu screen to land on
  * @param {boolean} [guard] drop the film on a machine too slow to show it (not when the player asked to watch it)
  */
 function watchIntro(screen, guard = true) {
   hideMenu();
   try {
-    const intro = playIntro({ root: document.getElementById('app'), quality: getSettings().quality, guard, onHandover: () => showMenu(screen) });
+    const s = getSettings();
+    const intro = playIntro({ root: document.getElementById('app'), quality: s.quality, guard, narrate: s.narration, volume: s.volume, onHandover: () => showMenu(screen) });
     return intro.done;
   } catch (err) {
     console.error('[main] the intro film could not start', err);

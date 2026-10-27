@@ -6,11 +6,13 @@
 //   node tools/shot-intro.mjs --at 40 --hour 20.5                           # the sky at another hour than the script's
 //   node tools/shot-intro.mjs --sheet      # also one contact sheet of every still (sheet.png)
 //   node tools/shot-intro.mjs --flow       # the page flow: the film plays on its own clock, Esc skips it
+//   node tools/shot-intro.mjs --narration  # the voice: each caption read as it comes up, Esc cuts it, a click unlocks it
 //
 // The film runs in manual mode (src/ui/intro.js playIntro({ manual: true })): the tool moves it on in
 // 0.05 s steps and draws only the seconds asked for, so software GL (a few seconds a frame) is
 // enough. The overlay (bars, caption, fades) is in the stills. Starts a static server on the port
 // unless one already answers there. Prints page errors; exits non-zero when a check fails.
+// (--narration cannot hear anything: a stand-in speech synthesis records what the page asks of it.)
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -84,7 +86,7 @@ async function stills(browser, errors) {
   const started = Date.now();
   await page.evaluate(async (q) => {
     const { playIntro } = await import('/src/ui/intro.js');
-    const intro = playIntro({ manual: true, guard: false, quality: q, wait: () => Promise.resolve() });
+    const intro = playIntro({ manual: true, guard: false, narrate: false, quality: q, wait: () => Promise.resolve() });
     window.__intro = intro;
     await intro.ready;
   }, quality);
@@ -151,12 +153,18 @@ async function sheet(browser, files) {
 
 // ---------------------------------------------------------------- the page flow
 
-async function flow(browser, errors) {
+/** Checks that print as they go: ok(name, condition, detail), and the list of results. */
+function reporter() {
   const results = [];
   const ok = (name, cond, detail = '') => {
     results.push({ name, pass: !!cond });
     console.log(`  ${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
   };
+  return { results, ok };
+}
+
+async function flow(browser, errors) {
+  const { results, ok } = reporter();
   mkdirSync(out, { recursive: true });
 
   // the film plays when asked (?intro=1), shows over a hidden menu, and Esc hands over to the title
@@ -225,6 +233,145 @@ async function flow(browser, errors) {
   return results;
 }
 
+// ---------------------------------------------------------------- the narration
+
+/**
+ * A speech synthesis for the page to talk to (runs in the page). It records every call with the caption on the screen
+ * and the film's second, and refuses to speak while `__speech.allowed` is false, as Chrome does before the page has
+ * had a click.
+ */
+function installSpeechStandIn() {
+  const calls = [];
+  window.__speech = { calls, allowed: true };
+  window.SpeechSynthesisUtterance = class {
+    constructor(text) {
+      this.text = text;
+    }
+  };
+  const synth = {
+    speaking: false,
+    pending: false,
+    speak(u) {
+      const cap = document.querySelector('.mw-intro-caption');
+      calls.push({ call: 'speak', text: u.text, caption: cap ? cap.textContent : null, t: window.__intro && window.__intro.film ? window.__intro.film.t : null, lang: u.lang, volume: u.volume, rate: u.rate, pitch: u.pitch, at: performance.now() });
+      if (!window.__speech.allowed) {
+        setTimeout(() => u.onerror && u.onerror({ error: 'not-allowed' }), 0); // the refusal arrives in a task of its own
+        return;
+      }
+      synth.speaking = true;
+      setTimeout(() => u.onstart && u.onstart({}), 0);
+    },
+    cancel() {
+      calls.push({ call: 'cancel', at: performance.now() });
+      synth.speaking = false;
+    },
+    getVoices: () => [],
+  };
+  Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true });
+}
+
+async function narration(browser, errors) {
+  const { results, ok } = reporter();
+  mkdirSync(out, { recursive: true });
+  const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } });
+  await ctx.addInitScript(installSpeechStandIn);
+  const page = await ctx.newPage();
+  watchErrors(page, errors);
+  await page.goto(`${base}?intro=0`);
+  await page.waitForSelector('.mw-title-screen');
+  await page.addStyleTag({ content: '.mw-intro-loading { display: none !important; }' }); // the card fades by the clock; these runs have none
+  const film = () => page.evaluate(async () => {
+    const { playIntro } = await import('/src/ui/intro.js');
+    window.__handover = null;
+    const intro = playIntro({ manual: true, guard: false, quality: 'low', volume: 0.6, onHandover: () => (window.__handover = performance.now()) });
+    window.__intro = intro;
+    await intro.ready;
+  });
+  /** Step the film (on a clock of its own, nothing drawn) to second `target`. */
+  const stepTo = (target) => page.evaluate((to) => {
+    const intro = window.__intro;
+    while (intro.film && intro.film.t < to - 1e-6) intro.advance(Math.min(0.05, to - intro.film.t));
+  }, target);
+  const calls = () => page.evaluate(() => window.__speech.calls);
+  const reset = (allowed = true) => page.evaluate((a) => {
+    window.__speech.calls.length = 0;
+    window.__speech.allowed = a;
+  }, allowed);
+  const gone = () => page.waitForSelector('.mw-intro', { state: 'detached', timeout: 180000 });
+  const captions = await page.evaluate(async () => (await import('/src/intro/script.js')).CAPTIONS);
+  const hint = () => page.evaluate(() => document.querySelector('.mw-intro').classList.contains('needs-click'));
+  console.log('narration:');
+
+  // 1. the whole script: each caption is read once, word for word, while it is on the screen
+  await film();
+  await stepTo(46.9);
+  const said = (await calls()).filter((c) => c.call === 'speak');
+  ok('one line is read for each caption, in order', JSON.stringify(said.map((c) => c.text)) === JSON.stringify(captions.map((c) => c.text)), said.map((c) => `"${c.text}"`).join(', '));
+  ok('each is the caption on the screen as it is read', said.length > 0 && said.every((c) => c.caption === c.text));
+  ok('each starts with its caption', said.length === captions.length && said.every((c, i) => c.t >= captions[i].from && c.t < captions[i].from + 0.1), said.map((c) => c.t.toFixed(2)).join(' '));
+  ok('in English, at the setting\'s volume, a little slower than talk', said.length > 0 && said.every((c) => c.lang === 'en-US' && c.volume === 0.6 && c.rate < 1 && c.rate > 0.5));
+  ok('the hint for a click stays down while the browser speaks', !(await hint()));
+  await page.evaluate(() => window.__intro.skip());
+  await gone();
+
+  // 2. Esc in the middle of a line cuts the voice before the dip to black is over
+  await reset();
+  await film();
+  await stepTo(10.4); // the second line, "Pray. Summon the gods.", began at 9.6
+  const before = await calls();
+  ok('a line is being said when Esc comes', before.length === 2 && before[1].text === captions[1].text, JSON.stringify(before.map((c) => c.text || c.call)));
+  await page.keyboard.press('Escape');
+  const during = await calls();
+  ok('Esc cuts the voice in the same breath', during.length === 3 && during[2].call === 'cancel');
+  await gone();
+  const after = await calls();
+  const handover = await page.evaluate(() => window.__handover);
+  ok('the cut comes before the title does (the dip to black takes 320 ms)', handover !== null && handover - during[2].at > 250, `${Math.round(handover - during[2].at)} ms`);
+  ok('and nothing more is said', after.length === 3);
+
+  // 3. a browser that will not speak before a click: the hint comes up, and any click on the film starts the voice
+  await reset(false);
+  await film();
+  await stepTo(3);
+  await page.waitForTimeout(100); // the refusal comes in a task of its own
+  ok('refused, the hint comes up', await hint());
+  await page.evaluate(() => window.__intro.draw());
+  await page.waitForTimeout(700); // it fades in over half a second
+  const shown = await page.evaluate(() => getComputedStyle(document.querySelector('.mw-intro-hint')).opacity);
+  ok('and shows', Number(shown) > 0.95, `opacity ${shown}`);
+  await page.screenshot({ path: join(out, 'narration-hint.png') });
+  await page.evaluate(() => (window.__speech.allowed = true));
+  await page.mouse.click(320, 180);
+  const clicked = await calls();
+  ok('a click on the film says the line on the screen', clicked.length === 2 && clicked[1].text === captions[0].text && clicked[1].caption === captions[0].text, JSON.stringify(clicked.map((c) => c.text || c.call)));
+  ok('and the hint goes', !(await hint()));
+  await stepTo(10);
+  const next = (await calls()).filter((c) => c.call === 'speak');
+  ok('the next line is read without another click', next.length === 3 && next[2].text === captions[1].text, next.map((c) => `"${c.text}"`).join(', '));
+  await page.evaluate(() => window.__intro.skip());
+  await gone();
+
+  // 4. the page as a player gets it: on its own clock, the setting decides whether the film is read (low quality, for the sake of software GL)
+  for (const on of [true, false]) {
+    await reset();
+    await page.evaluate((narrate) => localStorage.setItem('mythicwar-settings', JSON.stringify({ quality: 'low', narration: narrate })), on);
+    await page.goto(`${base}?intro=1`);
+    await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
+    await page.waitForFunction(() => document.querySelector('.mw-intro-caption').textContent !== '', null, { timeout: 120000 }); // past 1.4 s of film
+    await page.waitForTimeout(500);
+    const heard = (await calls()).filter((c) => c.call === 'speak');
+    if (on) ok('narration on in Settings: the film is read as it plays', heard.length >= 1 && heard[0].text === captions[0].text && heard[0].caption === captions[0].text, JSON.stringify(heard.map((c) => c.text)));
+    else ok('narration off in Settings: not a word is said', heard.length === 0);
+    await page.keyboard.press('Escape');
+    const cut = await calls();
+    if (on) ok('Esc cuts it', cut.at(-1).call === 'cancel');
+    else ok('and nothing is cut, for nothing was started', cut.length === 0);
+    await gone(); // (software GL: the renderer is freed after the backlog of frames, half a minute here)
+  }
+  await ctx.close();
+  return results;
+}
+
 // ---------------------------------------------------------------- main
 
 const server = await ensureServer();
@@ -235,6 +382,8 @@ try {
   if (flag('flow')) {
     console.log('page flow:');
     failed = (await flow(browser, errors)).filter((r) => !r.pass).length;
+  } else if (flag('narration')) {
+    failed = (await narration(browser, errors)).filter((r) => !r.pass).length;
   } else {
     console.log(`stills at ${times.join(', ')} s:`);
     const files = await stills(browser, errors);
