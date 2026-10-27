@@ -22,7 +22,7 @@ import { createGroundCover } from './models/ground-cover.js';
 import { heightAt, footprintHeight } from './height.js';
 import { VFXSystem } from './vfx.js';
 import { CameraController, CAMERA_DEFAULTS } from './camera.js';
-import { hazeStretch, shadowShare, aoShare, overlayScale, crowdScale, ringLineScale, ringRadiusScale, pixelsPerTile, terrainStride, forestFar, unitFar } from './zoom-lod.js';
+import { hazeStretch, shadowShare, aoShare, overlayScale, crowdScale, ringLineScale, ringRadiusScale, detailPixels, terrainStride, forestFar, unitFar } from './zoom-lod.js';
 import { FarUnits } from './far-units.js';
 import { FogOfWar, patchFowObject, FOW_UNIFORMS } from './fog.js';
 import { createTerrain, WATER_LEVEL } from './terrain.js';
@@ -1282,13 +1282,14 @@ export class GameRenderer {
   }
 
   /**
-   * The detail levels of the zoom (zoom-lod.js): by pixels on the screen, one step for the whole ground mesh and
-   * all the forest, and the unit markers decided per unit in syncUnits. `lodPin` overrides a level.
+   * The detail levels of the zoom (zoom-lod.js): by pixels on the screen and only past the original zoom range, one
+   * step for the whole ground mesh and all the forest, and the unit markers decided per unit in syncUnits. `lodPin`
+   * overrides a level.
    */
   updateLod() {
     const lod = this.lod;
     const pin = this.lodPin;
-    const ppt = (lod.ppt = pixelsPerTile(this.camera.distance, this.viewH));
+    const ppt = (lod.ppt = detailPixels(this.camera.distance, this.viewH)); // Infinity inside the old zoom range
     const stride = pin && pin.stride !== undefined ? pin.stride : terrainStride(ppt, lod.stride);
     if (stride !== lod.stride) {
       lod.stride = stride;

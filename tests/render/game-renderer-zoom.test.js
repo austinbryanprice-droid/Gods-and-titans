@@ -179,6 +179,36 @@ test('zoom: the levels are held at the edge by their margin, and a pin overrides
   r.dispose();
 });
 
+test('zoom: the original range keeps every model and detail level in a short window', () => {
+  const { world, r, step } = makeMatch();
+  assert.ok(crowd(world, r) > 40);
+  const near = CAMERA_DEFAULTS.midDistance;
+  r.resize(W, 360); // 11 pixels a tile at 44: by the pixels alone that is marker, crown and coarse-ground territory
+  assert.ok(pixelsPerTile(near, 360) < 12);
+  r.camera.setDistance(near, true);
+  step(0.5);
+  assert.deepEqual({ stride: r.lod.stride, forestFar: r.lod.forestFar }, { stride: 1, forestFar: false });
+  assert.equal(r.terrain.stride, 1);
+  assert.equal(r.forest.far, false);
+  assert.equal(r.farUnits.mesh.count, 0, 'no markers at the old limit');
+  assert.equal(rootsShown(r), r.units.size, 'every model is drawn');
+
+  r.camera.setDistance(near + 6, true);
+  step(0.5);
+  assert.equal(r.lod.stride, 2, 'past it the levels follow the pixels');
+  assert.equal(r.forest.far, true);
+  assert.ok(r.farUnits.mesh.count > 20, `${r.farUnits.mesh.count} markers`);
+
+  r.camera.setDistance(near, true);
+  step(0.5);
+  assert.equal(r.terrain.stride, 1);
+  assert.equal(r.forest.far, false);
+  assert.equal(r.farUnits.mesh.count, 0, 'and back at the limit the models are back');
+  const inView = [...r.units.values()].filter((v) => v.onScreen);
+  assert.ok(inView.length > 20 && inView.every((v) => !v.far && v.model.root.visible));
+  r.dispose();
+});
+
 test('zoom: a unit that dies as a marker plays its death on the model', () => {
   const { world, r, step } = makeMatch();
   const cx = r.camera.target.x;

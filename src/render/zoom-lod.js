@@ -6,7 +6,7 @@
 // The detail levels (terrainStride, forestFar, unitFar) go by what the eye can tell apart, pixels on the
 // screen (CSS pixels), not by the distance alone: a bigger window keeps the detail longer. Each has
 // a way down and a way back up at a different value (hysteresis), so a camera resting on the edge does not
-// flicker between two looks.
+// flicker between two looks. None of them acts inside NEAR_RANGE, whatever the height of the window.
 import { CAMERA_DEFAULTS } from './camera.js';
 
 /** The camera distance where the original zoom range ended. */
@@ -84,11 +84,21 @@ export function pixelsPerTile(distance, viewH, fov = CAMERA_DEFAULTS.fov) {
 }
 
 /**
+ * The pixels a tile that the detail levels below go by: the real ones (pixelsPerTile) past NEAR_RANGE, and
+ * Infinity inside it, so every level stays at full detail in the zoom range the game always had, in a short
+ * window too (a 600 pixel window has under 19 pixels a tile at 44, which on its own would already swap the
+ * models of its small units for markers).
+ */
+export function detailPixels(distance, viewH, fov = CAMERA_DEFAULTS.fov) {
+  return distance > NEAR_RANGE ? pixelsPerTile(distance, viewH, fov) : Infinity;
+}
+
+/**
  * Ground mesh detail, as the step through the field's samples (FIELD_RES = 4 per tile): 1 every sample,
  * 2 every other one (a vertex every half tile), 4 one per tile. Coarser from 16 and from 7 pixels per tile
  * (the vertices are then 8 and 7 pixels apart at most); finer again above 19 and 8.5. It is one step for
  * the whole map, so neighbouring chunks always meet edge to edge.
- * @param {number} ppt pixelsPerTile
+ * @param {number} ppt detailPixels
  * @param {number} [prev] the step now in use
  */
 export function terrainStride(ppt, prev = 1) {
@@ -112,11 +122,11 @@ export function forestFar(ppt, prev = false) {
 /**
  * Whether a unit is drawn as a far marker (one shared instanced mesh in its team color) instead of its model:
  * under 11 pixels tall on the screen (a head, a body and a weapon are then a handful of pixels); back to the
- * model from 14. Only once the view is wider than the original zoom range (under 20 pixels a tile, a little
- * past 50 tiles up in a 720 pixel window; back to the models from 22): a tiny creature close up, and every
- * unit in the range the game always had, are drawn as themselves.
+ * model from 14. Only once the camera is past the original zoom range (detailPixels) and the view is under 20
+ * pixels a tile (a little past 50 tiles out in a 720 pixel window; back to the models from 22): a tiny creature
+ * close up, and every unit in the range the game always had, are drawn as themselves.
  * @param {number} heightPx the unit's height on the screen, foot to head
- * @param {number} ppt pixelsPerTile
+ * @param {number} ppt detailPixels
  * @param {boolean} [prev]
  */
 export function unitFar(heightPx, ppt, prev = false) {

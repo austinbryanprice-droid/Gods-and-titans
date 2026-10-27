@@ -126,6 +126,27 @@ test('zoom: the ground mesh steps coarser with the pixels, with a way back at a 
   for (const p of [1, 5, 8, 12, 18, 25, 80]) assert.ok([1, 2, 4].includes(Z.terrainStride(p)));
 });
 
+test('zoom: the detail levels do not act inside the original zoom range, in a window of any height', () => {
+  const near = CAMERA_DEFAULTS.midDistance;
+  for (const h of [240, 360, 600, 720, 1080, 2160]) {
+    for (const d of [CAMERA_DEFAULTS.minDistance, CAMERA_DEFAULTS.defaultDistance, near]) {
+      assert.equal(Z.detailPixels(d, h), Infinity, `${h} pixels, ${d} tiles: full detail`);
+    }
+    assert.equal(Z.detailPixels(near + 0.5, h), Z.pixelsPerTile(near + 0.5, h), `${h} pixels: past it, the real pixels`);
+  }
+  assert.equal(Z.detailPixels(Number.NaN, 720), Infinity);
+  // what it keeps: a 600 pixel window has under 19 pixels a tile at 44, which by itself would put markers there
+  assert.ok(Z.pixelsPerTile(near, 600) < 19);
+  assert.equal(Z.unitFar(8, Z.pixelsPerTile(near, 600)), true);
+  assert.equal(Z.unitFar(8, Z.detailPixels(near, 600)), false, 'a unit keeps its model at the old limit');
+  assert.equal(Z.unitFar(8, Z.detailPixels(near + 4, 600)), true, 'past it the markers go by the pixels');
+  assert.equal(Z.unitFar(8, Z.detailPixels(near, 600), true), false, 'a marker in use is let go on coming back in');
+  assert.equal(Z.terrainStride(Z.detailPixels(near, 300)), 1);
+  assert.equal(Z.terrainStride(Z.detailPixels(near, 300), 4), 1);
+  assert.equal(Z.forestFar(Z.detailPixels(near, 300)), false);
+  assert.equal(Z.forestFar(Z.detailPixels(near, 300), true), false);
+});
+
 test('zoom: the forest and the unit markers switch with a margin', () => {
   assert.equal(Z.forestFar(10), true);
   assert.equal(Z.forestFar(12), false);

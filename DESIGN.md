@@ -1484,7 +1484,9 @@ per-frame budget, so a revealed army appears over a few frames.
   terrain's border mist fades out past 80 tiles. What a wide view costs is what the far view is
   about: the late game (four AIs, ten minutes, 231 units, walls of forest) drew 1830 draw calls and
   2.2 M triangles at low from 170 tiles. Three detail levels go by *pixels on the screen*
-  (`pixelsPerTile`, in CSS pixels: a bigger window keeps its detail longer), each with a
+  (`detailPixels`: `pixelsPerTile` in CSS pixels, so a bigger window keeps its detail longer; and
+  none at all up to 44, so the old zoom range keeps every level at full detail in a short window
+  too, where a 600 pixel high one has under 19 pixels a tile at the old limit), each with a
   way back at a different value (hysteresis) so a camera resting on an edge does not flicker:
   (1) `terrainStride`: the ground mesh draws every 2nd field sample below 16 pixels a tile (back
   above 19) and every 4th below 7 (back above 8.5): `createTerrain().setStride(n)` swaps each
@@ -1497,7 +1499,7 @@ per-frame budget, so a revealed army appears over a few frames.
   InstancedMesh a variant for the whole map that copies the matrices and tints of the chunk
   meshes the first time it is wanted and is kept in step by `fell()`; `forest.setFar(on)` swaps
   them. (3) `unitFar`: a unit under 11 pixels tall on the screen (back to the model from 14),
-  once the view is wider than the old range (under 20 pixels a tile, back from 22), is a marker:
+  once the camera is past the old range and the view is under 20 pixels a tile (back from 22), is a marker:
   `far-units.js`, one instanced 54-triangle figure in its team colour for all of them (fog of war,
   fade-in and the blob shadow as for models); its model is hidden and not animated, and a unit
   that dies as a marker plays its death on its model. The levels are driven by
