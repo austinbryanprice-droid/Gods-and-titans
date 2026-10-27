@@ -1777,7 +1777,8 @@ per-frame budget, so a revealed army appears over a few frames.
   under the stingers in `DUCKS` (`summon_god`, `summon_titan`, `victory`, `defeat`, `tier_up`, `horn`; heard through
   `sfx.onPlay`). `initAudio(settings)` and `syncAudio(settings, changed)` (`main.js`) start both engines and carry the
   settings over; `playTitleMusic()` is what each menu screen calls (a no-op while it already plays);
-  `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is `music.play(themeId)` (crossfades;
+  `quietMusic()` is for the intro film (11.1), which plays over silence (`main.js` calls it as the film starts and
+  `playTitleMusic()` at the hand-over to the menu); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is `music.play(themeId)` (crossfades;
   remembered until the browser allows audio), `stop(fade)`, `setIntensity(0..1)`, `setVolume`, `mute`, `duck`,
   `state()`. All of it is a no-op where WebAudio is missing (Node), a voice that throws is muted from then on and five
   scheduler faults in a row switch the music off: it cannot break the game.

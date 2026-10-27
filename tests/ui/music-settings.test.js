@@ -9,7 +9,7 @@ import { FakeElement, installFakeDom } from './fake-dom.js';
 import { getSettings, saveSettings } from '../../src/settings.js';
 import { Overlays } from '../../src/ui/hud-overlays.js';
 import { music } from '../../src/audio/music.js';
-import { TITLE_INTENSITY, PREVIEW_MOODS, syncAudio } from '../../src/audio/audio.js';
+import { TITLE_INTENSITY, PREVIEW_MOODS, syncAudio, quietMusic, playTitleMusic } from '../../src/audio/audio.js';
 import { PANTHEON_LIST } from '../../src/data/index.js';
 import { THEMES } from '../../src/audio/music-themes.js';
 
@@ -143,6 +143,17 @@ test('the title screen plays the title theme, and the other menu screens keep it
   assert.equal(music.state().target, TITLE_INTENSITY);
   showMenu('how');
   assert.equal(music.state().wanted, 'menu');
+});
+
+test('the intro film plays over silence: quietMusic takes the music down until the title music is asked for again', () => {
+  showMenu('title');
+  assert.equal(music.state().wanted, 'menu');
+  quietMusic();
+  assert.equal(music.state().wanted, null);
+  assert.equal(music.state().playing, false);
+  playTitleMusic(); // what the film's hand-over does
+  assert.equal(music.state().wanted, 'menu');
+  assert.equal(music.state().target, TITLE_INTENSITY);
 });
 
 test('Settings can audition every pantheon at a calm, tense or battle moment, and leaving brings the title music back', () => {
