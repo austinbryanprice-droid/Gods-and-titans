@@ -13,13 +13,15 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
 import { el } from '../ui/hud-dom.js';
 import { InputController } from '../ui/input.js';
 import { Selection } from '../ui/hud-selection.js';
 import { tierName } from '../ui/hud-data.js';
-import { MSG, REASONS, sanitizeName, sanitizeReason } from '../net/protocol.js';
+import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
+import { TeamMarks } from './team-marks.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -169,6 +171,8 @@ export class Game {
     this.input = null;
     this.selection = null;
     this.viewState = null;
+    this.marks = new TeamMarks(); // the pings and markers standing on this screen (mine and my teammates')
+    this.markLimit = new RateLimiter(...MARK_SEND_RATE);
     this.raf = 0;
     this.lastFrame = 0;
     this.disposed = false;
@@ -230,6 +234,7 @@ export class Game {
     this.hud = new Hud({ root: this.hudRoot, game: this });
     if (session.mapMismatch) this.hud.setMapMismatch(true);
     this.offs.push(session.onChat((line) => this.onChat(line)));
+    if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
     this.offs.push(session.onEnd((info) => this.onEnd(info)));
     this.offs.push(this.viewState.on('*', (ev) => this.onEvent(ev)));
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
@@ -519,6 +524,24 @@ export class Game {
     if (this.session && !this.ended) this.session.sendChat(text);
   }
 
+  /**
+   * Ping or mark a spot for my team (DESIGN 9). The session shows it here at once and, when I have
+   * teammates, tells only them. Returns false when it was not sent: too many in a row (the same pace
+   * the host would drop at, so a mark I see is a mark my team sees), or the match is over.
+   * @param {string} kind a key of MARKS
+   * @param {number} x tile
+   * @param {number} y tile
+   */
+  sendMark(kind, x, y) {
+    const s = this.session;
+    if (this.disposed || !s || this.ended || typeof s.sendMark !== 'function' || !Object.hasOwn(MARKS, kind)) return false;
+    if (!this.markLimit.take()) {
+      if (this.hud) this.hud.message('Slow down: too many pings.', 'error');
+      return false;
+    }
+    return !!s.sendMark({ kind, x, y });
+  }
+
   surrender() {
     this.command({ type: 'surrender' });
   }
@@ -574,6 +597,20 @@ export class Game {
     if (!this.hud) return;
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
+  }
+
+  /**
+   * A ping or marker from my team (or my own, echoed by the session): stand it up and chime. A teammate's
+   * marker also says its words in the message area, in their colour, for a player with the sound off.
+   */
+  onMark(mark) {
+    if (this.disposed || !this.hud || !mark) return;
+    const placed = this.marks.add(mark);
+    if (!placed) return;
+    const def = MARKS[placed.kind];
+    const own = placed.from === this.myIndex;
+    sfx.play(def.urgent ? 'ping_urgent' : 'ping', { volume: own ? 0.5 : 1 });
+    if (!own && def.id !== 'ping') this.hud.chat({ from: placed.from, name: mark.name, text: def.text });
   }
 
   onEnd({ reason } = {}) {

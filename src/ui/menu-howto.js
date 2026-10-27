@@ -73,6 +73,12 @@ const HOTKEYS = [
     [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera'],
     [kbd('Mouse wheel'), 'Zoom in and out (smoothly on a trackpad)'],
   ]],
+  ['Team signals', [
+    [kbd('Alt', 'Click'), 'Ping your team at that spot on the map or the minimap (not while aiming an order or placing a building)'],
+    [kbd('Middle-click'), 'The same with the middle button; hold it and drag to move the camera instead'],
+    [['Marker buttons'], 'Beside the minimap: Ping, Attack, Defend, Help and Gather. Press one, then click the map or the minimap'],
+    [['Who sees them'], 'Only your teammates. A mark fades after a few seconds; click the arrow at the edge of the screen to jump to one out of view'],
+  ]],
 ];
 
 // "your Village Hall, then a Town Hall and a City Palace": what the Town Center is called on screen at each tier.

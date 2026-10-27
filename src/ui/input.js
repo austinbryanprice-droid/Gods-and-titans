@@ -3,11 +3,13 @@
 // screen, control groups, Tab subgroups), right-click smart orders with shift
 // queueing, command-card hotkeys, targeting modes (attack-move, abilities,
 // gather, pray, rally), building placement with the ghost, and the camera
-// (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3).
+// (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3), and the team's pings and
+// markers (Alt+click, middle-click, the marker buttons).
 import { TERRAIN, MAX_QUEUE, MAX_WALL_SELECTION } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { isWallType } from '../data/walls.js';
 import { MANOR, houseBlocks } from '../data/houses.js';
+import { MARKS, DEFAULT_MARK } from '../data/marks.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { checkPlacement, checkWallLine, footprintAt, peaceAnchors } from '../game/placement.js';
@@ -19,6 +21,7 @@ import { peaceNotice } from '../sim/peace.js';
 
 const DRAG_THRESHOLD = 5; // px before a left press becomes a box
 const DOUBLE_MS = 350;
+const PING_CLICK_MS = 350; // a middle press that ends sooner than this without moving is a ping; otherwise it was a camera drag
 const EDGE_PX = 4;
 const PAN_SPEED = 26; // tiles per second for edge scroll and arrow keys
 const HOVER_MS = 60;
@@ -261,7 +264,8 @@ export class InputController {
     this.mouseInWindow = true;
     if (e.button === 1) {
       e.preventDefault();
-      this.midDown = { x: e.clientX, y: e.clientY };
+      // x, y: where the camera was last moved from; spot: what a ping would mark (the camera moves if this becomes a drag).
+      this.midDown = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false, spot: this.markSpot(p.x, p.y) };
       this.setCursor('pan');
       return;
     }
@@ -272,6 +276,12 @@ export class InputController {
       return;
     }
     if (e.button !== 0) return;
+    if (e.altKey && this.mode.kind === 'normal') {
+      // Alt+click is a team ping and nothing else (no selection). With an order or a building pending it stays an ordinary click.
+      const spot = this.markSpot(p.x, p.y);
+      if (spot) this.pingAt(spot.x, spot.y);
+      return;
+    }
     if (this.mode.kind === 'target') {
       this.confirmTarget(p.x, p.y, null, e.shiftKey);
       return;
@@ -297,24 +307,33 @@ export class InputController {
       if (this.leftDown.box) this.drawBox(this.leftDown.x, this.leftDown.y, e.clientX, e.clientY);
     }
     if (this.midDown && this.renderer) {
-      const cam = this.renderer.camera;
-      if (typeof cam.panPixels === 'function') {
-        cam.panPixels(e.clientX - this.midDown.x, e.clientY - this.midDown.y);
-      } else {
-        const a = this.canvasPoint(this.midDown.x, this.midDown.y);
-        const b = this.canvasPoint(e.clientX, e.clientY);
-        const wa = this.ground(a.x, a.y);
-        const wb = this.ground(b.x, b.y);
-        if (wa && wb) cam.pan(wa.x - wb.x, wa.y - wb.y);
+      const md = this.midDown;
+      // A few pixels of shake still make a click (a ping); past DRAG_THRESHOLD the press is a drag from where it began.
+      if (!md.moved && Math.hypot(e.clientX - md.x, e.clientY - md.y) > DRAG_THRESHOLD) md.moved = true;
+      if (md.moved) {
+        const cam = this.renderer.camera;
+        if (typeof cam.panPixels === 'function') {
+          cam.panPixels(e.clientX - md.x, e.clientY - md.y);
+        } else {
+          const a = this.canvasPoint(md.x, md.y);
+          const b = this.canvasPoint(e.clientX, e.clientY);
+          const wa = this.ground(a.x, a.y);
+          const wb = this.ground(b.x, b.y);
+          if (wa && wb) cam.pan(wa.x - wb.x, wa.y - wb.y);
+        }
+        md.x = e.clientX;
+        md.y = e.clientY;
       }
-      this.midDown = { x: e.clientX, y: e.clientY };
     }
   }
 
   onMouseUp(e) {
     if (e.button === 1 && this.midDown) {
+      const md = this.midDown;
       this.midDown = null;
       this.setCursor('');
+      // A middle click, as opposed to a drag of the camera, pings the spot it was made on.
+      if (!md.moved && md.spot && !this.disposed && performance.now() - md.t < PING_CLICK_MS) this.pingAt(md.spot.x, md.spot.y);
       return;
     }
     if (e.button === 0 && this.mode.kind === 'place' && this.mode.anchor) {
@@ -686,6 +705,12 @@ export class InputController {
       case 'cast':
         ok = this.castAt(m, p, target, shift);
         break;
+      case 'mark': {
+        // A marker button's click: a unit or building under the cursor is marked where it stands.
+        const spot = target ? { x: target.ix ?? target.x, y: target.iy ?? target.y } : p;
+        ok = this.sendMark(m.mark, spot.x, spot.y);
+        break;
+      }
       default:
         break;
     }
@@ -925,9 +950,14 @@ export class InputController {
   }
 
   /** Minimap pointer events (from minimap.js). */
-  onMinimap({ button, phase, x, y, shift }) {
+  onMinimap({ button, phase, x, y, shift, alt }) {
     if (this.hud.overlays.open) return;
     const r = this.renderer;
+    // The middle button, and Alt+click when no order is pending, ping the team at that spot.
+    if (button === 1 || (button === 0 && alt && this.mode.kind === 'normal')) {
+      if (phase === 'down') this.pingAt(x, y);
+      return;
+    }
     if (button === 0) {
       if (phase === 'down' && this.mode.kind === 'target') {
         this.confirmTarget(0, 0, { x, y }, shift);
@@ -942,6 +972,43 @@ export class InputController {
       }
       this.smartAt(0, 0, shift, { x, y });
     }
+  }
+
+  // ---------------------------------------------------------------- team marks
+
+  /** True while a marker button is armed (its next click on the map or minimap places the marker). */
+  marking() {
+    return this.mode.kind === 'target' && this.mode.order === 'mark';
+  }
+
+  /** What a click on the map marks: a unit or building where it stands, otherwise the ground under the cursor. */
+  markSpot(x, y) {
+    const t = this.pick(x, y);
+    if (t && Number.isFinite(t.x) && Number.isFinite(t.y)) return { x: t.ix ?? t.x, y: t.iy ?? t.y };
+    return this.ground(x, y);
+  }
+
+  /** Ping the team at a spot (Alt+click, middle-click). */
+  pingAt(x, y) {
+    return this.sendMark(DEFAULT_MARK, x, y);
+  }
+
+  /** Send a mark of this kind; the game keeps the pace, shows it here and tells the team. */
+  sendMark(kind, x, y) {
+    if (this.disposed || this.hud.overlays.open || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    return this.game.sendMark(kind, x, y);
+  }
+
+  /** A marker button was pressed: the next click on the map or minimap places it (the button again, or Esc, puts it away). */
+  armMark(kind) {
+    if (this.disposed || this.hud.overlays.open || !Object.hasOwn(MARKS, kind)) return;
+    sfx.play('click');
+    if (this.marking() && this.mode.mark === kind) {
+      this.cancelMode();
+      return;
+    }
+    this.setMode({ kind: 'target', order: 'mark', mark: kind, target: 'point' });
+    this.hud.message(`${MARKS[kind].name}: click the map or the minimap. Esc cancels.`, 'info');
   }
 
   // ---------------------------------------------------------------- command card
