@@ -5,6 +5,7 @@
 // GameSetup from `start` and every snapshot. Pure: runs in Node too.
 import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS, MAX_QUEUE } from '../config.js';
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
+import { MARKS } from '../data/marks.js';
 import { sanitizeName } from './protocol.js';
 
 const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -103,6 +104,23 @@ export function sanitizeCommand(cmd, bounds) {
     out[field] = v;
   }
   return out;
+}
+
+/**
+ * Rebuild a team mark (DESIGN 9) from a `mark` message, a client's or the host's relay: a kind
+ * from the MARKS table and a spot clamped to the map, rounded to a hundredth of a tile. Who sent
+ * it is never taken from the message. Returns null for anything unusable.
+ * @param {*} m
+ * @param {{ width: number, height: number }} bounds map size in tiles
+ * @returns {{ kind: string, x: number, y: number }|null}
+ */
+export function sanitizeMark(m, bounds) {
+  if (!isObject(m) || !hasOwn(MARKS, m.kind)) return null;
+  const b = bounds && bounds.width > 0 && bounds.height > 0 ? bounds : { width: 256, height: 256 };
+  const x = FIELD.x(m.x, b);
+  const y = FIELD.y(m.y, b);
+  if (x === undefined || y === undefined) return null;
+  return { kind: m.kind, x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
 }
 
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;

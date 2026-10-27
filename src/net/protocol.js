@@ -6,7 +6,10 @@ import { PEER_ID_PREFIX, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.
 // The version two builds compare at join (HELLO.version) is PROTOCOL_VERSION in
 // wire-version.js: it needs the sanitizer and codec tables, which import this file.
 
-/** Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC; host→client: the rest (+ LOBBY, CHAT). */
+/**
+ * Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC MARK; host→client: the rest
+ * (+ LOBBY, CHAT, and MARK, which the host relays to the sender's teammates only).
+ */
 export const MSG = {
   HELLO: 'hello',
   LOBBY: 'lobby',
@@ -14,6 +17,7 @@ export const MSG = {
   CHAT: 'chat',
   PING: 'ping',
   RESYNC: 'resync',
+  MARK: 'mark',
   WELCOME: 'welcome',
   START: 'start',
   FULL: 'full',
