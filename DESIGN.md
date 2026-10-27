@@ -351,10 +351,13 @@ Pop used = pop of living units + pop of everything queued in production.
 - Placement: all footprint tiles in bounds, ground-passable (not forest/water/rock), no
   building/mine footprint overlap, no enemy units on it (own units are pushed out), and every
   drop-off (Town Center, Storehouse) keeps a gap of ≥ `DROPOFF_MINE_GAP` (3) empty tiles
-  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. The error names the reason,
-  the first that applies of: water, rock or the map edge (`Can't build there.`), `Trees in the
-  way.`, `Another building is in the way.`, `A gold mine is in the way.`, `Something is in the
-  way.` (an enemy or neutral unit), `Too close to a gold mine.` (the gap alone);
+  (Chebyshev: `max(gapX, gapY)`) from every gold mine footprint. In a Decade of Peace no tile of
+  the footprint may lie within `PEACE_BUILD_GAP` (20) empty tiles of an enemy Town Center (5.10).
+  The error names the reason, the first that applies of: water, rock or the map edge (`Can't build
+  there.`), `Trees in the way.`, `Another building is in the way.`, `A gold mine is in the way.`,
+  `Something is in the way.` (an enemy or neutral unit), `The Decade of Peace holds for another
+  m:ss: no building near an enemy Town Center yet.` (the peace's ground), `Too close to a gold
+  mine.` (the gap alone);
   `world.placementError(i, typeId, tx, ty)` returns that text (null = valid) and
   src/game/placement.js `checkPlacement(...).message` gives the same on the client, which also
   says `Unexplored ground.` first for any fogged tile (the sim does not know the fog, and the
@@ -603,6 +606,39 @@ for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the 
   Attack-move walks through rivals without stopping.
 - Neutral creatures (owner −1) are never protected or held back: camps still wake, fight and
   pay bounty, and units fight them as usual.
+- **Ground kept clear.** While the peace lasts nobody builds within `PEACE_BUILD_GAP` (20) empty
+  tiles of an enemy Town Center, finished or still a site (`PEACE_ANCHOR`), so a rival cannot
+  wall a base in, put towers on its doorstep or plant a camp beside it while attacking is
+  off. The gap is the straight distance between the nearest tiles of the two footprints (0 when
+  they touch), so the ground is a square around the Town Center with rounded corners, 44 tiles
+  across. Only enemy Town Centers keep ground: not houses, towers or walls (any building would let
+  a player creep a line of cheap ones across the map and claim it), not a teammate's, not your
+  own (build as close to your own as you like). Rules: `peaceBlocksFootprint` in `src/sim/peace.js`
+  (the footprint test shared with the client), `world.peaceBuildBlocks(i, tx, ty, size)` (the
+  enemy Town Centers of player `i`, only while `world.peace` holds) and one line in
+  `placementError`, so everything that places a building obeys it with the text above: a player's
+  `build` and each tile of a wall line (tiles inside are left out like any tile that cannot be
+  built on; the peace is the error when none can go up), a queued build when the worker arrives
+  (cost refunded, 5.3), `findPlacement` and the AI (`canPlaceBuilding`), and the commands of a
+  remote player, since the host's sim has the last word. When the peace ends the ground is free
+  at once. Measured: starts of the generated maps are at least 62 tiles apart (small map, four
+  players; 66 between enemies in a 2v2), and in four AI-vs-AI peace games of 20 minutes (small and
+  medium maps, 2 to 4 players, Normal and Hard) no placement was ever refused for the peace, the
+  nearest an AI building came to an enemy Town Center was 25 tiles, and every game played out
+  exactly as with the rule switched off (same buildings, population and gold), so the AI's
+  base and expansions never meet it; only a Town Center planted on purpose beside an enemy's does.
+  Limits, kept on purpose: the rule is symmetric, so a Town Center planted just outside your 20
+  tiles claims ground of its own that overlaps the strip between (no "older Town Center wins"
+  rule); the refusal tells you a Town Center is within 20 tiles even if you have not seen it (the
+  same leak as `Another building is in the way.`); a far chokepoint stays open to walls.
+- The client shows the ground before the click (`src/game/placement.js` `checkFootprint` and
+  `peaceAnchors`): the ghost's tiles inside it are red with the sim's text, from the enemy Town
+  Centers the player has seen or remembers (`lastSeen`); one never scouted is refused only by the
+  sim, which names the reason. While a building or wall line is placed the renderer tints the
+  whole zone (`NoBuildZone` in `src/render/no-build-zone.js`: red, hatched, with a bright edge line
+  on its rim; one mesh of tile quads on the terrain, rebuilt only when the known Town Centers
+  change) and a tip by the cursor says why the ghost is red. A refused click shows the message
+  and keeps the placement open. None of it is on the wire (no snapshot field or event).
 - The peace ends at the start of the first tick with `time >= peaceEnd`: `world.peace` turns
   false and one `{ type: 'peaceEnd' }` event is emitted. There is no new snapshot field: clients
   derive the countdown from `setup.peaceMinutes` and the snapshot `time`
@@ -794,7 +830,9 @@ EntityView = {
 (owner indices), `world.canPlaceBuilding(i, typeId, tx, ty)`,
 `world.placementError(i, typeId, tx, ty)` → the refusal text (5.3: `"Can't build there."`, `"Trees in the way."`,
 `"Another building is in the way."`, `"A gold mine is in the way."`, `"Something is in the way."`,
-`"Too close to a gold mine."`) `| null`,
+`"The Decade of Peace holds for another m:ss: no building near an enemy Town Center yet."`,
+`"Too close to a gold mine."`) `| null`, `world.peaceBuildBlocks(i, tx, ty, size)` (5.10: is that
+footprint within `PEACE_BUILD_GAP` of an enemy Town Center while the peace holds),
 `world.findPlacement(i, typeId, nearX, nearY, maxR)` → `{tx, ty} | null`,
 `world.canAfford(i, cost)`, `world.hasBuilding(i, typeId, completedOnly = true)`,
 `world.isGameOver()`, `world.winningTeam`.
@@ -1451,6 +1489,13 @@ per-frame budget, so a revealed army appears over a few frames.
   Alt held, and a progress bar only when hovered. `PlacementLayer.showLine(typeId, tiles, kindAt)` is
   the ghost of the dragged line: a segment per tile to build (red where blocked), joined to its
   neighbours and to the walls that stand, over a per-tile grid.
+  In a Decade of Peace (5.10) `GameRenderer.setNoBuildZones(anchors)` (→ `PlacementLayer.setZones`)
+  gives the layer the enemy Town Centers whose surroundings stay clear; `NoBuildZone`
+  (`src/render/no-build-zone.js`) drapes one mesh of tile quads on the terrain over every tile within
+  `PEACE_BUILD_GAP` of them (`zoneMask`, the sim's own `peaceBlocksFootprint` per tile): a red tint with
+  diagonal hatching and a brighter pulsing line only where the zone ends (not along the map's edge),
+  drawn in the overlay scene under the footprint grid, visible exactly while a building or wall ghost
+  is, rebuilt only when the Town Centers change.
 
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
@@ -1477,7 +1522,10 @@ per-frame budget, so a revealed army appears over a few frames.
   it turns amber and pulses for the last minute and is gone when the peace ends); one line as the
   game opens, a reminder at 5:00, 1:00 and 0:10 (not for marks already passed when the HUD
   opens), and a "war begins" banner with the horn on `peaceEnd`. Right-clicking or attack-ordering a
-  protected player marks a walk, and the sword cursor does not show over it.
+  protected player marks a walk, and the sword cursor does not show over it. Placing a building shows
+  the ground an enemy Town Center keeps clear: tinted under the ghost, the ghost's tiles inside it red,
+  and a red tip by the cursor with the reason (`InputController.showPeaceZone` / `peaceTip`; the same
+  text a refused click and the sim give).
   God portraits top-left (click selects, double-click centers). Messages (errors, alerts,
   "Kronos is being summoned!"), chat (Enter), game-over overlay with stats, menu (surrender, quit).
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
@@ -1589,7 +1637,9 @@ player's wall breaks through it like any soldier (5.5). Its Barracks also trains
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
 population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
-home until the peace ends: the army keeps growing and masses at the rally point.
+home until the peace ends: the army keeps growing and masses at the rally point. The ground an
+enemy Town Center keeps clear is closed to its building too: every site it tries goes through
+`canPlaceBuilding`, so it simply takes another spot.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 
