@@ -651,7 +651,7 @@ export class PostFX {
     const depthTex = this.scene.depthTexture;
 
     // 2. ambient occlusion (half resolution)
-    if (this.cfg.aoTaps && this.aoRaw) {
+    if (this.cfg.aoTaps && this.aoRaw && look.aoStrength > 0.004) {
       const P = camera.projectionMatrix.elements;
       this.projInv.copy(camera.projectionMatrixInverse);
       const u = this.aoMat.uniforms;

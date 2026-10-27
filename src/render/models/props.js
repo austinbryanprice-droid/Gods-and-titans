@@ -32,6 +32,7 @@ import {
   patchFoliageMaterial, patchStoneMaterial, foliageDepthMaterial, PINE_TIERS, PINE_TOP, PINE_PRESETS, pineLayout,
 } from './foliage-shader.js';
 import { NEEDLE_SPRAYS } from './leaf-texture.js';
+import { createFarCrowns } from './props-far.js';
 
 // Forest chunk size (tiles). Every variant in a chunk is one InstancedMesh,
 // culled as a whole in the main and the shadow pass: at close and default zoom
@@ -949,7 +950,8 @@ function treeTint(variant, r1, r2, n, out) {
  * @param {{ variants?: string[], quality?: string }} [o] variants: grow only these tree variants (galleries and tests);
  *   quality: low / medium / high / ultra (leaf puffs lose their sphere depth on low)
  * @returns {{object3d: THREE.Group, fell: (tx:number, ty:number)=>boolean, isStanding: (tx:number, ty:number)=>boolean,
- *   setQuality: (q:string)=>void, count: number, dispose: ()=>void}}
+ *   setQuality: (q:string)=>void, setFar: (on:boolean)=>void, far: boolean, count: number, dispose: ()=>void}}
+ *   setFar(true) draws plain crowns (props-far.js) instead of the full trees: the far zoom (zoom-lod.js forestFar)
  */
 export function createForest(mapData, heightFn, { variants = null, quality = 'medium' } = {}) {
   const S = shared();
@@ -1094,9 +1096,48 @@ export function createForest(mapData, heightFn, { variants = null, quality = 'me
   stumps.receiveShadow = true;
   group.add(stumps);
 
+  // The far crowns (props-far.js): made the first time they are asked for, one mesh per variant for the whole
+  // map, with the matrices and tints the chunk meshes hold then; fell() keeps them in step after that.
+  let far = null;
+  let isFar = false;
+  const buildFar = () => {
+    const fg = new THREE.Group();
+    fg.name = 'forest-far';
+    const byVariant = new Map();
+    for (const t of trees) {
+      const v = t.bucket.variant;
+      const l = byVariant.get(v);
+      if (l) l.push(t);
+      else byVariant.set(v, [t]);
+    }
+    const list = [];
+    for (const [v, ts] of byVariant) {
+      const mesh = createFarCrowns(v, ts);
+      ts.forEach((t, i) => {
+        t.farMesh = mesh;
+        t.farIndex = i;
+      });
+      fg.add(mesh);
+      list.push(mesh);
+    }
+    group.add(fg);
+    return { group: fg, meshes: list };
+  };
+
   return {
     object3d: group,
     count: trees.length,
+    get far() {
+      return isFar;
+    },
+    setFar(on) {
+      on = !!on;
+      if (on === isFar) return;
+      if (on && !far) far = buildFar();
+      for (const m of meshes) m.visible = !on;
+      if (far) far.group.visible = on;
+      isFar = on;
+    },
     fell(tx, ty) {
       if (tx < 0 || ty < 0 || tx >= W || ty >= H) return false;
       const i = ty * W + tx;
@@ -1108,6 +1149,11 @@ export function createForest(mapData, heightFn, { variants = null, quality = 'me
         m.setMatrixAt(t.index, ZERO);
         m.instanceMatrix.addUpdateRange(t.index * 16, 16);
         m.instanceMatrix.needsUpdate = true;
+        if (t.farMesh) {
+          t.farMesh.setMatrixAt(t.farIndex, ZERO);
+          t.farMesh.instanceMatrix.addUpdateRange(t.farIndex * 16, 16);
+          t.farMesh.instanceMatrix.needsUpdate = true;
+        }
       }
       const t = list[0];
       const si = stumps.count;
@@ -1136,6 +1182,7 @@ export function createForest(mapData, heightFn, { variants = null, quality = 'me
         // per-chunk spruce geometry objects (the shared buffers are re-uploaded on next use)
         if (m.geometry !== S.trees.pine && m.geometry.attributes.aShape) m.geometry.dispose();
       }
+      if (far) for (const m of far.meshes) m.dispose();
       stumps.dispose();
     },
   };

@@ -228,10 +228,10 @@ export class StatusLayer {
     this.nBubbles = 0;
   }
 
-  /** Number of icons `fx` asks for (buff, debuff, slow, dot). */
-  static iconCount(fx) {
+  /** Number of icons `fx` asks for (buff, debuff, slow, dot), leaving out the `skip` kind. */
+  static iconCount(fx, skip = null) {
     let n = 0;
-    for (let i = 0; i < fx.length; i++) if (STATUS_ICONS[fx[i]] !== undefined) n++;
+    for (let i = 0; i < fx.length; i++) if (STATUS_ICONS[fx[i]] !== undefined && fx[i] !== skip) n++;
     return n;
   }
 
@@ -244,16 +244,18 @@ export class StatusLayer {
    * @param {number} size icon size, world units
    * @param {number} alpha
    * @param {number} phase animation offset (per unit)
+   * @param {string|null} [skip] a kind to leave out (the far zoom draws no buff over each unit of an army)
    * @returns {number} icons added
    */
-  addIcons(x, y, z, fx, size, alpha, phase) {
-    const n = StatusLayer.iconCount(fx);
+  addIcons(x, y, z, fx, size, alpha, phase, skip = null) {
+    const n = StatusLayer.iconCount(fx, skip);
     if (!n) return 0;
     let k = 0;
     const a = this.aIcon.array;
     const e = this._m.elements;
     for (let j = 0; j < ICON_ORDER.length; j++) {
       const name = ICON_ORDER[j];
+      if (name === skip) continue;
       let has = false;
       for (let i = 0; i < fx.length; i++) {
         if (fx[i] === name) {

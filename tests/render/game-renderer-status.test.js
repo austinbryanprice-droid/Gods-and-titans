@@ -192,6 +192,22 @@ test('status layer: icons in a fixed order centered over the unit, bubbles, caps
   assert.equal(root.children.length, 0);
 });
 
+test('status layer: a skipped kind is left out of the row, which stays centered', () => {
+  const root = new THREE.Group();
+  const s = new StatusLayer(root, 8, 2);
+  assert.equal(StatusLayer.iconCount(['buff', 'dot', 'slow']), 3);
+  assert.equal(StatusLayer.iconCount(['buff', 'dot', 'slow'], 'buff'), 2);
+  s.begin(0);
+  assert.equal(s.addIcons(0, 1, 0, ['buff'], 0.5, 1, 0, 'buff'), 0, 'nothing but the buff: no row');
+  assert.equal(s.addIcons(0, 1, 0, ['buff', 'dot', 'slow'], 0.5, 1, 0, 'buff'), 2);
+  s.end();
+  assert.equal(s.icons.count, 2);
+  const a = s.aIcon.array;
+  assert.deepEqual([a[0], a[4]], [STATUS_ICONS.slow, STATUS_ICONS.dot]);
+  assert.ok(Math.abs(a[3] + a[7]) < 1e-9 && a[3] < 0, 'two icons centered without the buff');
+  s.dispose();
+});
+
 test('status layer: rank pips are icons of kind RANK_ICON + rank, in the rank colours, and share the cap', () => {
   const root = new THREE.Group();
   const s = new StatusLayer(root, 4, 2);

@@ -67,7 +67,8 @@ test('hearing range follows the zoom: wider zoomed out, narrower zoomed in, neve
   assert.equal(hearingScale(cam(25)), 1);
   assert.ok(hearingScale(cam(44)) > 1.5 && hearingScale(cam(44)) <= 1.8);
   assert.equal(hearingScale(cam(10)), 0.8);
-  assert.equal(hearingScale(cam(500)), 1.8);
+  assert.ok(hearingScale(cam(100)) > hearingScale(cam(44)), 'keeps widening past the old far limit');
+  assert.equal(hearingScale(cam(500)), 4.5);
   assert.equal(hearingScale({}), 1, 'a camera without a distance is neutral');
   assert.equal(hearingScale(null), 1);
 });

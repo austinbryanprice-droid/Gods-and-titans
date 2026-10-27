@@ -46,7 +46,8 @@ the authoritative simulation.
   its center is `(tx + 0.5, ty + 0.5)`. Tile index = `ty * width + tx`.
 - `x` grows east, `y` grows **south** (minimap top = north = y 0).
 - 3D: sim `(x, y)` → Three `(x, h, y)` where `h` = terrain height at that point.
-  Camera sits south of its target looking north and down (~56° pitch).
+  Camera sits south of its target looking north and down (50° pitch close up, 58° at 44 tiles,
+  steeper still out to 66° at the 170 tile far limit; DESIGN 8, "Far zoom").
 - `facing` is radians, `atan2(dy, dx)` in sim coords. Models are built facing **+X**;
   set `object.rotation.y = -facing`.
 - Sim tick = 1/20 s (`TICK_RATE = 20`, `DT = 0.05`). Data durations are **seconds**,
@@ -1460,6 +1461,60 @@ per-frame budget, so a revealed army appears over a few frames.
   after post). Tests: `tests/render/atmosphere.test.js`, `tests/render/game-renderer-lighting.test.js`;
   `tools/shot-lighting.mjs` captures any scene at any time of day and quality (`--canvas` for
   high / ultra under software GL).
+- Far zoom (`camera.js`, `zoom-lod.js`, `far-units.js`, `models/props-far.js`; render-only: no sim,
+  protocol or data change). The camera zooms from 10 to 170 tiles (`CAMERA_DEFAULTS`; the range
+  used to end at 44, which is `midDistance` now): at 170 a whole medium map (128 tiles) fits a
+  16:9 window with its border around it. The pitch keeps its old line (50° to 58°) up to 44, then
+  rises on a rational curve to 66° at 170 (it has to stay under 70°: the bottom of the view would
+  pass the vertical); the clip planes follow the zoom (`updateClipPlanes`: near 0.5 up to the
+  default zoom, then 0.04 more a tile of distance up to 6; far 3.2 times the distance, never under
+  400), so the depth buffer keeps its precision. `zoom-lod.js` holds every curve that follows the
+  distance, as pure functions the renderer and the tests share; each gives the look the game
+  always had up to `NEAR_RANGE` (44): `hazeStretch` (haze distances times (d/44)^0.7, so the far
+  edge of a wide view keeps about the haze the old far view had instead of fading into it);
+  `shadowShare` (the sun's shadow fades out between 48 and 88 tiles, the blob shadows under units
+  take over, and from 88 the shadow pass is skipped: `shadowMap.autoUpdate` off, redrawn at once
+  when the camera comes back; the light itself keeps turning with the day); `aoShare` (ambient occlusion on high / ultra fades out between 60
+  and 110, the pass is skipped at 0); `overlayScale` (bars' thickness, status icons, floating
+  text: the old curve, then growing with d^0.8 so the drawn size falls slowly); `crowdScale` (a
+  unit's bar width and rank pips, d^0.5: an army of a hundred units a few pixels tall each does
+  not vanish under its own bars); `ringLineScale` and `ringRadiusScale` (selection and hover rings
+  are in tiles: the line grows with the distance and keeps the two pixels it had at 44, a unit's
+  ring radius with its square root; buildings keep their radius); and the sound's hearing scale
+  (`hearingScale` in `game.js`, up to 4.5, so a fight anywhere on a medium map is still heard). The
+  terrain's border mist fades out past 80 tiles. What a wide view costs is what the far view is
+  about: the late game (four AIs, ten minutes, 231 units, walls of forest) drew 1830 draw calls and
+  2.2 M triangles at low from 170 tiles. Three detail levels go by *pixels on the screen*
+  (`detailPixels`: `pixelsPerTile` in CSS pixels, so a bigger window keeps its detail longer; and
+  none at all up to 44, so the old zoom range keeps every level at full detail in a short window
+  too, where a 600 pixel high one has under 19 pixels a tile at the old limit), each with a
+  way back at a different value (hysteresis) so a camera resting on an edge does not flicker:
+  (1) `terrainStride`: the ground mesh draws every 2nd field sample below 16 pixels a tile (back
+  above 19) and every 4th below 7 (back above 8.5): `createTerrain().setStride(n)` swaps each
+  chunk's index (`buildTerrainLodIndex`, cached per step) over the same vertices, one step for the
+  whole map so chunk edges, which lie on whole tiles, always meet; positions, normals, the data
+  texture and the shader are shared, so only the triangle count changes. (2) `forestFar`: below 11
+  pixels a tile (back above 13) the forest is drawn as plain crowns (`props-far.js`: smooth
+  vertex-coloured shapes, 18 to 30 triangles a tree against 76 to 144, in the leaf colours of the
+  full tree times 0.93, lit by the same foliage light, with no wind and no shadow), one
+  InstancedMesh a variant for the whole map that copies the matrices and tints of the chunk
+  meshes the first time it is wanted and is kept in step by `fell()`; `forest.setFar(on)` swaps
+  them. (3) `unitFar`: a unit under 11 pixels tall on the screen (back to the model from 14),
+  once the camera is past the old range and the view is under 20 pixels a tile (back from 22), is a marker:
+  `far-units.js`, one instanced 54-triangle figure in its team colour for all of them (fog of war,
+  fade-in and the blob shadow as for models), as tall as the unit from its foot to the top of its
+  model (a flyer's from its hover, not from the ground); its model is hidden and not animated, and a unit
+  that dies as a marker plays its death on its model. The levels are driven by
+  `GameRenderer.updateLod()` and `syncUnits`; `renderer.lodPin = { stride, forestFar, unitFar }`
+  pins any of them (tools and tests). Every curve above goes by `GameRenderer.zoomDistance`, the
+  camera's distance, except while the camera is free (the intro film, 11.1): its authored framings
+  (74 tiles out at the start) never see more than the old range, so the film keeps the look it was
+  made for. Measured at low, 1280x720, the late game, 170 tiles: 1830
+  to 420 draw calls, 2.2 M to 0.5 M triangles, about 2.5 times less time per frame under software
+  GL (`tools/shot-zoom.mjs`: the same view at any distances with the levels auto, pinned `full`
+  or pinned `far`, stills and the cost table; the harness has a `late` scenario for it). Tests:
+  `tests/render/zoom-lod.test.js`, `game-renderer-zoom.test.js`, `far-units.test.js`, `props.test.js`,
+  `game-renderer-parts.test.js`.
 - Vision-edge fade (`src/render/unit-fade.js`): enemy and neutral units that come into sight
   after load fade in over `FADE_SECONDS` (0.25 s) and fade out the same way when they leave
   it (own and allied units, and everything visible at load, never fade). A fading-out unit is
@@ -1653,7 +1708,8 @@ per-frame budget, so a revealed army appears over a few frames.
   targeting, build placement with ghost (a refused click shows the client-side
   `checkPlacement(...).message`); Esc cancels; right-click cancels targeting; another command
   hotkey replaces the pending order), camera: edge scroll, arrow keys, mouse wheel zoom (one
-  step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan (a middle click that does not move
+  step per ~100 px of scroll, so trackpads zoom gently; each step is 16% of the distance, from 10
+  tiles to 170, where a whole medium map is in view), middle-drag pan (a middle click that does not move
   pings the team instead), minimap click/drag, Space centers on selection or last alert, F1–F3 select gods,
   Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
@@ -1709,8 +1765,8 @@ per-frame budget, so a revealed army appears over a few frames.
   click/drag moves camera, right-click issues smart move, Alt+click or middle-click pings the team.
 - Audio `src/audio/sfx.js`: WebAudio-synthesized sounds, `sfx.play(name, { x, y })` with
   distance attenuation from `sfx.setListener(x, y, scale)` (the camera target; `scale` follows the
-  zoom, 0.8 close to 1.8 far, and stretches the hearing range so a zoomed-out view still hears its
-  far side).
+  zoom, 0.8 close, 1 at the default zoom, 4.5 at the 170 tile far limit, and stretches the hearing
+  range so a zoomed-out view still hears its far side).
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
   tier_up, chop, mine, pray, horn, ping, ping_urgent.
@@ -1854,7 +1910,7 @@ src/data/pantheons/<id>.js         content owners
 src/sim/*.js                       simulation owner (mapgen.js: map owner)
 src/ai/*.js                        AI owner
 src/net/*.js, src/game/view-state.js  network owner
-src/render/game-renderer.js, terrain.js, camera.js, fog.js, overlays.js  renderer owner
+src/render/game-renderer.js, terrain.js, camera.js, zoom-lod.js, far-units.js, fog.js, overlays.js  renderer owner
 src/render/models/*.js             model owners
 src/render/vfx.js                  VFX owner
 src/ui/hud.js, hud.css, input.js, command-card.js, minimap.js  HUD owner
