@@ -255,6 +255,15 @@ test('cancelling on any one of the four Houses stops all of it and gives the who
   w.issueCommand(0, { type: 'cancelTrain', building: hs[0].id, index: 0 });
   w.tick();
   assert.equal(w.players[0].gold, gold, 'refunded once, not twice');
+  // The queue panel's Shift-click is one cancelTrain with a count of the whole queue: the same, once.
+  merge(w, hs);
+  w.tick();
+  assert.equal(w.players[0].gold, gold - rule.cost.gold);
+  w.issueCommand(0, { type: 'cancelTrain', building: hs[1].id, index: 0, count: 50 });
+  w.tick();
+  assert.equal(w.players[0].gold, gold, 'a whole-queue cancel stops the upgrade too');
+  assert.equal(w.players[0].wood, wood);
+  assert.equal(hs.every((h) => h.queue.length === 0), true);
 });
 
 test('a House that falls while its square is being combined stops the upgrade: the price comes back and the others stand', () => {
