@@ -488,7 +488,7 @@ export function createMenu({ root, onStart }) {
     };
     const modeBtns = [
       ['standard', 'Standard', 'Fight from the first minute.', () => setPeace(0)],
-      ['peace', PEACE_NAME, `No player can harm another for the first ${PEACE_LENGTHS.join(', ')} minutes: time to build and mass armies for one great battle.`, () => setPeace(lastPeace)],
+      ['peace', PEACE_NAME, `No player can harm another, or build near an enemy Town Center, for the first ${PEACE_LENGTHS.join(', ')} minutes: time to build and mass armies for one great battle.`, () => setPeace(lastPeace)],
     ].map(([id, label, title, pick]) => h('button.mw-seg', { type: 'button', title, dataset: { mode: id }, onclick: pick }, h('span', label)));
     const peaceBtns = PEACE_LENGTHS.map((m) => h('button.mw-seg', {
       type: 'button',
