@@ -6,6 +6,7 @@ import { reservePrayerSlot } from './economy.js';
 import { issueBuild, issueBuildLine, cancelBuild, issueRepair, needsRepair } from './construction.js';
 import { issueTrain, cancelTrain, issueTierUp, issueResearch, issueWallUpgrade, setRally } from './production.js';
 import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbility, setAutocast } from './abilities.js';
+import { issueHouseUpgrade } from './homes.js';
 import { issueTrade } from './trade.js';
 import { peaceNotice } from './peace.js';
 import { hyp } from './common.js';
@@ -18,7 +19,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -56,6 +57,7 @@ export function normalizeCommand(cmd, map) {
       type,
       units: unitIds(cmd.units),
       walls: unitIds(cmd.walls),
+      houses: unitIds(cmd.houses),
       target: idOf(cmd.target),
       x: clampTo(num(cmd.x), map.width),
       y: clampTo(num(cmd.y), map.height),
@@ -72,6 +74,7 @@ export function normalizeCommand(cmd, map) {
       res: typeof cmd.res === 'string' && cmd.res.length <= MAX_NAME ? cmd.res : undefined,
       amount: num(cmd.amount),
       index: Number.isSafeInteger(cmd.index) ? cmd.index : undefined,
+      count: Number.isSafeInteger(cmd.count) ? cmd.count : undefined,
       queue: !!cmd.queue,
     };
   } catch {
@@ -347,11 +350,14 @@ export function applyCommand(world, player, cmd) {
     case 'upgradeWall':
       issueWallUpgrade(world, player, cmd.walls);
       break;
+    case 'upgradeHouses':
+      issueHouseUpgrade(world, player, cmd.houses);
+      break;
     case 'train':
       issueTrain(world, player, ownBuilding(world, player, cmd.building), cmd.unit);
       break;
     case 'cancelTrain':
-      cancelTrain(world, player, ownBuilding(world, player, cmd.building), cmd.index);
+      cancelTrain(world, player, ownBuilding(world, player, cmd.building), cmd.index, cmd.count);
       break;
     case 'upgradeTier':
       issueTierUp(world, player, ownBuilding(world, player, cmd.building));

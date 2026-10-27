@@ -1,5 +1,6 @@
 // Building placement ghost (translucent model + per-tile green/red footprint
-// grid), the ghost of a dragged wall line, and ghost outlines of own workers'
+// grid), the ghost of a dragged wall line, the ground a Decade of Peace keeps
+// clear around enemy Town Centers, and ghost outlines of own workers'
 // pending build orders.
 import * as THREE from 'three';
 import { BUILDINGS } from '../data/buildings.js';
@@ -7,6 +8,7 @@ import { wallConnections } from '../data/walls.js';
 import { MAX_WALL_LINE } from '../config.js';
 import { buildBuildingModel } from './models/building-models.js';
 import { footprintHeight, heightAt } from './height.js';
+import { NoBuildZone } from './no-build-zone.js';
 
 const GRID_VS = `
 attribute vec3 aCol;
@@ -213,6 +215,7 @@ export class PlacementLayer {
     this.getStyle = getStyle;
     this.grid = new FootprintGrid(parent, map);
     this.lineGrid = new FootprintGrid(parent, map, MAX_WALL_LINE);
+    this.zone = new NoBuildZone(parent, map); // shown with the ghost, whichever kind
     this.ghost = null; // { type, model, mats }
     this.line = { type: null, ghosts: [] }; // the segments of a dragged wall line: { model, valid, mask }
     this.valid = true;
@@ -281,12 +284,22 @@ export class PlacementLayer {
     g.model.root.visible = true;
     g.model.root.position.set(tx + size / 2, footprintHeight(this.map, tx, ty, size), ty + size / 2);
     this.grid.set(tx, ty, size, valid, tiles);
+    this.zone.show();
+  }
+
+  /**
+   * The ground kept clear of building around these enemy Town Centers ([{ tx, ty, size }], none to
+   * clear it): drawn under the ghost, whenever one is shown (the Decade of Peace, DESIGN 5.10).
+   */
+  setZones(anchors) {
+    this.zone.set(anchors || []);
   }
 
   hide() {
     if (this.ghost) this.ghost.model.root.visible = false;
     this.grid.hide();
     this.hideLine();
+    this.zone.hide();
   }
 
   /**
@@ -343,6 +356,7 @@ export class PlacementLayer {
     }
     for (let i = n; i < line.ghosts.length; i++) line.ghosts[i].model.root.visible = false;
     this.lineGrid.setCells(cells);
+    this.zone.show();
   }
 
   hideLine() {
@@ -396,6 +410,7 @@ export class PlacementLayer {
     this.time += dt;
     this.grid.uniforms.uTime.value = this.time;
     this.lineGrid.uniforms.uTime.value = this.time;
+    this.zone.update(dt);
     if (this.orderMats) {
       const k = 0.3 + 0.08 * Math.sin(this.time * 3);
       this.orderMats.body.opacity = k;
@@ -407,6 +422,7 @@ export class PlacementLayer {
   dispose() {
     this.grid.dispose();
     this.lineGrid.dispose();
+    this.zone.dispose();
     this.clearLine();
     if (this.ghost) this.ghost.model.dispose();
     this.ghost = null;

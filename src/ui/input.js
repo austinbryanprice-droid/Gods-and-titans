@@ -3,21 +3,25 @@
 // screen, control groups, Tab subgroups), right-click smart orders with shift
 // queueing, command-card hotkeys, targeting modes (attack-move, abilities,
 // gather, pray, rally), building placement with the ghost, and the camera
-// (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3).
+// (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3), and the team's pings and
+// markers (Alt+click, middle-click, the marker buttons).
 import { TERRAIN, MAX_QUEUE, MAX_WALL_SELECTION } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { isWallType } from '../data/walls.js';
+import { MANOR, houseBlocks } from '../data/houses.js';
+import { MARKS, DEFAULT_MARK } from '../data/marks.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { checkPlacement, checkWallLine, footprintAt } from '../game/placement.js';
+import { checkPlacement, checkWallLine, footprintAt, peaceAnchors } from '../game/placement.js';
 import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
-import { isComplete, isWallEntity } from './hud-data.js';
+import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 import { deletePlan, DELETE_CONFIRM_MS } from './delete-key.js';
 import { peaceNotice } from '../sim/peace.js';
 
 const DRAG_THRESHOLD = 5; // px before a left press becomes a box
 const DOUBLE_MS = 350;
+const PING_CLICK_MS = 350; // a middle press that ends sooner than this without moving is a ping; otherwise it was a camera drag
 const EDGE_PX = 4;
 const PAN_SPEED = 26; // tiles per second for edge scroll and arrow keys
 const HOVER_MS = 60;
@@ -71,6 +75,7 @@ export class InputController {
     this.hoverMoved = true;
     this.placeAt = 0;
     this.placeSig = '';
+    this.zoneSig = ''; // the enemy Town Centers whose kept-clear ground the renderer has been given
     this.queuedBuilds = []; // [{ b, tx, ty }] placed with Shift in this placement mode
     this.deleteArmed = null; // { ids: Set, until } after a first Delete press that asks for a second
     this.shiftHeld = false;
@@ -259,7 +264,8 @@ export class InputController {
     this.mouseInWindow = true;
     if (e.button === 1) {
       e.preventDefault();
-      this.midDown = { x: e.clientX, y: e.clientY };
+      // x, y: where the camera was last moved from; spot: what a ping would mark (the camera moves if this becomes a drag).
+      this.midDown = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false, spot: this.markSpot(p.x, p.y) };
       this.setCursor('pan');
       return;
     }
@@ -270,6 +276,12 @@ export class InputController {
       return;
     }
     if (e.button !== 0) return;
+    if (e.altKey && this.mode.kind === 'normal') {
+      // Alt+click is a team ping and nothing else (no selection). With an order or a building pending it stays an ordinary click.
+      const spot = this.markSpot(p.x, p.y);
+      if (spot) this.pingAt(spot.x, spot.y);
+      return;
+    }
     if (this.mode.kind === 'target') {
       this.confirmTarget(p.x, p.y, null, e.shiftKey);
       return;
@@ -295,24 +307,33 @@ export class InputController {
       if (this.leftDown.box) this.drawBox(this.leftDown.x, this.leftDown.y, e.clientX, e.clientY);
     }
     if (this.midDown && this.renderer) {
-      const cam = this.renderer.camera;
-      if (typeof cam.panPixels === 'function') {
-        cam.panPixels(e.clientX - this.midDown.x, e.clientY - this.midDown.y);
-      } else {
-        const a = this.canvasPoint(this.midDown.x, this.midDown.y);
-        const b = this.canvasPoint(e.clientX, e.clientY);
-        const wa = this.ground(a.x, a.y);
-        const wb = this.ground(b.x, b.y);
-        if (wa && wb) cam.pan(wa.x - wb.x, wa.y - wb.y);
+      const md = this.midDown;
+      // A few pixels of shake still make a click (a ping); past DRAG_THRESHOLD the press is a drag from where it began.
+      if (!md.moved && Math.hypot(e.clientX - md.x, e.clientY - md.y) > DRAG_THRESHOLD) md.moved = true;
+      if (md.moved) {
+        const cam = this.renderer.camera;
+        if (typeof cam.panPixels === 'function') {
+          cam.panPixels(e.clientX - md.x, e.clientY - md.y);
+        } else {
+          const a = this.canvasPoint(md.x, md.y);
+          const b = this.canvasPoint(e.clientX, e.clientY);
+          const wa = this.ground(a.x, a.y);
+          const wb = this.ground(b.x, b.y);
+          if (wa && wb) cam.pan(wa.x - wb.x, wa.y - wb.y);
+        }
+        md.x = e.clientX;
+        md.y = e.clientY;
       }
-      this.midDown = { x: e.clientX, y: e.clientY };
     }
   }
 
   onMouseUp(e) {
     if (e.button === 1 && this.midDown) {
+      const md = this.midDown;
       this.midDown = null;
       this.setCursor('');
+      // A middle click, as opposed to a drag of the camera, pings the spot it was made on.
+      if (!md.moved && md.spot && !this.disposed && performance.now() - md.t < PING_CLICK_MS) this.pingAt(md.spot.x, md.spot.y);
       return;
     }
     if (e.button === 0 && this.mode.kind === 'place' && this.mode.anchor) {
@@ -684,6 +705,12 @@ export class InputController {
       case 'cast':
         ok = this.castAt(m, p, target, shift);
         break;
+      case 'mark': {
+        // A marker button's click: a unit or building under the cursor is marked where it stands.
+        const spot = target ? { x: target.ix ?? target.x, y: target.iy ?? target.y } : p;
+        ok = this.sendMark(m.mark, spot.x, spot.y);
+        break;
+      }
       default:
         break;
     }
@@ -870,6 +897,34 @@ export class InputController {
     }
   }
 
+  /**
+   * In a Decade of Peace, tint the ground kept clear around the enemy Town Centers I know of under the
+   * placement ghost (it only goes to the renderer when those Town Centers change).
+   */
+  showPeaceZone(r) {
+    if (!r.setNoBuildZones) return;
+    const anchors = peaceAnchors(this.vs);
+    const sig = anchors.map((a) => `${a.tx},${a.ty}`).join(';');
+    if (sig === this.zoneSig) return;
+    this.zoneSig = sig;
+    r.setNoBuildZones(anchors);
+  }
+
+  /** The tip beside the cursor says why the ghost is red when it is the peace's kept-clear ground (the sim says the same). */
+  peaceTip(chk) {
+    const tip = this.wallTip;
+    if (!chk.peace) {
+      tip.hidden = true;
+      return;
+    }
+    const text = chk.message.replace(': ', ':\n');
+    if (tip.textContent !== text) tip.textContent = text;
+    tip.classList.add('is-bad');
+    tip.style.left = `${this.mx + 18}px`;
+    tip.style.top = `${this.my + 18}px`;
+    tip.hidden = false;
+  }
+
   /** The dragged line's ghost, and the tip beside the cursor with what it would build and cost. */
   previewWallLine(tx, ty) {
     const m = this.mode;
@@ -895,9 +950,14 @@ export class InputController {
   }
 
   /** Minimap pointer events (from minimap.js). */
-  onMinimap({ button, phase, x, y, shift }) {
+  onMinimap({ button, phase, x, y, shift, alt }) {
     if (this.hud.overlays.open) return;
     const r = this.renderer;
+    // The middle button, and Alt+click when no order is pending, ping the team at that spot.
+    if (button === 1 || (button === 0 && alt && this.mode.kind === 'normal')) {
+      if (phase === 'down') this.pingAt(x, y);
+      return;
+    }
     if (button === 0) {
       if (phase === 'down' && this.mode.kind === 'target') {
         this.confirmTarget(0, 0, { x, y }, shift);
@@ -912,6 +972,43 @@ export class InputController {
       }
       this.smartAt(0, 0, shift, { x, y });
     }
+  }
+
+  // ---------------------------------------------------------------- team marks
+
+  /** True while a marker button is armed (its next click on the map or minimap places the marker). */
+  marking() {
+    return this.mode.kind === 'target' && this.mode.order === 'mark';
+  }
+
+  /** What a click on the map marks: a unit or building where it stands, otherwise the ground under the cursor. */
+  markSpot(x, y) {
+    const t = this.pick(x, y);
+    if (t && Number.isFinite(t.x) && Number.isFinite(t.y)) return { x: t.ix ?? t.x, y: t.iy ?? t.y };
+    return this.ground(x, y);
+  }
+
+  /** Ping the team at a spot (Alt+click, middle-click). */
+  pingAt(x, y) {
+    return this.sendMark(DEFAULT_MARK, x, y);
+  }
+
+  /** Send a mark of this kind; the game keeps the pace, shows it here and tells the team. */
+  sendMark(kind, x, y) {
+    if (this.disposed || this.hud.overlays.open || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    return this.game.sendMark(kind, x, y);
+  }
+
+  /** A marker button was pressed: the next click on the map or minimap places it (the button again, or Esc, puts it away). */
+  armMark(kind) {
+    if (this.disposed || this.hud.overlays.open || !Object.hasOwn(MARKS, kind)) return;
+    sfx.play('click');
+    if (this.marking() && this.mode.mark === kind) {
+      this.cancelMode();
+      return;
+    }
+    this.setMode({ kind: 'target', order: 'mark', mark: kind, target: 'point' });
+    this.hud.message(`${MARKS[kind].name}: click the map or the minimap. Esc cancels.`, 'info');
   }
 
   // ---------------------------------------------------------------- command card
@@ -1013,6 +1110,22 @@ export class InputController {
           else if ((e.q || []).length) this.command({ type: 'cancelTrain', building: e.id, index: 0 });
         }
         break;
+      case 'upgradeHouses': {
+        // Every finished House of the active type: the sim finds the squares among them and pays square by square.
+        const houses = this.activeHouses().map((e) => e.id);
+        if (houses.length) this.command({ type: 'upgradeHouses', houses });
+        break;
+      }
+      case 'cancelMerge': {
+        // Stopping any one House of a square stops all four: one order for each whole square among the
+        // selected Houses, and one for each House left over from a part of a square.
+        const merging = this.activeHouses().filter(isMergingEntity);
+        const squares = houseBlocks(merging);
+        const covered = new Set(squares.flatMap((sq) => sq.ids));
+        const stop = [...squares.map((sq) => sq.ids[0]), ...merging.filter((e) => !covered.has(e.id)).map((e) => e.id)];
+        for (const id of stop) this.command({ type: 'cancelTrain', building: id, index: vs.entities.get(id).q.findIndex((it) => it.u === MANOR) });
+        break;
+      }
       case 'research': {
         // The least busy finished building of the active group researches it.
         const group = this.sel.activeGroup();
@@ -1020,7 +1133,7 @@ export class InputController {
         for (const e of this.sel.ownBuildings()) {
           if (!group || e.t !== group.type || !isComplete(e)) continue;
           const q = e.q || [];
-          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE) continue;
+          if (q.some((it) => it.u === 'tier_up') || q.length >= MAX_QUEUE || isMergingEntity(e)) continue;
           if (!pick || q.length < (pick.q || []).length) pick = e;
         }
         if (pick) this.command({ type: 'research', building: pick.id, upgrade: a.upgrade });
@@ -1032,6 +1145,12 @@ export class InputController {
       default:
         break;
     }
+  }
+
+  /** Own Houses of the active subgroup (the command card's combine buttons act on these). */
+  activeHouses() {
+    const group = this.sel.activeGroup();
+    return this.sel.ownBuildings().filter((e) => group && e.t === group.type && isComplete(e));
   }
 
   /** Own wall segments of the active subgroup (the command card's wall buttons act on these). */
@@ -1226,8 +1345,8 @@ export class InputController {
         return;
       }
       if (this.cancelMode()) return;
-      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade: Esc by habit would take it back.)
-      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x));
+      // A building with a queue: cancel the last item (WC3). (Not a wall's upgrade or Houses being combined: Esc by habit would take it back.)
+      const blds = this.sel.ownBuildings().filter((x) => x.q && x.q.length && !isWallEntity(x) && !isMergingEntity(x));
       if (blds.length) {
         const bq = blds[0];
         this.command({ type: 'cancelTrain', building: bq.id, index: bq.q.length - 1 });
@@ -1349,6 +1468,7 @@ export class InputController {
         const w = this.ground(p.x, p.y);
         if (w) {
           const { tx, ty } = footprintAt(this.mode.building, w.x, w.y);
+          this.showPeaceZone(r);
           if (isWallType(this.mode.building)) this.previewWallLine(tx, ty);
           else {
             const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty, this.plannedBuilds(this.shiftHeld));
@@ -1357,6 +1477,7 @@ export class InputController {
               this.placeSig = sig;
               r.showPlacement(this.mode.building, tx, ty, chk.valid, chk.tiles);
             }
+            this.peaceTip(chk);
           }
           this.placeAt = now;
         }

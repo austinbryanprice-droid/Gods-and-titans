@@ -22,6 +22,7 @@
 // this same vocabulary, folded in by computeMods before any researched upgrade. A building effect
 // whose `building` is '*' applies to every building type.
 import { BUILDINGS } from './buildings.js';
+import { researchHostOf } from './houses.js';
 import { PANTHEONS } from './pantheon-list.js';
 import { PERK_STATS } from './schema.js';
 import { REVIVE_COST_MULT } from '../config.js';
@@ -36,9 +37,10 @@ export function getUpgrade(id) {
   return typeof id === 'string' && Object.hasOwn(UPGRADES, id) ? UPGRADES[id] : null;
 }
 
-/** Upgrades researched at a building type, in card order. */
+/** Upgrades researched at a building type, in card order (a Manor researches the House upgrades). */
 export function upgradesFor(buildingId) {
-  const b = Object.hasOwn(BUILDINGS, buildingId) ? BUILDINGS[buildingId] : null;
+  const host = researchHostOf(buildingId);
+  const b = Object.hasOwn(BUILDINGS, host) ? BUILDINGS[host] : null;
   return b && b.upgrades ? b.upgrades.map((u) => UPGRADES[u.id]) : [];
 }
 
@@ -58,11 +60,24 @@ const NO_UNIT_MODS = Object.freeze({ damage: 0, hp: 0, armor: 0, regen: 0, speed
  */
 const NO_PERKS = Object.freeze(Object.fromEntries(PERK_STATS.map((k) => [k, 0])));
 
+// A building made by combining others (the Manor, from four Houses) holds what they held: an effect on
+// the House counts again for it, as many times as the Houses it replaced for what a building shelters
+// and holds up (pop, hp), once for the rest (armor). An effect on every building ('*') reaches it directly.
+const COMBINED = Object.values(BUILDINGS).filter((b) => b.mergesFrom);
+const SUMMED_STATS = ['pop', 'hp'];
+
+function addBuildingEffect(mods, id, stat, amount) {
+  const m = mods.buildings[id] || (mods.buildings[id] = { ...NO_BUILDING_MODS });
+  m[stat] += amount;
+}
+
 function addEffect(mods, e) {
   if (e.type === 'building') {
-    for (const id of e.building === '*' ? Object.keys(BUILDINGS) : [e.building]) {
-      const m = mods.buildings[id] || (mods.buildings[id] = { ...NO_BUILDING_MODS });
-      m[e.stat] += e.amount;
+    for (const id of e.building === '*' ? Object.keys(BUILDINGS) : [e.building]) addBuildingEffect(mods, id, e.stat, e.amount);
+    if (e.building !== '*') {
+      for (const b of COMBINED) {
+        if (b.mergesFrom.building === e.building) addBuildingEffect(mods, b.id, e.stat, SUMMED_STATS.includes(e.stat) ? e.amount * b.mergesFrom.count : e.amount);
+      }
     }
   } else if (e.type === 'unit') mods.units.push(e);
   else if (e.type === 'carry') mods.carry[e.resource] += e.amount;

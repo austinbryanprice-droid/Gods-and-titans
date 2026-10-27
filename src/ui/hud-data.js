@@ -4,6 +4,7 @@
 import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES } from '../data/index.js';
 import { MINE_TIME, CARRY_AMOUNT, PEACE_NAME } from '../config.js';
 import { NO_MODS, computeMods, workSpeed } from '../data/upgrades.js';
+import { MANOR } from '../data/houses.js';
 import { peaceClock } from '../sim/peace.js';
 
 /** Subgroup order (WC3 sorts heroes first): lower comes first. */
@@ -61,6 +62,11 @@ export function isComplete(e) {
 /** Is this view entity a wall segment (wooden or stone)? */
 export function isWallEntity(e) {
   return !!e && e.k === 'b' && !!BUILDINGS[e.t] && BUILDINGS[e.t].wall === true;
+}
+
+/** Is this view entity a House whose square is being combined into a Manor (sim/homes.js)? */
+export function isMergingEntity(e) {
+  return !!e && e.k === 'b' && (e.q || []).some((it) => it.u === MANOR);
 }
 
 /**
@@ -135,7 +141,7 @@ export const PEACE_WARNINGS = [300, 60, 10];
 
 /** The line the HUD shows once, as a game with a Decade of Peace opens. */
 export function peaceStartText(sec) {
-  return `The ${PEACE_NAME} is on: no fighting between players for another ${peaceClock(sec)}. Build, train and mass your armies.`;
+  return `The ${PEACE_NAME} is on: no fighting between players, and no building near an enemy Town Center, for another ${peaceClock(sec)}. Build, train and mass your armies.`;
 }
 
 /** The reminder at a PEACE_WARNINGS mark: "The Decade of Peace ends in 5 minutes." */

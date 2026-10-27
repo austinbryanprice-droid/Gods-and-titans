@@ -24,9 +24,11 @@ const { groundField, FIELD_RES } = await import('../../src/render/ground-field.j
 const { LAYER, LAYER_COUNT, GROUND_SIZE, terrainTextureData } = await import('../../src/render/terrain-textures.js');
 const { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } = await import('../../src/render/overlays.js');
 const { PlacementLayer } = await import('../../src/render/placement.js');
+const { NoBuildZone, zoneMask } = await import('../../src/render/no-build-zone.js');
+const { peaceBlocksFootprint } = await import('../../src/sim/peace.js');
 const { FireLayer, fireCount } = await import('../../src/render/fires.js');
 const { heightAt } = await import('../../src/render/height.js');
-const { TERRAIN } = await import('../../src/config.js');
+const { TERRAIN, PEACE_BUILD_GAP } = await import('../../src/config.js');
 
 const close = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 
@@ -519,6 +521,156 @@ test('placement: a ghost with a per-tile footprint, hidden on demand, pending or
   layer.setOrders([]);
   layer.update(0.1);
   assert.equal(visibleMeshes(), 0);
+  layer.dispose();
+  assert.equal(root.children.length, 0);
+});
+
+// ------------------------------------------------------------------ no-build zone (Decade of Peace)
+
+const ZONE_ANCHORS = [{ tx: 30, ty: 20, size: 4 }, { tx: 1, ty: 2, size: 4 }];
+
+test('no-build zone: the mask is the sim\'s own rule, tile by tile, clipped to the map with rounded corners', () => {
+  const W = 64;
+  const H = 48;
+  const mask = zoneMask(W, H, ZONE_ANCHORS);
+  assert.equal(mask.length, W * H);
+  let n = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const want = peaceBlocksFootprint(ZONE_ANCHORS, x, y, 1) ? 1 : 0;
+      assert.equal(mask[y * W + x], want, `tile ${x},${y}`);
+      n += want;
+    }
+  }
+  assert.ok(n > 1500, `${n} tiles kept clear`);
+  // One Town Center on its own (the other one's ground overlaps this one's west side).
+  const one = zoneMask(W, H, [ZONE_ANCHORS[0]]);
+  const at = (x, y) => one[y * W + x];
+  // The Town Center's own tiles (30..33 by 20..23) and the ground up to PEACE_BUILD_GAP - 1 empty tiles from it are in, the next one is out.
+  assert.equal(at(30, 20), 1);
+  assert.equal(at(30 - PEACE_BUILD_GAP, 21), 1, 'west side: 19 empty tiles');
+  assert.equal(at(30 - PEACE_BUILD_GAP - 1, 21), 0);
+  assert.equal(at(34 + PEACE_BUILD_GAP - 1, 21), 1, 'east side: 19 empty tiles');
+  assert.equal(at(34 + PEACE_BUILD_GAP, 21), 0);
+  // The corner of the square is cut off: 15 empty tiles out on both axes is over the line (450 > 400), 14 is not.
+  assert.equal(at(14, 4), 0);
+  assert.equal(at(15, 5), 1);
+  // Nothing known, nothing kept clear.
+  assert.ok(zoneMask(W, H, []).every((v) => v === 0));
+});
+
+test('no-build zone: one mesh of tile quads on the terrain, edge flags only where the zone ends, rebuilt only when it changes', () => {
+  const map = hillyMap(64, 48);
+  const root = new THREE.Group();
+  const zone = new NoBuildZone(root, map);
+  assert.equal(root.children.length, 0, 'nothing is made until there is a zone');
+  zone.set([]);
+  assert.equal(root.children.length, 0);
+
+  const anchors = [{ tx: 1, ty: 2, size: 4 }]; // touches the west and north edges of the map
+  zone.set(anchors);
+  const mask = zoneMask(map.width, map.height, anchors);
+  const cells = mask.reduce((a, v) => a + v, 0);
+  assert.equal(zone.cells, cells);
+  assert.equal(root.children.length, 1);
+  const mesh = zone.mesh;
+  assert.equal(mesh.name, 'no-build-zone');
+  assert.equal(mesh.visible, false, 'drawn only with the placement ghost');
+  const geo = mesh.geometry;
+  assert.equal(geo.getAttribute('position').count, cells * 4);
+  assert.equal(geo.index.count, cells * 6);
+  assert.equal(geo.index.array.constructor, Uint32Array);
+  assert.equal(mesh.material.transparent, true);
+  assert.equal(mesh.material.depthWrite, false);
+
+  // The edge flags (west, east, north, south neighbour is outside the zone) per quad, found by the quad's tile.
+  const pos = geo.getAttribute('position');
+  const sides = geo.getAttribute('aSides');
+  const flagsAt = (tx, ty) => {
+    for (let q = 0; q < cells; q++) {
+      const x = Math.floor(pos.getX(q * 4));
+      const z = Math.floor(pos.getZ(q * 4));
+      if (x === tx && z === ty) return [0, 1, 2, 3].map((k) => sides.getComponent(q * 4, k));
+    }
+    return null;
+  };
+  const east = 5 + PEACE_BUILD_GAP - 1; // the last tile east of the Town Center (tiles 1..4) that is kept clear
+  assert.deepEqual(flagsAt(east, 3), [0, 1, 0, 0], 'a quad on the east rim: only its east side is open');
+  assert.deepEqual(flagsAt(3, 3), [0, 0, 0, 0], 'inside: no line');
+  assert.deepEqual(flagsAt(0, 3), [0, 0, 0, 0], 'on the map edge: no line along it');
+  assert.deepEqual(flagsAt(east, 2), [0, 1, 0, 0]);
+  const south = 6 + PEACE_BUILD_GAP - 1;
+  assert.deepEqual(flagsAt(2, south), [0, 0, 0, 1], 'south rim');
+  assert.equal(flagsAt(east + 1, 3), null, 'nothing past the rim');
+
+  // Draped on the terrain: each corner sits a hair over the ground (never under the water line).
+  for (const q of [0, Math.floor(cells / 2), cells - 1]) {
+    for (let v = 0; v < 4; v++) {
+      const i = q * 4 + v;
+      const want = Math.max(heightAt(map, pos.getX(i), pos.getZ(i)), -0.2) + 0.05;
+      assert.ok(close(pos.getY(i), want, 1e-5), `corner ${i}`);
+    }
+  }
+
+  // The same Town Centers again: not rebuilt. Shown and hidden with the ghost.
+  zone.set(anchors.map((a) => ({ ...a })));
+  assert.equal(zone.mesh, mesh);
+  zone.show();
+  assert.equal(mesh.visible, true);
+  zone.hide();
+  assert.equal(mesh.visible, false);
+  zone.show();
+  // Another set of Town Centers: a new mesh in place of the old one, still shown.
+  zone.set([{ tx: 40, ty: 30, size: 4 }]);
+  assert.notEqual(zone.mesh, mesh);
+  assert.equal(root.children.length, 1, 'the old one is gone');
+  assert.equal(zone.mesh.visible, true);
+  // None: nothing drawn.
+  zone.set([]);
+  assert.equal(zone.mesh, null);
+  assert.equal(zone.cells, 0);
+  assert.equal(root.children.length, 0);
+
+  // The edge line pulses with time.
+  const t0 = zone.uniforms.uTime.value;
+  zone.update(0.5);
+  assert.ok(close(zone.uniforms.uTime.value, t0 + 0.5));
+  zone.set(anchors);
+  zone.dispose();
+  assert.equal(root.children.length, 0);
+});
+
+test('placement: the no-build zone shows with the ghost (building or wall line), hides with it and goes away on dispose', () => {
+  const map = hillyMap(64, 48);
+  const root = new THREE.Group();
+  const layer = new PlacementLayer(root, map, () => ({ pantheon: null, color: '#3366ff' }));
+  const zoneShown = () => {
+    let on = false;
+    root.traverseVisible((o) => {
+      if (o.name === 'no-build-zone') on = true;
+    });
+    return on;
+  };
+  layer.setZones([{ tx: 40, ty: 30, size: 4 }]);
+  assert.equal(zoneShown(), false, 'set, but no ghost yet');
+  layer.show('house', 30, 30, false, [1, 0, 1, 1]);
+  assert.equal(zoneShown(), true);
+  layer.update(0.1);
+  assert.ok(layer.zone.uniforms.uTime.value > 0, 'the layer advances its time');
+  layer.hide();
+  assert.equal(zoneShown(), false);
+  // A wall line shows it too, and a type that is not a building takes it down.
+  layer.showLine('wooden_wall', [{ tx: 30, ty: 30, state: 'build' }, { tx: 31, ty: 30, state: 'blocked' }]);
+  assert.equal(zoneShown(), true);
+  layer.show('no-such-building', 1, 1, true, null);
+  assert.equal(zoneShown(), false);
+  // New Town Centers while a ghost is up: the zone is replaced and stays shown.
+  layer.show('house', 30, 30, true, null);
+  layer.setZones([{ tx: 10, ty: 10, size: 4 }]);
+  assert.equal(zoneShown(), true);
+  layer.setZones(null);
+  assert.equal(zoneShown(), false, 'cleared');
+  layer.setZones([{ tx: 10, ty: 10, size: 4 }]);
   layer.dispose();
   assert.equal(root.children.length, 0);
 });

@@ -26,7 +26,8 @@ import {
 } from '../config.js';
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt, eliteFor } from '../data/index.js';
 import { offeredUpgrades, lineOf, getUpgrade, reviveMult } from '../data/upgrades.js';
-import { selectionIds, subgroups, isComplete, ownBuildings, tierName, upgradesOf, modsOf, pantheonOf, mineTripText } from './hud-data.js';
+import { MANOR, MERGE_TEXT, mergeRule, planMerges } from '../data/houses.js';
+import { selectionIds, subgroups, isComplete, isMergingEntity, ownBuildings, tierName, upgradesOf, modsOf, pantheonOf, mineTripText } from './hud-data.js';
 
 export const CARD_SLOTS = 12;
 
@@ -226,6 +227,7 @@ export function researchCheck(vs, up, buildings) {
   if (!ready.length) return res('disabled', null);
   const free = ready.filter((b) => !(b.q || []).some((q) => q.u === 'tier_up'));
   if (!free.length) return res('disabled', 'Your settlement is already growing.');
+  if (free.every(isMergingEntity)) return res('disabled', 'That House is being combined into a Manor.');
   if (free.every((b) => (b.q || []).length >= MAX_QUEUE)) return res('disabled', 'Production queue is full.');
   const a = affordReason(me, cost);
   if (a) return res('unaffordable', a);
@@ -595,6 +597,64 @@ function wallCard(card, vs, group, buildings) {
   return card;
 }
 
+/**
+ * Houses (DESIGN 5.3): four that stand in a square are combined into a Manor, and a combining under way
+ * can be cancelled. Both buttons act on the Houses of the active subgroup; the sim finds the squares among
+ * them (data/houses.js, the same rule), so the button knows what an order would do before it is given.
+ */
+function mergeButtons(card, vs, buildings) {
+  const me = vs.me;
+  const rule = mergeRule();
+  const manor = BUILDINGS[MANOR];
+  const house = BUILDINGS[rule.building];
+  const spot = (b) => ({ id: b.id, tx: b.tx, ty: b.ty });
+  const done = buildings.filter(isComplete);
+  const plan = planMerges(done.map((b) => ({ ...spot(b), busy: (b.q || []).length > 0 })));
+  const merging = done.filter(isMergingEntity).length;
+  const squares = Math.ceil(merging / rule.count); // of the selected Houses (a part of a square counts as the square)
+  const n = plan.blocks.length;
+  let afford = n;
+  let state = 'ready';
+  let reason = null;
+  if (!done.length) state = 'disabled';
+  else if (((me && me.tier) || 1) < manor.tier) {
+    state = 'locked';
+    reason = tierReason(manor.tier);
+  } else if (!n) {
+    state = 'disabled';
+    reason = done.every(isMergingEntity) ? 'Already being combined.' : MERGE_TEXT[plan.reason];
+  } else {
+    // The sim pays square by square until the purse runs short.
+    for (const k of ['gold', 'wood', 'faith']) if (rule.cost[k] > 0) afford = Math.min(afford, Math.floor(((me && me[k]) || 0) / rule.cost[k]));
+    if (afford < 1) {
+      state = 'unaffordable';
+      reason = affordReason(me, rule.cost);
+    }
+  }
+  const count = Math.max(1, n);
+  let description = `A square of ${rule.count} ${house.name}s becomes a ${manor.name}: ${manor.popProvided} population instead of the ${rule.count * house.popProvided} they shelter apart, ${manor.hp} health instead of ${rule.count * house.hp}, and every ${house.name} upgrade counts for it too. The ${house.name}s keep sheltering while they are combined. ${costText(rule.cost)} and ${rule.time} seconds for each square.`;
+  if (afford > 0 && afford < n) description += ` You can pay for ${afford} of the ${n} squares right now.`;
+  card[0] = button(0, {
+    id: 'house-merge',
+    key: 'U',
+    icon: manor.icon,
+    title: n > 1 ? `Combine into ${n} ${manor.name}s` : `Combine into a ${manor.name}`,
+    description,
+    state,
+    reason,
+    cost: { gold: (rule.cost.gold || 0) * count, wood: (rule.cost.wood || 0) * count, faith: (rule.cost.faith || 0) * count, pop: 0, time: rule.time },
+    queued: squares,
+    action: { kind: 'upgradeHouses' },
+  });
+  if (merging) {
+    card[1] = button(1, {
+      id: 'house-merge-cancel', key: 'C', icon: '✖', title: 'Cancel Combining',
+      description: `Stop combining the ${house.name}s and get back everything it cost. They stand as before.`,
+      action: { kind: 'cancelMerge' },
+    });
+  }
+}
+
 function buildingCard(card, vs, group) {
   const buildings = group.ids.map((id) => vs.entities.get(id)).filter((e) => e && e.k === 'b');
   if (!buildings.length) return card;
@@ -643,6 +703,9 @@ function buildingCard(card, vs, group) {
       break;
     case 'titan_gate':
       if (units[0]) card[0] = trainButton(0, 'T', vs, units[0], buildings, 'Summon');
+      break;
+    case 'house':
+      mergeButtons(card, vs, buildings);
       break;
     default:
       break;

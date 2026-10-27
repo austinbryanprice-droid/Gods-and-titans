@@ -10,6 +10,7 @@ import { wallLine } from '../data/walls.js';
 import { moveToRect, stopMove } from './movement.js';
 import { workSpeedOf } from './economy.js';
 import { hyp, distPointRect } from './common.js';
+import { peaceBuildNotice } from './peace.js';
 
 const BUILD_REACH = 0.6;
 
@@ -54,9 +55,11 @@ function buildableDef(typeId) {
  * (they get pushed out); enemy and neutral ground units block it. Drop-offs
  * (Town Center, Storehouse) keep a Chebyshev gap of DROPOFF_MINE_GAP empty
  * tiles from every gold mine.
+ * While a Decade of Peace lasts (DESIGN 5.10) no site within PEACE_BUILD_GAP
+ * tiles of an enemy Town Center is valid either.
  * When several things are wrong the text names the first of: water / rock /
  * map edge ("Can't build there."), trees, a building, a gold mine, a unit,
- * the mine gap.
+ * the peace's kept-clear ground, the mine gap.
  * @returns {string|null} null when the site is valid, else the error message
  */
 export function placementError(world, player, typeId, tx, ty) {
@@ -92,6 +95,7 @@ export function placementError(world, player, typeId, tx, ty) {
     if (u.dead || u.air || !world.areEnemies(player, u.owner)) continue;
     if (distPointRect(u.x, u.y, tx, ty, tx + s, ty + s) < u.radius * 0.8) return UNIT_IN_WAY;
   }
+  if (world.peaceBuildBlocks(player, tx, ty, s)) return peaceBuildNotice(world.peaceLeft());
   if (def.dropOff) {
     for (const m of world.mineList) {
       if (m.dead) continue;
