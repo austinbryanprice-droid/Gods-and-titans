@@ -5,7 +5,7 @@
 // No recorded audio: the music engine (src/audio/music.js) composes and plays it live.
 //
 //   const score = createFilmScore();    // the page's music engine (tests pass { music: a stand-in })
-//   score.start();                      // the title theme from the quiet, at the story's first intensity
+//   score.start();                      // the title theme from the quiet, at the story's first intensity (as the film's first frame shows)
 //   score.update(t);                    // once a frame, with the film's second: the intensity follows the story
 //   score.speaking(on);                 // the narrator began / finished a line: step back / swell again
 //   score.waiting();                    // true while only a click is missing (the browser has not allowed audio)
@@ -148,9 +148,9 @@ export class FilmScore {
   }
 
   /**
-   * The film is over. `'handover'` (it ran to its end, or never began to show): the piece plays on for the title
-   * screen and the lift glides away. `'cut'` (skipped, failed, too slow): it fades out in the dip to black, so
-   * the title screen's own score can come in clean after it.
+   * The film is over. `'handover'` (it ran to its end): the piece plays on for the title screen and the lift glides
+   * away (a score that never began, for a film left while it loaded, has nothing to hand over). `'cut'` (skipped,
+   * failed, too slow): it fades out in the dip to black, so the title screen's own score can come in clean after it.
    */
   end(how = 'handover') {
     if (this.phase === 'over') return;

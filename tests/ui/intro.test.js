@@ -497,15 +497,22 @@ test('the hint follows the narrator\'s word, clicks go to the narrator, and the 
 
 // ---------------------------------------------------------------- the score
 
-test('the score starts with the loading card, follows the film\'s second every frame, and hears when the voice speaks', async () => {
+test('the score begins with the film, not the loading card; it follows the film\'s second every frame and hears when the voice speaks', async () => {
   const score = fakeScore();
   const voice = fakeVoice();
-  const { intro } = start({ createScore: score.create, createVoice: voice.create });
+  let loaded;
+  const load = () => new Promise((resolve) => (loaded = () => resolve({ IntroFilm: FakeFilm, Renderer: class {} })));
+  const { intro } = start({ createScore: score.create, createVoice: voice.create, load });
   assert.equal(score.made, 1);
-  assert.deepEqual(score.log, [['start']], 'it begins before the film has loaded: the music is up with the first frame');
+  await tick();
+  await tick();
+  assert.deepEqual(score.log, [], 'not while the code loads: the piece\'s sections fall on the film\'s beats, so its clock starts with the film\'s');
+  loaded();
   await intro.ready;
+  assert.deepEqual(score.calls('start'), [['start']], 'it begins as the film does, once');
+  assert.deepEqual(score.log.at(-1), ['start'], 'and that is the last thing the page did before the first frame');
   const first = score.calls('update').length;
-  assert.equal(first, 1, 'the first frame, drawn behind the card');
+  assert.equal(first, 1, 'the first frame, drawn behind the card, before the score had begun');
   intro.advance(0.1);
   intro.advance(0.1);
   intro.advance(0.1);
@@ -576,16 +583,18 @@ test('every way out tells the score how the film was left, once and before the v
     await run.intro.done;
     assert.equal(score.calls('end').length, 1, `${label}: once`);
   }
-  // a film that never began to show has nothing to fade: the music it started is left for the title screen
+  // a film that never began to show has nothing to fade: its score never began, and is told it is over so it never does
   const early = fakeScore();
   const skipped = start({ createScore: early.create, load: () => new Promise(() => {}) });
   press('Escape');
   assert.equal(await skipped.intro.done, 'skipped');
   assert.deepEqual(early.calls('end'), [['end', 'handover']], 'a skip while the card is still up');
+  assert.deepEqual(early.calls('start'), [], 'the score was not begun');
   const broke = fakeScore();
   const failed = start({ createScore: broke.create, load: async () => { throw new Error('the module did not load'); } });
   assert.equal(await failed.intro.done, 'failed');
   assert.deepEqual(broke.calls('end'), [['end', 'handover']], 'a film that cannot start');
+  assert.deepEqual(broke.calls('start'), []);
 });
 
 test('the hint is up while the score or the voice waits for a click, says "sound", and goes when neither does', async () => {

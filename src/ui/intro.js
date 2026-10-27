@@ -122,10 +122,10 @@ export function playIntro({
   root.appendChild(ui.root);
   const done = new Promise((resolve) => (finished = resolve));
 
-  // The score: the title theme, conducted by the film's clock (paint). It starts with the loading card, so the music is
-  // already up when the first frame is, and it steps back for the voice (below) and swells between the lines.
+  // The score: the title theme, conducted by the film's clock (paint). It begins with the film's first frame, not the
+  // loading card: its sections fall on the film's beats, so the piece's clock must start where the film's does, however
+  // long the code took to load. It steps back for the voice (below) and swells between the lines.
   const score = createScore ? createScore() : null;
-  if (score) score.start();
 
   // The voice: it follows the film's clock (paint), and a click on the film lets a browser that refused to speak
   // before any click start. The hint says so while it is refusing.
@@ -258,6 +258,7 @@ export function playIntro({
       if (state !== 'loading') return;
       state = 'playing';
       ui.root.classList.add('is-playing');
+      if (score) score.start();
       if (!manual) raf = requestAnimationFrame(frame);
     } catch (err) {
       console.warn('[intro] the film could not start', err);

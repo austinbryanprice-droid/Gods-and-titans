@@ -253,6 +253,38 @@ test('stop() fades out, keeps quiet until the next play(), and the timer winds d
   assert.ok(ctx.sources.length > sources, 'play() starts again');
 });
 
+test('a piece made while another is still leaving waits out what is left of the crossfade delay; one made after it is gone does not wait', () => {
+  const { ctx, engine } = setup();
+  const comesIn = (run) => run.mix.gain.events.find((e) => e[0] === 'set')[2];
+  engine.play('menu', { seed: 5 });
+  advance(ctx, engine, 4);
+  const quietAt = ctx.currentTime;
+  engine.stop(0.8); // the page clears the title's music ...
+  ctx.currentTime = quietAt + 0.1;
+  const before = ctx.sources.length;
+  engine.play('menu', { seed: 82 }); // ... and the intro film starts its score just after
+  assert.ok(Math.abs(comesIn(engine.run) - (quietAt + 0.9)) < 1e-9, `0.9 s after the old one began to leave, as in a crossfade, not at once (${(comesIn(engine.run) - quietAt).toFixed(2)} s)`);
+  assert.equal(engine.fading.length, 1, 'while the old one is still dying away');
+  advance(ctx, engine, 3);
+  const first = Math.min(...ctx.sources.slice(before).map((s) => s.started));
+  assert.ok(first >= quietAt + 0.9 + 0.12 - 1e-9, `and its first note sounds after that (${(first - quietAt).toFixed(2)} s)`);
+  // a piece let go of long before is gone: there is nothing to wait for
+  engine.stop(0.8);
+  advance(ctx, engine, 3);
+  assert.equal(engine.fading.length, 0);
+  const gone = ctx.currentTime;
+  engine.play('menu', { seed: 7 });
+  assert.equal(comesIn(engine.run), gone, 'it comes in at once');
+  // the same goes for a mute lifted soon after it: the piece is back after the delay, not on top of the one still leaving
+  engine.mute(true);
+  engine.tick();
+  const mutedAt = ctx.currentTime;
+  ctx.currentTime += 0.2;
+  engine.mute(false);
+  engine.tick();
+  assert.ok(Math.abs(comesIn(engine.run) - (mutedAt + 0.9)) < 1e-9, 'a mute lifted after 0.2 s');
+});
+
 test('volume maps through a curve, zero is silent and mute is silent but remembers the volume', () => {
   const { ctx, engine } = setup({ volume: 0.5 });
   engine.play('greek');

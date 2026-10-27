@@ -36,6 +36,7 @@ const HALL_SECONDS = 2.0; // the reverb is a convolver, whose cost grows with th
 const PAN_STEP = 0.15; // off-centre notes share a panner per layer and position, rounded to this
 const HIDDEN_QUIET = 1.5; // seconds after the tab is hidden (its fade-out is over) that the score stops making notes
 const MAX_SKIP_BARS = 400; // bars a run joining a piece late will compose silently at most (a film is about fifteen)
+const CROSS_DELAY = 0.9; // seconds after one piece starts to leave that the next comes in, so two keys never ring together for long
 
 // Each layer of the score is a bus with its own loudness and how much of it goes to the reverb.
 const LAYERS = {
@@ -139,6 +140,7 @@ class Run {
     this.nextBar = now + 0.12;
     this.bars = 0;
     this.fading = false;
+    this.fadedAt = -Infinity; // the clock time it began to leave
     this.bad = new Set(); // instruments that threw: left out from then on
     this.only = null; // layers to play, when soloing some (renderMusicOffline)
   }
@@ -237,6 +239,7 @@ class Run {
   fadeOut(seconds, now) {
     if (this.fading) return;
     this.fading = true;
+    this.fadedAt = now;
     const tc = Math.max(0.05, seconds / 4);
     for (const p of [this.mix.gain, this.send.gain]) {
       try {
@@ -546,7 +549,10 @@ export class MusicEngine {
       }
       const fade = this.want.fade ?? (hadRun ? 3 : this.fadeIn);
       // The new piece comes in a little after the old one starts to leave, so two keys never ring together for long.
-      this.run = new Run(this.env, this.want.theme, this.want.seed, now + (hadRun ? 0.9 : 0), fade);
+      // That holds for a piece let go of a moment before as well (the intro film starts its score just after the page
+      // cleared the title's): it waits out what is left of the delay.
+      const wait = this.fading.reduce((w, r) => Math.max(w, r.fadedAt + CROSS_DELAY - now), 0);
+      this.run = new Run(this.env, this.want.theme, this.want.seed, now + wait, fade);
       this.level = this.target;
       this._join(this.run);
     }

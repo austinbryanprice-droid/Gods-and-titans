@@ -1793,9 +1793,9 @@ per-frame budget, so a revealed army appears over a few frames.
   under the stingers in `DUCKS` (`summon_god`, `summon_titan`, `victory`, `defeat`, `tier_up`, `horn`; heard through
   `sfx.onPlay`). `initAudio(settings)` and `syncAudio(settings, changed)` (`main.js`) start both engines and carry the
   settings over; `playTitleMusic()` is what each menu screen calls (a no-op while it already plays);
-  `quietMusic()` clears whatever plays as the intro film (11.1) starts (the film starts a score of its own, under its
-  narration; `main.js` calls `playTitleMusic()` at the hand-over to the menu, which carries that score on or, after a
-  skip, starts the title's own); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is
+  `quietMusic()` clears whatever plays as the intro film (11.1) starts (the film starts a score of its own when its first
+  frame shows, under its narration; `main.js` calls `playTitleMusic()` at the hand-over to the menu, which carries that
+  score on or, after a skip, starts the title's own); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is
   `music.play(themeId)` (crossfades; remembered until the browser allows audio), `stop(fade)`, `setIntensity(0..1)`,
   `setVolume`, `mute`, `duck`, `state()`, and four things for the intro film: `conduct(v)` (the intensity set exactly, with
   none of the easing), `setStage(gain, tc, delay)` (see below), `setStingers(on)` (whether the sounds in `DUCKS` make
@@ -1818,7 +1818,9 @@ per-frame budget, so a revealed army appears over a few frames.
   **The engine.** A look-ahead scheduler (a tick every 250 ms) composes bars 1.6 s ahead and creates each note 0.6 s
   before it sounds (a note waiting in the audio graph is not free); after a stall it carries on from the clock instead
   of catching up, and a hidden tab fades the music out and stops making notes. Layers (pad, drone, bass, arp, lead,
-  perc, war, fx) are buses with a gain and a send to one mono 2 s hall reverb; a new theme crossfades in; the intensity
+  perc, war, fx) are buses with a gain and a send to one mono 2 s hall reverb; a new theme crossfades in, 0.9 s after the old
+  one begins to leave (so two keys never ring together for long, and a piece begun just after another was let go of, as the
+  film's score is after `quietMusic()`, waits out what is left of that); the intensity
   eases toward its target (1.5 s up, 7 s down: a fight ends slowly). The volume is `0.63 * v^1.5` into the limiter.
   The graph is layers → run mix → `bus` (the volume) → `duck` (the stingers' dip) → `stage` (the intro film's mix, a
   gain at 1 outside the film, moved by `setStage` and remembered for a context that does not exist yet) → `hide` (the
@@ -1941,15 +1943,18 @@ the score reads the story `LEAD` = 3.5 s ahead of the film's clock (the value fo
 the piece: the same overture every time, with its four-bar sections falling on the film's beats (a section of the calm
 progression with no tune over the dawn and the prayer; the tune coming in with the cut to Zeus at 15 s; a tense section, the tune
 an octave up, starting as the titans do at 30 s; a calm one again from 43 s, which the title screen carries on). A test pins that
-shape, and when a change to the composer breaks it, its failure message lists the seeds that fit.
+shape, and when a change to the composer breaks it, its failure message lists the seeds that fit. For the sections to fall there the
+piece's clock must be the film's: `playIntro` begins the score with the film's first frame, not with the loading card (begun with the
+card, it would run ahead of the film by the time the code took to load, and every section with it).
 *The voice*: a `stage` gain (9) is at `LIFT` 1.4 (+2.9 dB, between the lines, and the opening) and steps back to `UNDER` 0.28
 of that (-11 dB, 8 dB under the music's usual place) while a line is with the browser: time constant 0.1 s when the narrator hands a
 line over, 0.55 s starting 0.2 s after its last word for the swell. `liftFor(volume)` holds the lift so that it is never
 louder than the Music slider's top. The film's own cues (`AUDIO_CUES`) play over the score with the stingers' ducking switched
 off (`setStingers(false)`: the cue table is the mix, the engine's rules are for a match).
-*The way out*: `end('handover')` for a film that ran to its end, or never began to show: the same run plays on, the lift
-glides away over a few seconds (time constant 1.5 s) and `playTitleMusic()` finds the piece already playing at the same
-intensity. `end('cut')` for a skip, a failure or the speed guard while the film is showing: the piece fades out in 0.3 s inside
+*The way out*: `end('handover')` for a film that ran to its end: the same run plays on, the lift glides away over a few
+seconds (time constant 1.5 s) and `playTitleMusic()` finds the piece already playing at the same intensity (a film left while it
+still loads, skipped or failed, never began its score: there is nothing to hand over, and the title screen's own piece begins at
+the hand-over). `end('cut')` for a skip, a failure or the speed guard while the film is showing: the piece fades out in 0.3 s inside
 the dip to black, the stage is reset to 1 at 0.36 s (behind the fading piece and as the title's own begins), and the title screen
 fades its own piece in at the hand-over. `finish` tells the score first and stops the voice second, so a cut-off line cannot
 swell it again.
@@ -2018,8 +2023,8 @@ and moon discs where they stand, cloud streaks, stars at night, the haze below t
 look past the edge of the map, which the game's camera never does.
 
 **The page** (`src/ui/intro.js`, `src/ui/intro.css`): `playIntro({ root, quality, onHandover, createScore, … })` (the score,
-below, starts with the loading card, follows each frame's film second, and is told how the film was left) builds an
-overlay (z 30, over the menu) of a black card with the title and a pulse while the code loads (`import()`ed only
+below, begins with the film's first frame as the loading card lifts, follows each frame's film second, and is told how the film
+was left) builds an overlay (z 30, over the menu) of a black card with the title and a pulse while the code loads (`import()`ed only
 when the film plays, so it costs nothing for players who skip it), the film's canvas, a vignette, letterbox bars
 that close over the film (the caption sits in the bottom bar), the Skip button and a black fade layer. It states
 `loading → playing → leaving → done`; `leave` dips to black (320 ms, unless the film ran to its own end), frees the film, calls
