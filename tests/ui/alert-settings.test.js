@@ -193,6 +193,32 @@ for (const [name, open] of [['Settings screen', settingsScreen], ['F10 menu', f1
     assert.equal(active(s.tab), 'Flash the tab');
     assert.match(s.tab.note(), /cannot show notifications/);
   });
+
+  test(`${name}: picking again while the browser's prompt is open keeps the newer pick`, async () => {
+    let answer;
+    globalThis.Notification = class SlowNotification {
+      static permission = 'default';
+      static requestPermission() {
+        return new Promise((resolve) => {
+          answer = () => {
+            SlowNotification.permission = 'granted';
+            resolve('granted');
+          };
+        });
+      }
+    };
+    const s = open();
+    button(s.tab, 'Notification').click(); // the prompt is open...
+    button(s.tab, 'Off').click(); // ...and the player picks Off
+    await settle();
+    assert.equal(getSettings().tabAlerts, 'off');
+    assert.equal(active(s.tab), 'Off');
+    answer(); // the prompt is answered late
+    await settle();
+    assert.equal(getSettings().tabAlerts, 'off', 'the late answer does not overwrite it');
+    assert.equal(active(s.tab), 'Off');
+    assert.equal(s.tab.note(), tabAlertNote('off'));
+  });
 }
 
 test('F10 menu: the new rows sit with the other options, before the volume, and show the saved choices', () => {

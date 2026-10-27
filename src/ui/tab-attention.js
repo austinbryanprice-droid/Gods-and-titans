@@ -35,12 +35,17 @@ export async function requestNotifications(Notif = globalThis.Notification) {
   return notificationState(Notif);
 }
 
+let latestPick = 0; // each pick gets a number, so a prompt answered after a newer pick cannot undo it
+
 /**
  * The settings UI picked `mode` for tabAlerts: 'notify' only sticks when the browser grants the
- * permission (else the title flash is kept). Resolves to the mode now in effect.
+ * permission (else the title flash is kept). Resolves to the mode now in effect, or to null when
+ * the player picked again while the browser's prompt was open (the newer pick stands).
  */
 export async function chooseTabAlerts(mode, { Notif = globalThis.Notification, save = saveSettings } = {}) {
+  const pick = ++latestPick;
   if (mode === 'notify' && (await requestNotifications(Notif)) !== 'granted') mode = 'title';
+  if (pick !== latestPick) return null;
   save({ tabAlerts: mode });
   return mode;
 }

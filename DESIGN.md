@@ -1578,7 +1578,8 @@ per-frame budget, so a revealed army appears over a few frames.
   the player returns. `tabAlerts` is `'title'` (default), `'off'` or `'notify'`, which also raises a silent
   desktop notification (one at a time, at most one per 15 s, closing itself after 8 s; a click focuses the
   window). The browser's permission is asked when the player picks Notification in the settings (a click);
-  if it is refused, blocked or missing, the choice falls back to `'title'` and the note under it says why.
+  if it is refused, blocked or missing, the choice falls back to `'title'` and the note under it says why
+  (a pick made while the prompt is still open stands: the late answer does not overwrite it).
   A single-player match pauses itself in a hidden tab (section 11), so the flash serves multiplayer and a
   window left unfocused beside the game.
   **Gameplay tips** (`src/ui/hint-data.js`, `src/ui/hud-hints.js`): about 40 one- or two-sentence tips
@@ -1587,7 +1588,8 @@ per-frame budget, so a revealed army appears over a few frames.
   one every 150 s of game time. The tips heard least come first, and one that fits the match (it has
   Worshippers, an army, walls, a god, a Barracks, a damaged building, is in a peace or in a team) before a
   general one; none is told more than twice across matches (`localStorage` key `mythicwar-hints`). The card
-  yields to a fight (30 s after the player's things were hit, and whenever a warning fires), stays 9 to 18 s by
+  yields to a fight (30 s after the player's things were hit, and whenever a warning is shown to the player;
+  one the settings silenced does not count), stays 9 to 18 s by
   length (while the pointer rests on it, and 4 s after), and has ✕ and "Turn tips off" (saves `hints: false`).
   A soft chime goes with it when `alerts` is `'all'`. A tip is text with `[[Key]]` markers drawn as `<kbd>`;
   the hotkeys and numbers it quotes come from the data (`tests/ui/hud-hints.test.js` checks them). The

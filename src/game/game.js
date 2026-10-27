@@ -864,7 +864,8 @@ export class Game {
     if (a.ping) hud.minimap.ping(a.ping.x, a.ping.y, a.ping.color);
     if (a.jump && this.input) this.input.noteAlert(a.jump.x, a.jump.y);
     if (a.attention && this.tab) this.tab.attention(a.attention);
-    if (a.kind === 'alert') hud.holdHints(); // no tip while the player is under pressure
+    // No tip while the player is under pressure (a warning that the settings silenced was never shown).
+    if (a.kind === 'alert' && (a.text || a.sound || a.ping || a.jump)) hud.holdHints();
   }
 
   worldSoundAt(id, name, volume = 1) {

@@ -345,6 +345,7 @@ export class Hud {
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
     this.hintTimer.update();
+    this.hints.update();
   }
 
   /** The top-bar pantheon chip: emblem and name, with the blessings and elite soldier in its tooltip. */

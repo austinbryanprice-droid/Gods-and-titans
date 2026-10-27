@@ -218,6 +218,11 @@ export class HintsView {
     setStyle(this.el, 'top', below > 0 ? `calc(${below}px + 0.5em)` : '');
   }
 
+  /** Call every frame: the checklist can be closed (or come back) while a tip is up, and the card follows it. */
+  update() {
+    if (this.visible) this.place();
+  }
+
   /** (Re)start the countdown to the fade; 0 stops it. */
   arm(ms) {
     clearTimeout(this.timer);

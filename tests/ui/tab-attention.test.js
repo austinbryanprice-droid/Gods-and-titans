@@ -120,6 +120,25 @@ test('chooseTabAlerts: notify sticks only when the browser grants it; title and 
   assert.deepEqual(saved, [{ tabAlerts: 'notify' }, { tabAlerts: 'title' }, { tabAlerts: 'title' }, { tabAlerts: 'title' }, { tabAlerts: 'title' }, { tabAlerts: 'off' }]);
 });
 
+test('chooseTabAlerts: a prompt answered after a newer pick does not undo it', async () => {
+  const saved = [];
+  const save = (patch) => saved.push(patch);
+  let answer;
+  const Slow = fakeNotification('default', { onRequest: (N) => new Promise((resolve) => {
+    answer = () => {
+      N.permission = 'granted';
+      resolve('granted');
+    };
+  }) });
+  const first = chooseTabAlerts('notify', { Notif: Slow, save }); // the browser's prompt is open
+  assert.equal(await chooseTabAlerts('off', { Notif: Slow, save }), 'off', 'the player changed their mind: that applies at once');
+  answer();
+  assert.equal(await first, null, 'the late answer is dropped');
+  assert.deepEqual(saved, [{ tabAlerts: 'off' }]);
+  assert.equal(await chooseTabAlerts('title', { Notif: Slow, save }), 'title', 'later picks work as before');
+  assert.deepEqual(saved, [{ tabAlerts: 'off' }, { tabAlerts: 'title' }]);
+});
+
 test('a tab the player is looking at is left alone', () => {
   const { tab, doc } = make();
   assert.equal(tab.attention('Your base is under attack!'), false);

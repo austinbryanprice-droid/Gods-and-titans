@@ -63,6 +63,18 @@ test('an alert is carried out in full: line, sound, ping, Space jump, tab flash,
   ]);
 });
 
+test('a warning the settings silenced (only the tab flash is left) does not clear a tip; any part shown does', () => {
+  const { game, log } = fake();
+  onAlert(game, { kind: 'alert', attention: 'An enemy unit has been sighted near your base!' });
+  assert.deepEqual(log, [['tab', 'An enemy unit has been sighted near your base!']], 'the player saw nothing, so the tip stays');
+  log.length = 0;
+  onAlert(game, { kind: 'alert', sound: 'drums' });
+  onAlert(game, { kind: 'alert', ping: { x: 1, y: 2, color: '#fff' } });
+  onAlert(game, { kind: 'alert', jump: { x: 3, y: 4 } });
+  onAlert(game, { kind: 'alert', text: 'An ally is under attack!' });
+  assert.equal(log.filter((l) => l[0] === 'holdHints').length, 4);
+});
+
 test('a friendly reminder is a line and a sound, and does not clear a tip', () => {
   const { game, log } = fake();
   onAlert(game, { text: 'Your Barracks is ready.', kind: 'info', sound: 'nudge', volume: 0.5 });

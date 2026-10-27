@@ -143,7 +143,7 @@ export class Overlays {
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
     const tabAlerts = choiceRow('When this tab is in the background', TAB_ALERT_OPTIONS, s.tabAlerts, async (v) => {
       const got = await chooseTabAlerts(v); // 'notify' asks the browser for permission first
-      if (got === v) return;
+      if (got === null || got === v) return; // (null: picked again meanwhile, that pick stands)
       tabAlerts.buttons.forEach((x) => x.classList.toggle('is-active', x.dataset.id === got));
       tabAlerts.note.textContent = tabAlertNote(v, notificationState(), true);
     });

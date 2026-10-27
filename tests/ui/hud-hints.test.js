@@ -480,6 +480,24 @@ test('the card sits under the getting-started checklist while that is up, in the
   assert.equal(view.el.style.top, '');
 });
 
+test('the card follows the checklist: closed while a tip is up, the card moves to the corner, and back under it', () => {
+  const checklist = document.createElement('div');
+  checklist.offsetTop = 40;
+  checklist.offsetHeight = 180;
+  let anchor = checklist;
+  const { view } = makeCard({ anchor: () => anchor });
+  view.update();
+  assert.ok(!view.el.style.top, 'no tip on screen, nothing to move');
+  view.show({ id: 'zoom', text: 'The checklist is up while this tip is shown.' });
+  assert.equal(view.el.style.top, 'calc(220px + 0.5em)');
+  anchor = null; // the player closed the checklist
+  view.update();
+  assert.equal(view.el.style.top, '');
+  anchor = checklist; // ... and switched it on again in the menu
+  view.update();
+  assert.equal(view.el.style.top, 'calc(220px + 0.5em)');
+});
+
 // ---------------------------------------------------------------- in the HUD
 
 function hudAt(time, { me = 0, session = null } = {}) {
@@ -563,6 +581,27 @@ test('a HUD for a spectator or a game with a checklist still builds and updates'
     hud.update(1000);
     assert.ok(hud.tips, 'the checklist is up');
     assert.equal(hud.hints.el.hidden, false, 'and so is a tip, under it');
+  } finally {
+    saveSettings({ tipsDismissed: true });
+  }
+});
+
+test('closing the checklist while a tip is up moves the card up into the corner on the next frame', () => {
+  saveSettings({ tipsDismissed: false });
+  try {
+    const { hud, push } = hudAt(1);
+    hud.update(900);
+    hud.tips.el.offsetTop = 40; // the fake DOM does no layout
+    hud.tips.el.offsetHeight = 180;
+    push(95);
+    hud.update(1000);
+    assert.equal(hud.hints.el.hidden, false);
+    assert.equal(hud.hints.el.style.top, 'calc(220px + 0.5em)', 'under the checklist');
+    hud.tips.dismiss('closed');
+    assert.equal(hud.tips, null);
+    hud.update(1100);
+    assert.equal(hud.hints.el.hidden, false, 'the tip itself stays');
+    assert.equal(hud.hints.el.style.top, '', 'in the corner now');
   } finally {
     saveSettings({ tipsDismissed: true });
   }

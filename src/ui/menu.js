@@ -1025,7 +1025,7 @@ export function createMenu({ root, onStart }) {
     const wNote = h('div.mw-field-note');
     const wBtns = TAB_ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { w: id }, onclick: async () => {
       const got = await chooseTabAlerts(id); // 'notify' asks the browser for permission first
-      renderW(got !== id ? id : null);
+      if (got !== null) renderW(got !== id ? id : null); // (null: picked again meanwhile, that pick stands)
     } }, label));
     const renderW = (refused = null) => {
       const w = getSettings().tabAlerts;
