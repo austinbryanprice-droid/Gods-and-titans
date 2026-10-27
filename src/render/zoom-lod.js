@@ -4,7 +4,7 @@
 // gives the look the game always had; beyond it the view takes in more and more of the map.
 //
 // The detail levels (terrainStride, forestFar, unitFar) go by what the eye can tell apart, pixels on the
-// screen, not by the distance alone: a bigger window or a sharper display keeps the detail longer. Each has
+// screen (CSS pixels), not by the distance alone: a bigger window keeps the detail longer. Each has
 // a way down and a way back up at a different value (hysteresis), so a camera resting on the edge does not
 // flicker between two looks.
 import { CAMERA_DEFAULTS } from './camera.js';

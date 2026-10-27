@@ -1484,7 +1484,7 @@ per-frame budget, so a revealed army appears over a few frames.
   terrain's border mist fades out past 80 tiles. What a wide view costs is what the far view is
   about: the late game (four AIs, ten minutes, 231 units, walls of forest) drew 1830 draw calls and
   2.2 M triangles at low from 170 tiles. Three detail levels go by *pixels on the screen*
-  (`pixelsPerTile`, so a bigger window or a sharper display keeps its detail longer), each with a
+  (`pixelsPerTile`, in CSS pixels: a bigger window keeps its detail longer), each with a
   way back at a different value (hysteresis) so a camera resting on an edge does not flicker:
   (1) `terrainStride`: the ground mesh draws every 2nd field sample below 16 pixels a tile (back
   above 19) and every 4th below 7 (back above 8.5): `createTerrain().setStride(n)` swaps each
