@@ -9,7 +9,7 @@ import { Hud } from '../../src/ui/hud.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { ViewState } from '../../src/game/view-state.js';
 import { BUILDINGS, eliteFor } from '../../src/data/index.js';
-import { MINE_SLOTS, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../../src/config.js';
+import { MAX_QUEUE, MINE_SLOTS, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../../src/config.js';
 import { getSettings, saveSettings } from '../../src/settings.js';
 import { sfx } from '../../src/audio/sfx.js';
 import { makeWorld } from '../sim/helpers.js';
@@ -65,7 +65,7 @@ test('every tip is well formed: unique id, words, balanced key markers, a boolea
 });
 
 test('every key a tip names is a real key', () => {
-  const NAMED = new Set(['Shift', 'Ctrl', 'Alt', 'Tab', 'Space', 'Backspace', 'F1', 'F2', 'F3', '.', '`']);
+  const NAMED = new Set(['Shift', 'Ctrl', 'Alt', 'Tab', 'Space', 'Backspace', 'Delete', 'F1', 'F2', 'F3', '.', '`']);
   for (const h of HINTS) {
     for (const part of hintParts(hintText(h, { pantheon: 'greek' }))) {
       if (typeof part === 'string') continue;
@@ -81,6 +81,7 @@ test('tips that quote a build hotkey or a game number say what the data says', (
   build('titan', 'titan_gate');
   assert.match(text('walls'), new RegExp(`\\[\\[B\\]\\], then \\[\\[${BUILDINGS.wooden_wall.hotkey}\\]\\]`));
   assert.match(text('mine-slots'), new RegExp(`Only ${MINE_SLOTS} Worshippers`));
+  assert.match(text('train-batch'), new RegExp(`up to ${MAX_QUEUE} units`));
   assert.match(text('market'), new RegExp(`keeps ${TRADE_TAX_PCT}%`));
   assert.match(text('spells-buildings'), new RegExp(`only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings`));
   assert.match(text('peace'), new RegExp(PEACE_NAME));

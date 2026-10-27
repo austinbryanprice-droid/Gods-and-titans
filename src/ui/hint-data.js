@@ -8,7 +8,7 @@
 //   hintParts(text)       → ['Press ', { key: 'Space' }, ' to …'] for building the DOM
 import { UNITS, eliteFor } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
-import { MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../config.js';
+import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME } from '../config.js';
 import { isWallEntity } from './hud-data.js';
 
 const percent = (v) => Math.round(v * 100);
@@ -66,7 +66,8 @@ export const HINTS = [
   { id: 'queue-orders', text: 'Hold [[Shift]] while you right-click to queue orders one after another.' },
   { id: 'attack-move', text: 'Press [[A]], then click the ground: your army marches there and fights whatever it meets on the way.' },
   { id: 'rally', text: 'Select a building and press [[Y]], then click: new units walk to that rally point. Pick a tree or a mine and new Worshippers go straight to work.', when: (c) => c.workers >= 3 },
-  { id: 'train-batch', text: '[[Shift]]-click a unit button to queue a batch at once, as many as you can afford.', when: (c) => !!(c.has.town_center || c.has.barracks) },
+  { id: 'train-batch', text: `[[Shift]]-click a unit button to queue up to five at once, as many as you can afford. A building lines up to ${MAX_QUEUE} units, paid for as you queue them.`, when: (c) => !!(c.has.town_center || c.has.barracks) },
+  { id: 'delete-key', text: 'Press [[Delete]] to destroy the selected units for good and free their population. A big group, a god or a Titan asks for a second press first.' },
   { id: 'health-bars', text: 'Hold [[Alt]] to see every health bar on the field.' },
   { id: 'tab-cycle', text: '[[Tab]] steps through the unit types of a mixed selection, so you can order a god without losing the army.', when: (c) => c.gods >= 1 || c.army >= 6 },
   { id: 'god-keys', text: '[[F1]] [[F2]] [[F3]] select your gods. Press one twice to center the camera on it.', when: (c) => c.gods >= 1 },
