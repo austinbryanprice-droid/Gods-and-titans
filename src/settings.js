@@ -33,10 +33,11 @@ function cleanName(name) {
  * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
  * or one fixed time of day. `alerts` is how much the game speaks up ('all', 'important', 'off'),
  * `hints` whether a gameplay tip appears now and then, `tabAlerts` what a background tab does
- * when the game needs the player ('off', 'title', 'notify').
+ * when the game needs the player ('off', 'title', 'notify'). `intro` plays the intro film
+ * when the game opens (src/ui/intro.js).
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title' };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -53,6 +54,7 @@ function sanitize(raw, base) {
   if (ALERT_LEVELS.includes(raw.alerts)) out.alerts = raw.alerts;
   if (typeof raw.hints === 'boolean') out.hints = raw.hints;
   if (TAB_ALERTS.includes(raw.tabAlerts)) out.tabAlerts = raw.tabAlerts;
+  if (typeof raw.intro === 'boolean') out.intro = raw.intro;
   return out;
 }
 
@@ -94,7 +96,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify' }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean }}
  */
 export function getSettings() {
   return load();

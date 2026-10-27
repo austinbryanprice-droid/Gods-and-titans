@@ -55,6 +55,8 @@ export class CameraController {
     this.shakeY = 0;
     this.viewportWidth = 1;
     this.viewportHeight = 1;
+    /** The framing set by setFree (the intro film), or null while the player's controls frame the view. */
+    this.free = null;
     this.apply();
   }
 
@@ -68,6 +70,7 @@ export class CameraController {
 
   /** Current pitch in radians (below the horizon). */
   get pitch() {
+    if (this.free) return this.free.pitch * DEG;
     const { pitchNear, pitchFar } = this.opts;
     const z = Math.max(0, Math.min(1, this.zoom));
     return (pitchNear + (pitchFar - pitchNear) * z) * DEG;
@@ -147,6 +150,23 @@ export class CameraController {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * Frame the view directly instead of by the player's controls (the intro film): the camera orbits
+   * the ground point (x, y), `lift` above it, at `dist` from it, `yaw` degrees round from due south
+   * (the RTS view is yaw 0) and `pitch` degrees below the horizon, through a lens of `fov` degrees.
+   * The pose is read on every update, so the caller moves it by changing its fields; it ignores the
+   * zoom limits, the map edge and the easing. null hands the camera back to the player.
+   * @param {{ x: number, y: number, dist: number, pitch: number, yaw?: number, lift?: number, fov?: number } | null} pose
+   */
+  setFree(pose) {
+    this.free = pose || null;
+    if (!pose && this.camera.fov !== this.opts.fov) {
+      this.camera.fov = this.opts.fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.update(0);
+  }
+
   /** Shake offset in world units (applied to the camera, not the target). */
   setShake(x, y) {
     this.shakeX = x;
@@ -155,6 +175,10 @@ export class CameraController {
 
   /** Ease toward the goal and update the camera matrices. */
   update(dt) {
+    if (this.free) {
+      this.followFree();
+      return;
+    }
     const d = Math.max(0, Math.min(0.25, dt || 0));
     const kp = 1 - Math.exp(-this.opts.panDamping * d);
     const kz = 1 - Math.exp(-this.opts.zoomDamping * d);
@@ -171,13 +195,31 @@ export class CameraController {
     this.apply();
   }
 
+  /** The free pose becomes the camera's state at once, so everything that reads target, distance and groundY sees the film's view. */
+  followFree() {
+    const f = this.free;
+    this.target.x = this.goal.x = f.x;
+    this.target.y = this.goal.y = f.y;
+    this.distance = this.goalDistance = f.dist;
+    this.groundY = this.heightFn ? Math.max(-0.2, this.heightFn(f.x, f.y)) : 0;
+    const fov = f.fov || this.opts.fov;
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.apply();
+  }
+
   apply() {
     const cam = this.camera;
     const p = this.pitch;
+    const yaw = this.free ? (this.free.yaw || 0) * DEG : 0;
     const tx = this.target.x + this.shakeX;
     const tz = this.target.y + this.shakeY;
-    cam.position.set(tx, this.groundY + this.distance * Math.sin(p), tz + this.distance * Math.cos(p));
-    cam.lookAt(tx, this.groundY, tz);
+    const ty = this.groundY + (this.free ? this.free.lift || 0 : 0);
+    const flat = this.distance * Math.cos(p);
+    cam.position.set(tx + flat * Math.sin(yaw), ty + this.distance * Math.sin(p), tz + flat * Math.cos(yaw));
+    cam.lookAt(tx, ty, tz);
     cam.updateMatrixWorld(true);
   }
 

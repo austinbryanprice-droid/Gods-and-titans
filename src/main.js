@@ -4,6 +4,7 @@
 import { getSettings, onSettingsChange } from './settings.js';
 import { sfx } from './audio/sfx.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
+import { introWanted, playIntro } from './ui/intro.js';
 
 export { showMenu, hideMenu };
 
@@ -113,6 +114,32 @@ function hasWebGL2() {
   }
 }
 
+/**
+ * Play the intro film (DESIGN 11.1) over the hidden menu; the menu comes back on `screen` behind the
+ * black when the film ends or is skipped. Resolves once the film is gone, whatever its outcome.
+ * @param {string} screen the menu screen to land on
+ * @param {boolean} [guard] drop the film on a machine too slow to show it (not when the player asked to watch it)
+ */
+function watchIntro(screen, guard = true) {
+  hideMenu();
+  try {
+    const intro = playIntro({ root: document.getElementById('app'), quality: getSettings().quality, guard, onHandover: () => showMenu(screen) });
+    return intro.done;
+  } catch (err) {
+    console.error('[main] the intro film could not start', err);
+    showMenu(screen);
+    return Promise.resolve('failed');
+  }
+}
+
+function prefersReducedMotion() {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
 function boot() {
   const settings = getSettings();
   sfx.init({ volume: settings.volume });
@@ -120,13 +147,17 @@ function boot() {
   onSettingsChange((s, changed) => {
     if (changed.includes('volume')) sfx.setVolume(s.volume);
   });
-  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame });
+  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onIntro: () => watchIntro('settings', false) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
-  if (!hasWebGL2()) {
+  const webgl2 = hasWebGL2();
+  if (!webgl2) {
     menu.setNotice('This game needs WebGL 2, which this browser is not providing. Turn on hardware acceleration in your browser settings, or try a current Chrome, Edge, Firefox or Safari.');
   }
-  warmUp();
+  const intro = introWanted({ enabled: settings.intro, search: location.search, webdriver: navigator.webdriver === true, reducedMotion: prefersReducedMotion(), webgl2 });
+  // the film has the machine to itself; the game's code is fetched once it is over
+  if (intro) watchIntro('title').then(warmUp);
+  else warmUp();
 }
 
 /**
