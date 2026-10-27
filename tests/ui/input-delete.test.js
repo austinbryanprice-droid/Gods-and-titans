@@ -168,26 +168,28 @@ test('losing or dropping a unit between the presses does not matter, adding one 
   input.dispose();
 });
 
-test('holding the key, a modifier, a text field and an open menu do nothing', () => {
-  const { select, key, sent, messages, prevented, overlays, input } = setup();
-  select(2);
-  key('Delete', { repeat: true });
-  assert.deepEqual(sent, [], 'auto-repeat is not another press');
-  key('Delete', { ctrlKey: true });
-  key('Delete', { metaKey: true });
-  key('Delete', { altKey: true });
-  assert.deepEqual(sent, [], 'Ctrl+Delete and friends stay with the browser');
-  assert.equal(prevented.filter((k) => k === 'Delete').length, 1, 'only the repeat was swallowed');
-  key('Delete', { target: { tagName: 'INPUT', type: 'text' } });
-  assert.deepEqual(sent, [], 'typing in chat keeps its keys');
-  overlays.open = true;
-  key('Delete');
-  assert.deepEqual(sent, []);
-  assert.deepEqual(messages, []);
-  overlays.open = false;
-  key('Delete');
-  assert.equal(kills(sent).length, 1);
-  input.dispose();
+test('holding the key, a modifier, a text field and an open menu do nothing, for Delete and for Backspace', () => {
+  for (const name of ['Delete', 'Backspace']) {
+    const { select, key, sent, messages, prevented, overlays, input } = setup();
+    select(2);
+    key(name, { repeat: true });
+    assert.deepEqual(sent, [], `${name}: auto-repeat is not another press`);
+    key(name, { ctrlKey: true });
+    key(name, { metaKey: true });
+    key(name, { altKey: true });
+    assert.deepEqual(sent, [], `Ctrl+${name} and friends stay with the browser`);
+    assert.equal(prevented.filter((k) => k === name).length, 1, 'only the repeat was swallowed');
+    key(name, { target: { tagName: 'INPUT', type: 'text' } });
+    assert.deepEqual(sent, [], 'typing in chat keeps its keys');
+    overlays.open = true;
+    key(name);
+    assert.deepEqual(sent, []);
+    assert.deepEqual(messages, []);
+    overlays.open = false;
+    key(name);
+    assert.equal(kills(sent).length, 1, `${name} destroys the selection`);
+    input.dispose();
+  }
 });
 
 test('only the player\'s own units: an enemy unit and buildings are left alone, and buildings are explained', () => {
@@ -235,12 +237,39 @@ test('killing leaves a pending placement or target: the units it was for are gon
   input.dispose();
 });
 
-test('Backspace still jumps to the Town Center and kills nothing', () => {
-  const { select, key, sent, centered, input } = setup();
-  select(3);
+test('Backspace, the delete key of a Mac, does what Delete does, and either key answers the other\'s question', () => {
+  const { select, key, sent, messages, prevented, centered, input } = setup();
+  const units = select(2);
   key('Backspace');
+  assert.deepEqual(sent, [{ type: 'kill', units: units.map((u) => u.id).sort((a, b) => a - b) }], 'a few plain units go at once');
+  assert.deepEqual(prevented, ['Backspace'], 'the browser does not get the key');
+  assert.deepEqual(centered, [], 'and the camera stays where it is');
+
+  sent.length = 0;
+  const crowd = select(DELETE_CONFIRM_ABOVE + 1);
+  key('Backspace');
+  assert.deepEqual(sent, [], 'a big group asks first');
+  assert.deepEqual(messages, [[`Press Delete again to destroy ${crowd.length} units.`, 'error']]);
+  key('Delete');
+  assert.equal(kills(sent).length, 1, 'Delete gives the second press to a question Backspace asked');
+
+  select(DELETE_CONFIRM_ABOVE + 1);
+  key('Delete');
+  key('Backspace');
+  assert.equal(kills(sent).length, 2, 'and the other way round');
+  assert.equal(input.deleteArmed, null);
+  input.dispose();
+});
+
+test('Home jumps to the Town Center, where Backspace used to, and kills nothing', () => {
+  const { world, vs, select, key, sent, centered, input } = setup();
+  select(3);
+  key('Home');
   assert.deepEqual(sent, []);
-  assert.equal(centered.length, 1);
+  const tc = vs.entities.get(world.buildingsOf(0).find((b) => b.type === 'town_center').id);
+  assert.deepEqual(centered, [[tc.x, tc.y]]);
+  key('Home', { repeat: true });
+  assert.equal(centered.length, 1, 'holding the key is not another jump');
   input.dispose();
 });
 
