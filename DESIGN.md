@@ -1577,7 +1577,7 @@ per-frame budget, so a revealed army appears over a few frames.
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
-  (name, volume, graphics quality, time of day, intro film with a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier.
@@ -1831,6 +1831,23 @@ The menu is hidden while it plays and shown again behind the black when it ends;
 shows. Its sounds are cues in the game's synthesized set (`sfx`), silent on a first visit until a click or key
 lets the browser start audio.
 
+**Narration** (`src/intro/narrator.js`): a voice reads each caption of `CAPTIONS` aloud, with the browser's own speech
+synthesis (`speechSynthesis`; no audio files), as the film's clock reaches the caption's `from` second: the caption's
+own words, `en-US`, rate 0.9 and pitch 0.9, at the Settings volume (0 is silence), a line at a time (the browser
+queues a line behind one still being said, so they never overlap; no voice is picked by name, since the browser's
+default for English is its best and a list can open on a novelty voice). The overlay's `paint` hands the voice the film's second each frame, so it
+follows the picture, and a caption that came and went between two frames is not read late. Every way out of the film
+(`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first, with
+`speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
+under the intro toggle) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
+film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
+throws is ignored. Chrome will not speak until the page has had a click or a key (the rule that keeps the film's
+sounds quiet on a first visit): the refused `speak` fires an `error` event (`not-allowed`), which puts up a "Click for
+narration" hint at the top left (class `needs-click` on the overlay); a click anywhere on the film then says the
+caption on screen (if it has 1.2 s left) and takes the hint down, and the later lines speak by themselves. "Watch it
+now" always speaks, for the player has just clicked. `createNarrator({ speech, volume, captions, onBlocked })` takes
+the speech synthesis as a parameter (tests pass a stand-in).
+
 **The script** (`src/intro/script.js`, pure data and arithmetic, no DOM, three.js or simulation): `SHOTS` (each
 with its `from` / `to` seconds, the `cut` into it, `hours` of the day it runs through, `ease`, and a camera of
 specs `{ at, dx, dy, dist, pitch, yaw, lift, fov }`: the camera orbits a named point at `dist` and `pitch` degrees
@@ -1891,8 +1908,10 @@ tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no
 **Looking at it**: `node tools/shot-intro.mjs --at 2,16,26,38 --sheet` renders stills (the film runs in manual
 mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
 changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
-plays, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`). Don't sample stills at
-19 or 36 s, the dips' black frames. Tests: `tests/intro/{script,stage,film}.test.js`,
+plays, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
+voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
+screen, Esc cutting it before the dip, the hint and the click, the setting). Don't sample stills at
+19 or 36 s, the dips' black frames. Tests: `tests/intro/{script,stage,film,narrator}.test.js`,
 `tests/render/camera-free.test.js`, `tests/ui/intro.test.js`.
 
 Traps met while making it: the summon pillar of a god or titan (about 8 tiles tall, 1.75 s) washes out a close

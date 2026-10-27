@@ -2,9 +2,10 @@
 // film (src/intro/film.js, the real renderer on a set the simulation runs) between letterbox
 // bars with a line of text at a time, then hands over to the title screen. Esc (or Enter,
 // Space, or the Skip button) cuts it short at any moment, even while it is still loading.
+// A voice (src/intro/narrator.js) reads each line aloud as it comes up, unless the player turned that off.
 //
 //   if (introWanted({ enabled: settings.intro, search: location.search, ... })) {
-//     const intro = playIntro({ root, quality, onHandover: () => showMenu('title') });
+//     const intro = playIntro({ root, quality, narrate: settings.narration, volume: settings.volume, onHandover: () => showMenu('title') });
 //     await intro.done;                                  // 'finished' | 'skipped' | 'failed'
 //   }
 //
@@ -12,6 +13,7 @@
 // only when the film plays, and the renderer's GL context is freed before the title shows.
 import { h } from './menu-dom.js';
 import { FILM_LENGTH, AUDIO_CUES } from '../intro/script.js';
+import { createNarrator } from '../intro/narrator.js';
 import { sfx } from '../audio/sfx.js';
 
 const SKIP_KEYS = new Set(['Escape', 'Enter', ' ']);
@@ -64,6 +66,8 @@ function buildOverlay(onSkip) {
   const canvas = h('canvas.mw-intro-canvas', { 'aria-hidden': 'true' });
   const caption = h('p.mw-intro-caption', { 'aria-live': 'polite' });
   const skip = h('button.mw-intro-skip.mw-silent', { type: 'button', onclick: onSkip }, h('kbd', 'Esc'), h('span', 'Skip'));
+  // shown while the browser will not speak until the page has had a click (any click on the film does it)
+  const hint = h('p.mw-intro-hint', { 'aria-hidden': 'true' }, 'Click for narration');
   const fade = h('div.mw-intro-fade', { 'aria-hidden': 'true' });
   const loading = h('div.mw-intro-loading', { role: 'status' }, h('span.mw-intro-mark', 'Mythic War'), h('span.mw-intro-pulse', { 'aria-hidden': 'true' }));
   const root = h('section.mw-intro', { 'aria-label': 'Intro film' },
@@ -71,7 +75,7 @@ function buildOverlay(onSkip) {
     h('div.mw-intro-vignette', { 'aria-hidden': 'true' }),
     h('div.mw-intro-bar.is-top', { 'aria-hidden': 'true' }),
     h('div.mw-intro-bar.is-bottom', { 'aria-hidden': 'true' }, caption),
-    skip, fade, loading);
+    skip, hint, fade, loading);
   root.id = 'intro-root';
   return { root, canvas, caption, skip, fade };
 }
@@ -84,9 +88,12 @@ function buildOverlay(onSkip) {
  * @param {() => void} [o.onHandover] called once, behind the black, when the title screen should show
  * @param {boolean} [o.manual] tools and tests drive the film themselves (intro.advance moves it on, intro.draw paints a frame); no frame loop runs
  * @param {boolean} [o.guard] drop the film on a machine too slow to show it
+ * @param {boolean} [o.narrate] read each caption aloud with the browser's speech synthesis (the player's setting); silent where it has none
+ * @param {number} [o.volume] the game's volume setting, 0..1: the voice follows it
  * @param {() => Promise<{ IntroFilm: Function, Renderer: Function }>} [o.load]
  * @param {(ms: number) => Promise<void>} [o.wait]
  * @param {{ play: Function }} [o.audio]
+ * @param {(o: { volume: number, onBlocked: (blocked: boolean) => void }) => { update: Function, retry: Function, stop: Function }} [o.createVoice] makes the narrator (tests pass a stand-in)
  * @returns {{ done: Promise<'finished'|'skipped'|'failed'>, ready: Promise<void>, skip: () => void, advance: (dt: number) => void, draw: () => void, film: object|null, root: HTMLElement }}
  */
 export function playIntro({
@@ -95,9 +102,12 @@ export function playIntro({
   onHandover = () => {},
   manual = false,
   guard = true,
+  narrate = true,
+  volume = 1,
   load = defaultLoad,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   audio = sfx,
+  createVoice = createNarrator,
 } = {}) {
   let state = 'loading'; // loading → playing → leaving → done
   let film = null;
@@ -107,6 +117,11 @@ export function playIntro({
   const ui = buildOverlay(() => finish('skipped'));
   root.appendChild(ui.root);
   const done = new Promise((resolve) => (finished = resolve));
+
+  // The voice: it follows the film's clock (paint), and a click on the film lets a browser that refused to speak
+  // before any click start. The hint says so while it is refusing.
+  const voice = narrate ? createVoice({ volume, onBlocked: (blocked) => ui.root.classList.toggle('needs-click', blocked) }) : null;
+  ui.root.addEventListener('click', () => voice && voice.retry());
 
   // The menu underneath never sees a key that skips the film (nor one held down, or pressed again
   // while the black lifts): a second Enter must not press the title screen's Play.
@@ -153,6 +168,7 @@ export function playIntro({
         // a sound that cannot play must not stop the film
       }
     }
+    if (voice) voice.update(view.t);
   }
 
   // ---------------------------------------------------------------- the frame loop
@@ -228,6 +244,7 @@ export function playIntro({
     const wasPlaying = state === 'playing';
     state = 'leaving';
     outcome = reason;
+    if (voice) voice.stop(); // the voice goes first, before the dip to black
     if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
     raf = 0;
     leave(wasPlaying && reason !== 'finished').catch((err) => console.warn('[intro] leaving failed', err));

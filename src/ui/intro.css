@@ -1,7 +1,8 @@
 /* Mythic War — the intro film's overlay (DESIGN 11.1). A black card over the menu (z 30) that holds
    the film's canvas, the letterbox bars (--bars: 0 open .. 1 closed, set by src/ui/intro.js), one line of
    text at a time and the Skip button. Its state is classes on .mw-intro: is-playing (the film is up),
-   is-skipping (dipping to black), is-black (the picture is gone), is-revealing (the black lifts off the title). */
+   is-skipping (dipping to black), is-black (the picture is gone), is-revealing (the black lifts off the title),
+   needs-click (the narration is waiting for the page's first click). */
 
 .mw-intro {
   --bars: 0;
@@ -86,6 +87,27 @@
 .mw-intro-skip:hover { color: var(--mw-gold-hi); border-color: var(--mw-gold); }
 .mw-intro-skip:focus-visible { outline: none; box-shadow: var(--mw-focus); }
 
+/* the narration's hint, opposite the Skip button: shown (class needs-click) while the browser will not
+   speak until the page has had a click; any click on the film, not only on the hint, is that click */
+.mw-intro-hint {
+  position: absolute;
+  top: 1.1em;
+  left: 1.4em;
+  margin: 0;
+  padding: 0.5em 0.9em;
+  font: 600 0.8em / 1 var(--mw-font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mw-ink-dim);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--mw-line-soft);
+  border-radius: 0.35em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+.mw-intro.needs-click .mw-intro-hint { opacity: 1; }
+
 /* the dips between shots, the fade in and the fade out: opacity is set each frame by the page */
 .mw-intro-fade {
   position: absolute;
@@ -130,12 +152,14 @@
 /* a skip: the picture dips to black quickly (the page waits for this before it frees the renderer) */
 .mw-intro.is-skipping .mw-intro-fade { opacity: 1 !important; transition: opacity 0.32s ease-in; }
 .mw-intro.is-skipping .mw-intro-skip,
+.mw-intro.is-skipping .mw-intro-hint,
 .mw-intro.is-skipping .mw-intro-caption { opacity: 0 !important; transition: opacity 0.2s; }
 
 /* solid black, then the title screen under it comes up as the black lifts */
 .mw-intro.is-black .mw-intro-fade { opacity: 1 !important; transition: none; }
 .mw-intro.is-black .mw-intro-loading,
 .mw-intro.is-black .mw-intro-skip,
+.mw-intro.is-black .mw-intro-hint,
 .mw-intro.is-black .mw-intro-caption { opacity: 0 !important; transition: none; }
 .mw-intro.is-revealing { opacity: 0; pointer-events: none; transition: opacity 0.9s ease; }
 
