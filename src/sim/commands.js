@@ -18,7 +18,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -385,6 +385,11 @@ export function applyCommand(world, player, cmd) {
       break;
     case 'hold':
       for (const u of ownUnits(world, player, cmd.units)) world.setOrder(u, { type: 'hold', target: 0 }, queue);
+      break;
+    case 'kill':
+      // The Delete key: the player's own units die as they would in a fight but with no killer, so
+      // nobody earns credit, experience or spoils. Buildings and mines are not units: ownUnits skips them.
+      for (const u of ownUnits(world, player, cmd.units)) world.killEntity(u, null);
       break;
     case 'cast':
       castCommand(world, player, cmd);

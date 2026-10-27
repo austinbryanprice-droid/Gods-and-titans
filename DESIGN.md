@@ -624,6 +624,7 @@ counted in `world.perf.commandErrors`.
 { type: 'rally',      building: id, x, y, target?: id }
 { type: 'stop',       units }
 { type: 'hold',       units }
+{ type: 'kill',       units }                                   // the Delete key: own units die, no killer (below)
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
 { type: 'surrender' }
 ```
@@ -632,6 +633,14 @@ tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker ca
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
 Units that cannot do the resolved action just move.
+
+**kill** destroys the issuing player's own living units among `units` (another player's unit, a building and a
+mine in the list are skipped) with `World.killEntity(unit, null)`: a normal death that has no killer. The `death`
+event plays the death animation and sound, the unit's population is free at once, a loss is counted, a fallen god
+stays in `fallen` to be revived at a Temple with its level, and its orders are cleaned up as in a fight (a paid
+building is refunded, a prayer slot is freed). Nobody earns anything from it: no kill, no experience for gods or
+soldiers, no plunder or sacrifice, no bounty. It works in a Decade of Peace and, like every command, not for a
+defeated player or once the game is over.
 
 Errors emit `{ type: 'error', player, message }` with these messages:
 `Not enough gold.` `Not enough wood.` `Not enough faith.` `Not enough population. Build more Houses.`
@@ -1434,6 +1443,16 @@ per-frame budget, so a revealed army appears over a few frames.
   step per ~100 px of scroll, so trackpads zoom gently), middle-drag pan, minimap click/drag,
   Space centers on selection or last alert, F1–F3 select gods, Alt shows all health bars.
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
+  **Delete** destroys the selected own units (`kill`, 6.2; the whole selection, not only the active subgroup).
+  Buildings are not units: they stay, and a selection of nothing but buildings says so (`Delete destroys units,
+  not buildings.`; walls have D, an unfinished building Esc). Up to `DELETE_CONFIRM_ABOVE` (5) plain units go at
+  once. More than that, or any god or Titan, first says what it would destroy (`Press Delete again to destroy 12
+  units, including Zeus.`) and goes on a second press within `DELETE_CONFIRM_MS` (2.5 s) while every selected unit
+  was among those asked about: units lost or taken off the selection meanwhile do not matter, one added does. Esc
+  (which then does nothing else), waiting or leaving the window takes the question back. Key auto-repeat,
+  Ctrl / Alt / Cmd + Delete, typing in chat and an open menu do nothing. Destroying units also ends a pending
+  placement or targeting. Backspace is unchanged (it jumps to the Town Center), so on a Mac keyboard, whose delete
+  key is Backspace, Delete is fn + delete. Rules and texts in `src/ui/delete-key.js`.
   **Walls**: with a wall type chosen in the build menu (W) the left button goes down on the first
   tile and the line follows the cursor in the nearest of eight directions (`wallLine`); releasing
   orders it for all selected workers (`build` with `tx2` / `ty2`; Shift keeps laying walls). A tip by
