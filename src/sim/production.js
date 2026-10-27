@@ -1,12 +1,14 @@
 // Production: training queues with cost and population reserved up front,
 // god/titan summoning rules, reviving fallen gods, tier upgrades, building
 // upgrade research, rally points and spawning at the footprint edge nearest
-// the rally.
+// the rally. (Combining Houses into a Manor rides the same queues: sim/homes.js.)
 import { MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, GOD_MAX_LEVEL, GOD_XP_LEVELS, DT, POP_MAX } from '../config.js';
 import { getUnitType, producibleAt } from '../data/index.js';
 import { getUpgrade, buildingMods, reviveMult } from '../data/upgrades.js';
 import { wallUpgradeOf } from '../data/walls.js';
+import { researchHostOf } from '../data/houses.js';
 import { refund, tierMessage, requiresMessage } from './construction.js';
+import { cancelMerge, advanceMerge, isMerging } from './homes.js';
 import { hyp } from './common.js';
 
 /** Count living + queued units of a class for a player. */
@@ -95,6 +97,10 @@ export function cancelTrain(world, player, b, index, count) {
   const n = Number.isInteger(count) && count > 1 ? Math.min(count, b.queue.length - i) : 1;
   const p = world.players[player];
   for (const item of b.queue.splice(i, n)) {
+    if (item.group) {
+      cancelMerge(world, item.group); // four Houses were being combined: all of it stops, and the price comes back once
+      continue;
+    }
     refund(world, player, item.cost);
     if (item.revive) p.fallen[item.u] = { level: item.revive.level, xp: item.revive.xp };
     p.popUsed = Math.max(0, p.popUsed - item.pop);
@@ -131,8 +137,9 @@ export function researching(world, player, upId) {
 export function issueResearch(world, player, b, upId) {
   if (!b || b.dead || b.kind !== 'building' || b.owner !== player || !b.constructed) return;
   const up = getUpgrade(upId);
-  if (!up || up.building !== b.type) return;
+  if (!up || up.building !== researchHostOf(b.type)) return;
   const p = world.players[player];
+  if (isMerging(b)) return world.error(player, 'That House is being combined into a Manor.');
   if (p.upgrades[upId]) return world.error(player, 'Already researched.');
   if (researching(world, player, upId)) return world.error(player, 'Already being researched.');
   if (up.after && !p.upgrades[up.after]) return world.error(player, `Requires ${getUpgrade(up.after).name}.`);
@@ -238,6 +245,7 @@ function followRally(world, b, u) {
 export function updateProduction(world, b) {
   if (!b.constructed || b.queue.length === 0) return;
   const item = b.queue[0];
+  if (item.group) return advanceMerge(world, b, item); // four Houses becoming a Manor
   const p = world.players[b.owner];
   const unit = item.u !== 'tier_up' && !item.research && !item.upgrade;
   // Drill Yard / Widened Rift: units of this building train faster; Imperial Bureaucracy speeds up research and growth

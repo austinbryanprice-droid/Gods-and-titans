@@ -55,6 +55,10 @@ test('every building has its own upgrades: at least two each, no effect shared w
       assert.equal(ups.length, 0, `${b.id}: wall segments come by the hundred and take the one upgrade of their own (wallUpgrade), no research`);
       continue;
     }
+    if (b.mergesFrom) {
+      assert.equal(ups.length, 0, `${b.id}: a combined building researches the upgrades of ${b.mergesFrom.building} (researchHostOf), none of its own`);
+      continue;
+    }
     assert.ok(ups.length >= 2, `${b.id} has ${ups.length} upgrades`);
     for (const up of ups) {
       assert.equal(UPGRADES[up.id].building, b.id);
