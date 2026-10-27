@@ -15,6 +15,7 @@ import { checkPlacement, checkWallLine, footprintAt } from '../game/placement.js
 import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
 import { isComplete, isWallEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
+import { deletePlan, DELETE_CONFIRM_MS } from './delete-key.js';
 import { peaceNotice } from '../sim/peace.js';
 
 const DRAG_THRESHOLD = 5; // px before a left press becomes a box
@@ -74,6 +75,7 @@ export class InputController {
     this.placeAt = 0;
     this.placeSig = '';
     this.queuedBuilds = []; // [{ b, tx, ty }] placed with Shift in this placement mode
+    this.deleteArmed = null; // { ids: Set, until } after a first Delete press that asks for a second
     this.shiftHeld = false;
     this.cursor = '';
     this.disposed = false;
@@ -1136,6 +1138,38 @@ export class InputController {
     this.hud.message(anyOn ? 'Abilities set to manual.' : 'Abilities set to autocast.', 'info');
   }
 
+  /** The Delete question still waiting for its second press, or null (it lapses after DELETE_CONFIRM_MS). */
+  pendingDelete() {
+    if (this.deleteArmed && performance.now() >= this.deleteArmed.until) this.deleteArmed = null;
+    return this.deleteArmed;
+  }
+
+  /**
+   * Delete: destroy the selected own units (the sim's `kill`). A few plain units go at once; a bigger
+   * group, a god or a Titan first says what it would destroy and needs a second press (DELETE_CONFIRM_MS)
+   * with nothing new in the selection. Buildings are not units and stay.
+   */
+  deleteSelected() {
+    const units = this.ownUnits().map((id) => this.vs.entities.get(id)).filter(Boolean);
+    if (!units.length) {
+      this.deleteArmed = null;
+      if (this.sel.ownBuildings().length) this.error('Delete destroys units, not buildings.');
+      return;
+    }
+    const plan = deletePlan(units);
+    const armed = this.pendingDelete();
+    if (plan.confirm && !(armed && plan.ids.every((id) => armed.ids.has(id)))) {
+      this.deleteArmed = { ids: new Set(plan.ids), until: performance.now() + DELETE_CONFIRM_MS };
+      this.hud.message(plan.prompt, 'error');
+      return;
+    }
+    this.deleteArmed = null;
+    // The units are about to be gone: a pending placement or target would have nobody to order.
+    if (this.mode.kind !== 'normal') this.setMode({ kind: 'normal' });
+    this.menu = 'root';
+    this.command({ type: 'kill', units: plan.ids });
+  }
+
   // ---------------------------------------------------------------- keyboard
 
   onKeyDown(e) {
@@ -1239,9 +1273,18 @@ export class InputController {
       if (!rep) this.toggleAllAutocast();
       return;
     }
+    if (key === 'Delete') {
+      e.preventDefault();
+      if (!rep) this.deleteSelected();
+      return;
+    }
     if (key === 'Escape') {
       e.preventDefault();
       if (rep) return;
+      if (this.pendingDelete()) {
+        this.deleteArmed = null; // Esc takes back the question and nothing else
+        return;
+      }
       const card = hud.currentCard();
       const b = buttonForKey(card, 'Escape');
       if (b) {
@@ -1296,6 +1339,7 @@ export class InputController {
 
   onBlur() {
     this.shiftHeld = false;
+    this.deleteArmed = null;
     this.endShiftMode();
     this.keys.clear();
     if (this.altHeld) {

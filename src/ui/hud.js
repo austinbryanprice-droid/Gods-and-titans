@@ -217,7 +217,7 @@ export class Hud {
         const e = this.vs.entities.get(id);
         return e && e.t === type;
       })),
-      onCancelQueue: (building, index) => game.command({ type: 'cancelTrain', building, index }),
+      onCancelQueue: (building, index, count = 1) => game.command(count > 1 ? { type: 'cancelTrain', building, index, count } : { type: 'cancelTrain', building, index }),
       onPortrait: () => game.input && game.input.centerOnSelection(),
     });
     this.overlays = new Overlays(this.overlayRoot, game);

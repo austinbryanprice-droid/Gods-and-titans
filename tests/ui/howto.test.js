@@ -38,6 +38,8 @@ test('controls that were undocumented are listed', () => {
     'keep placing more', // Shift + place
     'take back its last queued unit', // Esc on a producer
     'Shift or Ctrl: select all of them', // idle worshippers
+    'Destroy the selected units and free their population', // Delete
+    'press twice for more than 5 units, a god or a Titan',
     'another command hotkey replaces the pending order',
     'Zoom in and out (smoothly on a trackpad)',
   ]) assert.ok(text.includes(part), part);

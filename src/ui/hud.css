@@ -911,13 +911,18 @@
   border: 1px solid var(--mw-gold);
   background: linear-gradient(180deg, #2e3750, #141824);
 }
-.hi-q-main:hover, .hi-q-item:not(.is-empty):hover { border-color: #ff8a6a; box-shadow: 0 0 0.7em rgba(255, 110, 80, 0.5); }
+.hi-q-main:hover, .hi-q-item:hover { border-color: #ff8a6a; box-shadow: 0 0 0.7em rgba(255, 110, 80, 0.5); }
 .hi-q-icon { font-family: var(--mw-emoji); font-size: 1.8em; line-height: 1; }
 .hi-q-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.3em; justify-content: space-between; }
 .hi-q-info { display: flex; flex-direction: column; gap: 0.25em; }
-.hi-q-label { font-size: 0.86em; color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hi-q-rest { display: flex; gap: 0.25em; }
+.hi-q-head { display: flex; align-items: baseline; gap: 0.6em; }
+.hi-q-label { flex: 1; min-width: 0; font-size: 0.86em; color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hi-q-count { flex: none; font-size: 0.8em; color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
+/* the rest of the queue: runs of the same unit with a count, so 49 queued units are one button; the row keeps its height when empty */
+.hi-q-rest { display: flex; gap: 0.25em; min-height: 1.9em; }
 .hi-q-item {
+  position: relative;
+  flex: none;
   width: 1.9em;
   height: 1.9em;
   padding: 0;
@@ -928,7 +933,16 @@
   font-size: 0.95em;
   line-height: 1;
 }
-.hi-q-item.is-empty { border-color: rgba(196, 146, 72, 0.2); background: rgba(0, 0, 0, 0.35); cursor: default; }
+.hi-q-n {
+  position: absolute;
+  right: 0.12em;
+  bottom: 0.05em;
+  font: 800 0.8em/1 var(--mw-font-ui);
+  color: #fff;
+  text-shadow: 0 1px 0 #000, 0 0 3px #000, 0 0 3px #000;
+  pointer-events: none;
+}
+.hi-q-item.is-more { width: auto; min-width: 1.9em; padding: 0 0.45em; font: 800 0.8em/1 var(--mw-font-ui); color: var(--mw-gold-hi); }
 
 .hi-multi { display: flex; flex-direction: column; gap: 0.35em; height: 100%; }
 .hi-grid-label { font-size: 0.9em; color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
