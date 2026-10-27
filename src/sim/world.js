@@ -19,6 +19,7 @@ import { updateDelayed, updateFields, defaultManualMask, refreshAutocast } from 
 import { computePrayerSpots, mineSpots, nearestMine } from './economy.js';
 import { canPlace, placementError, findPlacement, updateConstruction, updateBuildingRepair } from './construction.js';
 import { updateProduction } from './production.js';
+import { cancelMerge } from './homes.js';
 import { awardSpoils, accrueBlessedFaith } from './spoils.js';
 import { spawnCreeps } from './creeps.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
@@ -559,6 +560,7 @@ export class World {
     const p = this.players[b.owner];
     if (p) {
       for (const q of b.queue) {
+        if (q.group) cancelMerge(this, q.group); // a House of four being combined fell: the others stand, the price comes back
         if (q.revive) p.fallen[q.u] = { level: q.revive.level, xp: q.revive.xp };
         p.popUsed = Math.max(0, p.popUsed - q.pop);
       }

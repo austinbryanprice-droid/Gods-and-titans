@@ -143,6 +143,15 @@ building be raised on, or in line with, the owner's wall segments and be joined 
 `wallConnections` (the neighbours a segment runs on to). Walls do not count as buildings for
 defeat (5.8), for the AI's targets (10), for population, or for the buildings stat.
 
+**The Manor** (`manor`, `size: 4`, tier 2) is four Houses combined: it is not on the build menu and
+only comes from the upgrade in 5.3. Its `mergesFrom: { building: 'house', count: 4, cost, time }` is
+the rule (which House, how many, the price and the time of the upgrade); the `cost` it carries is the
+whole price of the four Houses and the upgrade, which repairs go by. It has no `upgrades` of its own:
+it researches the House's (`researchHostOf`, which `upgradesFor` follows), and every effect on the
+House counts again for it (`COMBINED` in `src/data/upgrades.js`). `src/data/houses.js` holds the pure
+helpers the sim, HUD and renderer share: `mergeRule`, `researchHostOf`, `houseBlocks` and `planMerges`
+(the squares among some Houses, or why there is none) and `MERGE_TEXT` (the refusals, word for word).
+
 ### 4.4 Ability
 ```js
 {
@@ -301,7 +310,8 @@ Each player: Town Center (tier 1, Village) at its start position, 5 Worshippers,
 200 wood, 50 faith. A gold mine (12000) 2–4 tiles from the Town Center, a forest edge 6–10
 tiles away. Population cap = sum of `popProvided` of completed buildings, max `POP_MAX` (200): a Town
 Center gives 12 and a House 8 (10 with Large Families), so 24 Houses and a Town Center reach it (19 with
-Large Families).
+Large Families). Four Houses in a square can be combined into a Manor (5.3) that gives 48 instead of
+their 32, so a Town Center and four Manors (204) reach it with sixteen Houses' worth of ground.
 Pop used = pop of living units + pop of everything queued in production.
 
 ### 5.2 Economy
@@ -390,6 +400,36 @@ Pop used = pop of living units + pop of everything queued in production.
   - `cancelBuild` on a *finished* wall segment takes it down, refunding `WALL_REMOVE_REFUND` (50%) of
     its cost (an upgrade under way is refunded in full): walls block the owner's own units too, so
     this is how a gap is opened. Dismantling is not an attack and costs no time.
+- **Manors** (`src/sim/homes.js`, `src/data/houses.js`): four Houses that stand in a *square*, a 2×2
+  block of the owner's finished Houses touching edge to edge (so one 4×4-tile square: each House is one
+  House-width, 2 tiles, from its neighbours), are combined into one Manor in place. Houses merely near
+  each other, in a row or in an L are not grouped. `upgradeHouses { houses: [ids] }` takes any selection
+  of Houses and finds the squares among them (`houseBlocks`: row by row from the top, left to right, no
+  House in two squares; other Houses may stand anywhere), then starts every square that can, paying
+  `mergesFrom.cost` (100 gold, 60 wood) for each at once, for as many squares as the purse allows
+  (`Not enough gold. Combined 1 of 2 squares.`). It needs a Town (`Requires Town.`: the Manor's `tier`),
+  and the four Houses must be finished and *idle*: not researching and not part of a combining already.
+  The refusals cost nothing: `Select four Houses that stand together in a square.`, `Those Houses do not
+  make a square, two by two.`, `A House in the square is busy: wait for its research or upgrade to finish.`
+  - The upgrade needs no worker. It is a queue item (`upgrade: true`, `u` = `manor`, 45 s, quickened by
+    Imperial Bureaucracy's `techSpeed` like any growth) on each of the four Houses, all sharing one `group`
+    object (`ids`, the square's top-left tile, `cost`, `owner`): the top-left House runs the timer and the
+    other three copy its progress, so any one of them can be selected to watch it and the queue panel shows
+    it like any item. The Houses keep sheltering their people while it runs. The price belongs to the group:
+    `cancelTrain` on any of the four items stops the whole upgrade and returns the price once, and so does a
+    House that falls meanwhile (`releaseBuilding`), while the other three carry on as Houses. Researching at
+    a House being combined is refused (`That House is being combined into a Manor.`).
+  - When the time is up the four Houses are removed (no death, like a wall taken down) and one Manor stands
+    on their ground, finished, announced by a `buildingComplete` ("Manor completed."), with the average of
+    the four health fractions (combining does not heal; repair does). A Manor shelters 48
+    population against the 32 of four Houses (+16, so the limit of 200 is reached with a Town Center and four
+    Manors), has 2400 health (against 2000) and armor 4, and costs 420 gold and 180 wood to replace: four
+    Houses and the upgrade. It cannot be built from scratch (`build` takes only `BUILD_MENU` types).
+  - A Manor holds what the Houses held: every upgrade, blessing or perk effect on the House counts again for
+    it, as often as the Houses it replaced for population and health and once for armor (`COMBINED`, so
+    Large Families +2 becomes +8 and Mesopotamian Crowded Cities too, whether researched before or after),
+    and it researches the House's upgrades (`researchHostOf`), each once per player. The AI never combines
+    Houses (10).
 - **Repair:** worshippers ordered to `repair` an own completed, damaged building walk to it and
   mend it (state `build`, view task `tk: 'repair'`). One worshipper restores the full health bar
   in `REPAIR_TIME` (75%) of the build time (shorter with work speed); each extra adds `BUILD_HELPER_BONUS`. A full bar
@@ -660,6 +700,7 @@ counted in `world.perf.commandErrors`.
 { type: 'upgradeTier', building: id }
 { type: 'cancelBuild', building: id }                      // also takes a finished wall segment down (5.3)
 { type: 'upgradeWall', walls: [buildingIds] }             // wooden → stone on finished wall segments (5.3)
+{ type: 'upgradeHouses', houses: [buildingIds] }          // each square of four Houses among them becomes a Manor (5.3)
 { type: 'repair',     units, target: buildingId, queue }   // on a construction site: help build
 { type: 'research',   building: id, upgrade: upgradeId }
 { type: 'autoRepair', on: bool }
@@ -697,7 +738,11 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That ability is not ready.` `That ability unlocks at level N.` (N = the ability's `unlockLevel`)
 `Target out of range.` `This Shrine is full.` / `This Temple is full.` (the building's name).
 `That building is not damaged.` `Not enough gold to repair.` (wood / faith) `Already researched.`
-`Already being researched.` `Requires <Upgrade name>.` (a line's earlier level, e.g. `Requires Work Songs.`) Trades: `Choose a teammate to send to.` `You can only send resources
+`Already being researched.` `Requires <Upgrade name>.` (a line's earlier level, e.g. `Requires Work Songs.`)
+`Select four Houses that stand together in a square.` `Those Houses do not make a square, two by two.`
+`A House in the square is busy: wait for its research or upgrade to finish.`
+`That House is being combined into a Manor.` (and `Not enough gold. Combined 1 of 2 squares.` when the purse
+runs short part way) Trades: `Choose a teammate to send to.` `You can only send resources
 to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
 `Choose gold, wood or faith to send.` `You cannot trade now.`
 
@@ -1345,6 +1390,11 @@ per-frame budget, so a revealed army appears over a few frames.
   a building, 700 a wall segment (two meshes), 6 meshes; a style whose detailed build does not fit
   is built at the plain level (`getBuildingModelInfo(...).level`), which no roster pantheon needs.
   A test casts rays from the game camera to check that team color stays visible on every building.
+  The Manor (four Houses combined, 4×4 tiles; `buildManor`) is a courtyard house in the pantheon's own
+  style: a hall at the back with the door and the team banners, a lower wing on each side (round halls
+  and cones for the round-roofed styles) around a paved court with a fountain, hedges, a barrel and
+  sacks, the ornament pair at the gate and a flag on each side. It shows more than a House (1.1k to 1.9k
+  triangles plain, 1.6k to 2.6k detailed) and stays in the same budgets.
   Terrain (`terrain.js`, `ground-field.js`, `terrain-textures.js`, `terrain-water.js`): the sim's
   vertex heights stay as they are, and the renderer builds one smooth ground field from them
   (`groundField(mapData)`, 4 samples a tile: a Catmull-Rom surface through the vertices, so the
@@ -1491,7 +1541,8 @@ per-frame budget, so a revealed army appears over a few frames.
   damage / range, housing and faith rates include the owner's upgrades (`players[i].up`); a
   Town Center lists only the highest level of each upgrade line. A Worshipper also shows a "Work"
   stat (Normal, or +N% from the work upgrades), and the gold mine's rule line and the Gather
-  tooltip quote the viewer's own trip ("1.3 s per 12 gold").
+  tooltip quote the viewer's own trip ("1.3 s per 12 gold"). A House's note tells how to combine four
+  into a Manor and a Manor's says how much more housing it gives than the Houses it replaced (+16).
   **Queue row** (own buildings with a queue of up to `MAX_QUEUE` = 50): the big button is the item in progress
   (its bar, "Training Worshipper") with a "n / 50" count at the right once more than one is queued; after it,
   the rest of the queue as runs of the same item, one button each with a count on the runs of two or more
@@ -1545,6 +1596,13 @@ per-frame budget, so a revealed army appears over a few frames.
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
   Wall segments: U upgrade to stone (every idle segment of the active subgroup, as many as the purse
   allows), D dismantle finished segments, C cancel unfinished segments or upgrades.
+  Houses: U combine into a Manor (5.3), C cancel the combining. The button reads the same rule as the
+  sim (`planMerges` in `src/data/houses.js`) from the finished Houses of the active subgroup: it says
+  how many squares of four they make ("Combine into 2 Manors"; the cost is the sum), and is greyed out
+  with the sim's own text when they make none (too few Houses, not a square, one of them busy) or locked
+  until a Town; when the purse covers fewer squares than there are, the tooltip says how many it can pay
+  for. A House being combined shows the upgrade in its queue and a Cancel button; a Manor's card
+  offers the House upgrades (the Houses' list, shared) in the same slots.
   Each building's upgrades fill the free middle / bottom slots with their data hotkey (no two
   buttons of a card share a key); researched ones stay as dim "(researched)" buttons. An upgrade
   line takes one slot and shows its next level to research ("Level 2 of 3."), keeping the line's
@@ -1573,7 +1631,7 @@ second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/cre
 when its buildings are attacked; attack in waves when its army is strong enough (later and
 smaller on easy); target the nearest enemy base (prefer the weakest enemy in multi-enemy
 games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, ultimates in
-big fights); retreat badly hurt gods to base. It builds no walls, and wall segments are invisible to its scans (`worldDigest`,
+big fights); retreat badly hurt gods to base. It combines no Houses into Manors (5.3: it keeps building Houses ahead of its cap) and builds no walls, and wall segments are invisible to its scans (`worldDigest`,
 `scanWorld`, team targeting): they are neither buildings it counts nor targets it picks, and an army shut out by a
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the

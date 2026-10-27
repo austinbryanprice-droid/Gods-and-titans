@@ -208,6 +208,7 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
     repair: { units: [1], target: 2 }, research: { building: 2, upgrade: 'house_stone_walls' }, autoRepair: { on: true },
     trade: { to: 1, res: 'gold', amount: 100 },
     autocast: { units: [1], ability: 'greek_zeus_thunderbolt', on: true },
+    upgradeHouses: { houses: [7, 8, 9, 10] },
     upgradeWall: { walls: [4, 5, 6] },
   };
   assert.deepEqual(Object.keys(good).sort(), [...COMMAND_TYPES].sort());
