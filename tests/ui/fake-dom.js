@@ -42,6 +42,7 @@ export class FakeElement {
         drawImage() {},
         clearRect() {},
         fillRect() {},
+        fillText() {},
         beginPath() {},
         stroke() {},
         fill() {},

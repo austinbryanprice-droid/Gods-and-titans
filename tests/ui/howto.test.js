@@ -66,3 +66,12 @@ test('walls are explained: the build key, dragging a line, the stone upgrade, to
   assert.match(text, /A Tower raised on a wall, or in line with one, becomes part of the wall/);
   assert.match(text, /Wall segments: upgrade to stone \(U\) or dismantle \(D\)/);
 });
+
+test('team pings and markers are explained: the gestures, the buttons and who sees them', () => {
+  assert.ok(text.includes('Team signals'));
+  assert.match(text, /Alt\+ClickPing your team at that spot on the map or the minimap/);
+  assert.match(text, /not while aiming an order or placing a building/);
+  assert.match(text, /Middle-clickThe same with the middle button/);
+  assert.match(text, /Beside the minimap: Ping, Attack, Defend, Help and Gather/);
+  assert.match(text, /Only your teammates/);
+});

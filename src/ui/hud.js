@@ -3,7 +3,8 @@
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
-//   bottom       minimap | selection panel | 4×3 command card (+ tooltip)
+//   bottom       minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
+//   team marks   pins over the battlefield (and arrows at its edge) for the pings and markers of my team
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
 //   overlays     waiting, in-game menu (F10), game over, host left
 // Only the panels take pointer events; everything else falls through to the canvas.
@@ -20,6 +21,8 @@ import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
 import { MarketView, marketPartners } from './hud-market.js';
+import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
+import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { POP_MAX, PEACE_NAME } from '../config.js';
 
@@ -32,6 +35,7 @@ const ERROR_MS = 2600;
 const BANNER_MS = 4200;
 const MAX_MESSAGES = 7;
 const MAX_MESSAGE_CHARS = 240;
+const MARKS_HINT = 'Team ping: Alt+click or middle-click the map or minimap. The buttons beside the minimap mark where to attack, defend, gather or get help.';
 
 export class Hud {
   /**
@@ -63,6 +67,16 @@ export class Hud {
     root.textContent = '';
     root.classList.add('hud');
     const game = this.game;
+
+    // Team pings and markers: pins over the battlefield, under every panel (so added first).
+    this.teamMarks = game.marks || new TeamMarks();
+    this.marksLayer = new MarksLayer({
+      root,
+      marks: this.teamMarks,
+      viewState: this.vs,
+      getRenderer: () => game.renderer || null,
+      getInsets: () => ({ top: this.top.offsetHeight || 0, bottom: this.bottom.offsetHeight || 0 }),
+    });
 
     // Top bar.
     this.menuBtn = el('button', 'hud-menu-btn', el('span', 'hud-menu-ico', '☰'), el('span', null, 'Menu'), el('kbd', null, 'F10'));
@@ -169,8 +183,10 @@ export class Hud {
     this.cardGrid = el('div', 'hud-card');
     this.tip = el('div', 'hud-tip hud-panel');
     this.tip.hidden = true;
+    // The marker buttons stand beside the minimap: pick one, then click the map or the minimap.
+    this.markpad = new MarkPalette({ onPick: (kind) => game.input && game.input.armMark(kind) });
     this.bottom = el('div', 'hud-bottom hud-panel',
-      el('div', 'hud-bottom-mini', mini),
+      el('div', 'hud-bottom-mini', mini, this.markpad.root),
       el('div', 'hud-bottom-info', this.infoRoot),
       el('div', 'hud-bottom-card', this.cardGrid));
 
@@ -210,6 +226,7 @@ export class Hud {
       viewState: this.vs,
       getCamera: () => (game.renderer ? game.renderer.camera : null),
       onPointer: (info) => game.input && game.input.onMinimap(info),
+      marks: this.teamMarks,
     });
 
     // New players get the "getting started" checklist until they close or finish it.
@@ -275,6 +292,8 @@ export class Hud {
       const lead = leadText(vs);
       if (lead) this.message(lead, 'good');
       if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good');
+      // Only a match with a teammate has anyone to ping.
+      if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info');
     }
 
     if (now - this.lastGods >= GODS_REFRESH_MS) {
@@ -298,6 +317,10 @@ export class Hud {
       this.cardView.render(this.card);
     }
     this.minimap.update(now);
+    this.marksLayer.update(now);
+    const m = input && input.mode;
+    this.markpad.setArmed(m && m.kind === 'target' && m.order === 'mark' ? m.mark : null);
+    this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
   }
 
@@ -554,6 +577,7 @@ export class Hud {
     clearTimeout(this.bannerTimer);
     for (const line of this.msgs.children) clearTimeout(line._timer);
     this.minimap.dispose();
+    this.marksLayer.dispose();
     this.hideTips();
     this.overlays.hide();
     for (const off of this.offs.splice(0)) off();
