@@ -7,12 +7,15 @@
 //   node tools/shot-intro.mjs --sheet      # also one contact sheet of every still (sheet.png)
 //   node tools/shot-intro.mjs --flow       # the page flow: the film plays on its own clock, Esc skips it
 //   node tools/shot-intro.mjs --narration  # the voice: each caption read as it comes up, Esc cuts it, a click unlocks it
+//   node tools/shot-intro.mjs --music      # the score, on the page's real audio graph, in real time (about three minutes; --scenes 2 runs one of the four)
 //
 // The film runs in manual mode (src/ui/intro.js playIntro({ manual: true })): the tool moves it on in
 // 0.05 s steps and draws only the seconds asked for, so software GL (a few seconds a frame) is
 // enough. The overlay (bars, caption, fades) is in the stills. Starts a static server on the port
 // unless one already answers there. Prints page errors; exits non-zero when a check fails.
-// (--narration cannot hear anything: a stand-in speech synthesis records what the page asks of it.)
+// (--narration cannot hear anything: a stand-in speech synthesis records what the page asks of it.
+// --music cannot either: it reads the real Web Audio graph instead, the mix stage's gain and the level of the
+// music's output through an analyser, while a film without a renderer runs in real time with a stand-in voice.)
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -372,6 +375,291 @@ async function narration(browser, errors) {
   return results;
 }
 
+// ---------------------------------------------------------------- the score
+
+/** A speech synthesis that takes real time (runs in the page): a line lasts 0.4 s and 70 ms a letter, then it ends; cancel() cuts it. */
+function installTimedSpeech() {
+  const calls = [];
+  const queue = [];
+  let current = null;
+  window.__speech = { calls };
+  window.SpeechSynthesisUtterance = class {
+    constructor(text) {
+      this.text = text;
+    }
+  };
+  const next = () => {
+    if (current || !queue.length) return;
+    const u = queue.shift();
+    const rec = { text: u.text, at: performance.now(), ms: 400 + 70 * u.text.length };
+    calls.push(rec);
+    current = { u, rec, timers: [] };
+    current.timers.push(setTimeout(() => u.onstart && u.onstart({}), 40));
+    current.timers.push(setTimeout(() => {
+      rec.end = performance.now();
+      current = null;
+      if (u.onend) u.onend({});
+      next();
+    }, rec.ms));
+  };
+  const synth = {
+    speaking: false,
+    pending: false,
+    speak(u) {
+      queue.push(u);
+      next();
+    },
+    cancel() {
+      const cut = [...(current ? [current.u] : []), ...queue];
+      if (current) {
+        current.timers.forEach(clearTimeout);
+        current.rec.cut = performance.now();
+      }
+      current = null;
+      queue.length = 0;
+      for (const u of cut) if (u.onerror) u.onerror({ error: 'interrupted' });
+    },
+    getVoices: () => [],
+  };
+  Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true });
+}
+
+/**
+ * Runs in the page: the page's own overlay, narrator, score and music engine over a film with no renderer, in real
+ * time, set up the way main.js's watchIntro does it (the music cleared, the title theme back at the hand-over). A
+ * sampler writes down every 50 ms the film's second, the mix stage's and the stingers' gain (the live Web Audio
+ * parameters), the music's output level (an analyser on the node the music leaves through) and which run is playing.
+ */
+async function runLightFilm({ narrate }) {
+  const { playIntro } = await import('/src/ui/intro.js');
+  const { FILM_LENGTH, fadeAt, barsAt, captionAt } = await import('/src/intro/script.js');
+  const { quietMusic, playTitleMusic } = await import('/src/audio/audio.js');
+  const { music } = await import('/src/audio/music.js');
+  class LightFilm {
+    constructor() {
+      this.t = 0;
+      this.view = { t: 0, fade: 1, bars: 0, caption: null };
+    }
+    get done() {
+      return this.t >= FILM_LENGTH;
+    }
+    advance(dt) {
+      this.t = Math.min(FILM_LENGTH, this.t + dt);
+      this.view = { t: this.t, fade: fadeAt(this.t), bars: barsAt(this.t), caption: captionAt(this.t) };
+    }
+    draw() {}
+    resize() {}
+    dispose() {}
+  }
+  const trace = [];
+  window.__trace = trace;
+  window.__handover = null;
+  window.__outcome = null;
+  let tap = null;
+  let runs = 0;
+  const samples = new Float32Array(2048);
+  const sampler = setInterval(() => {
+    const env = music.env;
+    if (env && !tap) {
+      tap = music.ctx.createAnalyser();
+      tap.fftSize = 2048;
+      env.nodes.hide.connect(tap);
+    }
+    let rms = null;
+    if (tap) {
+      tap.getFloatTimeDomainData(samples);
+      let sum = 0;
+      for (const x of samples) sum += x * x;
+      rms = Math.sqrt(sum / samples.length);
+    }
+    if (music.run && !music.run.__id) music.run.__id = ++runs;
+    const film = window.__intro && window.__intro.film;
+    const st = music.state();
+    trace.push({ at: performance.now(), t: film ? film.t : null, stage: env ? env.nodes.stage.gain.value : null, duck: env ? env.nodes.duck.gain.value : null, rms, run: music.run ? music.run.__id : null, level: st.level, wanted: st.wanted, playing: st.playing, ctxState: music.ctx ? music.ctx.state : null });
+  }, 50);
+  window.__stopSampler = () => clearInterval(sampler);
+  quietMusic();
+  const intro = playIntro({
+    guard: false,
+    narrate,
+    quality: 'low',
+    volume: 0.6,
+    load: async () => ({ IntroFilm: LightFilm, Renderer: class {} }),
+    onHandover: () => {
+      window.__handover = performance.now();
+      playTitleMusic();
+    },
+  });
+  window.__intro = intro;
+  intro.done.then((o) => (window.__outcome = o));
+  await intro.ready;
+}
+
+async function score(browser, errors, only = [1, 2, 3]) {
+  const { results, ok } = reporter();
+  mkdirSync(out, { recursive: true });
+  const db = (x) => 20 * Math.log10(Math.max(x, 1e-9));
+  const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+  const between = (trace, a, b) => trace.filter((r) => r.at >= a && r.at <= b);
+  const fixed = (x, n = 2) => (Number.isFinite(x) ? x.toFixed(n) : 'n/a');
+  /** A page on the title screen; `click` is the player's first click (the browser allows audio after it). */
+  const open = async (click) => {
+    const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } });
+    await ctx.addInitScript(installTimedSpeech);
+    const page = await ctx.newPage();
+    watchErrors(page, errors);
+    await page.goto(`${base}?intro=0`);
+    await page.waitForSelector('.mw-title-screen');
+    await page.addStyleTag({ content: '.mw-intro-loading { display: none !important; }' });
+    if (click) {
+      await page.mouse.click(5, 5);
+      await page.waitForFunction(async () => (await import('/src/audio/music.js')).music.state().playing, null, { timeout: 20000 });
+      await page.waitForTimeout(2000); // the title music's own run, to be cleared by the film as it is in the page
+    }
+    return { ctx, page };
+  };
+  const filmT = (page) => page.evaluate(() => (window.__intro && window.__intro.film ? window.__intro.film.t : -1));
+  const outcome = (page) => page.waitForFunction(() => window.__outcome !== null, null, { timeout: 120000, polling: 250 });
+  console.log('score:');
+
+  // 1. the whole film, narrated, to its end
+  if (only.includes(1)) {
+    const { ctx, page } = await open(true);
+    await page.evaluate(runLightFilm, { narrate: true });
+    await outcome(page);
+    await page.waitForTimeout(9000); // the title screen has the piece now
+    const victoryAt = await page.evaluate(async () => {
+      const { sfx } = await import('/src/audio/sfx.js');
+      const at = performance.now();
+      sfx.play('victory', { volume: 0.7 });
+      return at;
+    });
+    await page.waitForTimeout(1200);
+    const d = await page.evaluate(() => ({ trace: window.__trace, calls: window.__speech.calls, handover: window.__handover, outcome: window.__outcome }));
+    const trace = d.trace.filter((r) => r.stage !== null);
+    const lines = d.calls.map((c) => ({ text: c.text, from: c.at + 40, to: c.at + c.ms }));
+    ok('the film ran to its end and handed over once', d.outcome === 'finished' && d.handover !== null);
+    ok('one line is said for each caption', lines.length === 5, lines.map((l) => `"${l.text}"`).join(', '));
+    const first = trace.find((r) => r.t !== null && r.t > 0.5);
+    ok('the score is up with the film: the title theme, in the film\'s mix, on a running context', first && first.wanted === 'menu' && first.ctxState === 'running' && first.stage > 1.3, first ? `stage ${fixed(first.stage)}` : 'no sample');
+    const stages = trace.map((r) => r.stage);
+    ok('the page\'s Web Audio parameter moves with the mix (Chrome reports the automation in .value)', Math.min(...stages) < 0.5 && Math.max(...stages) > 1.3, `from ${fixed(Math.min(...stages))} to ${fixed(Math.max(...stages))}`);
+    console.log('    line                          under the voice (stage, music dBFS)   between the lines (stage, music dBFS)   gap');
+    let allUnder = true;
+    let allGap = true;
+    let quieter = Infinity;
+    lines.forEach((l, i) => {
+      const nextStart = i + 1 < lines.length ? lines[i + 1].from : d.handover;
+      const under = between(trace, l.from + 500, l.to);
+      const gap = between(trace, l.to + 2300, nextStart - 100);
+      const su = mean(under.map((r) => r.stage));
+      const sg = mean(gap.map((r) => r.stage));
+      const ru = db(mean(under.map((r) => r.rms)));
+      const rg = db(mean(gap.map((r) => r.rms)));
+      allUnder = allUnder && su < 0.45;
+      allGap = allGap && sg > 1.3;
+      quieter = Math.min(quieter, rg - ru);
+      console.log(`    ${l.text.padEnd(28)}  ${fixed(su)}  ${fixed(ru, 1).padStart(6)}                      ${fixed(sg)}  ${fixed(rg, 1).padStart(6)}                          ${fixed(rg - ru, 1)} dB`);
+    });
+    ok('the stage is down under every line', allUnder);
+    ok('and back up between them', allGap);
+    ok('the music that comes out is quieter under every line than between (by at least 4 dB, the story\'s own swings included)', quieter >= 4, `least: ${fixed(quieter, 1)} dB`);
+    ok('the film\'s own sounds do not make the music step back (the stingers are off during the film)', !trace.filter((r) => r.t !== null).some((r) => r.duck < 0.99));
+    const dipped = Math.min(...between(trace, victoryAt, victoryAt + 1200).map((r) => r.duck));
+    ok('and the game\'s do again after it', dipped < 0.6, `a victory fanfare dips the music to ${fixed(dipped)}`);
+    const lastLive = [...trace].reverse().find((r) => r.t !== null && r.t > 46);
+    const after = trace.filter((r) => r.at > d.handover + 500);
+    ok('the title screen carries on with the very same piece, at the title\'s intensity', lastLive && after.length > 0 && after.every((r) => r.run === lastLive.run && r.wanted === 'menu' && r.playing), lastLive ? `run ${lastLive.run}, level ${fixed(lastLive.level)}` : 'no sample');
+    const settled = trace.filter((r) => r.at > victoryAt - 1000 && r.at < victoryAt);
+    ok('the lift has glided away a few seconds after', Math.abs(mean(settled.map((r) => r.stage)) - 1) < 0.03, `stage ${fixed(mean(settled.map((r) => r.stage)), 3)}`);
+    const edge = trace.filter((r) => r.at > d.handover - 500 && r.at < d.handover + 1500).map((r) => r.rms);
+    ok('with no hole or blast in the music at the hand-over', Math.min(...edge) > 0.003 && Math.max(...edge) < 3 * mean(edge), `${fixed(db(Math.min(...edge)), 1)}..${fixed(db(Math.max(...edge)), 1)} dBFS`);
+    // the picture of the mix, one row a second and a half, for the notes
+    const rows = [];
+    for (let s = 0; s <= 47; s += 1.5) {
+      const r = trace.find((x) => x.t !== null && x.t >= s);
+      if (r) rows.push(`${s.toFixed(1).padStart(4)}s stage ${fixed(r.stage)} music ${fixed(db(r.rms), 1).padStart(6)} dBFS level ${fixed(r.level)}`);
+    }
+    console.log(`    ${rows.join('\n    ')}`);
+    writeFileSync(join(out, 'score-trace.json'), JSON.stringify({ lines, handover: d.handover, trace }));
+    await ctx.close();
+  }
+
+  // 2. Esc in the middle of the second line: the music is gone inside the dip, the title's own comes in clean
+  if (only.includes(2)) {
+    const { ctx, page } = await open(true);
+    await page.evaluate(runLightFilm, { narrate: true });
+    await page.waitForFunction(() => window.__intro.film && window.__intro.film.t >= 10.4, null, { timeout: 60000, polling: 50 });
+    const pressedAt = await page.evaluate(() => performance.now());
+    await page.keyboard.press('Escape');
+    await outcome(page);
+    await page.waitForTimeout(3500);
+    const d = await page.evaluate(() => ({ trace: window.__trace, calls: window.__speech.calls, handover: window.__handover, outcome: window.__outcome }));
+    const trace = d.trace.filter((r) => r.stage !== null);
+    const before = between(trace, pressedAt - 400, pressedAt);
+    const levelBefore = mean(before.map((r) => r.rms));
+    ok('a line was being said, and the stage was under it', before.length > 5 && mean(before.map((r) => r.stage)) < 0.45, `stage ${fixed(mean(before.map((r) => r.stage)))}, ${fixed(db(levelBefore), 1)} dBFS`);
+    ok('the voice was cut', d.calls.length >= 2 && !!d.calls[1].cut);
+    const quiet = between(trace, d.handover - 100, d.handover);
+    ok('the music is 12 dB down or more by the time the dip to black ends and the title begins (the hall\'s reverb rings on a little)', quiet.length > 0 && Math.max(...quiet.map((r) => r.rms)) < 0.25 * levelBefore, `${fixed(db(Math.max(...quiet.map((r) => r.rms))), 1)} dBFS against ${fixed(db(levelBefore), 1)} before, the hand-over ${Math.round(d.handover - pressedAt)} ms after Esc`);
+    const filmRun = before.at(-1).run;
+    const atHandover = trace.find((r) => r.at >= d.handover + 100);
+    ok('the title screen starts a piece of its own', atHandover && atHandover.wanted === 'menu' && atHandover.run !== filmRun && atHandover.run !== null, `run ${filmRun} then ${atHandover && atHandover.run}`);
+    const late = between(trace, pressedAt + 2800, pressedAt + 3500);
+    ok('the stage is back to 1 and the title\'s music is up', late.length > 0 && Math.abs(mean(late.map((r) => r.stage)) - 1) < 0.02 && mean(late.map((r) => r.rms)) > 0.003, `stage ${fixed(mean(late.map((r) => r.stage)), 3)}, ${fixed(db(mean(late.map((r) => r.rms))), 1)} dBFS`);
+    const around = between(trace, pressedAt, pressedAt + 1500);
+    ok('nothing swells on the way: the title\'s piece fades in under its settled level', Math.max(...around.map((r) => r.rms)) <= mean(late.map((r) => r.rms)) * 1.25, `${fixed(db(Math.max(...around.map((r) => r.rms))), 1)} against ${fixed(db(mean(late.map((r) => r.rms))), 1)} dBFS`);
+    await ctx.close();
+  }
+
+  // 3. a first visit: nothing sounds and the film says so; the first click lets the score in at the story's moment
+  if (only.includes(3)) {
+    const { ctx, page } = await open(false);
+    await page.evaluate(runLightFilm, { narrate: true });
+    await page.waitForFunction(() => window.__intro.film && window.__intro.film.t >= 2.2, null, { timeout: 60000, polling: 50 });
+    const hinted = () => page.evaluate(() => document.querySelector('.mw-intro').classList.contains('needs-click'));
+    ok('before any click the hint is up', await hinted());
+    const cold = await page.evaluate(() => window.__trace.slice(-3));
+    ok('and there is no audio context at all', cold.length > 0 && cold.every((r) => r.ctxState === null));
+    const clickedAt = await page.evaluate(() => performance.now());
+    await page.mouse.click(320, 180);
+    await page.waitForFunction(() => document.querySelector('.mw-intro') && !document.querySelector('.mw-intro').classList.contains('needs-click'), null, { timeout: 10000 });
+    ok('a click on the film takes the hint down', !(await hinted()));
+    await page.waitForTimeout(2500);
+    const t = await filmT(page);
+    const d = await page.evaluate(() => window.__trace);
+    const heard = between(d, clickedAt + 1500, clickedAt + 2500);
+    ok('and the score is playing under it from that moment, at the story\'s intensity', heard.length > 0 && heard.every((r) => r.playing && r.ctxState === 'running') && mean(heard.map((r) => r.rms)) > 0.001, `film at ${fixed(t, 1)} s, level ${fixed(heard.at(-1).level)}, ${fixed(db(mean(heard.map((r) => r.rms))), 1)} dBFS`);
+    await page.evaluate(() => window.__intro.skip());
+    await outcome(page);
+    await ctx.close();
+  }
+
+  // 4. a first visit whose click comes late: the score comes in on the section the story is in (the titans), not the first
+  if (only.includes(4)) {
+    const { ctx, page } = await open(false);
+    await page.evaluate(runLightFilm, { narrate: true });
+    await page.waitForFunction(() => window.__intro.film && window.__intro.film.t >= 31.8, null, { timeout: 90000, polling: 50 });
+    const clickedAt = await page.evaluate(() => performance.now());
+    await page.mouse.click(320, 180);
+    await page.waitForFunction(async () => (await import('/src/audio/music.js')).music.state().playing, null, { timeout: 10000 });
+    await page.waitForTimeout(700);
+    const joined = await page.evaluate(async () => {
+      const { music } = await import('/src/audio/music.js');
+      const s = music.run.score;
+      return { section: s.section.index, mode: s.section.mode, tune: !!s.section.tune, shift: s.section.shift, bars: music.run.bars, film: window.__intro.film.t, level: music.state().level };
+    });
+    ok('a click at 32 s brings the score in on the titans\' section (the third), a tense one, not on the first bar of the piece', joined.section === 2 && joined.mode === 'tense' && joined.bars >= 9, `film at ${fixed(joined.film, 1)} s, section ${joined.section} ${joined.mode}${joined.tune ? ' with the tune' : ''}${joined.shift ? ' an octave up' : ''}, ${joined.bars} bars composed, level ${fixed(joined.level)}`);
+    await page.waitForTimeout(1800);
+    const heard = between(await page.evaluate(() => window.__trace), clickedAt + 1500, clickedAt + 2500);
+    ok('and it is the battle that is heard, at the story\'s intensity', heard.length > 0 && heard.every((r) => r.playing && r.ctxState === 'running') && heard.at(-1).level > 0.9 && mean(heard.map((r) => r.rms)) > 0.001, heard.length ? `level ${fixed(heard.at(-1).level)}, ${fixed(db(mean(heard.map((r) => r.rms))), 1)} dBFS` : 'no sample');
+    await page.evaluate(() => window.__intro.skip());
+    await outcome(page);
+    await ctx.close();
+  }
+  return results;
+}
+
 // ---------------------------------------------------------------- main
 
 const server = await ensureServer();
@@ -384,6 +672,8 @@ try {
     failed = (await flow(browser, errors)).filter((r) => !r.pass).length;
   } else if (flag('narration')) {
     failed = (await narration(browser, errors)).filter((r) => !r.pass).length;
+  } else if (flag('music')) {
+    failed = (await score(browser, errors, opt('scenes', '1,2,3,4').split(',').map(Number))).filter((r) => !r.pass).length;
   } else {
     console.log(`stills at ${times.join(', ')} s:`);
     const files = await stills(browser, errors);

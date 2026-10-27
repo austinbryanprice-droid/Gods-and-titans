@@ -42,6 +42,8 @@ Click Play (browsers start audio only after a click). Intensity 0 is a quiet bui
 import { music, renderMusicOffline, MUSIC_THEME_IDS } from '../src/audio/music.js';
 import { sfx } from '../src/audio/sfx.js';
 import { THEMES } from '../src/audio/music-themes.js';
+import { THEME as FILM_THEME, SEED as FILM_SEED, barLevel, stageCurve } from '../src/intro/score.js';
+import { FILM_LENGTH, CAPTIONS } from '../src/intro/script.js';
 
 const $ = (id) => document.getElementById(id);
 for (const id of MUSIC_THEME_IDS) $('theme').add(new Option(THEMES[id].name === 'Mythic War' ? 'Title screen (Mythic War)' : THEMES[id].name, id));
@@ -91,10 +93,8 @@ const curves = {
   },
 };
 
-/** Render a theme offline; resolves { sampleRate, seconds, peak, rms, wav: Uint8Array }. */
-async function renderTheme(id, { seconds = 60, level = 0, curve = 'flat', seed = 1, sampleRate = 44100, volume = 0.5, only = null, reverb = true } = {}) {
-  const buf = await renderMusicOffline(id, { seconds, sampleRate, seed, volume, only, reverb, levelAt: curves[curve](level, seconds) });
-  if (!buf) return null;
+/** The WAV bytes of a rendered buffer with its peak and rms: { sampleRate, seconds, peak, rms, wav }. */
+function describe(buf, sampleRate, seconds) {
   let peak = 0, sum = 0, n = 0;
   for (let c = 0; c < buf.numberOfChannels; c++) {
     const d = buf.getChannelData(c);
@@ -102,7 +102,24 @@ async function renderTheme(id, { seconds = 60, level = 0, curve = 'flat', seed =
   }
   return { sampleRate, seconds, peak, rms: Math.sqrt(sum / n), wav: wavBytes(buf) };
 }
-window.__lab = { renderTheme, themes: MUSIC_THEME_IDS };
+
+/** Render a theme offline; resolves { sampleRate, seconds, peak, rms, wav: Uint8Array }. */
+async function renderTheme(id, { seconds = 60, level = 0, curve = 'flat', seed = 1, sampleRate = 44100, volume = 0.5, only = null, reverb = true } = {}) {
+  const buf = await renderMusicOffline(id, { seconds, sampleRate, seed, volume, only, reverb, levelAt: curves[curve](level, seconds) });
+  return buf ? describe(buf, sampleRate, seconds) : null;
+}
+
+/**
+ * The intro film's score (src/intro/score.js) offline: the title theme conducted by the story, coming in as it does in the
+ * page (a 2.5 s fade), with the mix stepping back over each stretch of speech. `speech` is [[from, to], ...] in film seconds
+ * (by default a guess at when the captions are read); the voice itself is not in it, and nor are the film's sound effects.
+ */
+async function renderFilm({ seconds = FILM_LENGTH + 2, volume = 0.5, speech = null, seed = FILM_SEED, sampleRate = 44100, reverb = true } = {}) {
+  const windows = speech || CAPTIONS.map((c) => [c.from, c.from + 0.4 + 0.07 * c.text.length]);
+  const buf = await renderMusicOffline(FILM_THEME, { seconds, sampleRate, seed, volume, reverb, fadeIn: 2.5, levelAt: barLevel, stageAt: stageCurve(windows, volume) });
+  return buf ? { ...describe(buf, sampleRate, seconds), windows } : null;
+}
+window.__lab = { renderTheme, renderFilm, themes: MUSIC_THEME_IDS };
 
 $('render').onclick = async () => {
   $('dl').textContent = 'rendering…';

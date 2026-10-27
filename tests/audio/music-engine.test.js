@@ -7,8 +7,9 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { FakeAudioContext, reaches } from './fake-audio.js';
 import { sfx } from '../../src/audio/sfx.js';
-import { MusicEngine, DUCKS, MUSIC_GAIN, MUSIC_THEME_IDS } from '../../src/audio/music.js';
+import { MusicEngine, DUCKS, MUSIC_GAIN, MUSIC_THEME_IDS, renderMusicOffline, COMPOSE_AHEAD } from '../../src/audio/music.js';
 import { THEMES } from '../../src/audio/music-themes.js';
+import { createScore, composeBar } from '../../src/audio/music-composer.js';
 
 const warn = console.warn;
 beforeEach(() => {
@@ -252,6 +253,38 @@ test('stop() fades out, keeps quiet until the next play(), and the timer winds d
   assert.ok(ctx.sources.length > sources, 'play() starts again');
 });
 
+test('a piece made while another is still leaving waits out what is left of the crossfade delay; one made after it is gone does not wait', () => {
+  const { ctx, engine } = setup();
+  const comesIn = (run) => run.mix.gain.events.find((e) => e[0] === 'set')[2];
+  engine.play('menu', { seed: 5 });
+  advance(ctx, engine, 4);
+  const quietAt = ctx.currentTime;
+  engine.stop(0.8); // the page clears the title's music ...
+  ctx.currentTime = quietAt + 0.1;
+  const before = ctx.sources.length;
+  engine.play('menu', { seed: 82 }); // ... and the intro film starts its score just after
+  assert.ok(Math.abs(comesIn(engine.run) - (quietAt + 0.9)) < 1e-9, `0.9 s after the old one began to leave, as in a crossfade, not at once (${(comesIn(engine.run) - quietAt).toFixed(2)} s)`);
+  assert.equal(engine.fading.length, 1, 'while the old one is still dying away');
+  advance(ctx, engine, 3);
+  const first = Math.min(...ctx.sources.slice(before).map((s) => s.started));
+  assert.ok(first >= quietAt + 0.9 + 0.12 - 1e-9, `and its first note sounds after that (${(first - quietAt).toFixed(2)} s)`);
+  // a piece let go of long before is gone: there is nothing to wait for
+  engine.stop(0.8);
+  advance(ctx, engine, 3);
+  assert.equal(engine.fading.length, 0);
+  const gone = ctx.currentTime;
+  engine.play('menu', { seed: 7 });
+  assert.equal(comesIn(engine.run), gone, 'it comes in at once');
+  // the same goes for a mute lifted soon after it: the piece is back after the delay, not on top of the one still leaving
+  engine.mute(true);
+  engine.tick();
+  const mutedAt = ctx.currentTime;
+  ctx.currentTime += 0.2;
+  engine.mute(false);
+  engine.tick();
+  assert.ok(Math.abs(comesIn(engine.run) - (mutedAt + 0.9)) < 1e-9, 'a mute lifted after 0.2 s');
+});
+
 test('volume maps through a curve, zero is silent and mute is silent but remembers the volume', () => {
   const { ctx, engine } = setup({ volume: 0.5 });
   engine.play('greek');
@@ -360,6 +393,287 @@ test('duck() dips the music and brings it back; the sound effects named in DUCKS
   ctx.currentTime += 5;
   sfx.play('click');
   assert.equal(engine.env.nodes.duck.gain.events.length, after, 'a click does not');
+});
+
+test('conduct() sets the intensity exactly, at once and for good: no easing up or down, garbage ignored', () => {
+  const { ctx, engine } = setup();
+  engine.conduct(0.9);
+  assert.equal(engine.state().level, 0.9, 'there at once, not 63% of the way after 1.5 s');
+  assert.equal(engine.state().target, 0.9);
+  engine.play('menu');
+  engine.tick();
+  assert.equal(engine.state().level, 0.9, 'a piece started afterwards opens there');
+  advance(ctx, engine, 5);
+  assert.equal(engine.state().level, 0.9, 'and the engine\'s own easing leaves it alone');
+  engine.conduct(0.1);
+  assert.equal(engine.state().level, 0.1, 'down at once too (setIntensity would take seconds: a fight ends slowly)');
+  advance(ctx, engine, 5);
+  assert.equal(engine.state().level, 0.1);
+  engine.conduct(Number.NaN);
+  engine.conduct(Infinity);
+  engine.conduct(undefined);
+  assert.equal(engine.state().level, 0.1);
+  engine.conduct(7);
+  assert.equal(engine.state().level, 1);
+  engine.conduct(-2);
+  assert.equal(engine.state().level, 0);
+  engine.setIntensity(0.6); // the ordinary call still eases from where the conductor left it
+  advance(ctx, engine, 1.5);
+  assert.ok(engine.state().level > 0.3 && engine.state().level < 0.5, `eased ${engine.state().level}`);
+});
+
+// ---------------------------------------------------------------- a piece joined part-way in (the film's score after a late click)
+
+/** A piece composed from its start at the intensity `levelAt(second a bar starts)`: [{ start, dur, section, index }] for every bar. */
+function pieceFromStart(themeId, seed, levelAt, seconds) {
+  const score = createScore(THEMES[themeId], seed);
+  const bars = [];
+  for (let start = 0; start < seconds; ) {
+    const bar = composeBar(score, levelAt(start));
+    bars.push({ start, dur: bar.dur, section: score.section, index: score.bar - 1 });
+    start += bar.dur;
+  }
+  return bars;
+}
+
+const kindOf = (section) => `${section.mode}${section.tune ? '+tune' : ''}${section.shift ? '+octave' : ''}`;
+
+test('joining a piece part-way in: the bars before that second are composed without a sound, and the one in progress is the first to sound', () => {
+  const levelAt = (s) => (s < 14 ? 0.2 : 0.9); // calm, then a battle: sections of different kinds on either side
+  const piece = pieceFromStart('menu', 82, levelAt, 200);
+  assert.ok(new Set(piece.map((b) => kindOf(b.section))).size >= 3, `the piece has sections of several kinds (${[...new Set(piece.map((b) => kindOf(b.section)))]})`);
+  for (const at of [0.2, 6, 14.5, 18, 25, 31, 47, 70]) {
+    const k = piece.findIndex((b) => b.start + b.dur > at); // the bar in progress at that second
+    const { ctx, engine } = setup();
+    engine.conduct(0.9); // what the live bars after the join are composed at
+    engine.play('menu', { seed: 82, joinAt: () => ({ seconds: at, levelAt }) });
+    const run = engine.run;
+    assert.equal(run.bars, k + 1, `${at}s: ${k} bars skipped, the one in progress composed`);
+    assert.equal(run.score.bar, k + 1);
+    const want = piece[k].section;
+    const got = run.score.section;
+    assert.equal(got.index, want.index, `${at}s: the same section as a piece played from the start (${kindOf(want)})`);
+    assert.equal(kindOf(got), kindOf(want));
+    assert.deepEqual(got.chords.map((c) => c.name), want.chords.map((c) => c.name));
+    assert.ok(ctx.sources.length > 0, 'it sounds at once');
+    assert.ok(Math.min(...ctx.sources.map((s) => s.started)) >= 0.12 - 1e-9, 'from the run\'s first bar on, nothing from the skipped ones');
+    assert.ok(ctx.sources.some((s) => reaches(s, run.bus.pad)), `${at}s: the pad chord is struck for the bar in progress, whether or not the skipped bars held it`);
+    if (at >= 14) {
+      // the live bars after the join are the piece's own: the same sections, in the same order
+      advance(ctx, engine, 40);
+      const j = run.score.bar - 1;
+      assert.ok(j > k + 4, `${at}s: it went on for several sections`);
+      assert.equal(run.score.section.index, piece[j].section.index, `${at}s: and is in the section the piece is in at that bar`);
+      assert.equal(kindOf(run.score.section), kindOf(piece[j].section));
+    }
+  }
+});
+
+test('a piece joined in a bar through which a pad chord is held strikes the chord again, or that bar would have no pad', () => {
+  const levelAt = () => 0.9; // the menu theme holds a chord across two bars only in its tense progressions
+  const piece = pieceFromStart('menu', 82, levelAt, 60);
+  // a bar whose chord is the one before it: the pad was struck a bar back and is held through this one
+  const held = piece.findIndex((b) => b.index % 4 !== 0 && b.section.chords[b.index % 4].name === b.section.chords[(b.index % 4) - 1].name);
+  assert.ok(held > 0, 'the menu theme holds a chord across two bars somewhere');
+  const { ctx, engine } = setup();
+  engine.play('menu', { seed: 82, joinAt: () => ({ seconds: piece[held].start + 0.1, levelAt }) });
+  assert.equal(engine.run.score.bar, held + 1, 'joined in the bar the chord is held through');
+  assert.ok(ctx.sources.some((s) => reaches(s, engine.run.bus.pad)), 'the held chord sounds');
+});
+
+test('joinAt is asked each time a run is made, so a run made after an unmute joins where the piece is by then', () => {
+  const levelAt = () => 0.5;
+  const { ctx, engine } = setup();
+  let at = 20;
+  let asked = 0;
+  engine.play('menu', { seed: 7, joinAt: () => (asked++, { seconds: at, levelAt }) });
+  assert.equal(asked, 1);
+  const first = engine.run;
+  const piece = pieceFromStart('menu', 7, levelAt, 90);
+  assert.equal(first.bars, piece.findIndex((b) => b.start + b.dur > 20) + 1);
+  engine.mute(true);
+  advance(ctx, engine, 1);
+  assert.equal(engine.run, null, 'muted: the piece is gone');
+  at = 61;
+  engine.mute(false);
+  advance(ctx, engine, 0.25);
+  assert.notEqual(engine.run, first, 'unmuted: a run of its own');
+  assert.equal(asked, 2, 'which asked again');
+  assert.equal(engine.run.bars, piece.findIndex((b) => b.start + b.dur > 61) + 1, 'and came in where the piece is by now');
+  engine.play('menu');
+  engine.tick();
+  assert.equal(asked, 2, 'asking for the piece that is already wanted changes nothing');
+});
+
+test('with nowhere to join, or nonsense, a piece begins at its start; a joinAt that fails is warned of once and the music plays', () => {
+  const levelAt = () => 0.9;
+  const begins = (join) => {
+    const { ctx, engine } = setup();
+    engine.play('menu', { seed: 82, joinAt: join });
+    return { ctx, engine, run: engine.run };
+  };
+  for (const [what, join] of [
+    ['nothing to say', () => null],
+    ['no time at all', () => ({ seconds: 0, levelAt })],
+    ['a time that is not one', () => ({ seconds: Number.NaN, levelAt })],
+    ['a time before the start', () => ({ seconds: -5, levelAt })],
+    ['no function at all', 'soon'],
+  ]) {
+    const { ctx, run } = begins(join);
+    assert.equal(run.bars, 1, `${what}: the first bar`);
+    assert.equal(run.score.section.index, 0);
+    assert.ok(ctx.sources.length > 0);
+  }
+  const warnings = [];
+  console.warn = (...a) => warnings.push(a.join(' '));
+  for (const join of [
+    () => {
+      throw new Error('no clock');
+    },
+    () => ({ seconds: 20, levelAt: null }),
+  ]) {
+    const { ctx, engine, run } = begins(join);
+    assert.ok(run && ctx.sources.length > 0, 'the music plays on');
+    assert.equal(engine.disabled, false, 'one failed join is not a fault of the scheduler');
+  }
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /could not join the piece/);
+  // a levelAt that answers nonsense is read as calm, and the join still ends
+  const { run } = begins(() => ({ seconds: 30, levelAt: () => 'loud' }));
+  const piece = pieceFromStart('menu', 82, () => 0, 90);
+  assert.equal(run.bars, piece.findIndex((b) => b.start + b.dur > 30) + 1);
+  assert.equal(warnings.length, 2, 'with no warning');
+});
+
+test('joining is bounded: a time far past the piece composes a few hundred bars and no more, and the music plays on from there', () => {
+  const { ctx, engine } = setup();
+  const started = Date.now();
+  engine.play('menu', { seed: 1, joinAt: () => ({ seconds: Infinity, levelAt: () => 0.5 }) });
+  assert.ok(Date.now() - started < 2000, 'quickly');
+  assert.ok(engine.run.bars > 100 && engine.run.bars < 1000, `${engine.run.bars} bars`);
+  advance(ctx, engine, 5);
+  assert.ok(ctx.sources.length > 0);
+});
+
+test('the stage is a gain of its own after the volume and the stingers\' dip: setStage eases it, with a delay, and touches no other gain', () => {
+  const { ctx, engine } = setup();
+  engine.play('menu');
+  engine.tick();
+  const { bus, duck, stage, hide } = engine.env.nodes;
+  assert.ok(reaches(bus, stage.gain.owner) && reaches(duck, stage.gain.owner) && reaches(stage.gain.owner, hide.gain.owner), 'volume → dip → stage → hidden-tab fade');
+  assert.ok(reaches(stage.gain.owner, sfx.shared.out), 'and on into the shared limiter');
+  const others = [bus, duck, hide].map((n) => n.gain.events.length);
+  ctx.currentTime = 10;
+  engine.setStage(0.28, 0.1);
+  let ev = stage.gain.events.at(-1);
+  assert.deepEqual(ev.slice(0, 2), ['target', 0.28]);
+  assert.equal(ev[2], 10, 'from now');
+  assert.equal(ev[3], 0.1, 'with the time constant asked for');
+  assert.equal(engine.state().stage, 0.28);
+  ctx.currentTime = 10.1;
+  engine.setStage(1.4, 0.55, 0.2);
+  ev = stage.gain.events.at(-1);
+  assert.deepEqual([ev[0], ev[1], ev[3]], ['target', 1.4, 0.55]);
+  assert.ok(Math.abs(ev[2] - 10.3) < 1e-9, 'a beat after now');
+  assert.ok(stage.gain.valueAt(10.25) > 0.28 && stage.gain.valueAt(10.25) < 0.7, 'held where the step back had got to, not yet swelling');
+  assert.ok(stage.gain.valueAt(13) > 1.35, 'and on its way up, a second and more later');
+  assert.deepEqual([bus, duck, hide].map((n) => n.gain.events.length), others, 'the volume, the dip and the fade belong to their own gains');
+  engine.setStage(Number.NaN, 1);
+  engine.setStage(Infinity, 1);
+  assert.equal(engine.state().stage, 1.4);
+  engine.setStage(99, 1);
+  assert.equal(engine.state().stage, 4, 'held to a sane ceiling');
+  engine.setStage(-1, 1);
+  assert.equal(engine.state().stage, 0);
+});
+
+test('the stage a film set before the engine had a graph is waiting on the new graph, and survives a replaced context', () => {
+  const { engine } = setup();
+  engine.setStage(0.4, 0.1);
+  assert.equal(engine.env, null, 'no graph yet: the first tick makes it');
+  engine.play('menu');
+  engine.tick();
+  assert.equal(engine.env.nodes.stage.gain.valueAt(0), 0.4, 'the graph is made with the stage as it was set');
+  const ctx2 = new FakeAudioContext({ state: 'running', sampleRate: 8000 });
+  sfx.init({ context: ctx2 });
+  engine.tick();
+  assert.equal(engine.ctx, ctx2);
+  assert.equal(engine.env.nodes.stage.gain.valueAt(0), 0.4, 'and so is the replacement');
+});
+
+test('setStingers(false): the sounds in DUCKS no longer make the music step back, and setStingers(true) gives it back', () => {
+  const { ctx, engine } = setup();
+  sfx.last.clear(); // the sound engine is one object for the whole file: forget when the other tests played these
+  sfx.active.clear();
+  engine.play('menu');
+  engine.tick();
+  const duck = engine.env.nodes.duck.gain;
+  assert.equal(engine.stingers, true, 'a match has them');
+  engine.setStingers(false);
+  const n = duck.events.length;
+  for (const name of Object.keys(DUCKS)) {
+    ctx.currentTime += 5;
+    assert.equal(sfx.play(name), true, `${name} plays`);
+  }
+  assert.equal(duck.events.length, n, 'and the music does not move');
+  engine.duck(0.5, 2);
+  assert.ok(duck.events.length > n, 'duck() itself still works');
+  engine.setStingers(true);
+  const m = duck.events.length;
+  ctx.currentTime += 5;
+  sfx.play('horn');
+  assert.ok(duck.events.length > m, 'with the stingers back, a horn does it again');
+});
+
+test('renderMusicOffline can follow a mix stage: one value curve over the whole render, from the function it is given', async () => {
+  class Offline extends FakeAudioContext {
+    constructor(channels, length, sampleRate) {
+      super({ sampleRate });
+      this.length = length;
+    }
+    startRendering() {
+      return Promise.resolve(this);
+    }
+  }
+  globalThis.OfflineAudioContext = Offline;
+  try {
+    const r = await renderMusicOffline('menu', { seconds: 6, sampleRate: 8000, stageAt: (t) => (t < 3 ? 1.4 : 0.4), levelAt: () => 0.5 });
+    const curves = r.nodes.flatMap((n) => (n.gain ? n.gain.events.filter((e) => e[0] === 'curve').map((e) => [n, e]) : []));
+    assert.equal(curves.length, 1, 'one curve, on one gain');
+    const [node, e] = curves[0];
+    assert.equal(e[2], 0);
+    assert.equal(e[3], 6, 'over the whole render');
+    assert.ok(Math.abs(node.gain.valueAt(1) - 1.4) < 1e-6 && Math.abs(node.gain.valueAt(5) - 0.4) < 1e-6);
+    assert.ok(e[4] instanceof Float32Array && e[4].every(Number.isFinite), 'a legal curve');
+    const plain = await renderMusicOffline('menu', { seconds: 2, sampleRate: 8000 });
+    assert.equal(plain.nodes.filter((n) => n.gain && n.gain.events.some((x) => x[0] === 'curve')).length, 0, 'without stageAt there is no curve');
+  } finally {
+    delete globalThis.OfflineAudioContext;
+  }
+});
+
+test('COMPOSE_AHEAD is the horizon the score is composed to (the film reads its story that far on)', () => {
+  assert.equal(COMPOSE_AHEAD, 1.6);
+});
+
+test('state() says when only the browser\'s click is missing: a theme is wanted, nothing mutes it, audio is not running', () => {
+  const { ctx, engine } = setup({ state: 'suspended' });
+  assert.equal(engine.state().waiting, false, 'nothing wanted yet');
+  engine.play('menu');
+  engine.tick();
+  assert.equal(engine.state().waiting, true, 'a click would start it');
+  engine.mute(true);
+  assert.equal(engine.state().waiting, false, 'a muted music is not waiting for anything');
+  engine.mute(false);
+  engine.setVolume(0);
+  assert.equal(engine.state().waiting, false, 'nor one at volume zero');
+  engine.setVolume(0.5);
+  assert.equal(engine.state().waiting, true);
+  ctx.state = 'running';
+  engine.tick();
+  assert.equal(engine.state().waiting, false, 'and once it plays, it is not');
+  engine.stop();
+  assert.equal(engine.state().waiting, false);
 });
 
 test('DUCKS names real sounds and sensible dips', () => {

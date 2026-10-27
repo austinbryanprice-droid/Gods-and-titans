@@ -255,3 +255,200 @@ test('browserSpeech: the browser\'s own speech synthesis and utterance, or null 
     }
   }
 });
+
+// ---------------------------------------------------------------- the voice as the score hears it
+
+/** A narrator that reports "a line is with the browser" to a log of [film second, speaking]. */
+function listen(o = {}) {
+  const rig = make({ ...o, narrator: { ...(o.narrator || {}), onSpeaking: (on) => rig.heard.push([rig.voice.t, on]) } });
+  rig.heard = [];
+  return rig;
+}
+
+test('onSpeaking(true) is called as a line is handed to the browser, before it speaks, and (false) when the browser says it is done', () => {
+  const rig = listen();
+  const order = [];
+  const speak = rig.synth.speak;
+  rig.synth.speak = (u) => {
+    order.push(`speak after ${rig.heard.length} reports`);
+    speak(u);
+  };
+  play(rig.voice, { until: 3 });
+  assert.deepEqual(rig.heard, [[CAPTIONS[0].from, true]].map(([t, on]) => [rig.heard[0][0], on]), 'one report');
+  assert.ok(rig.heard[0][0] >= CAPTIONS[0].from && rig.heard[0][0] < CAPTIONS[0].from + 0.06, 'at the caption\'s own second');
+  assert.deepEqual(order, ['speak after 1 reports'], 'the score is told first: it has a moment to step back before the first word');
+  assert.equal(rig.voice.speaking, true);
+  rig.synth.spoken[0].onend({});
+  assert.equal(rig.heard.length, 2);
+  assert.equal(rig.heard[1][1], false);
+  assert.equal(rig.voice.speaking, false);
+  rig.synth.spoken[0].onend({});
+  assert.equal(rig.heard.length, 2, 'a second end of the same line says nothing more');
+});
+
+test('every line of the film is reported in and out, once each, with the browser\'s end events', () => {
+  const rig = listen();
+  let said = 0;
+  for (let t = 0; t <= FILM_LENGTH; t += 0.05) {
+    rig.voice.update(t);
+    if (rig.synth.spoken.length > said) {
+      said = rig.synth.spoken.length;
+      const u = rig.synth.spoken[said - 1];
+      setTimeout(() => {}, 0);
+      u.endsAt = t + 2.5; // this voice takes 2.5 s over every line
+    }
+    for (const u of rig.synth.spoken) if (u.endsAt !== undefined && t >= u.endsAt) {
+      u.endsAt = undefined;
+      u.onend({});
+    }
+  }
+  assert.deepEqual(rig.heard.map((h) => h[1]), CAPTIONS.flatMap(() => [true, false]), 'in, out, in, out …');
+  CAPTIONS.forEach((c, i) => {
+    const [tIn] = rig.heard[2 * i];
+    const [tOut] = rig.heard[2 * i + 1];
+    assert.ok(tIn >= c.from && tIn < c.from + 0.06, `line ${i} comes in with its caption`);
+    assert.ok(tOut > tIn + 2.4 && tOut < tIn + 2.7, `and goes out when the voice is done (${(tOut - tIn).toFixed(2)} s)`);
+  });
+});
+
+test('a browser that never says a line is over: it is over when its caption is, so the score is never held down', () => {
+  const rig = listen();
+  rig.voice.update(1.5); // "Raise a city of the faithful", on screen until 7.6
+  assert.equal(rig.voice.speaking, true);
+  rig.voice.update(7.5);
+  assert.equal(rig.voice.speaking, true, 'still within its caption');
+  rig.voice.update(7.7);
+  assert.equal(rig.voice.speaking, false, 'past it');
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false]);
+  rig.synth.spoken[0].onend({}); // the browser finally reports it
+  rig.synth.spoken[0].onerror({ error: 'interrupted' });
+  assert.equal(rig.heard.length, 2, 'late word from a line already settled changes nothing');
+  rig.voice.update(9.7); // the next line, with a late end of the settled one arriving in the middle of it
+  assert.equal(rig.voice.speaking, true);
+  rig.synth.spoken[0].onend({});
+  assert.equal(rig.voice.speaking, true, 'and is not mistaken for the end of the new one');
+  rig.synth.spoken[1].onend({});
+  assert.equal(rig.voice.speaking, false);
+});
+
+test('a line queued behind another keeps the voice "speaking" until both are done', () => {
+  const rig = listen();
+  rig.voice.update(1.5);
+  rig.voice.update(9.7); // the first has not reported its end when the second is due (a slow voice, a stalled engine)
+  assert.equal(rig.synth.spoken.length, 2);
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true], 'one report: it was speaking and still is');
+  rig.synth.spoken[0].onend({});
+  assert.equal(rig.voice.speaking, true, 'one line left');
+  rig.synth.spoken[1].onend({});
+  assert.equal(rig.voice.speaking, false);
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false]);
+});
+
+test('a refused line (no click yet) is reported out at once, and so is a line that failed', () => {
+  const rig = listen({ allowed: false });
+  rig.voice.update(1.5);
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false], 'in for the call, out for the refusal');
+  assert.equal(rig.voice.blocked, true);
+  const ok = listen();
+  ok.voice.update(1.5);
+  ok.synth.spoken[0].onerror({ error: 'synthesis-failed' });
+  assert.deepEqual(ok.heard.map((h) => h[1]), [true, false]);
+  const broken = listen();
+  broken.synth.speak = () => {
+    throw new Error('no engine');
+  };
+  broken.voice.update(1.5);
+  assert.deepEqual(broken.heard.map((h) => h[1]), [true, false], 'a speak that throws is reported out too');
+});
+
+test('stop reports the voice out at once, and nothing after it is reported', () => {
+  const rig = listen();
+  rig.voice.update(1.5);
+  rig.voice.stop();
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false]);
+  rig.synth.spoken[0].onend({});
+  rig.synth.spoken[0].onerror({ error: 'interrupted' }); // what a cancelled line does
+  rig.voice.update(9.7);
+  rig.voice.retry();
+  assert.equal(rig.heard.length, 2);
+  assert.equal(rig.voice.speaking, false);
+  const idle = listen();
+  idle.voice.stop();
+  assert.deepEqual(idle.heard, [], 'a voice that never spoke has nothing to report');
+});
+
+test('a click that starts the voice late reports it too, and the line ends with its caption as the others do', () => {
+  const rig = listen({ allowed: false });
+  rig.voice.update(1.5);
+  rig.synth.allowed = true;
+  rig.voice.update(3);
+  rig.voice.retry();
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true]);
+  rig.voice.update(7.7);
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true, false]);
+});
+
+test('a click that starts a line near the end of its caption keeps the voice "speaking" past the caption, until the browser says it is done', () => {
+  const rig = listen({ allowed: false });
+  rig.voice.update(1.5); // refused
+  rig.synth.allowed = true;
+  rig.voice.update(6.3); // "Raise a city of the faithful" is up until 7.6: a click now (1.3 s left) still starts it, and it takes longer than that
+  rig.voice.retry();
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true]);
+  rig.voice.update(7.7);
+  assert.equal(rig.voice.speaking, true, 'the caption is over but the browser is still saying the line: the score stays down');
+  rig.voice.update(8.5);
+  assert.equal(rig.voice.speaking, true);
+  rig.synth.spoken[1].onend({}); // the browser reports the end
+  assert.equal(rig.voice.speaking, false);
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true, false]);
+  assert.equal(rig.heard.length, 4, 'and nothing more comes of it');
+});
+
+test('a line started late that the browser never reports is still over a few seconds after it was handed over, not held for good', () => {
+  const rig = listen({ allowed: false });
+  rig.voice.update(31.5); // "Unleash the titans", 31 to 35.4, refused
+  rig.synth.allowed = true;
+  rig.voice.update(34.1);
+  rig.voice.retry(); // 1.3 s left of its caption: started now
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true]);
+  rig.voice.update(35.5);
+  assert.equal(rig.voice.speaking, true, 'past its caption');
+  rig.voice.update(37.9);
+  assert.equal(rig.voice.speaking, true, 'a line takes about 3 s: 4 s are allowed it from the click');
+  rig.voice.update(38.2); // before the next caption, at 38.6
+  assert.equal(rig.voice.speaking, false, 'and then the score is let up');
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true, false]);
+});
+
+test('a line handed over on time is bounded by its caption as before: the extra time is for lines that start late', () => {
+  for (const [i, c] of CAPTIONS.entries()) assert.ok(c.to - c.from >= 4, `caption ${i} lasts longer than a line is given from the moment it is handed over`);
+  const rig = listen();
+  rig.voice.update(9.6); // "Pray. Summon the gods.", on screen until 14.2, with no end reported
+  assert.equal(rig.voice.speaking, true);
+  rig.voice.update(14.1);
+  assert.equal(rig.voice.speaking, true);
+  rig.voice.update(14.3);
+  assert.equal(rig.voice.speaking, false, 'it ends with its caption');
+});
+
+test('no volume, no speech engine and a listener that throws: nothing is reported, and the film is not disturbed', () => {
+  const mute = listen({ narrator: { volume: 0 } });
+  play(mute.voice);
+  assert.deepEqual(mute.heard, []);
+  const none = new Narrator({ speech: null, onSpeaking: () => assert.fail('no voice, no report') });
+  play(none);
+  const warn = console.warn;
+  const warned = [];
+  console.warn = (...a) => warned.push(a.join(' '));
+  try {
+    const angry = new Narrator({ speech: fakeSpeech(), onSpeaking: () => {
+      throw new Error('the score broke');
+    } });
+    play(angry);
+    assert.equal(angry.speech.synth.spoken.length, CAPTIONS.length, 'every line was still said');
+    assert.ok(warned.length > 0 && warned.every((w) => w.includes('narrator')));
+  } finally {
+    console.warn = warn;
+  }
+});

@@ -10,10 +10,59 @@ export function finite(v, what) {
 export class FakeParam {
   constructor(ctx, value = 0) {
     this.ctx = ctx;
-    this.value = value;
+    this.base = value; // the value assigned to .value: what the parameter is at time 0, before any automation
     this.events = [];
     this.curves = []; // [start, end] of every value curve
     this.owner = null; // the node this is a parameter of
+  }
+  /** As in a browser, .value reads what the automation makes of the parameter now (the context's currentTime); assigning sets the value it starts from. */
+  get value() {
+    return this.valueAt(this.ctx.currentTime);
+  }
+  set value(v) {
+    this.base = v;
+  }
+  /**
+   * What the automation makes of the parameter at time t: steps, linear and exponential ramps, setTarget
+   * approaches and value curves, in time order (a later event starts from where the earlier left off).
+   */
+  valueAt(t) {
+    const events = this.events.map((e, i) => [e, i]).sort((a, b) => a[0][2] - b[0][2] || a[1] - b[1]).map(([e]) => e);
+    let t0 = 0;
+    let v0 = this.base;
+    let approach = null; // an active setTarget: { v, c }
+    const now = (at) => (approach ? approach.v + (v0 - approach.v) * Math.exp(-(at - t0) / approach.c) : v0);
+    for (const e of events) {
+      const [kind, v, te] = e;
+      if (te > t) {
+        if (kind === 'lin' || kind === 'exp') {
+          const from = now(t0);
+          const k = te > t0 ? (t - t0) / (te - t0) : 1;
+          return kind === 'lin' ? from + (v - from) * k : from > 0 && v > 0 ? from * Math.pow(v / from, k) : from;
+        }
+        break;
+      }
+      if (kind === 'target') {
+        v0 = now(te);
+        t0 = te;
+        approach = { v, c: Math.max(e[3], 1e-9) };
+      } else if (kind === 'curve') {
+        const [, , , duration, values] = e;
+        if (t < te + duration) {
+          const x = ((t - te) / duration) * (values.length - 1);
+          const i = Math.min(values.length - 2, Math.floor(x));
+          return values[i] + (values[i + 1] - values[i]) * (x - i);
+        }
+        v0 = values[values.length - 1];
+        t0 = te + duration;
+        approach = null;
+      } else {
+        v0 = v;
+        t0 = te;
+        approach = null;
+      }
+    }
+    return now(t);
   }
   /** A browser refuses an event that lands inside a value curve, and a curve over other events. */
   _checkCurves(t) {

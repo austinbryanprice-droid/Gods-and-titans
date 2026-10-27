@@ -3,21 +3,27 @@
 // on a click" unlock happens once, for both.
 //
 //   music.init({ volume, muted })   once at boot; safe to call again
-//   music.play(themeId)             'menu' or a pantheon id; crossfades from what is playing. It starts
-//                                   as soon as the browser allows audio (after the first click or key press)
+//   music.play(themeId, { seed, joinAt })
+//                                   'menu' or a pantheon id; crossfades from what is playing. It starts
+//                                   as soon as the browser allows audio (after the first click or key press);
+//                                   `joinAt` says where in the piece that is, for a score that has been going on
+//                                   without sound (the intro film: see Run.skip)
 //   music.stop(fadeSeconds)         fade out and keep quiet until the next play()
 //   music.setIntensity(v)           0 calm .. 1 battle; the score eases toward it (quickly up, slowly down)
 //   music.setVolume(v) / music.mute(on)
 //   music.duck(depth, seconds)      dip under a stinger (sound effects named in DUCKS do it by themselves)
-//   music.state()                   { theme, level, target, playing, ready, muted, volume }
+//   music.conduct(v)                the intensity set exactly, no easing: for the intro film, which conducts the score
+//   music.setStage(gain, tc, delay) the film's own volume stage: ease everything to `gain` (1 = as the settings have it)
+//   music.setStingers(on)           whether the sound effects in DUCKS make the music step back (the film turns it off)
+//   music.state()                   { theme, level, target, stage, playing, ready, waiting, muted, volume }
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers). What plays is
 // composed bar by bar by music-composer.js from the themes in music-themes.js.
 import { sfx, kit as makeKit, makeNoiseBuffer } from './sfx.js';
 import { THEMES, themeFor } from './music-themes.js';
-import { createScore, composeBar } from './music-composer.js';
+import { createScore, composeBar, barSeconds } from './music-composer.js';
 import { playVoice } from './music-voices.js';
 
-const COMPOSE_AHEAD = 1.6; // seconds of music composed ahead of the clock: rides out a stalled frame
+export const COMPOSE_AHEAD = 1.6; // seconds of music composed ahead of the clock: rides out a stalled frame
 const PLAY_AHEAD = 0.6; // a note is created this long before it sounds (a note waiting in the audio graph is not free)
 const LATE = 0.15; // a short note that is this late is dropped rather than played out of time
 const TICK_MS = 250;
@@ -29,6 +35,8 @@ const MIN_GAIN = 0.0001;
 const HALL_SECONDS = 2.0; // the reverb is a convolver, whose cost grows with the length of its impulse response
 const PAN_STEP = 0.15; // off-centre notes share a panner per layer and position, rounded to this
 const HIDDEN_QUIET = 1.5; // seconds after the tab is hidden (its fade-out is over) that the score stops making notes
+const MAX_SKIP_BARS = 400; // bars a run joining a piece late will compose silently at most (a film is about fifteen)
+const CROSS_DELAY = 0.9; // seconds after one piece starts to leave that the next comes in, so two keys never ring together for long
 
 // Each layer of the score is a bus with its own loudness and how much of it goes to the reverb.
 const LAYERS = {
@@ -67,14 +75,18 @@ function makeHall(ctx, seconds = HALL_SECONDS) {
 }
 
 /**
- * The music's own part of the graph: layers → run mix → bus → duck → hide → the shared limiter, with
- * a reverb fed by each run's send. `out` is where the music joins (the sound effects' limiter).
+ * The music's own part of the graph: layers → run mix → bus → duck → stage → hide → the shared limiter,
+ * with a reverb fed by each run's send. `out` is where the music joins (the sound effects' limiter).
+ * `bus` is the settings' volume, `duck` the stingers' dip, `stage` the intro film's mix (a voice speaking
+ * over it) and `hide` the hidden tab's fade: four gains that never touch each other's automation.
  */
 function buildMusicGraph(ctx, out, { reverb = true } = {}) {
   const hide = ctx.createGain();
   hide.connect(out);
+  const stage = ctx.createGain();
+  stage.connect(hide);
   const duck = ctx.createGain();
-  duck.connect(hide);
+  duck.connect(stage);
   const bus = ctx.createGain();
   bus.connect(duck);
   let reverbIn = null;
@@ -92,7 +104,7 @@ function buildMusicGraph(ctx, out, { reverb = true } = {}) {
   } catch {
     reverbIn = null;
   }
-  return { bus, duck, hide, reverbIn };
+  return { bus, duck, stage, hide, reverbIn };
 }
 
 /** One piece of music playing: a score, its layer buses, and the clock position of the next bar. */
@@ -128,6 +140,7 @@ class Run {
     this.nextBar = now + 0.12;
     this.bars = 0;
     this.fading = false;
+    this.fadedAt = -Infinity; // the clock time it began to leave
     this.bad = new Set(); // instruments that threw: left out from then on
     this.only = null; // layers to play, when soloing some (renderMusicOffline)
   }
@@ -166,10 +179,37 @@ class Run {
 
   /** Compose the bars that start before `until` into `pending`. */
   compose(until, level) {
-    while (this.nextBar < until) {
+    while (this.nextBar < until) this.addBar(composeBar(this.score, level));
+  }
+
+  /** Put a composed bar's notes in `pending`, at the clock position of the next bar, and move on to the one after. */
+  addBar(bar) {
+    for (const ev of bar.events) this.pending.push({ at: this.nextBar + ev.t, ev });
+    this.nextBar += bar.dur;
+    this.bars++;
+  }
+
+  /**
+   * Compose the first `seconds` of the piece without sounding any of it, so a run that begins late is where one
+   * played from the start would be: the same sections, the same tune. The intro film's score needs it when the
+   * browser allows audio part-way through the film. The bar in progress at that second is the first to sound
+   * (with the chord that was held through the bars skipped struck again for it); `levelAt(second)` is the
+   * intensity of the bar that starts at that second of the piece.
+   */
+  skip(seconds, levelAt) {
+    if (!(seconds > 0)) return;
+    let t = 0;
+    for (let i = 0; i < MAX_SKIP_BARS; i++) {
+      const asked = Number(levelAt(t));
+      const level = Number.isFinite(asked) ? Math.min(1, Math.max(0, asked)) : 0;
+      const inProgress = t + barSeconds(this.theme, level) > seconds;
+      if (inProgress) this.score.padUntil = 0; // composed below: the pad chord it is part of is not sounding yet
       const bar = composeBar(this.score, level);
-      for (const ev of bar.events) this.pending.push({ at: this.nextBar + ev.t, ev });
-      this.nextBar += bar.dur;
+      if (inProgress) {
+        this.addBar(bar);
+        return;
+      }
+      t += bar.dur;
       this.bars++;
     }
   }
@@ -199,6 +239,7 @@ class Run {
   fadeOut(seconds, now) {
     if (this.fading) return;
     this.fading = true;
+    this.fadedAt = now;
     const tc = Math.max(0.05, seconds / 4);
     for (const p of [this.mix.gain, this.send.gain]) {
       try {
@@ -245,6 +286,8 @@ export class MusicEngine {
     this.hiddenSince = null; // clock time the tab was hidden at, or null while it is shown
     this.fadeIn = 2.5;
     this.fadeOutSeconds = 2.2;
+    this.stageGain = 1; // the film's mix stage (see setStage); kept here so a context made later starts with it
+    this.stingers = true; // whether the sounds in DUCKS make the music step back
   }
 
   /**
@@ -263,7 +306,7 @@ export class MusicEngine {
     sfx.init();
     sfx.onPlay((name) => {
       const d = DUCKS[name];
-      if (d) this.duck(d[0], d[1]);
+      if (d && this.stingers) this.duck(d[0], d[1]);
     });
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('visibilitychange', () => {
@@ -292,6 +335,7 @@ export class MusicEngine {
     this.fading = [];
     this._applyVolume();
     this._applyHidden();
+    nodes.stage.gain.value = this.stageGain; // a new graph starts where the film's mix is now
     return true;
   }
 
@@ -323,14 +367,18 @@ export class MusicEngine {
   /**
    * Start a theme ('menu' or a pantheon id), crossfading from the one playing. Playing the theme
    * that is already on is a no-op. Before the browser allows audio it is remembered and starts then.
+   * `joinAt` is for a piece that has been going on without being heard (the intro film's score, when the browser
+   * allows audio part-way through the film): it is asked each time a run is made, and answers where in the piece
+   * the run should come in as `{ seconds, levelAt }` (the second of the piece, and the intensity of the bar that
+   * starts at any second of it) or null to begin at the start. See Run.skip.
    * @param {string} id
-   * @param {{ seed?: number, fade?: number }} [opts]
+   * @param {{ seed?: number, fade?: number, joinAt?: () => ({ seconds: number, levelAt: (second: number) => number } | null) }} [opts]
    */
   play(id, opts = {}) {
     if (this.disabled) return;
     const theme = themeFor(id);
     if (this.want && this.want.theme === theme && !(this.run && this.run.fading)) return;
-    this.want = { id: theme.id, theme, seed: opts.seed ?? Math.floor(Math.random() * 0x7fffffff), fade: opts.fade };
+    this.want = { id: theme.id, theme, seed: opts.seed ?? Math.floor(Math.random() * 0x7fffffff), fade: opts.fade, joinAt: typeof opts.joinAt === 'function' ? opts.joinAt : null };
     this._startTimer();
     this.tick();
   }
@@ -348,6 +396,15 @@ export class MusicEngine {
   setIntensity(v) {
     if (!Number.isFinite(v)) return;
     this.target = Math.min(1, Math.max(0, v));
+  }
+
+  /**
+   * The intensity set exactly, with none of the easing of setIntensity (1.5 s up, 7 s down): whoever
+   * conducts the score (the intro film, src/intro/score.js) already shapes the curve it wants.
+   */
+  conduct(v) {
+    if (!Number.isFinite(v)) return;
+    this.target = this.level = Math.min(1, Math.max(0, v));
   }
 
   setVolume(v) {
@@ -379,18 +436,60 @@ export class MusicEngine {
     }
   }
 
+  /**
+   * The film's own volume stage, after the volume setting and the stingers' dip: everything eases to `gain`
+   * (1 = as the settings have it) with time constant `tc` seconds, starting `delay` seconds from now. The intro
+   * film lifts the score above its usual place and steps it back under a voice, then gives it back
+   * (src/intro/score.js). Remembered for a context that does not exist yet.
+   */
+  setStage(gain, tc = 0.3, delay = 0) {
+    if (!Number.isFinite(gain)) return;
+    this.stageGain = Math.min(4, Math.max(0, gain));
+    if (!this.env) return;
+    const p = this.env.nodes.stage.gain;
+    const now = this.ctx.currentTime;
+    const from = p.value; // read before the cancel: a running ease is dropped by it
+    try {
+      p.cancelScheduledValues(now);
+      p.setValueAtTime(from, now);
+      p.setTargetAtTime(this.stageGain, now + Math.max(0, delay || 0), Math.max(0.005, tc || 0));
+    } catch {
+      p.value = this.stageGain;
+    }
+  }
+
+  /** Whether the sound effects in DUCKS make the music step back (they do, except under the intro film, which mixes its own sounds). */
+  setStingers(on) {
+    this.stingers = !!on;
+  }
+
   state() {
     return {
       theme: this.run ? this.run.theme.id : null,
       wanted: this.want ? this.want.id : null,
       level: this.level,
       target: this.target,
+      stage: this.stageGain,
       playing: !!(this.run && !this.run.fading && this.ready),
       ready: this.ready,
+      // a theme is wanted, nothing mutes it and the browser has not allowed audio yet (the first click will)
+      waiting: !!(this.want && !this.muted && this.volume > 0 && !this.ready && (sfx.armed || this.ctx)),
       muted: this.muted,
       volume: this.volume,
       bars: this.run ? this.run.bars : 0,
     };
+  }
+
+  /** A run just made for a piece that has been going on without it (see `play`): skip to where the piece would be. */
+  _join(run) {
+    const joinAt = this.want && this.want.joinAt;
+    if (!joinAt) return;
+    try {
+      const at = joinAt();
+      if (at && at.seconds > 0) run.skip(at.seconds, at.levelAt);
+    } catch (err) {
+      console.warn('[music] could not join the piece part-way in; it begins at the start', err);
+    }
   }
 
   _startTimer() {
@@ -450,8 +549,12 @@ export class MusicEngine {
       }
       const fade = this.want.fade ?? (hadRun ? 3 : this.fadeIn);
       // The new piece comes in a little after the old one starts to leave, so two keys never ring together for long.
-      this.run = new Run(this.env, this.want.theme, this.want.seed, now + (hadRun ? 0.9 : 0), fade);
+      // That holds for a piece let go of a moment before as well (the intro film starts its score just after the page
+      // cleared the title's): it waits out what is left of the delay.
+      const wait = this.fading.reduce((w, r) => Math.max(w, r.fadedAt + CROSS_DELAY - now), 0);
+      this.run = new Run(this.env, this.want.theme, this.want.seed, now + wait, fade);
       this.level = this.target;
+      this._join(this.run);
     }
     const dt = this.lastTick === null ? 0 : Math.max(0, now - this.lastTick);
     this.lastTick = now;
@@ -469,10 +572,11 @@ export const music = new MusicEngine();
 
 /**
  * Render a theme into an AudioBuffer with an OfflineAudioContext (browser only; used by checks to
- * measure levels and by the music lab). The intensity follows `levelAt(seconds)` when given.
+ * measure levels and by the music lab). The intensity follows `levelAt(seconds)` when given, and the film's mix stage
+ * `stageAt(seconds)` (a gain; see setStage); `fadeIn` is the seconds the piece takes to come in (the live engine's is 2.5).
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 44100, seed = 1, level = 0, levelAt = null, volume = 1, only = null, reverb = true } = {}) {
+export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 44100, seed = 1, level = 0, levelAt = null, volume = 1, only = null, reverb = true, stageAt = null, fadeIn = 0.01 } = {}) {
   const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (!OAC) return null;
   const ctx = new OAC(2, Math.floor(sampleRate * seconds), sampleRate);
@@ -486,8 +590,15 @@ export async function renderMusicOffline(themeId, { seconds = 60, sampleRate = 4
   comp.connect(ctx.destination);
   const nodes = buildMusicGraph(ctx, comp, { reverb });
   nodes.bus.gain.value = MUSIC_GAIN * Math.pow(volume, 1.5);
+  if (stageAt) {
+    // the film's mix stage (a gain as a function of the second), as one value curve at 100 a second
+    const rate = 100;
+    const curve = new Float32Array(Math.max(2, Math.ceil(seconds * rate) + 1));
+    for (let i = 0; i < curve.length; i++) curve[i] = Math.max(0, stageAt(Math.min(seconds, i / rate)));
+    nodes.stage.gain.setValueCurveAtTime(curve, 0, seconds);
+  }
   const env = { ctx, nodes, kit: makeKit(ctx, makeNoiseBuffer(ctx)) };
-  const run = new Run(env, themeFor(themeId), seed, 0, 0.01);
+  const run = new Run(env, themeFor(themeId), seed, 0, fadeIn);
   run.only = only; // solo some layers
   while (run.nextBar < seconds) run.compose(run.nextBar + 0.01, levelAt ? levelAt(run.nextBar) : level);
   run.play(Infinity);
