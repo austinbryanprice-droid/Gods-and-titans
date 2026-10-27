@@ -1,7 +1,7 @@
 // Settings persistence (src/settings.js) with a fake localStorage.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSettings, saveSettings, onSettingsChange, defaultSettings, _resetSettingsForTests, SETTINGS_KEY } from '../../src/settings.js';
+import { getSettings, saveSettings, onSettingsChange, defaultSettings, _resetSettingsForTests, SETTINGS_KEY, ALERT_LEVEL_IDS, TAB_ALERT_MODES } from '../../src/settings.js';
 
 class FakeStorage {
   constructor() {
@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, intro: true });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -109,6 +109,42 @@ test('timeOfDay: the day and night cycle by default, only the known times accept
   saveSettings({ timeOfDay: 'night' });
   _resetSettingsForTests();
   assert.equal(getSettings().timeOfDay, 'night');
+});
+
+test('alerts, hints and tabAlerts: on by default, only the known values accepted, remembered across reloads', () => {
+  const s = getSettings();
+  assert.equal(s.alerts, 'all');
+  assert.equal(s.hints, true);
+  assert.equal(s.tabAlerts, 'title');
+  assert.deepEqual(ALERT_LEVEL_IDS, ['all', 'important', 'off']);
+  assert.deepEqual(TAB_ALERT_MODES, ['off', 'title', 'notify']);
+  assert.equal(saveSettings({ alerts: 'loud' }).alerts, 'all');
+  assert.equal(saveSettings({ alerts: true }).alerts, 'all');
+  assert.equal(saveSettings({ hints: 'yes' }).hints, true);
+  assert.equal(saveSettings({ tabAlerts: 'sound' }).tabAlerts, 'title');
+  const seen = [];
+  onSettingsChange((st, changed) => seen.push(changed));
+  for (const a of ['important', 'off', 'all']) assert.equal(saveSettings({ alerts: a }).alerts, a, a);
+  for (const t of ['off', 'notify', 'title']) assert.equal(saveSettings({ tabAlerts: t }).tabAlerts, t, t);
+  assert.equal(saveSettings({ hints: false }).hints, false);
+  assert.equal(seen.length, 7);
+  saveSettings({ alerts: 'important', tabAlerts: 'notify' });
+  _resetSettingsForTests();
+  const back = getSettings();
+  assert.equal(back.alerts, 'important');
+  assert.equal(back.tabAlerts, 'notify');
+  assert.equal(back.hints, false);
+});
+
+test('settings saved before alerts existed still load, with the new ones at their defaults', () => {
+  globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Old Timer', volume: 0.3, quality: 'high' }));
+  _resetSettingsForTests();
+  const s = getSettings();
+  assert.equal(s.name, 'Old Timer');
+  assert.equal(s.volume, 0.3);
+  assert.equal(s.alerts, 'all');
+  assert.equal(s.hints, true);
+  assert.equal(s.tabAlerts, 'title');
 });
 
 test('intro: the film plays by default, only booleans accepted, remembered across reloads', () => {

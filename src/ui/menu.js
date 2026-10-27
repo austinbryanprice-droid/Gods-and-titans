@@ -16,6 +16,8 @@ import { h, setChildren, copyText } from './menu-dom.js';
 import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
+import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
+import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import * as M from './menu-model.js';
 
 let instance = null;
@@ -1007,6 +1009,31 @@ export function createMenu({ root, onStart, onIntro = null }) {
     };
     renderT();
 
+    // Alerts (src/game/alerts.js) and what a background tab does about them (src/ui/tab-attention.js).
+    const aNote = h('div.mw-field-note');
+    const aBtns = ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { a: id }, onclick: () => {
+      saveSettings({ alerts: id });
+      renderA();
+    } }, label));
+    const renderA = () => {
+      const a = getSettings().alerts;
+      aBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.a === a));
+      aNote.textContent = alertNote(a);
+    };
+    renderA();
+
+    const wNote = h('div.mw-field-note');
+    const wBtns = TAB_ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { w: id }, onclick: async () => {
+      const got = await chooseTabAlerts(id); // 'notify' asks the browser for permission first
+      if (got !== null) renderW(got !== id ? id : null); // (null: picked again meanwhile, that pick stands)
+    } }, label));
+    const renderW = (refused = null) => {
+      const w = getSettings().tabAlerts;
+      wBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.w === w));
+      wNote.textContent = refused ? tabAlertNote(refused, notificationState(), true) : tabAlertNote(w);
+    };
+    renderW();
+
     const toggle = (key, label, note, invert = false) => {
       const input = h('input', { type: 'checkbox', checked: invert ? !getSettings()[key] : !!getSettings()[key], onchange: () => saveSettings({ [key]: invert ? !input.checked : input.checked }) });
       return h('label.mw-toggle', input, h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')), h('span.mw-toggle-text', h('span', label), note ? h('small', note) : null));
@@ -1027,7 +1054,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),
           toggle('tipsDismissed', 'Getting-started tips', 'Show the new-player checklist in your next game.', true),
+          toggle('hints', 'Gameplay tips', 'A short tip now and then during a match.'),
         ),
+        h('div.mw-field', h('span.mw-label', 'Alerts'), h('div.mw-segmented', aBtns), aNote),
+        h('div.mw-field', h('span.mw-label', 'When this tab is in the background'), h('div.mw-segmented', wBtns), wNote),
         h('p.mw-hint.mw-saved-note', '✓ Settings are saved automatically in this browser.'),
       ),
     );

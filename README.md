@@ -23,6 +23,8 @@ Houses can grow, too: in a Town, select four Houses that stand together in a squ
 
 The host can pick the **Decade of Peace** game mode in the lobby: for the first 30, 45 or 60 minutes no player can harm another and nobody can build near an enemy Town Center, so everyone can build up and mass armies for one great battle (neutral creatures still fight).
 
+The game keeps an eye out for you. War drums and a minimap ping say when enemies come near your base or an ally is attacked, a gong marks the end of the Decade of Peace, and gentler reminders mention idle Worshippers, a full population, a god you can afford and an army standing about. If you are in another tab, the tab title flashes (or a desktop notification appears, if you allow it). A short gameplay tip shows up every couple of minutes. Settings and the F10 menu turn the alerts down or off, switch the tips off and pick what a background tab does.
+
 ## Controls
 
 | Input | Action |

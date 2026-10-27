@@ -7,6 +7,12 @@ const QUALITIES = ['low', 'medium', 'high', 'ultra'];
 // The sky: the day and night cycle that follows the match clock, or one time of day held
 // for the whole match (the render side is src/render/atmosphere.js; a test keeps both lists equal).
 const TIMES_OF_DAY = ['cycle', 'golden', 'day', 'dusk', 'night', 'dawn'];
+// Alerts: how much the game speaks up (src/game/alerts.js). 'important' keeps only the warnings
+// (enemies near, an ally under attack, the Decade of Peace ending); 'off' silences the reminders too.
+const ALERT_LEVELS = ['all', 'important', 'off'];
+// What a tab in the background does when the game needs the player (src/ui/tab-attention.js):
+// nothing, flash the tab's title, or also raise a desktop notification (needs the browser's permission).
+const TAB_ALERTS = ['off', 'title', 'notify'];
 const MAX_NAME_LENGTH = 20;
 
 const listeners = new Set();
@@ -25,10 +31,13 @@ function cleanName(name) {
  * Defaults; the name gets 3 random digits once and is then saved. `tipsDismissed`
  * becomes true once the player closes (or finishes) the in-game "getting started" tips.
  * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
- * or one fixed time of day. `intro` plays the intro film when the game opens (src/ui/intro.js).
+ * or one fixed time of day. `alerts` is how much the game speaks up ('all', 'important', 'off'),
+ * `hints` whether a gameplay tip appears now and then, `tabAlerts` what a background tab does
+ * when the game needs the player ('off', 'title', 'notify'). `intro` plays the intro film
+ * when the game opens (src/ui/intro.js).
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, intro: true };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -42,6 +51,9 @@ function sanitize(raw, base) {
   if (typeof raw.edgeScroll === 'boolean') out.edgeScroll = raw.edgeScroll;
   if (typeof raw.showAllBars === 'boolean') out.showAllBars = raw.showAllBars;
   if (typeof raw.tipsDismissed === 'boolean') out.tipsDismissed = raw.tipsDismissed;
+  if (ALERT_LEVELS.includes(raw.alerts)) out.alerts = raw.alerts;
+  if (typeof raw.hints === 'boolean') out.hints = raw.hints;
+  if (TAB_ALERTS.includes(raw.tabAlerts)) out.tabAlerts = raw.tabAlerts;
   if (typeof raw.intro === 'boolean') out.intro = raw.intro;
   return out;
 }
@@ -84,7 +96,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, intro: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean }}
  */
 export function getSettings() {
   return load();
@@ -139,3 +151,5 @@ export function _resetSettingsForTests({ clearStorage = false } = {}) {
 export const SETTINGS_KEY = STORAGE_KEY;
 export const QUALITY_LEVELS = QUALITIES;
 export const TIME_OF_DAY_MODES = TIMES_OF_DAY;
+export const ALERT_LEVEL_IDS = ALERT_LEVELS;
+export const TAB_ALERT_MODES = TAB_ALERTS;
