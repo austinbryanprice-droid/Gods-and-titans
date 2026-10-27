@@ -221,11 +221,11 @@ for (const [name, open] of [['Settings screen', settingsScreen], ['F10 menu', f1
   });
 }
 
-test('F10 menu: the new rows sit with the other options, before the volume, and show the saved choices', () => {
+test('F10 menu: the new rows sit with the other options, before the sound and music, and show the saved choices', () => {
   saveSettings({ alerts: 'important', hints: false, tabAlerts: 'off' });
   const s = f10Menu();
   const text = s.root.find('hud-options').textContent;
-  const order = ['Getting-started tips', 'Gameplay tips', 'Alerts', 'When this tab is in the background', 'Volume'].map((label) => text.indexOf(label));
+  const order = ['Getting-started tips', 'Gameplay tips', 'Alerts', 'When this tab is in the background', 'Sound effects', 'Music'].map((label) => text.indexOf(label));
   assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
   assert.equal(active(s.alerts), 'Warnings only');
   assert.equal(s.alerts.note(), alertNote('important'));

@@ -1770,6 +1770,51 @@ per-frame budget, so a revealed army appears over a few frames.
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
   tier_up, chop, mine, pray, horn, ping, ping_urgent.
+- Music (`src/audio/music.js`, `music-composer.js`, `music-theory.js`, `music-themes.js`, `music-voices.js`, the hub
+  `src/audio/audio.js`, and `src/game/music-director.js`): background music for the title screen and for matches,
+  composed and synthesized live with WebAudio (no audio files). It shares the sound effects' `AudioContext` and master
+  limiter (`sfx.shared`), so the browser's "audio starts on a click" unlock happens once for both, and it steps back
+  under the stingers in `DUCKS` (`summon_god`, `summon_titan`, `victory`, `defeat`, `tier_up`, `horn`; heard through
+  `sfx.onPlay`). `initAudio(settings)` and `syncAudio(settings, changed)` (`main.js`) start both engines and carry the
+  settings over; `playTitleMusic()` is what each menu screen calls (a no-op while it already plays);
+  `quietMusic()` is for the intro film (11.1), which plays over silence (`main.js` calls it as the film starts and
+  `playTitleMusic()` at the hand-over to the menu); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is `music.play(themeId)` (crossfades;
+  remembered until the browser allows audio), `stop(fade)`, `setIntensity(0..1)`, `setVolume`, `mute`, `duck`,
+  `state()`. All of it is a no-op where WebAudio is missing (Node), a voice that throws is muted from then on and five
+  scheduler faults in a row switch the music off: it cannot break the game.
+  **The score.** Eleven themes (`music-themes.js`: `menu`, the title screen's grand D minor with horns and a choir, and
+  one per pantheon, each with its own mode, tempo, instruments and rhythms). A theme is data: mode, bar length, an
+  instrument per role (`inst.leadHot` is the lead of tense sections), calm and tense chord progressions, a two-bar
+  motif and the rhythm patterns of each layer. `music-composer.js` is pure and seeded (the same seed plays the same
+  piece) and writes one bar at a time, in four-bar sections. Layers join as the intensity rises: pad, drone and the
+  culture's plucked arp always, the lead on most bars (the theme's tune, or a wander), bass from 0.10, a soft pulse
+  from 0.18, the groove from 0.40, war drums, horn calls, fills and crashes from 0.62. A section uses a calm
+  progression until the intensity passes 0.55 and a darker one until it falls below 0.38. Every chord and note comes
+  from the theme's mode, so any combination is consonant (`tests/audio/music-composer.test.js` checks it).
+  **The engine.** A look-ahead scheduler (a tick every 250 ms) composes bars 1.6 s ahead and creates each note 0.6 s
+  before it sounds (a note waiting in the audio graph is not free); after a stall it carries on from the clock instead
+  of catching up, and a hidden tab fades the music out and stops making notes. Layers (pad, drone, bass, arp, lead,
+  perc, war, fx) are buses with a gain and a send to one mono 2 s hall reverb; a new theme crossfades in; the intensity
+  eases toward its target (1.5 s up, 7 s down: a fight ends slowly). The volume is `0.63 * v^1.5` into the limiter.
+  **The instruments** (`music-voices.js`, 49): plucked strings, a mallet, 14 breath, reed and bowed leads, 5 pads, 16
+  drums, bells, gongs and horns, all oscillators, filters and noise. A score plays dozens of notes a second and every
+  live node costs the audio thread for as long as it lives, so the recipes are lean: vibrato is a value curve, not an
+  oscillator; filter sweeps and scoops run once per render block (`automationRate = 'k-rate'`, three to five times
+  cheaper); a note's tail is cut 45 dB below its peak; a voice has one envelope and as few gains as will do.
+  **Tension** (`music-director.js`, made by `Game.init`): a leaky "heat" fed from the ViewState (blows on the player's
+  side or struck by it, losses, a Titan rising, the peace ending), cooling with a time constant of 10 s, becomes the
+  intensity `1 - exp(-heat / 55)`. In the Decade of Peace it stays under 0.3 (creature fights only) until the horn.
+  **Settings.** `musicVolume` (0..1, default 0.5) and `musicMuted`, apart from the sound effects' `volume`. Settings →
+  Music has the slider, a Mute button and a Listen row that plays any theme as Calm, Tense or Battle; the F10 menu has
+  "Sound effects" and "Music" rows. Moving the music slider lifts a mute.
+  **Measured, not heard.** Nobody has listened to this score yet; what was measured, with the offline renders of
+  `tools/music-render.mjs` (WAV files for ffmpeg's `ebur128`) and a live headless Chromium (the DevTools WebAudio
+  domain's render capacity, the audio thread's share of its time budget): at the default volume every theme sits
+  within about 1.5 dB of the others, about -32 LUFS when calm, -29 in between and -26 in a full battle, true peak at most
+  -8.6 dBFS; the audio thread's load with the music is 5 to 7 % when calm and 9 to 13 % in battle (an idle audio context
+  alone is 3.4 %, the heaviest theme is Aztec in battle). `tests/audio/music-budget.test.js` holds the number of
+  sources sounding at once and of nodes made per second, the two things that load tracks, inside limits above
+  today's. `tools/music-lab.html` plays any theme at any intensity.
 
 ## 10. AI (src/ai/)
 
@@ -1807,7 +1852,9 @@ gameplay tip under it unless the player turned tips off). In a
 single-player match (no clients) a hidden tab opens the F10 menu, which pauses the sim. `init()` also
 creates the `AlertEngine` and the `TabAttention` (section 9, "Alerts, tips and sounds"); `onAlert(alert)` turns each alert into a HUD
 line, a sound, a minimap ping, the spot Space jumps to and a tab flash, and tells the HUD to hold its tips
-while the player is under pressure.
+while the player is under pressure. It also makes the `MusicDirector` (section 9, "Music"):
+`update(dt)` each frame turns the match's fighting into the score's intensity, and the director plays the player's
+pantheon theme.
 
 ### 11.1 Intro film (src/intro/, src/ui/intro.js)
 
@@ -1934,6 +1981,7 @@ src/render/models/*.js             model owners
 src/render/vfx.js                  VFX owner
 src/ui/hud.js, hud.css, input.js, command-card.js, minimap.js  HUD owner
 src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
+src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
 src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules

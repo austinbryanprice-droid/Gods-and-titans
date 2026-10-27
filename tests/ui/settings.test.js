@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, musicVolume: 0.5, musicMuted: false });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -145,6 +145,36 @@ test('settings saved before alerts existed still load, with the new ones at thei
   assert.equal(s.alerts, 'all');
   assert.equal(s.hints, true);
   assert.equal(s.tabAlerts, 'title');
+});
+
+test('music: volume 0.5 and not muted by default, clamped, only real values accepted, remembered across reloads', () => {
+  const s = getSettings();
+  assert.equal(s.musicVolume, 0.5);
+  assert.equal(s.musicMuted, false);
+  assert.equal(saveSettings({ musicVolume: 7 }).musicVolume, 1);
+  assert.equal(saveSettings({ musicVolume: -1 }).musicVolume, 0);
+  assert.equal(saveSettings({ musicVolume: NaN }).musicVolume, 0, 'a bad value keeps the last good one');
+  assert.equal(saveSettings({ musicVolume: '0.9' }).musicVolume, 0, 'a string is not a volume');
+  assert.equal(saveSettings({ musicMuted: 'yes' }).musicMuted, false);
+  const seen = [];
+  onSettingsChange((st, changed) => seen.push(changed));
+  assert.equal(saveSettings({ musicVolume: 0.35, musicMuted: true }).musicMuted, true);
+  assert.deepEqual(seen, [['musicVolume', 'musicMuted']]);
+  assert.equal(saveSettings({ volume: 0.2 }).musicVolume, 0.35, 'the sound-effect volume is separate');
+  _resetSettingsForTests();
+  const back = getSettings();
+  assert.equal(back.musicVolume, 0.35);
+  assert.equal(back.musicMuted, true);
+  assert.equal(back.volume, 0.2);
+});
+
+test('settings saved before the music existed still load, with the music at its defaults', () => {
+  globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Old Timer', volume: 0.3 }));
+  _resetSettingsForTests();
+  const s = getSettings();
+  assert.equal(s.volume, 0.3);
+  assert.equal(s.musicVolume, 0.5);
+  assert.equal(s.musicMuted, false);
 });
 
 test('intro: the film plays by default, only booleans accepted, remembered across reloads', () => {

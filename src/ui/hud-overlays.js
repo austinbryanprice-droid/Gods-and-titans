@@ -159,6 +159,23 @@ export class Overlays {
       saveSettings({ volume: Number(vol.value) / 100 });
     });
     vol.addEventListener('change', () => sfx.play('select'));
+    // The music: its own mute and volume (the sound effects keep theirs). Moving the slider lifts a mute.
+    const musicOn = toggleRow('Music', 'The score for your pantheon: calm while you build, louder in a fight.', !s.musicMuted, (v) => saveSettings({ musicMuted: !v }));
+    const musicVol = el('input', 'hud-range');
+    musicVol.type = 'range';
+    musicVol.min = '0';
+    musicVol.max = '100';
+    musicVol.value = String(Math.round(s.musicVolume * 100));
+    musicVol.setAttribute('aria-label', 'Music volume');
+    const musicText = el('b', 'hud-vol-text', `${musicVol.value}%`);
+    musicVol.addEventListener('input', () => {
+      const v = Number(musicVol.value) / 100;
+      musicText.textContent = `${musicVol.value}%`;
+      if (v > 0 && getSettings().musicMuted) {
+        musicOn.input.checked = true;
+        saveSettings({ musicVolume: v, musicMuted: false });
+      } else saveSettings({ musicVolume: v });
+    });
 
     const resume = btn('Resume', 'mw-btn--primary', () => this.closeMenu());
     const buttons = [resume];
@@ -195,7 +212,9 @@ export class Overlays {
         hints.row,
         alerts.row,
         tabAlerts.row,
-        el('label', 'hud-vol', el('span', null, 'Volume'), vol, volText),
+        el('label', 'hud-vol', el('span', null, 'Sound effects'), vol, volText),
+        musicOn.row,
+        el('label', 'hud-vol', el('span', null, 'Music volume'), musicVol, musicText),
       ),
       el('div', 'hud-ohint', 'Press F10 or Esc to resume.'));
     const wrap = this.show('menu', node, () => this.closeMenu());

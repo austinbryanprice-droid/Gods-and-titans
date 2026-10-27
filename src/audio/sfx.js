@@ -3,6 +3,8 @@
 //   sfx.play(name, { x, y, volume }) positional when x, y are given (tile coords)
 //   sfx.setListener(x, y, scale)     usually the camera target; scale > 1 widens the hearing range (zoomed out)
 //   sfx.setVolume(v) / sfx.mute(bool)
+//   sfx.shared                       { ctx, out, noise } once the context exists: the music engine plays through it too
+//   sfx.onPlay(cb)                   cb(name, gain) after a sound starts (the music dips under big ones)
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers).
 import { ALERT_RECIPES, ALERT_LIMITS, ALERT_LEVEL } from './sfx-alerts.js';
 
@@ -69,9 +71,10 @@ export function distanceGain(d) {
 // ------------------------------------------------------------------ synth kit
 
 /** Small helpers bound to one AudioContext; every node stops itself. */
-function kit(ctx, noiseBuf) {
+export function kit(ctx, noiseBuf) {
   const k = {
     ctx,
+    noiseBuf,
     gain(value, dest) {
       const g = ctx.createGain();
       g.gain.value = value;
@@ -453,7 +456,7 @@ const RECIPES = {
 
 // ------------------------------------------------------------------ engine
 
-function makeNoiseBuffer(ctx) {
+export function makeNoiseBuffer(ctx) {
   const len = Math.floor(ctx.sampleRate * 2);
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
   const d = buf.getChannelData(0);
@@ -521,6 +524,7 @@ class SfxEngine {
     this.voiceEnds = [];
     this.armed = false;
     this.unlockHandler = null;
+    this.playHooks = [];
   }
 
   /**
@@ -587,6 +591,23 @@ class SfxEngine {
     } catch {
       p.value = g;
     }
+  }
+
+  /**
+   * The page's one AudioContext, the limiter every sound ends in and the shared noise buffer, for
+   * other engines (the music) that play through the same chain; null until a gesture has made the context.
+   */
+  get shared() {
+    return this.ctx && this.graph ? { ctx: this.ctx, out: this.graph.comp, noise: this.graph.noise } : null;
+  }
+
+  /** Call cb(name, gain) each time a sound starts. Returns an unsubscribe function. */
+  onPlay(cb) {
+    this.playHooks.push(cb);
+    return () => {
+      const i = this.playHooks.indexOf(cb);
+      if (i >= 0) this.playHooks.splice(i, 1);
+    };
   }
 
   /** True when a sound would actually be heard right now. */
@@ -664,6 +685,13 @@ class SfxEngine {
         }
       }, ms);
       if (timer && typeof timer.unref === 'function') timer.unref();
+      for (const hook of this.playHooks) {
+        try {
+          hook(name, gain);
+        } catch (err) {
+          console.warn('[sfx] play hook failed', err);
+        }
+      }
       return true;
     } catch (err) {
       console.warn(`[sfx] failed to play ${name}`, err);

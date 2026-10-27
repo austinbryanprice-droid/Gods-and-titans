@@ -12,6 +12,7 @@ import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
 import { sfx } from '../audio/sfx.js';
+import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
 import { h, setChildren, copyText } from './menu-dom.js';
 import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
@@ -165,6 +166,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     // Each screen sits in its own scroller so tall content scrolls on small windows.
     setChildren(screenLayer, h('div.mw-screen', screen.el));
     root.dataset.screen = name;
+    if (name !== 'settings') playTitleMusic(); // the menu's own score (a no-op while it already plays; Settings may be auditioning another)
     // the full sky show on the title; a quieter one behind panels full of controls
     backdrop.setMode(name === 'title' ? 'full' : 'calm');
     if (screen.focus) setTimeout(() => screen.focus.focus && screen.focus.focus({ preventScroll: true }), 60);
@@ -963,7 +965,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       max: '100',
       step: '1',
       value: String(Math.round(s.volume * 100)),
-      'aria-label': 'Volume',
+      'aria-label': 'Sound effects volume',
       oninput: () => {
         saveSettings({ volume: Number(volume.value) / 100 });
         volValue.textContent = `${volume.value}%`;
@@ -979,6 +981,61 @@ export function createMenu({ root, onStart, onIntro = null }) {
       const n = testSounds[testIdx++ % testSounds.length];
       if (!sfx.play(n)) setTimeout(() => sfx.play(n), 60);
     } }, '♪ Test sound');
+
+    // The music: its own volume and mute (the sound effects keep theirs), and a way to hear each pantheon's
+    // score without starting a match. Leaving Settings goes back to the title music (see go()).
+    const musicOut = h('output.mw-range-value');
+    const musicRange = h('input.mw-range', {
+      type: 'range',
+      min: '0',
+      max: '100',
+      step: '1',
+      value: String(Math.round(s.musicVolume * 100)),
+      'aria-label': 'Music volume',
+      oninput: () => {
+        const v = Number(musicRange.value) / 100;
+        // Moving the slider is asking to hear the music: it lifts a mute too.
+        saveSettings(v > 0 && getSettings().musicMuted ? { musicVolume: v, musicMuted: false } : { musicVolume: v });
+        renderMusic();
+      },
+    });
+    const muteBtn = h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => {
+      saveSettings({ musicMuted: !getSettings().musicMuted });
+      renderMusic();
+    } });
+    const renderMusic = () => {
+      const m = getSettings();
+      const pct = Math.round(m.musicVolume * 100);
+      musicOut.textContent = `${pct}%`;
+      musicRange.style.setProperty('--fill', `${pct}%`);
+      musicRange.classList.toggle('is-muted', m.musicMuted);
+      muteBtn.textContent = m.musicMuted ? 'Unmute' : 'Mute';
+      muteBtn.setAttribute('aria-pressed', String(m.musicMuted));
+    };
+    renderMusic();
+    const previewThemes = [['menu', 'Title screen'], ...PANTHEON_LIST.map((p) => [p.id, p.name])];
+    let previewIdx = 0;
+    let previewMood = -1;
+    const previewName = h('span.mw-music-listen-name', previewThemes[0][1]);
+    const moodBtns = PREVIEW_MOODS.map(([label], i) => h('button.mw-seg', { type: 'button', dataset: { mood: String(i) }, onclick: () => {
+      previewMood = i;
+      playPreview();
+    } }, label));
+    const playPreview = () => {
+      previewName.textContent = previewThemes[previewIdx][1];
+      moodBtns.forEach((b, i) => b.classList.toggle('is-active', i === previewMood));
+      previewMusic(previewThemes[previewIdx][0], PREVIEW_MOODS[Math.max(0, previewMood)][1]);
+    };
+    const stepPreview = (d) => {
+      previewIdx = (previewIdx + previewThemes.length + d) % previewThemes.length;
+      playPreview();
+    };
+    const preview = h('div.mw-music-listen',
+      h('span.mw-music-listen-label', 'Listen'),
+      h('button.mw-btn.mw-btn--small', { type: 'button', 'aria-label': 'Previous theme', onclick: () => stepPreview(-1) }, '‹'),
+      previewName,
+      h('button.mw-btn.mw-btn--small', { type: 'button', 'aria-label': 'Next theme', onclick: () => stepPreview(1) }, '›'),
+      h('div.mw-segmented', moodBtns));
 
     const qualities = [
       ['low', 'Low', 'No shadows or post-processing, fewer particles. For older laptops.'],
@@ -1044,8 +1101,12 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('section.mw-panel.mw-form-panel.mw-settings',
         h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'Settings'), h('span.mw-head-spacer')),
         h('label.mw-field', h('span.mw-label', 'Player name'), nameInput, h('span.mw-field-note', 'Shown to other players in online lobbies.')),
-        h('div.mw-field', h('span.mw-label', 'Volume'),
+        h('div.mw-field', h('span.mw-label', 'Sound effects'),
           h('div.mw-range-row', volume, volValue, testBtn)),
+        h('div.mw-field', h('span.mw-label', 'Music'),
+          h('div.mw-range-row', musicRange, musicOut, muteBtn),
+          preview,
+          h('span.mw-field-note', 'Every pantheon has its own score: calm while you build, louder in a fight. The Decade of Peace stays calm until the war horn.')),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
         h('div.mw-field', h('span.mw-label', 'Intro film'),

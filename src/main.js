@@ -2,7 +2,7 @@
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
 // completely, so matches can be played one after another without a reload.
 import { getSettings, onSettingsChange } from './settings.js';
-import { sfx } from './audio/sfx.js';
+import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
 
@@ -123,13 +123,18 @@ function hasWebGL2() {
  */
 function watchIntro(screen, guard = true) {
   hideMenu();
+  quietMusic(); // the film has sounds and a voice of its own: the title music comes back with the menu
+  const handover = () => {
+    showMenu(screen);
+    playTitleMusic();
+  };
   try {
     const s = getSettings();
-    const intro = playIntro({ root: document.getElementById('app'), quality: s.quality, guard, narrate: s.narration, volume: s.volume, onHandover: () => showMenu(screen) });
+    const intro = playIntro({ root: document.getElementById('app'), quality: s.quality, guard, narrate: s.narration, volume: s.volume, onHandover: handover });
     return intro.done;
   } catch (err) {
     console.error('[main] the intro film could not start', err);
-    showMenu(screen);
+    handover();
     return Promise.resolve('failed');
   }
 }
@@ -144,11 +149,8 @@ function prefersReducedMotion() {
 
 function boot() {
   const settings = getSettings();
-  sfx.init({ volume: settings.volume });
-  sfx.setVolume(settings.volume);
-  onSettingsChange((s, changed) => {
-    if (changed.includes('volume')) sfx.setVolume(s.volume);
-  });
+  initAudio(settings); // the sound effects and the music: one audio context, armed to start on the first click
+  onSettingsChange(syncAudio);
   menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onIntro: () => watchIntro('settings', false) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
