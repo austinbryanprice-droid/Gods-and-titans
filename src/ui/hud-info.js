@@ -127,6 +127,23 @@ export function researchedText(up, typeId) {
     .join(', ');
 }
 
+/** Queue buttons the selection panel draws after the one in progress; any more runs fold into a "+N" button. */
+export const QUEUE_CHIPS = 12;
+
+/**
+ * The queue from item `from` on as runs of the same item: [{ u, at, n }] is item `u` at index `at`,
+ * `n` times in a row. A queue of 50 Worshippers is one run, so the panel draws "🧑 49" and not 49 buttons.
+ */
+export function queueRuns(q, from = 1) {
+  const runs = [];
+  for (let i = from; i < q.length; i++) {
+    const last = runs[runs.length - 1];
+    if (last && last.u === q[i].u) last.n++;
+    else runs.push({ u: q[i].u, at: i, n: 1 });
+  }
+  return runs;
+}
+
 /** Shape of an entity that needs a panel rebuild when it changes. */
 function shapeOf(e, vs) {
   if (!e) return '-';
@@ -146,7 +163,7 @@ function typeMix(ents) {
 export class InfoView {
   /**
    * @param {HTMLElement} root container
-   * @param {{ selection: object, viewState: object, onSelectOnly(id), onRemove(id), onSelectType(type), onCancelQueue(buildingId, index), onPortrait() }} o
+   * @param {{ selection: object, viewState: object, onSelectOnly(id), onRemove(id), onSelectType(type), onCancelQueue(buildingId, index, count), onPortrait() }} o
    */
   constructor(root, o) {
     this.root = root;
@@ -296,28 +313,41 @@ export class InfoView {
     if (queueing) {
       const q = e.q;
       const first = q[0];
+      // A click takes back the item `one`; Shift-click takes back `n` from `at` on.
+      const take = (ev, one, at, n) => (ev && ev.shiftKey ? this.o.onCancelQueue(e.id, at, n) : this.o.onCancelQueue(e.id, one, 1));
       const big = el('button', 'hi-q-main');
       big.type = 'button';
       big.tabIndex = -1;
-      big.title = 'Click to cancel';
-      big.addEventListener('click', () => this.o.onCancelQueue(e.id, 0));
+      big.title = q.length > 1 ? 'Click to cancel. Shift-click to cancel the whole queue.' : 'Click to cancel';
+      big.addEventListener('click', (ev) => take(ev, 0, 0, q.length));
       const bar = el('div', 'hi-bar is-train', el('i', 'hi-bar-fill'));
       const cls = UNITS[first.u] ? UNITS[first.u].class : '';
       const verb = BUILDINGS[first.u] ? 'Upgrading to' : UPGRADES[first.u] ? 'Researching' : cls === 'god' || cls === 'titan' || cls === 'creature' ? 'Summoning' : 'Training';
       const label = first.u === 'tier_up' ? `Growing into a ${tierName((e.tr || 1) + 1)}` : `${verb} ${typeName(first.u)}`;
       big.append(el('span', 'hi-q-icon', typeIcon(first.u)));
-      const info = el('div', 'hi-q-info', el('div', 'hi-q-label', label), bar);
+      const head = el('div', 'hi-q-head', el('div', 'hi-q-label', label), q.length > 1 ? el('div', 'hi-q-count', `${q.length} / ${MAX_QUEUE}`) : null);
+      const info = el('div', 'hi-q-info', head, bar);
+      // The rest of the queue as runs of the same unit with a count: a click takes one back, Shift-click the whole run.
       const small = el('div', 'hi-q-rest');
-      for (let i = 1; i < MAX_QUEUE; i++) {
-        const it = q[i];
-        const b = el('button', it ? 'hi-q-item' : 'hi-q-item is-empty');
+      const runs = queueRuns(q);
+      const shown = runs.length > QUEUE_CHIPS ? runs.slice(0, QUEUE_CHIPS - 1) : runs;
+      for (const r of shown) {
+        const b = el('button', 'hi-q-item', typeIcon(r.u), r.n > 1 ? el('span', 'hi-q-n', r.n) : null);
         b.type = 'button';
         b.tabIndex = -1;
-        if (it) {
-          b.textContent = typeIcon(it.u);
-          b.title = `${typeName(it.u)} — click to cancel`;
-          b.addEventListener('click', () => this.o.onCancelQueue(e.id, i));
-        }
+        b.title = r.n > 1 ? `${typeName(r.u)} ×${r.n} — click to cancel one, Shift-click to cancel all ${r.n}` : `${typeName(r.u)} — click to cancel`;
+        b.addEventListener('click', (ev) => take(ev, r.at + r.n - 1, r.at, r.n));
+        small.appendChild(b);
+      }
+      if (shown.length < runs.length) {
+        // Too many different runs for the row: the rest as one "+N" button (click takes the last one back).
+        const at = runs[shown.length].at;
+        const more = q.length - at;
+        const b = el('button', 'hi-q-item is-more', `+${more}`);
+        b.type = 'button';
+        b.tabIndex = -1;
+        b.title = `${more} more queued — click to cancel the last, Shift-click to cancel all ${more}`;
+        b.addEventListener('click', (ev) => take(ev, q.length - 1, at, more));
         small.appendChild(b);
       }
       extra.appendChild(el('div', 'hi-queue', big, el('div', 'hi-q-side', info, small)));

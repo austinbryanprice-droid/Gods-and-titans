@@ -85,17 +85,26 @@ export function issueTrain(world, player, b, unitId) {
   if (def.class === 'titan') world.emit({ type: 'titanSummoning', player, t: unitId });
 }
 
-/** cancelTrain: remove a queue item and refund it. */
-export function cancelTrain(world, player, b, index) {
+/**
+ * cancelTrain: take queue items back and refund them. `index` is the first item (default: the last
+ * one), `count` how many from there on (default 1, up to the end of the queue), so a long run of
+ * queued units goes back with one command.
+ */
+export function cancelTrain(world, player, b, index, count) {
   if (!b || b.dead || b.kind !== 'building' || b.owner !== player) return;
   const i = Number.isInteger(index) ? index : b.queue.length - 1;
   if (i < 0 || i >= b.queue.length) return;
-  if (b.queue[i].group) return cancelMerge(world, b.queue[i].group); // four Houses were being combined: all of it stops
-  const [item] = b.queue.splice(i, 1);
-  refund(world, player, item.cost);
+  const n = Number.isInteger(count) && count > 1 ? Math.min(count, b.queue.length - i) : 1;
   const p = world.players[player];
-  if (item.revive) p.fallen[item.u] = { level: item.revive.level, xp: item.revive.xp };
-  p.popUsed = Math.max(0, p.popUsed - item.pop);
+  for (const item of b.queue.splice(i, n)) {
+    if (item.group) {
+      cancelMerge(world, item.group); // four Houses were being combined: all of it stops, and the price comes back once
+      continue;
+    }
+    refund(world, player, item.cost);
+    if (item.revive) p.fallen[item.u] = { level: item.revive.level, xp: item.revive.xp };
+    p.popUsed = Math.max(0, p.popUsed - item.pop);
+  }
 }
 
 /** upgradeTier: queue the Town Center's next tier. */

@@ -3,10 +3,11 @@ import { h } from './menu-dom.js';
 import { BUILDINGS } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
 import { MANOR, mergeRule } from '../data/houses.js';
+import { DELETE_CONFIRM_ABOVE } from './delete-key.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME,
-  MAX_WALL_LINE, WALL_PLACE_RANGE,
+  MAX_WALL_LINE, WALL_PLACE_RANGE, MAX_QUEUE,
 } from '../config.js';
 
 // kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
@@ -27,6 +28,7 @@ const HOTKEYS = [
     [kbd('M'), 'Move'],
     [kbd('S'), 'Stop'],
     [kbd('H'), 'Hold position'],
+    [kbd('Delete'), `Destroy the selected units and free their population (press twice for more than ${DELETE_CONFIRM_ABOVE} units, a god or a Titan; on a Mac keyboard that is fn + delete)`],
     [keys('Q', 'W', 'E', 'R'), 'God and creature abilities (they also cast themselves by default)'],
     [kbd('Right-click'), 'On an ability button: autocast on or off (manual) for that ability'],
     [kbd('`'), 'Every ability of the selected units to manual, or back to autocast'],
@@ -45,6 +47,7 @@ const HOTKEYS = [
   ['Buildings', [
     [kbd('W'), 'Town Center: Worshipper · Barracks: Warrior'],
     [kbd('Shift', 'W'), 'Shift with any train hotkey or button queues up to 5 at once'],
+    [kbd('Shift', 'Click'), `A queued unit under a building's name: take back its whole run (the big button: the whole queue). A building queues up to ${MAX_QUEUE}`],
     [kbd('U'), 'Town Center: grow to Town, then City'],
     [keys('U', 'D'), 'Wall segments: upgrade to stone (U) or dismantle (D), the whole selection at once'],
     [keys('U', 'C'), 'Houses: combine four in a square into a Manor (U), or cancel it (C)'],

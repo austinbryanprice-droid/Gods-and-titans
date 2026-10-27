@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
 import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, researchCheck, CARD_SLOTS } from '../../src/ui/command-card.js';
 import { subgroups } from '../../src/ui/hud-data.js';
-import { POP_MAX } from '../../src/config.js';
+import { POP_MAX, MAX_QUEUE } from '../../src/config.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
 import { PANTHEON_LIST, godsFor } from '../../src/data/index.js';
@@ -259,10 +259,10 @@ test('population cap and queue limit make training unavailable', () => {
   assert.equal(card[0].reason, 'Not enough population. Build more Houses.');
 
   world.players[0].popCap = 100;
-  for (let i = 0; i < 5; i++) world.issueCommand(0, { type: 'train', building: tc.id, unit: 'worshipper' });
+  for (let i = 0; i < MAX_QUEUE; i++) world.issueCommand(0, { type: 'train', building: tc.id, unit: 'worshipper' });
   run(world, 0.1);
   card = getCommandCard([tc.id], viewOf(world));
-  assert.equal(card[0].queued, 5);
+  assert.equal(card[0].queued, MAX_QUEUE);
   assert.equal(card[0].reason, 'Production queue is full.');
 });
 

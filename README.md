@@ -31,6 +31,7 @@ The host can pick the **Decade of Peace** game mode in the lobby: for the first 
 | Right-click | Move, attack, gather, pray or help build, depending on the target |
 | Shift + right-click | Queue orders |
 | A, M, S, H | Attack-move, move, stop, hold position |
+| Delete | Destroy the selected units (press twice for a big group, a god or a Titan) |
 | Q, W, E, R | Abilities (and units on a selected building) |
 | B | Build menu for a Worshipper |
 | Ctrl + 1–9, 1–9 | Assign / select a control group |
