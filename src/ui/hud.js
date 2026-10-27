@@ -6,6 +6,7 @@
 //   bottom       minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
 //   team marks   pins over the battlefield (and arrows at its edge) for the pings and markers of my team
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
+//   tips         the getting-started checklist and now-and-then gameplay tips (top-right)
 //   overlays     waiting, in-game menu (F10), game over, host left
 // Only the panels take pointer events; everything else falls through to the canvas.
 import { UNITS, PANTHEONS } from '../data/index.js';
@@ -20,10 +21,12 @@ import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
+import { HintsView, HintScheduler } from './hud-hints.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
+import { sfx } from '../audio/sfx.js';
 import { POP_MAX, PEACE_NAME } from '../config.js';
 
 const CARD_REFRESH_MS = 120;
@@ -237,6 +240,25 @@ export class Hud {
       if (st.tipsDismissed) this.hideTips();
       else this.showTips();
     }));
+
+    // Every couple of minutes one gameplay tip (hud-hints.js), under the checklist while that is up.
+    this.hints = new HintsView(root, {
+      anchor: () => (this.tips ? this.tips.el : null),
+      onTurnOff: () => saveSettings({ hints: false }),
+    });
+    this.hintTimer = new HintScheduler({
+      viewState: this.vs,
+      show: (hint) => {
+        this.hints.show(hint);
+        if (getSettings().alerts === 'all') sfx.play('tip', { volume: 0.6 });
+      },
+      hide: () => this.hints.hide(),
+    }).attach();
+  }
+
+  /** Something urgent is going on: no gameplay tip for a while, and the one on screen goes. */
+  holdHints(seconds) {
+    if (this.hintTimer) this.hintTimer.hold(seconds);
   }
 
   showTips() {
@@ -322,6 +344,8 @@ export class Hud {
     this.markpad.setArmed(m && m.kind === 'target' && m.order === 'mark' ? m.mark : null);
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
+    this.hintTimer.update();
+    this.hints.update();
   }
 
   /** The top-bar pantheon chip: emblem and name, with the blessings and elite soldier in its tooltip. */
@@ -579,6 +603,8 @@ export class Hud {
     this.minimap.dispose();
     this.marksLayer.dispose();
     this.hideTips();
+    this.hintTimer.dispose();
+    this.hints.dispose();
     this.overlays.hide();
     for (const off of this.offs.splice(0)) off();
     this.root.textContent = '';
