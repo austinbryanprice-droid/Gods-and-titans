@@ -6,12 +6,14 @@
   <title>Render Harness — Mythic War</title>
   <!--
     Visual check page for src/render/game-renderer.js: runs a real local game
-    (createWorld + ViewState, no HUD, no AI) with scripted commands and a free
+    (createWorld + ViewState, no HUD, AI only in `late`) with scripted commands and a free
     camera. URL params:
-      scenario=base|battle|fog|construction|creeps|trees|perf|pantheon   (default base)
+      scenario=base|battle|fog|construction|creeps|trees|perf|late|pantheon   (default base)
                     pantheon: every unit (mortals, creatures, minions, gods, titan) and
                     building (City town center, titan gate, construction stages) of the
                     first pantheon; harness.focus.base / .army / .sites are camera spots
+                    late: four AI players (2 v 2, medium map) play minutes=10 of game time before the
+                    first frame (about 230 units and 100 buildings spread over the map: the far zoom's load)
       seed=12345  size=small|medium  my=0 (-1 = spectator, sees all)
       pantheons=greek,norse,...  players=2      quality=low|medium|high|ultra
       tod=cycle|golden|day|dusk|night|dawn|<hour 0..24>   time of day (default cycle: follows the sim clock from 08:00)
@@ -57,9 +59,10 @@
     import { GameRenderer } from '../src/render/game-renderer.js';
     import { PLAYER_COLORS, DT, TERRAIN } from '../src/config.js';
     import { UNITS, PANTHEONS, PANTHEON_LIST, BUILDINGS } from '../src/data/index.js';
+    import { createAI } from '../src/ai/ai.js';
 
     const Q = new URLSearchParams(location.search);
-    const SCENARIOS = ['base', 'battle', 'fog', 'construction', 'creeps', 'trees', 'perf', 'pantheon'];
+    const SCENARIOS = ['base', 'battle', 'fog', 'construction', 'creeps', 'trees', 'perf', 'late', 'pantheon'];
     const scenario = SCENARIOS.includes(Q.get('scenario')) ? Q.get('scenario') : 'base';
     const manual = Q.get('manual') === '1';
     const quality = Q.get('quality') || 'medium';
@@ -72,6 +75,7 @@
       creeps: { size: 'small', players: 2, pantheons: 'mesopotamian,west_african' },
       trees: { size: 'small', players: 2, pantheons: 'norse,greek' },
       perf: { size: 'medium', players: 4, pantheons: 'greek,norse,egyptian,japanese' },
+      late: { size: 'medium', players: 4, pantheons: 'greek,norse,egyptian,japanese' },
       pantheon: { size: 'small', players: 2, pantheons: 'greek,norse' },
     }[scenario];
     const nPlayers = Number(Q.get('players') || defaults.players);
@@ -329,6 +333,17 @@
         }
         for (const s of sides) cmd(s.p, { type: 'attackMove', units: s.units.map((u) => u.id), x: cx + (s.west ? 8 : -8), y: cy });
       },
+      late() {
+        // every player an AI; the match runs ahead without drawing (the AIs keep playing in the loop after)
+        const ais = setup.players.map((p) => createAI(world, p.index, p.difficulty));
+        const ticks = Math.round(Number(Q.get('minutes') || 10) * 60 / DT);
+        for (let i = 0; i < ticks && !world.gameOver; i++) {
+          for (const ai of ais) ai.tick();
+          world.tick();
+          world.events.length = 0;
+        }
+        scripts.push(() => { for (const ai of ais) ai.tick(); });
+      },
       perf() {
         const target = Number(Q.get('units') || 300);
         const per = Math.ceil(target / nPlayers);
@@ -584,6 +599,7 @@
 
     const pre = Number(Q.get('t') || 0);
     if (pre > 0) window.harness.advance(pre, 20);
+    else if (Q.has('sel')) window.harness.advance(0.05); // the view knows nothing before its first frame
     applyInitial();
     if (manual) {
       window.harness.advance(0.05);

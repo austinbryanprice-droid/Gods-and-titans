@@ -224,6 +224,52 @@ export function buildTerrainGeometry(map, field = groundField(map)) {
 }
 
 /**
+ * The terrain index at a coarser step, for the far zoom (zoom-lod.js terrainStride): every `stride`-th field
+ * sample (2: a vertex every half tile, 4: one per tile) over the same vertices, chunk after chunk like
+ * buildTerrainGeometry's, one Uint32Array per chunk in the order of geometry.userData.chunks. The step is
+ * the same for every chunk and chunk edges lie on whole tiles, so neighbours still meet edge to edge.
+ * @param {object} map mapData
+ * @param {import('./ground-field.js').GroundField} field
+ * @param {number} stride a divisor of FIELD_RES
+ * @returns {Uint32Array[]}
+ */
+export function buildTerrainLodIndex(map, field, stride) {
+  const W = map.width;
+  const H = map.height ?? map.width;
+  const R = FIELD_RES;
+  if (!(stride >= 1) || R % stride !== 0) throw new Error(`terrain step ${stride} does not divide ${R}`);
+  const nx = field.nx;
+  const out = [];
+  for (let cy = 0; cy < H; cy += CHUNK) {
+    for (let cx = 0; cx < W; cx += CHUNK) {
+      const i0 = cx * R;
+      const i1 = Math.min(W, cx + CHUNK) * R;
+      const j0 = cy * R;
+      const j1 = Math.min(H, cy + CHUNK) * R;
+      const idx = new Uint32Array(((i1 - i0) / stride) * ((j1 - j0) / stride) * 6);
+      let n = 0;
+      for (let j = j0; j < j1; j += stride) {
+        for (let i = i0; i < i1; i += stride) {
+          const tl = j * nx + i;
+          const tr = tl + stride;
+          const bl = tl + stride * nx;
+          const br = bl + stride;
+          if (((i + j) / stride) & 1) {
+            idx[n++] = tl; idx[n++] = bl; idx[n++] = br;
+            idx[n++] = tl; idx[n++] = br; idx[n++] = tr;
+          } else {
+            idx[n++] = tl; idx[n++] = bl; idx[n++] = tr;
+            idx[n++] = tr; idx[n++] = bl; idx[n++] = br;
+          }
+        }
+      }
+      out.push(idx);
+    }
+  }
+  return out;
+}
+
+/**
  * The ground data texture the shader reads per pixel (one texel per field sample,
  * bilinear): R shore distance (SHORE_MIN..SHORE_MAX tiles, + on land), G outcrop
  * rise (0..RISE_MAX), B forest share, A cavity (0.5 flat, below it a crest).
@@ -680,6 +726,9 @@ void main() {
   float m = texture2D( uFowNoise, q ).g * 0.6 + texture2D( uFowNoise, q * 2.7 + 0.3 ).r * 0.4;
   vec3 mist = vec3( 0.075, 0.085, 0.1 ) * ( 0.35 + 0.9 * smoothstep( 0.3, 0.8, m ) );
   mist *= smoothstep( 0.2, 3.0, dist ) * ( 1.0 - smoothstep( 6.0, 34.0, dist ) * 0.85 );
+  // zoomed far out the plane fills the screen around the map: the faint mist beyond the old view dies out
+  // (its noise cells are blocks of 20 pixels there)
+  mist *= 1.0 - smoothstep( 34.0, 80.0, dist );
   gl_FragColor = vec4( 0.0, 0.0, 0.0, 1.0 );
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -739,11 +788,13 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
   terrain.name = 'terrain';
   const chunks = [];
   const chunkGeos = [];
+  const fullIndex = []; // each chunk's index at full detail
   for (const c of geo.userData.chunks) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', geo.attributes.position);
     g.setAttribute('normal', geo.attributes.normal);
     g.setIndex(new THREE.BufferAttribute(geo.index.array.subarray(c.start, c.start + c.count), 1));
+    fullIndex.push(g.index);
     g.boundingBox = c.box.clone();
     g.boundingSphere = c.box.getBoundingSphere(new THREE.Sphere());
     const m = new THREE.Mesh(g, mat);
@@ -763,6 +814,10 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
   const border = borderMesh(map);
   group.add(border);
 
+  // coarser indices over the same vertices for the far zoom, made when first drawn
+  const lodIndex = new Map(); // step → one BufferAttribute per chunk
+  let stride = 1;
+
   return {
     group,
     terrain,
@@ -774,6 +829,23 @@ export function createTerrain(map, { quality = 'medium' } = {}) {
     height: (x, y) => heightAt(map, x, y),
     update(timeSec) {
       time.value = timeSec;
+    },
+    /** The step through the field's samples the ground is drawn with: 1 (all), 2 or 4 (zoom-lod.js terrainStride). */
+    get stride() {
+      return stride;
+    },
+    setStride(next) {
+      if (next === stride || !(next === 1 || next === 2 || next === 4)) return;
+      let list = fullIndex;
+      if (next > 1) {
+        list = lodIndex.get(next);
+        if (!list) {
+          list = buildTerrainLodIndex(map, field, next).map((a) => new THREE.BufferAttribute(a, 1));
+          lodIndex.set(next, list);
+        }
+      }
+      for (let k = 0; k < chunkGeos.length; k++) chunkGeos[k].setIndex(list[k]);
+      stride = next;
     },
     /**
      * Wear the meadow around a building down to bare earth: the footprint and a

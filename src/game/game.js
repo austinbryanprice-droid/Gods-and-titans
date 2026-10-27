@@ -115,12 +115,13 @@ function nextPaint() {
 
 /**
  * How much farther sounds carry than at the default zoom: with the camera pulled
- * back, more of the map is on screen, so a fight at the top edge must stay audible.
+ * back, more of the map is on screen, so a fight at the top edge must stay audible
+ * (it keeps growing past the old far limit, up to 4.5: sounds carry 135 tiles, across a whole medium map).
  */
 export function hearingScale(cam) {
   const base = (cam && cam.opts && cam.opts.defaultDistance) || 25;
   const k = cam && Number.isFinite(cam.distance) ? cam.distance / base : 1;
-  return Math.max(0.8, Math.min(1.8, k));
+  return Math.max(0.8, Math.min(4.5, k));
 }
 
 /**

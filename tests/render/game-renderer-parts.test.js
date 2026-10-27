@@ -19,7 +19,7 @@ export async function resolve(spec, ctx, next) {
 const THREE = await import('three');
 const { CameraController, CAMERA_DEFAULTS } = await import('../../src/render/camera.js');
 const { FogOfWar, FOW_UNIFORMS, FOW_VISIBLE, FOW_EXPLORED, FOW_UNEXPLORED, FOW_FADE_SECONDS, patchFowMaterial, patchFowObject } = await import('../../src/render/fog.js');
-const { buildTerrainGeometry, tileLayers, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
+const { buildTerrainGeometry, buildTerrainLodIndex, tileLayers, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
 const { groundField, FIELD_RES } = await import('../../src/render/ground-field.js');
 const { LAYER, LAYER_COUNT, GROUND_SIZE, terrainTextureData } = await import('../../src/render/terrain-textures.js');
 const { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } = await import('../../src/render/overlays.js');
@@ -106,6 +106,73 @@ test('camera: zoomBy (+ = closer) eases between the limits and steepens the pitc
   assert.equal(c.goalDistance, CAMERA_DEFAULTS.maxDistance);
   for (let i = 0; i < 200; i++) c.update(1 / 60);
   assert.ok(c.pitch > near);
+});
+
+test('camera: the far limit holds a whole medium map; the pitch rises smoothly to it', () => {
+  assert.equal(CAMERA_DEFAULTS.maxDistance, 170);
+  const c = makeCamera({ mapWidth: 128, mapHeight: 128 });
+  const deg = (d) => {
+    c.setDistance(d, true);
+    return (c.pitch * 180) / Math.PI;
+  };
+  const { minDistance: lo, midDistance: mid, maxDistance: hi } = CAMERA_DEFAULTS;
+  assert.ok(close(deg(lo), CAMERA_DEFAULTS.pitchNear, 1e-9));
+  assert.ok(close(deg(mid), CAMERA_DEFAULTS.pitchMid, 1e-9), 'the old zoom range ends on the old pitch');
+  assert.ok(close(deg(hi), CAMERA_DEFAULTS.pitchFar, 1e-9));
+  assert.ok(CAMERA_DEFAULTS.pitchFar < 70, 'the view stays under the vertical');
+  // it rises all the way, easing out past the old limit (no kink where the old range ended, the slope only falls)
+  const slope = (a, b) => (deg(b) - deg(a)) / (b - a);
+  let prev = -Infinity;
+  for (let d = lo; d <= hi; d += 1) {
+    const p = deg(d);
+    assert.ok(p >= prev - 1e-9, `pitch falls at ${d}`);
+    prev = p;
+  }
+  assert.ok(Math.abs(slope(mid - 1, mid) - slope(mid, mid + 1)) < 0.03, 'no kink at the old limit');
+  assert.ok(slope(mid + 60, mid + 61) < slope(mid, mid + 1), 'the pitch eases out toward the far limit');
+  // the view at the far limit spans the map in a 16:9 window (the quad's ground band is longer than the map is deep)
+  c.setViewport(1600, 900);
+  c.centerOn(64, 64);
+  c.setDistance(hi, true);
+  c.update(0);
+  const [tl, tr, br, bl] = c.getViewQuad();
+  assert.ok(bl.y - tl.y > 128, `ground band ${bl.y - tl.y}`);
+  assert.ok(br.x - bl.x > 128, `bottom edge ${br.x - bl.x}`);
+  assert.ok(tr.x - tl.x > br.x - bl.x);
+});
+
+test('camera: the clip planes follow the zoom and always hold the ground in view, at any window shape', () => {
+  const c = makeCamera({ mapWidth: 128, mapHeight: 128 });
+  const cam = c.camera;
+  assert.equal(cam.near, 0.5, 'the original planes up close');
+  assert.equal(cam.far, 400);
+  const dist = (p, g) => Math.hypot(p.x - g.x, p.y - g.y, p.z - g.z);
+  const g = new THREE.Vector3();
+  for (const [w, h] of [[1600, 900], [1280, 1024], [3440, 1440], [5120, 1440]]) {
+    c.setViewport(w, h);
+    let lastNear = 0;
+    for (let d = CAMERA_DEFAULTS.minDistance; d <= CAMERA_DEFAULTS.maxDistance; d += 4) {
+      c.setDistance(d, true);
+      c.centerOn(64, 64);
+      c.update(0);
+      assert.ok(cam.near >= 0.5 && cam.near <= 6 && cam.near < d * 0.5, `near ${cam.near} at ${d}`);
+      assert.ok(cam.near >= lastNear - 1e-9, 'the near plane only moves out');
+      lastNear = cam.near;
+      assert.ok(cam.far >= 400 && cam.far >= d * 3, `far ${cam.far} at ${d}`);
+      const nearest = Math.min(...c.getViewQuad().map((q) => dist(cam.position, g.set(q.x, c.groundY, q.y))));
+      const farthest = Math.max(...c.getViewQuad().map((q) => dist(cam.position, g.set(q.x, c.groundY, q.y))));
+      assert.ok(farthest < cam.far * 0.9, `the ground ${farthest.toFixed(0)} away passes the far plane ${cam.far.toFixed(0)} at ${d} in ${w}x${h}`);
+      assert.ok(nearest > cam.near * 3, `the near ground ${nearest.toFixed(1)} is cut by the near plane ${cam.near.toFixed(2)}`);
+      for (const q of c.getViewQuad()) assert.ok(Number.isFinite(q.x) && Number.isFinite(q.y));
+    }
+  }
+  // zooming back restores the original planes
+  c.setDistance(CAMERA_DEFAULTS.defaultDistance, true);
+  c.update(0);
+  assert.equal(cam.near, 0.5);
+  assert.equal(cam.far, 400);
+  // the projection matches the planes
+  assert.ok(close(cam.projectionMatrix.elements[10], -(cam.far + cam.near) / (cam.far - cam.near), 1e-9));
 });
 
 test('camera: panPixels drags the ground under the cursor, getViewQuad gives TL, TR, BR, BL', () => {
@@ -257,6 +324,78 @@ test('terrain: one vertex per field sample on heightAt, faces point up, chunks t
   assert.equal(next, idx.length);
   assert.equal(tiles, W * H);
   geo.dispose();
+});
+
+test('terrain: the coarser indices cover the same ground with every 2nd or 4th sample, chunk by chunk', () => {
+  const map = hillyMap(40, 36); // chunks of 16 tiles: 40 x 36 leaves partial ones at the east and south edges
+  const field = groundField(map);
+  const geo = buildTerrainGeometry(map, field);
+  const pos = geo.attributes.position;
+  const chunks = geo.userData.chunks;
+  assert.equal(chunks.length, 3 * 3);
+  const area = (idx, k0 = 0, k1 = idx.length) => {
+    let total = 0;
+    let down = 0;
+    for (let k = k0; k < k1; k += 3) {
+      const ax = pos.getX(idx[k]);
+      const az = pos.getZ(idx[k]);
+      const cross = (pos.getX(idx[k + 1]) - ax) * (pos.getZ(idx[k + 2]) - az) - (pos.getX(idx[k + 2]) - ax) * (pos.getZ(idx[k + 1]) - az);
+      // x east, z south: counter-clockwise seen from above is a negative cross product here
+      if (cross >= 0) down++;
+      total += Math.abs(cross) / 2;
+    }
+    return { total, down };
+  };
+  for (const stride of [2, 4]) {
+    const lists = buildTerrainLodIndex(map, field, stride);
+    assert.equal(lists.length, chunks.length);
+    let tiles = 0;
+    lists.forEach((idx, k) => {
+      const c = chunks[k];
+      const w = Math.min(map.width, c.cx + 16) - c.cx;
+      const h = Math.min(map.height, c.cy + 16) - c.cy;
+      assert.equal(idx.length, ((w * FIELD_RES) / stride) * ((h * FIELD_RES) / stride) * 6, `chunk ${k} at step ${stride}`);
+      assert.equal(idx.length * stride * stride, c.count, 'a fraction of the full index');
+      const a = area(idx);
+      assert.ok(close(a.total, w * h, 1e-6), `chunk ${k} covers ${a.total} of ${w * h} tiles`);
+      assert.equal(a.down, 0, `chunk ${k}: every face looks up`);
+      for (let i = 0; i < idx.length; i++) {
+        assert.ok(idx[i] < pos.count);
+        assert.equal((idx[i] % field.nx) % stride, 0, 'only every step-th column');
+        assert.equal(Math.floor(idx[i] / field.nx) % stride, 0, 'only every step-th row');
+      }
+      tiles += w * h;
+    });
+    assert.equal(tiles, map.width * map.height, 'the chunks tile the map');
+  }
+  // the full index is the same kind of cover (the first chunk, for comparison)
+  const full = area(geo.index.array, chunks[0].start, chunks[0].start + chunks[0].count);
+  assert.ok(close(full.total, 256, 1e-6) && full.down === 0);
+  assert.throws(() => buildTerrainLodIndex(map, field, 3), /does not divide/);
+  assert.throws(() => buildTerrainLodIndex(map, field, 0));
+});
+
+test('terrain: setStride swaps every chunk to a coarser index and back to the very same buffers', () => {
+  const map = hillyMap(40, 36);
+  const t = createTerrain(map, { quality: 'low' });
+  const full = t.chunks.map((m) => m.geometry.index);
+  const counts = full.map((a) => a.count);
+  assert.equal(t.stride, 1);
+  t.setStride(2);
+  assert.equal(t.stride, 2);
+  t.chunks.forEach((m, k) => assert.equal(m.geometry.index.count * 4, counts[k]));
+  const half = t.chunks.map((m) => m.geometry.index);
+  t.setStride(4);
+  assert.equal(t.stride, 4);
+  t.chunks.forEach((m, k) => assert.equal(m.geometry.index.count * 16, counts[k]));
+  t.setStride(3); // not a divisor of the field resolution: ignored
+  assert.equal(t.stride, 4);
+  t.setStride(2);
+  t.chunks.forEach((m, k) => assert.equal(m.geometry.index, half[k], 'the coarser index is made once'));
+  t.setStride(1);
+  t.chunks.forEach((m, k) => assert.equal(m.geometry.index, full[k], 'the full index is the one it began with'));
+  assert.ok(t.chunks.every((m) => m.geometry.attributes.position === t.chunks[0].geometry.attributes.position), 'the vertices stay shared');
+  t.dispose();
 });
 
 test('terrain: water only over low ground at the water level, a dark border, and a clean dispose', () => {

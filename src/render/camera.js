@@ -1,8 +1,10 @@
 // RTS camera (DESIGN 8): a perspective camera south of its ground target,
 // looking north and down, Warcraft III style. Smooth wheel-step zoom between a
-// close and a far limit (pitch steepens a little as it zooms out), pan speed
-// that scales with zoom, smooth damping, the target clamped to the map, and an
-// optional shake offset. Pure math on a THREE.PerspectiveCamera (runs in Node).
+// close and a far limit (pitch steepens as it zooms out: gently up to the
+// original far limit, then on toward a map-table view that holds a whole medium
+// map), clip planes that follow the zoom, pan speed that scales with zoom,
+// smooth damping, the target clamped to the map, and an optional shake offset.
+// Pure math on a THREE.PerspectiveCamera (runs in Node).
 import * as THREE from 'three';
 
 const DEG = Math.PI / 180;
@@ -10,15 +12,26 @@ const DEG = Math.PI / 180;
 export const CAMERA_DEFAULTS = Object.freeze({
   fov: 40, // vertical field of view, degrees
   minDistance: 10, // distance from the camera to its ground target (close zoom)
-  maxDistance: 44, // far zoom
+  maxDistance: 170, // far zoom: a whole medium (128 tile) map fits a 16:9 window above the HUD
+  midDistance: 44, // where the original zoom range ended: the pitch curve keeps its shape up to here
   defaultDistance: 25,
   pitchNear: 50, // degrees below the horizon at the closest zoom
-  pitchFar: 58, // … and at the farthest
+  pitchMid: 58, // … at midDistance
+  pitchFar: 66, // … and at maxDistance (it must stay under 70: the view's bottom edge would pass the vertical)
   zoomStep: 1.16, // distance factor per wheel step
   panDamping: 16, // 1/s, how fast the view follows pan / centerOn goals
   zoomDamping: 10, // 1/s
   edgeMargin: 3, // the target stays this far inside the map edge (tiles)
 });
+
+// Clip planes: the near plane stays at 0.5 up to the default zoom and moves out with the camera's height
+// (the nearest ground is then tens of tiles away and the depth buffer keeps its precision for the far
+// view); the far plane stays 400 until the farthest ground the view can show would pass it.
+const NEAR_MIN = 0.5;
+const NEAR_MAX = 6;
+const NEAR_PER_TILE = 0.04; // near plane growth a tile of distance beyond the default zoom
+const FAR_MIN = 400;
+const FAR_PER_TILE = 3.2; // a wide window sees ground up to about 2.2 times the distance
 
 const _ndc = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -41,8 +54,8 @@ export class CameraController {
     this.mapHeight = mapHeight;
     this.heightFn = heightFn;
     camera.fov = this.opts.fov;
-    camera.near = 0.5;
-    camera.far = 400;
+    camera.near = NEAR_MIN;
+    camera.far = FAR_MIN;
     camera.updateProjectionMatrix();
     /** Current (smoothed) look-at ground point, sim coords. */
     this.target = { x: mapWidth / 2, y: mapHeight / 2 };
@@ -66,11 +79,27 @@ export class CameraController {
     return (this.distance - a) / (b - a);
   }
 
-  /** Current pitch in radians (below the horizon). */
+  /**
+   * Current pitch in radians (below the horizon): linear in the distance from pitchNear to pitchMid up to
+   * midDistance, then it keeps rising at the rate it ended with and settles toward pitchFar at maxDistance
+   * (x m / (1 + x m / a), a rational curve with the same slope at midDistance and pitchFar - pitchMid at the end).
+   */
   get pitch() {
-    const { pitchNear, pitchFar } = this.opts;
-    const z = Math.max(0, Math.min(1, this.zoom));
-    return (pitchNear + (pitchFar - pitchNear) * z) * DEG;
+    const { pitchNear, pitchMid, pitchFar, minDistance, midDistance, maxDistance } = this.opts;
+    const d = this.distance;
+    if (d <= midDistance) {
+      const t = Math.max(0, (d - minDistance) / (midDistance - minDistance));
+      return (pitchNear + (pitchMid - pitchNear) * t) * DEG;
+    }
+    const span = maxDistance - midDistance;
+    const rise = pitchFar - pitchMid;
+    if (!(span > 0) || !(rise > 0)) return pitchMid * DEG;
+    const x = Math.min(d - midDistance, span);
+    const m = (pitchMid - pitchNear) / (midDistance - minDistance); // degrees a tile where the near range ended
+    const ml = m * span;
+    if (!(ml > rise * 1.001)) return (pitchMid + (rise * x) / span) * DEG; // the near slope is too gentle to ease out of
+    const a = (rise * ml) / (ml - rise);
+    return (pitchMid + (m * x) / (1 + (m * x) / a)) * DEG;
   }
 
   /** Pan speed factor: 1 at the default zoom, more when zoomed out. */
@@ -171,8 +200,20 @@ export class CameraController {
     this.apply();
   }
 
+  /** Near and far clip planes for the current distance (the projection is rebuilt only when they change). */
+  updateClipPlanes() {
+    const cam = this.camera;
+    const near = Math.min(NEAR_MAX, NEAR_MIN + Math.max(0, this.distance - this.opts.defaultDistance) * NEAR_PER_TILE);
+    const far = Math.max(FAR_MIN, this.distance * FAR_PER_TILE);
+    if (Math.abs(cam.near - near) < 1e-3 && Math.abs(cam.far - far) < 1e-3) return;
+    cam.near = near;
+    cam.far = far;
+    cam.updateProjectionMatrix();
+  }
+
   apply() {
     const cam = this.camera;
+    this.updateClipPlanes();
     const p = this.pitch;
     const tx = this.target.x + this.shakeX;
     const tz = this.target.y + this.shakeY;
