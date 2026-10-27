@@ -93,7 +93,7 @@ export class Hud {
     // Decade of Peace: counts down to the first moment players may attack each other; gone once it is over.
     this.peaceClock = el('span', 'hud-clock');
     this.peaceChip = el('div', 'hud-time hud-peace', el('i', 'hud-res-i', '🕊️'), this.peaceClock);
-    this.peaceChip.title = `${PEACE_NAME}: no player can harm another until this clock runs out. Neutral creatures still fight.`;
+    this.peaceChip.title = `${PEACE_NAME}: no player can harm another, or build near an enemy Town Center, until this clock runs out. Neutral creatures still fight.`;
     this.peaceChip.hidden = true;
     this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
     this.ping = el('span', 'hud-ping');

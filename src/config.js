@@ -91,6 +91,7 @@ export const CREEP_LEASH_RANGE = 10;
 // ---- Decade of Peace (game mode) ----
 export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can choose; a setup without one is a normal game
 export const PEACE_NAME = 'Decade of Peace';
+export const PEACE_BUILD_GAP = 20; // while the peace lasts nobody builds within this many empty tiles of an enemy Town Center (kept clear around it; DESIGN 5.10)
 
 // ---- Map ----
 export const MAP_SIZES = { small: 96, medium: 128 };

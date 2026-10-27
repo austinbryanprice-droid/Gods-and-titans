@@ -25,7 +25,7 @@ import { spawnCreeps } from './creeps.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
-import { peaceSeconds } from './peace.js';
+import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
 import { hyp, distPointRect } from './common.js';
 
 const ERRORS_GOLD = 'Not enough gold.';
@@ -367,6 +367,20 @@ export class World {
   /** Seconds of the Decade of Peace left (0 once it is over, and in a normal game). */
   peaceLeft() {
     return this.peace ? Math.max(0, this.peaceEnd - this.time) : 0;
+  }
+
+  /**
+   * Does the footprint lie in ground that an enemy Town Center of player i keeps clear right now?
+   * While the Decade of Peace lasts nobody may build within PEACE_BUILD_GAP tiles of an enemy Town
+   * Center (finished or a site; teammates' do not count). Always false once the peace is over.
+   */
+  peaceBuildBlocks(i, tx, ty, size) {
+    if (!this.peace) return false;
+    const centers = [];
+    for (const b of this.buildingList) {
+      if (!b.dead && b.type === PEACE_ANCHOR && b.owner >= 0 && this.areEnemies(i, b.owner)) centers.push(b);
+    }
+    return peaceBlocksFootprint(centers, tx, ty, size);
   }
 
   /**

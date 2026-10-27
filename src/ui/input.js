@@ -12,7 +12,7 @@ import { MANOR, houseBlocks } from '../data/houses.js';
 import { MARKS, DEFAULT_MARK } from '../data/marks.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { checkPlacement, checkWallLine, footprintAt } from '../game/placement.js';
+import { checkPlacement, checkWallLine, footprintAt, peaceAnchors } from '../game/placement.js';
 import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
 import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
@@ -75,6 +75,7 @@ export class InputController {
     this.hoverMoved = true;
     this.placeAt = 0;
     this.placeSig = '';
+    this.zoneSig = ''; // the enemy Town Centers whose kept-clear ground the renderer has been given
     this.queuedBuilds = []; // [{ b, tx, ty }] placed with Shift in this placement mode
     this.deleteArmed = null; // { ids: Set, until } after a first Delete press that asks for a second
     this.shiftHeld = false;
@@ -896,6 +897,34 @@ export class InputController {
     }
   }
 
+  /**
+   * In a Decade of Peace, tint the ground kept clear around the enemy Town Centers I know of under the
+   * placement ghost (it only goes to the renderer when those Town Centers change).
+   */
+  showPeaceZone(r) {
+    if (!r.setNoBuildZones) return;
+    const anchors = peaceAnchors(this.vs);
+    const sig = anchors.map((a) => `${a.tx},${a.ty}`).join(';');
+    if (sig === this.zoneSig) return;
+    this.zoneSig = sig;
+    r.setNoBuildZones(anchors);
+  }
+
+  /** The tip beside the cursor says why the ghost is red when it is the peace's kept-clear ground (the sim says the same). */
+  peaceTip(chk) {
+    const tip = this.wallTip;
+    if (!chk.peace) {
+      tip.hidden = true;
+      return;
+    }
+    const text = chk.message.replace(': ', ':\n');
+    if (tip.textContent !== text) tip.textContent = text;
+    tip.classList.add('is-bad');
+    tip.style.left = `${this.mx + 18}px`;
+    tip.style.top = `${this.my + 18}px`;
+    tip.hidden = false;
+  }
+
   /** The dragged line's ghost, and the tip beside the cursor with what it would build and cost. */
   previewWallLine(tx, ty) {
     const m = this.mode;
@@ -1439,6 +1468,7 @@ export class InputController {
         const w = this.ground(p.x, p.y);
         if (w) {
           const { tx, ty } = footprintAt(this.mode.building, w.x, w.y);
+          this.showPeaceZone(r);
           if (isWallType(this.mode.building)) this.previewWallLine(tx, ty);
           else {
             const chk = checkPlacement(this.vs, this.vs.myIndex, this.mode.building, tx, ty, this.plannedBuilds(this.shiftHeld));
@@ -1447,6 +1477,7 @@ export class InputController {
               this.placeSig = sig;
               r.showPlacement(this.mode.building, tx, ty, chk.valid, chk.tiles);
             }
+            this.peaceTip(chk);
           }
           this.placeAt = now;
         }
