@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AlertEngine, milestoneStep } from '../../src/game/alerts.js';
 import { ViewState } from '../../src/game/view-state.js';
-import { godsFor, titanFor } from '../../src/data/index.js';
+import { godsFor, titanFor, UPGRADES } from '../../src/data/index.js';
 import { PEACE_WARNINGS, peaceWarning } from '../../src/ui/hud-data.js';
 import { makeWorld } from '../sim/helpers.js';
 
@@ -141,7 +141,8 @@ test('enemy units sighted near the base: one alert per incursion, with a ping an
   const [a] = s.take();
   assert.equal(a.id, 'enemies_near');
   assert.equal(a.kind, 'alert');
-  assert.match(a.text, /^An enemy unit has been sighted near your base!/);
+  assert.equal(a.text, 'An enemy unit has been sighted near your base!  [[Space]]');
+  assert.equal(a.icon, '🚨');
   assert.equal(a.sound, 'drums');
   assert.deepEqual(a.ping, { x: 14.5, y: 12.5, color: '#ffae2e' });
   assert.deepEqual(a.jump, { x: 14.5, y: 12.5 });
@@ -161,7 +162,7 @@ test('several raiders are counted; creatures, units out of sight and the peace d
   s.at(1);
   const pack = [s.unit(900, 'warrior', 1, 14.5, 12.5), s.unit(901, 'archer', 1, 15.5, 12.5), s.unit(902, 'warrior', 1, 16.5, 12.5)];
   s.at(2, { edit: (snap) => snap.entities.push(...pack) });
-  assert.match(s.take()[0].text, /^3 enemy units have been sighted near your base!/);
+  assert.match(s.take()[0].text, /^3 enemy units have been sighted near your base!  \[\[Space\]\]$/);
 
   const t = scene();
   t.at(1);
@@ -182,6 +183,7 @@ test('an ally under attack: a softer drum, a ping in the ally\'s colour, Space u
   const [a] = s.take();
   assert.equal(a.id, 'ally_attacked');
   assert.equal(a.text, 'P1 is under attack!');
+  assert.equal(a.icon, '🛡️');
   assert.equal(a.sound, 'drums');
   assert.equal(a.volume, 0.6);
   assert.deepEqual(a.ping, { x: 40, y: 40, color: '#d63a3a' });
@@ -283,7 +285,8 @@ test('idle Worshippers: spoken once they have stood idle for 20 s, then at most 
   s.at(22);
   const [a] = s.take();
   assert.equal(a.id, 'idle_workers');
-  assert.equal(a.text, '5 Worshippers are idle.  (.)');
+  assert.equal(a.text, '5 Worshippers are idle.  [[.]]');
+  assert.equal(a.icon, '🙏');
   assert.equal(a.sound, 'nudge');
   assert.equal(a.kind, 'info');
   s.at(40);
@@ -291,7 +294,7 @@ test('idle Worshippers: spoken once they have stood idle for 20 s, then at most 
   // Four go to work; the fifth is still idle when the minute is up.
   const busy = (snap) => snap.entities.filter((e) => e.k === 'u' && e.o === 0).slice(1).forEach((e) => { e.st = 'gather'; });
   s.at(83, { edit: busy });
-  assert.equal(s.take()[0].text, '1 Worshipper is idle.  (.)');
+  assert.equal(s.take()[0].text, '1 Worshipper is idle.  [[.]]');
 
   const t = scene();
   t.at(0);
@@ -310,7 +313,8 @@ test('the population limit: spoken after 10 s at the cap, not with a House going
   s.at(16, { edit: capped });
   const pop = s.take().filter((a) => a.id === 'pop_capped');
   assert.equal(pop.length, 1);
-  assert.equal(pop[0].text, 'Your population limit is reached. Build Houses to grow (B, then H).');
+  assert.equal(pop[0].text, 'Your population limit is reached. Build Houses to grow ([[B]], then [[H]]).');
+  assert.equal(pop[0].icon, '🏠');
   assert.equal(pop[0].sound, 'nudge');
 
   const site = scene();
@@ -344,6 +348,7 @@ test('a god you can pay for: named at the Temple after 8 s, a fallen one as a re
   s.at(10, { edit: temple(s) });
   const [a] = s.take().filter((x) => x.id === 'god_ready');
   assert.match(a.text, /^You can summon .+ at your Temple\.$/);
+  assert.equal(a.icon, godsFor('greek').find((g) => a.text.includes(g.name)).icon, 'the card wears the god\'s own emblem');
   assert.equal(a.kind, 'good');
   assert.equal(a.sound, 'nudge');
 
@@ -384,7 +389,8 @@ test('the Titan you can pay for: named at the Titan Gate after 8 s, repeated at 
   s.at(1, { edit: gate });
   s.at(10, { edit: gate });
   const [a] = s.take().filter((x) => x.id === 'titan_ready');
-  assert.equal(a.text, `You can summon ${titan.name} at your Titan Gate (T).`);
+  assert.equal(a.text, `You can summon ${titan.name} at your Titan Gate ([[T]]).`);
+  assert.equal(a.icon, titan.icon);
   s.at(100, { edit: gate });
   assert.deepEqual(ids(s.take()).filter((id) => id === 'titan_ready'), []);
   s.at(260, { edit: gate });
@@ -402,7 +408,8 @@ test('an idle army: after 6 minutes of nothing, with most of 6 or more standing 
   assert.deepEqual(ids(s.take()).filter((id) => id === 'army_idle'), [], 'not for 2 minutes of it');
   s.at(485, { edit: army(s, 8) });
   const [a] = s.take().filter((x) => x.id === 'army_idle');
-  assert.equal(a.text, 'Your army has been standing idle for a while. Attack (A), or send scouts.');
+  assert.equal(a.text, 'Your army has been standing idle for a while. Attack ([[A]]), or send scouts.');
+  assert.equal(a.icon, '💤');
   assert.equal(a.sound, 'nudge');
   s.at(600, { edit: army(s, 8) });
   assert.deepEqual(ids(s.take()).filter((id) => id === 'army_idle'), [], 'not again for 5 minutes');
@@ -443,10 +450,13 @@ test('finished research is named', () => {
   const got = s.take();
   assert.equal(got.length, 1);
   assert.equal(got[0].text, 'Iron Picks is researched.');
+  assert.equal(got[0].icon, UPGRADES.tc_iron_picks.icon, 'the upgrade\'s own emblem');
   assert.equal(got[0].kind, 'good');
   assert.equal(got[0].sound, 'research');
   s.at(3, { events: [{ type: 'researched', player: 0, up: 'no_such_upgrade' }] });
-  assert.equal(s.take()[0].text, 'An upgrade is researched.');
+  const unknown = s.take()[0];
+  assert.equal(unknown.text, 'An upgrade is researched.');
+  assert.equal(unknown.icon, '📜');
 });
 
 test('milestones: counts passed before the first look are not cheered; one cheer at a time, 20 s apart', () => {
@@ -461,6 +471,7 @@ test('milestones: counts passed before the first look are not cheered; one cheer
   s.at(30, { edit: stats(50) });
   const [a] = s.take().filter((x) => x.id === 'milestone');
   assert.equal(a.text, '50 enemies have fallen before your armies!');
+  assert.equal(a.icon, '⚔️');
   assert.equal(a.sound, 'milestone');
   assert.equal(a.kind, 'good');
   s.at(35, { edit: stats(100, 1000) });
@@ -468,7 +479,9 @@ test('milestones: counts passed before the first look are not cheered; one cheer
   s.at(52, { edit: stats(100, 1000) });
   assert.equal(s.take().find((x) => x.id === 'milestone').text, '100 enemies have fallen before your armies!');
   s.at(75, { edit: stats(100, 1000) });
-  assert.equal(s.take().find((x) => x.id === 'milestone').text, '1,000 gold and wood gathered.');
+  const gathered = s.take().find((x) => x.id === 'milestone');
+  assert.equal(gathered.text, '1,000 gold and wood gathered.');
+  assert.equal(gathered.icon, '💰');
 
   const first = scene();
   first.at(0, { edit: stats(0) });
