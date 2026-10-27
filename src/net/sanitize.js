@@ -65,6 +65,7 @@ const COMMANDS = {
   rally: { building: ['id', true], x: XO, y: YO, target: TGT },
   stop: { units: U },
   hold: { units: U, queue: Q },
+  kill: { units: U },
   cast: { unit: ['id', true], ability: ['ability', true], x: XO, y: YO, target: TGT, queue: Q },
   surrender: {},
   repair: { units: U, target: ['id', true], queue: Q },
