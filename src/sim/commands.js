@@ -72,6 +72,7 @@ export function normalizeCommand(cmd, map) {
       res: typeof cmd.res === 'string' && cmd.res.length <= MAX_NAME ? cmd.res : undefined,
       amount: num(cmd.amount),
       index: Number.isSafeInteger(cmd.index) ? cmd.index : undefined,
+      count: Number.isSafeInteger(cmd.count) ? cmd.count : undefined,
       queue: !!cmd.queue,
     };
   } catch {
@@ -351,7 +352,7 @@ export function applyCommand(world, player, cmd) {
       issueTrain(world, player, ownBuilding(world, player, cmd.building), cmd.unit);
       break;
     case 'cancelTrain':
-      cancelTrain(world, player, ownBuilding(world, player, cmd.building), cmd.index);
+      cancelTrain(world, player, ownBuilding(world, player, cmd.building), cmd.index, cmd.count);
       break;
     case 'upgradeTier':
       issueTierUp(world, player, ownBuilding(world, player, cmd.building));

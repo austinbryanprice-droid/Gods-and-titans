@@ -410,8 +410,16 @@ Pop used = pop of living units + pop of everything queued in production.
   with their own, pickier threshold.
 
 ### 5.4 Production
-- `train` puts an item in the building's queue (max 5). Cost and population are reserved
-  when queued (refunded on `cancelTrain`). Units spawn at the footprint edge nearest the rally
+- `train` puts an item in the building's queue (max `MAX_QUEUE`, 50). Cost and population are reserved
+  when queued, so the purse and the population cap end a queue before the 50 do when they are short
+  (every trainable unit takes at least 1 population, so one player never holds more than `POP_MAX` queued
+  units in all of their buildings together). `cancelTrain` takes items back and refunds each at the cost it
+  was queued with, restoring a fallen god that was queued for a revive: `index` is the first item (default
+  the last), `count` how many from there on (default 1, clamped to the end of the queue), so a long run goes
+  back in one command. Units, research and growth share one queue, and research and a Town Center's growth
+  wait behind the units already in it. A building that is destroyed loses its queue: the population is
+  freed but nothing is paid back, which is the risk of queueing deep at the front line.
+  Units spawn at the footprint edge nearest the rally
   point and then follow the rally (rally on a mine/tree → worker gathers). When a rallied
   mine runs dry the rally moves to the nearest mine within 16 tiles (if any).
 - Creatures need tier ≥ their tier. Gods: unique per player (no duplicates alive or queued),
@@ -612,7 +620,7 @@ counted in `world.perf.commandErrors`.
 { type: 'returnCargo', units }
 { type: 'build',      units: [workerIds], building: typeId, tx, ty, queue, tx2?, ty2? } // footprint top-left tile; a wall type with tx2/ty2 is a line (5.3)
 { type: 'train',      building: id, unit: typeId }                // also creatures, gods, titan, revive
-{ type: 'cancelTrain', building: id, index }
+{ type: 'cancelTrain', building: id, index?, count? }  // take queue items back and refund them (5.4)
 { type: 'upgradeTier', building: id }
 { type: 'cancelBuild', building: id }                      // also takes a finished wall segment down (5.3)
 { type: 'upgradeWall', walls: [buildingIds] }             // wooden → stone on finished wall segments (5.3)
@@ -694,7 +702,7 @@ EntityView = {
   // buildings:
   tx, ty,         // footprint top-left tile
   bp,             // build progress 0..1 (1 = complete)
-  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }] (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
+  q,              // queue [{ u: typeId | 'tier_up' | upgradeId, p: 0..1 }], up to MAX_QUEUE items (first item progressing; a wall segment's stone upgrade is { u: 'stone_wall' })
   tr,             // town center tier 1..3
   pr,             // praying worshipper count
   rp,             // rally [x, y] or null
@@ -840,7 +848,12 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   packed by shape (`EVENT_SHAPES` order is wire format), felled trees; `tick` is omitted when
   it is the previous one + 1. Exact: `apply(prev, encode(prev, next))` deep-equals `next`, so
   new EntityView keys need no codec change. About 13–14 KB/s per client on average in an
-  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). Order is guaranteed (reliable
+  18-minute 4-AI game (`node tools/net-bandwidth.mjs`). A production queue (`q`, up to 50 items) travels
+  as any array of one shape does: a tick of progress is only the column `q.0.p` (about 20 bytes), while a
+  change in its length resends the whole array (a 50-item queue is about 1.2 KB, so a unit queued or
+  finished costs 1.3–1.5 KB for that building) and a full snapshot carries each queue whole. Queued
+  units count against the population cap, so all queues of one player together hold at most `POP_MAX`
+  items (about 5 KB of a full snapshot). Order is guaranteed (reliable
   channel). `resync` → host sends `full` (also includes `felledAll`, every tree felled so far).
 - Lobby (`src/net/lobby.js`):
   ```js
@@ -1431,6 +1444,15 @@ per-frame budget, so a revealed army appears over a few frames.
   Town Center lists only the highest level of each upgrade line. A Worshipper also shows a "Work"
   stat (Normal, or +N% from the work upgrades), and the gold mine's rule line and the Gather
   tooltip quote the viewer's own trip ("1.3 s per 12 gold").
+  **Queue row** (own buildings with a queue of up to `MAX_QUEUE` = 50): the big button is the item in progress
+  (its bar, "Training Worshipper") with a "n / 50" count at the right once more than one is queued; after it,
+  the rest of the queue as runs of the same item, one button each with a count on the runs of two or more
+  (50 Worshippers are the one in progress and a single button with 49), at most `QUEUE_CHIPS` (12) buttons:
+  more runs than that fold into a last "+N" button. A click takes one unit of a run back (the last of it),
+  Shift-click the whole run; on the big button a click takes back the item in progress and Shift-click the
+  whole queue; on "+N" a click takes back the last item and Shift-click everything it folds. A Shift-click is
+  one `cancelTrain` with `count` (5.4), so a whole queue refunds in one command. Esc still takes back the
+  last queued unit, and Shift + a train hotkey or button still queues 5 at a time (a held hotkey repeats).
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
