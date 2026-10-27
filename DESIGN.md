@@ -1797,9 +1797,13 @@ per-frame budget, so a revealed army appears over a few frames.
   narration; `main.js` calls `playTitleMusic()` at the hand-over to the menu, which carries that score on or, after a
   skip, starts the title's own); `previewMusic(themeId, intensity)` is Settings → Music → Listen. The engine is
   `music.play(themeId)` (crossfades; remembered until the browser allows audio), `stop(fade)`, `setIntensity(0..1)`,
-  `setVolume`, `mute`, `duck`, `state()`, and three calls for the intro film: `conduct(v)` (the intensity set exactly, with
-  none of the easing), `setStage(gain, tc, delay)` (see below) and `setStingers(on)` (whether the sounds in `DUCKS` make
-  the music step back; the film turns it off). `state().waiting` is true while a theme is wanted and only the browser's
+  `setVolume`, `mute`, `duck`, `state()`, and four things for the intro film: `conduct(v)` (the intensity set exactly, with
+  none of the easing), `setStage(gain, tc, delay)` (see below), `setStingers(on)` (whether the sounds in `DUCKS` make
+  the music step back; the film turns it off) and `play(id, { seed, joinAt })`: when a piece has been going on without
+  being heard (the film, until a first visit's click), `joinAt()` is asked each time a run is made and answers
+  `{ seconds, levelAt }`, so the run composes that many seconds of the piece without sounding them (`Run.skip`, at the
+  intensity `levelAt` gives each bar) and comes in on the bar in progress, in the section the piece would be in (the held
+  pad chord is struck again for it). `state().waiting` is true while a theme is wanted and only the browser's
   click is missing. All of it is a no-op where WebAudio is missing (Node), a voice that throws is muted from then on and five
   scheduler faults in a row switch the music off: it cannot break the game.
   **The score.** Eleven themes (`music-themes.js`: `menu`, the title screen's grand D minor with horns and a choir, and
@@ -1919,8 +1923,10 @@ for a click); a click anywhere on the film then says the caption on screen (if i
 down, and the later lines speak by themselves. "Watch it now" always speaks, for the player has just clicked.
 `createNarrator({ speech, volume, captions, onBlocked, onSpeaking })` takes the speech synthesis as a parameter (tests
 pass a stand-in). `onSpeaking(true)` is called as a line is handed to the browser, a moment before it is heard, and
-`onSpeaking(false)` when none is left: at the browser's `end` or `error` event, or when the line's caption has run out,
+`onSpeaking(false)` when none is left: at the browser's `end` or `error` event, or when the line's time has run out,
 whichever comes first (some browsers never report an end), or at `stop()`; events of a line already settled are ignored.
+A line's time is its caption's end, or `LINE_MAX` (4 s) after it was handed over if that is later, since a click can start
+a line near the end of its caption (a first visit), and the voice takes about 3 s over the longest.
 
 **The score** (`src/intro/score.js`, `createFilmScore()`; the engine is the music engine of 9): the title theme (`menu`,
 D minor, the very piece the title screen goes on playing) as an overture under the film, so a hand-over has no seam.
@@ -1952,7 +1958,10 @@ while music is muted or at 0; "Intro film" and "Narration" decide whether there 
 score simply stays at its lift). Every call is guarded: a failing engine costs a warning and a silent film. On a first visit
 the browser starts no audio before a click or key (the sound engine's rule), so the film is silent until then and shows the
 "Click for sound" hint (`state().waiting`); the first click starts the score at the film's moment, under the voice if one is
-being said. **Measured, not heard.** Nobody has listened to this: with a flite stand-in voice at -26 LUFS and the Music slider
+being said, and on the section the story is in: the score's `joinAt()` answers the film's second and `barLevel` (the story's
+intensity for the middle of each bar), so the engine composes the bars before the click without a sound and a click at 31 s
+comes in on the titans' battle, not on the dawn. (The sections' tunes after the second are the seed's chance, as in a match:
+what a late click fixes is where in the piece it comes in.) **Measured, not heard.** Nobody has listened to this: with a flite stand-in voice at -26 LUFS and the Music slider
 at its default (`node tools/music-render.mjs --film`, ffmpeg `ebur128`), the score is at -40 to -34 LUFS under the voice (14 to
 8 dB below it, closer as the story swells) and -29 to -23.5 LUFS between the lines (+10 to +14 dB), -26.7 LUFS over the whole film,
 true peak -11 dBFS before the voice is added; `tools/shot-intro.mjs --music` reads the same mix off the page's real Web Audio graph

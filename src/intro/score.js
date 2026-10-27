@@ -13,7 +13,9 @@
 //                                       // 'cut' (skipped, failed): it fades out inside the dip to black
 //
 // What it never does is get in the film's way: every call is guarded, and without audio (Node, a browser that has
-// not been clicked yet) the engine's own calls are quiet no-ops, so the film plays on in silence.
+// not been clicked yet) the engine's own calls are quiet no-ops, so the film plays on in silence. A first visit's
+// click can come at any moment of the film: the engine then asks `joinAt` where the piece should come in, and the
+// bars before that second are composed without a sound, so it enters on the section the story is in, not its first.
 import { music as engine, COMPOSE_AHEAD } from '../audio/music.js';
 import { THEMES } from '../audio/music-themes.js';
 import { musicAt } from './script.js';
@@ -77,6 +79,7 @@ export class FilmScore {
     this.music = music;
     this.seed = seed;
     this.phase = 'idle'; // idle → playing → over
+    this.t = 0; // the film's second at the last update
     this.talking = false;
     this.warned = false;
   }
@@ -101,8 +104,18 @@ export class FilmScore {
       m.setStingers(false); // the film's own sounds are mixed by this score, not ducked by the engine's rules for a match
       m.conduct(musicAt(LEAD));
       m.setStage(this.gain, ATTACK);
-      m.play(THEME, { seed: this.seed });
+      m.play(THEME, { seed: this.seed, joinAt: () => this.joinAt() });
     });
+  }
+
+  /**
+   * Where the piece should come in when the engine makes its run: the film's second now, with the story's intensity
+   * for each bar of the way, so a browser that allows audio only at a click part-way through the film (a first visit)
+   * still plays the sections the story needs, the tune with the god and the titans' battle, not the piece from its first bar.
+   * Nothing once the film is over: the title screen's music begins at the start.
+   */
+  joinAt() {
+    return this.phase === 'playing' ? { seconds: this.t, levelAt: barLevel } : null;
   }
 
   /** True while the score is wanted but the browser has not allowed audio yet: a click would start it (the film shows a hint). */
@@ -119,6 +132,7 @@ export class FilmScore {
   /** The film is at second t: the intensity of the score follows the story, read `LEAD` seconds on. */
   update(t) {
     if (this.phase !== 'playing') return;
+    this.t = t;
     this.guard(() => this.music.conduct(musicAt(t + LEAD)));
   }
 

@@ -3,8 +3,11 @@
 // on a click" unlock happens once, for both.
 //
 //   music.init({ volume, muted })   once at boot; safe to call again
-//   music.play(themeId)             'menu' or a pantheon id; crossfades from what is playing. It starts
-//                                   as soon as the browser allows audio (after the first click or key press)
+//   music.play(themeId, { seed, joinAt })
+//                                   'menu' or a pantheon id; crossfades from what is playing. It starts
+//                                   as soon as the browser allows audio (after the first click or key press);
+//                                   `joinAt` says where in the piece that is, for a score that has been going on
+//                                   without sound (the intro film: see Run.skip)
 //   music.stop(fadeSeconds)         fade out and keep quiet until the next play()
 //   music.setIntensity(v)           0 calm .. 1 battle; the score eases toward it (quickly up, slowly down)
 //   music.setVolume(v) / music.mute(on)
@@ -17,7 +20,7 @@
 // composed bar by bar by music-composer.js from the themes in music-themes.js.
 import { sfx, kit as makeKit, makeNoiseBuffer } from './sfx.js';
 import { THEMES, themeFor } from './music-themes.js';
-import { createScore, composeBar } from './music-composer.js';
+import { createScore, composeBar, barSeconds } from './music-composer.js';
 import { playVoice } from './music-voices.js';
 
 export const COMPOSE_AHEAD = 1.6; // seconds of music composed ahead of the clock: rides out a stalled frame
@@ -32,6 +35,7 @@ const MIN_GAIN = 0.0001;
 const HALL_SECONDS = 2.0; // the reverb is a convolver, whose cost grows with the length of its impulse response
 const PAN_STEP = 0.15; // off-centre notes share a panner per layer and position, rounded to this
 const HIDDEN_QUIET = 1.5; // seconds after the tab is hidden (its fade-out is over) that the score stops making notes
+const MAX_SKIP_BARS = 400; // bars a run joining a piece late will compose silently at most (a film is about fifteen)
 
 // Each layer of the score is a bus with its own loudness and how much of it goes to the reverb.
 const LAYERS = {
@@ -173,10 +177,37 @@ class Run {
 
   /** Compose the bars that start before `until` into `pending`. */
   compose(until, level) {
-    while (this.nextBar < until) {
+    while (this.nextBar < until) this.addBar(composeBar(this.score, level));
+  }
+
+  /** Put a composed bar's notes in `pending`, at the clock position of the next bar, and move on to the one after. */
+  addBar(bar) {
+    for (const ev of bar.events) this.pending.push({ at: this.nextBar + ev.t, ev });
+    this.nextBar += bar.dur;
+    this.bars++;
+  }
+
+  /**
+   * Compose the first `seconds` of the piece without sounding any of it, so a run that begins late is where one
+   * played from the start would be: the same sections, the same tune. The intro film's score needs it when the
+   * browser allows audio part-way through the film. The bar in progress at that second is the first to sound
+   * (with the chord that was held through the bars skipped struck again for it); `levelAt(second)` is the
+   * intensity of the bar that starts at that second of the piece.
+   */
+  skip(seconds, levelAt) {
+    if (!(seconds > 0)) return;
+    let t = 0;
+    for (let i = 0; i < MAX_SKIP_BARS; i++) {
+      const asked = Number(levelAt(t));
+      const level = Number.isFinite(asked) ? Math.min(1, Math.max(0, asked)) : 0;
+      const inProgress = t + barSeconds(this.theme, level) > seconds;
+      if (inProgress) this.score.padUntil = 0; // composed below: the pad chord it is part of is not sounding yet
       const bar = composeBar(this.score, level);
-      for (const ev of bar.events) this.pending.push({ at: this.nextBar + ev.t, ev });
-      this.nextBar += bar.dur;
+      if (inProgress) {
+        this.addBar(bar);
+        return;
+      }
+      t += bar.dur;
       this.bars++;
     }
   }
@@ -333,14 +364,18 @@ export class MusicEngine {
   /**
    * Start a theme ('menu' or a pantheon id), crossfading from the one playing. Playing the theme
    * that is already on is a no-op. Before the browser allows audio it is remembered and starts then.
+   * `joinAt` is for a piece that has been going on without being heard (the intro film's score, when the browser
+   * allows audio part-way through the film): it is asked each time a run is made, and answers where in the piece
+   * the run should come in as `{ seconds, levelAt }` (the second of the piece, and the intensity of the bar that
+   * starts at any second of it) or null to begin at the start. See Run.skip.
    * @param {string} id
-   * @param {{ seed?: number, fade?: number }} [opts]
+   * @param {{ seed?: number, fade?: number, joinAt?: () => ({ seconds: number, levelAt: (second: number) => number } | null) }} [opts]
    */
   play(id, opts = {}) {
     if (this.disabled) return;
     const theme = themeFor(id);
     if (this.want && this.want.theme === theme && !(this.run && this.run.fading)) return;
-    this.want = { id: theme.id, theme, seed: opts.seed ?? Math.floor(Math.random() * 0x7fffffff), fade: opts.fade };
+    this.want = { id: theme.id, theme, seed: opts.seed ?? Math.floor(Math.random() * 0x7fffffff), fade: opts.fade, joinAt: typeof opts.joinAt === 'function' ? opts.joinAt : null };
     this._startTimer();
     this.tick();
   }
@@ -442,6 +477,18 @@ export class MusicEngine {
     };
   }
 
+  /** A run just made for a piece that has been going on without it (see `play`): skip to where the piece would be. */
+  _join(run) {
+    const joinAt = this.want && this.want.joinAt;
+    if (!joinAt) return;
+    try {
+      const at = joinAt();
+      if (at && at.seconds > 0) run.skip(at.seconds, at.levelAt);
+    } catch (err) {
+      console.warn('[music] could not join the piece part-way in; it begins at the start', err);
+    }
+  }
+
   _startTimer() {
     if (this.timer || typeof setInterval !== 'function') return;
     this.timer = setInterval(() => this.tick(), TICK_MS);
@@ -501,6 +548,7 @@ export class MusicEngine {
       // The new piece comes in a little after the old one starts to leave, so two keys never ring together for long.
       this.run = new Run(this.env, this.want.theme, this.want.seed, now + (hadRun ? 0.9 : 0), fade);
       this.level = this.target;
+      this._join(this.run);
     }
     const dt = this.lastTick === null ? 0 : Math.max(0, now - this.lastTick);
     this.lastTick = now;

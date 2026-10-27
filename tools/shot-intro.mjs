@@ -7,7 +7,7 @@
 //   node tools/shot-intro.mjs --sheet      # also one contact sheet of every still (sheet.png)
 //   node tools/shot-intro.mjs --flow       # the page flow: the film plays on its own clock, Esc skips it
 //   node tools/shot-intro.mjs --narration  # the voice: each caption read as it comes up, Esc cuts it, a click unlocks it
-//   node tools/shot-intro.mjs --music      # the score, on the page's real audio graph, in real time (about two minutes; --scenes 2 runs one of the three)
+//   node tools/shot-intro.mjs --music      # the score, on the page's real audio graph, in real time (about three minutes; --scenes 2 runs one of the four)
 //
 // The film runs in manual mode (src/ui/intro.js playIntro({ manual: true })): the tool moves it on in
 // 0.05 s steps and draws only the seconds asked for, so software GL (a few seconds a frame) is
@@ -634,6 +634,29 @@ async function score(browser, errors, only = [1, 2, 3]) {
     await outcome(page);
     await ctx.close();
   }
+
+  // 4. a first visit whose click comes late: the score comes in on the section the story is in (the titans), not the first
+  if (only.includes(4)) {
+    const { ctx, page } = await open(false);
+    await page.evaluate(runLightFilm, { narrate: true });
+    await page.waitForFunction(() => window.__intro.film && window.__intro.film.t >= 31.8, null, { timeout: 90000, polling: 50 });
+    const clickedAt = await page.evaluate(() => performance.now());
+    await page.mouse.click(320, 180);
+    await page.waitForFunction(async () => (await import('/src/audio/music.js')).music.state().playing, null, { timeout: 10000 });
+    await page.waitForTimeout(700);
+    const joined = await page.evaluate(async () => {
+      const { music } = await import('/src/audio/music.js');
+      const s = music.run.score;
+      return { section: s.section.index, mode: s.section.mode, tune: !!s.section.tune, shift: s.section.shift, bars: music.run.bars, film: window.__intro.film.t, level: music.state().level };
+    });
+    ok('a click at 32 s brings the score in on the titans\' section (the third), a tense one, not on the first bar of the piece', joined.section === 2 && joined.mode === 'tense' && joined.bars >= 9, `film at ${fixed(joined.film, 1)} s, section ${joined.section} ${joined.mode}${joined.tune ? ' with the tune' : ''}${joined.shift ? ' an octave up' : ''}, ${joined.bars} bars composed, level ${fixed(joined.level)}`);
+    await page.waitForTimeout(1800);
+    const heard = between(await page.evaluate(() => window.__trace), clickedAt + 1500, clickedAt + 2500);
+    ok('and it is the battle that is heard, at the story\'s intensity', heard.length > 0 && heard.every((r) => r.playing && r.ctxState === 'running') && heard.at(-1).level > 0.9 && mean(heard.map((r) => r.rms)) > 0.001, heard.length ? `level ${fixed(heard.at(-1).level)}, ${fixed(db(mean(heard.map((r) => r.rms))), 1)} dBFS` : 'no sample');
+    await page.evaluate(() => window.__intro.skip());
+    await outcome(page);
+    await ctx.close();
+  }
   return results;
 }
 
@@ -650,7 +673,7 @@ try {
   } else if (flag('narration')) {
     failed = (await narration(browser, errors)).filter((r) => !r.pass).length;
   } else if (flag('music')) {
-    failed = (await score(browser, errors, opt('scenes', '1,2,3').split(',').map(Number))).filter((r) => !r.pass).length;
+    failed = (await score(browser, errors, opt('scenes', '1,2,3,4').split(',').map(Number))).filter((r) => !r.pass).length;
   } else {
     console.log(`stills at ${times.join(', ')} s:`);
     const files = await stills(browser, errors);

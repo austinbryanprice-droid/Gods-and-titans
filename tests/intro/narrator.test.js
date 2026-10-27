@@ -388,6 +388,50 @@ test('a click that starts the voice late reports it too, and the line ends with 
   assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true, false]);
 });
 
+test('a click that starts a line near the end of its caption keeps the voice "speaking" past the caption, until the browser says it is done', () => {
+  const rig = listen({ allowed: false });
+  rig.voice.update(1.5); // refused
+  rig.synth.allowed = true;
+  rig.voice.update(6.3); // "Raise a city of the faithful" is up until 7.6: a click now (1.3 s left) still starts it, and it takes longer than that
+  rig.voice.retry();
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true]);
+  rig.voice.update(7.7);
+  assert.equal(rig.voice.speaking, true, 'the caption is over but the browser is still saying the line: the score stays down');
+  rig.voice.update(8.5);
+  assert.equal(rig.voice.speaking, true);
+  rig.synth.spoken[1].onend({}); // the browser reports the end
+  assert.equal(rig.voice.speaking, false);
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true, false]);
+  assert.equal(rig.heard.length, 4, 'and nothing more comes of it');
+});
+
+test('a line started late that the browser never reports is still over a few seconds after it was handed over, not held for good', () => {
+  const rig = listen({ allowed: false });
+  rig.voice.update(31.5); // "Unleash the titans", 31 to 35.4, refused
+  rig.synth.allowed = true;
+  rig.voice.update(34.1);
+  rig.voice.retry(); // 1.3 s left of its caption: started now
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true]);
+  rig.voice.update(35.5);
+  assert.equal(rig.voice.speaking, true, 'past its caption');
+  rig.voice.update(37.9);
+  assert.equal(rig.voice.speaking, true, 'a line takes about 3 s: 4 s are allowed it from the click');
+  rig.voice.update(38.2); // before the next caption, at 38.6
+  assert.equal(rig.voice.speaking, false, 'and then the score is let up');
+  assert.deepEqual(rig.heard.map((h) => h[1]), [true, false, true, false]);
+});
+
+test('a line handed over on time is bounded by its caption as before: the extra time is for lines that start late', () => {
+  for (const [i, c] of CAPTIONS.entries()) assert.ok(c.to - c.from >= 4, `caption ${i} lasts longer than a line is given from the moment it is handed over`);
+  const rig = listen();
+  rig.voice.update(9.6); // "Pray. Summon the gods.", on screen until 14.2, with no end reported
+  assert.equal(rig.voice.speaking, true);
+  rig.voice.update(14.1);
+  assert.equal(rig.voice.speaking, true);
+  rig.voice.update(14.3);
+  assert.equal(rig.voice.speaking, false, 'it ends with its caption');
+});
+
 test('no volume, no speech engine and a listener that throws: nothing is reported, and the film is not disturbed', () => {
   const mute = listen({ narrator: { volume: 0 } });
   play(mute.voice);

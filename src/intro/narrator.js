@@ -9,15 +9,16 @@
 //   voice.stop();      // at once and for good: a skip, the end of the film, a failure
 //
 // `onSpeaking(true)` is called as a line is handed to the browser, a moment before the voice is heard, and
-// `onSpeaking(false)` when no line is left (the browser's `end` or `error` events, or the line's caption running
-// out, whichever comes first, for a browser that never reports an end); the score under the film steps back
-// for it and swells again.
+// `onSpeaking(false)` when no line is left (the browser's `end` or `error` events, or the line's time running
+// out, whichever comes first, for a browser that never reports an end: its caption's end, or `LINE_MAX` seconds
+// after it was handed over if a click started it late); the score under the film steps back for it and swells again.
 import { CAPTIONS } from './script.js';
 
 const LANG = 'en-US'; // the captions are English; the browser picks its own best voice for it
 const RATE = 0.9; // a little slower than talk, for a film
 const PITCH = 0.9;
 const LATE = 1.2; // seconds a caption must still have left for a click to start it late
+const LINE_MAX = 4; // seconds a line is given to be said from the moment it is handed over, if its caption ends sooner (the longest takes about 3)
 
 /** The browser's speech synthesis and its utterance class, or null where it has none. */
 export function browserSpeech() {
@@ -68,7 +69,8 @@ export class Narrator {
       const c = this.captions[this.next++];
       if (t <= c.to) this.say(c.text, c.to);
     }
-    // A browser that never says a line is over (some do not) must not hold the music down: the line ends with its caption.
+    // A browser that never says a line is over (some do not) must not hold the music down: the line ends with its caption
+    // (or, for one a click started late, a few seconds after it was handed over: see `say`).
     if (this.lines.size && t > this.until) this.settle();
   }
 
@@ -95,8 +97,11 @@ export class Narrator {
     }
   }
 
-  /** Hand a line to the browser; `until` is the film second its caption ends at. */
-  say(text, until = this.t + 6) {
+  /**
+   * Hand a line to the browser. `until` is the film second its caption ends at; the line is given until then, but at
+   * least `LINE_MAX` seconds from now, so one a click starts near the end of its caption can still be said to the end.
+   */
+  say(text, until = 0) {
     if (!this.speech || !(this.volume > 0)) return;
     const { synth, Utterance } = this.speech;
     const line = {};
@@ -116,7 +121,7 @@ export class Narrator {
       };
       this.utterance = u;
       this.lines.add(line);
-      this.until = Math.max(this.until, until);
+      this.until = Math.max(this.until, until, this.t + LINE_MAX);
       this.refresh(); // the score steps back now, before the voice is heard
       synth.speak(u);
     } catch {

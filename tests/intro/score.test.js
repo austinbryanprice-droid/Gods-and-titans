@@ -87,9 +87,30 @@ test('start: the stingers off, the story\'s first intensity, the lifted stage, t
   assert.deepEqual(m.calls[0], ['setStingers', false]);
   assert.deepEqual(m.calls[1], ['conduct', musicAt(LEAD)], 'at the intensity of the story a lead on from the first frame');
   assert.equal(m.calls[2][1], liftFor(0.5));
-  assert.deepEqual(m.calls[3], ['play', THEME, { seed: 7 }]);
+  assert.deepEqual(m.calls[3].slice(0, 2), ['play', THEME]);
+  assert.equal(m.calls[3][2].seed, 7);
+  assert.equal(typeof m.calls[3][2].joinAt, 'function', 'and where to come in, for a browser that allows audio late');
   score.start();
   assert.equal(m.calls.length, 4, 'once');
+});
+
+test('joinAt: where a piece should come in when the browser allows audio part-way through the film: the film\'s second, and the story\'s intensity for every bar of the way', () => {
+  const m = recorder();
+  const score = new FilmScore({ music: m });
+  assert.equal(score.joinAt(), null, 'nowhere before the film has begun');
+  score.start();
+  const join = m.calls.find((c) => c[0] === 'play')[2].joinAt;
+  assert.deepEqual(join(), { seconds: 0, levelAt: barLevel }, 'at the film\'s start, the start of the piece');
+  score.update(31.5);
+  assert.deepEqual(join(), { seconds: 31.5, levelAt: barLevel });
+  assert.equal(join().levelAt(20), musicAt(20 + THEMES[THEME].bar / 2), 'each bar at the intensity of its middle, as the live ones');
+  score.end('handover');
+  assert.equal(join(), null, 'and nowhere once the film is over: the title screen\'s own music begins at its start');
+  const cut = new FilmScore({ music: recorder() });
+  cut.start();
+  cut.update(10);
+  cut.end('cut');
+  assert.equal(cut.joinAt(), null);
 });
 
 test('update: the intensity follows the story, read a lead ahead; before the start and after the end it does nothing', () => {
@@ -251,7 +272,8 @@ test('createFilmScore makes a score with the options it is given', () => {
   const score = createFilmScore({ music: m, seed: 11 });
   assert.ok(score instanceof FilmScore);
   score.start();
-  assert.deepEqual(m.calls.at(-1), ['play', THEME, { seed: 11 }]);
+  assert.deepEqual(m.calls.at(-1).slice(0, 2), ['play', THEME]);
+  assert.equal(m.calls.at(-1)[2].seed, 11);
 });
 
 // ---------------------------------------------------------------- through the real engine, over the whole film
@@ -354,7 +376,7 @@ function playFilm({ seed = SEED, volume = 0.5, state = 'running', narrate = true
           if (run.score.sections !== seen) {
             seen = run.score.sections;
             const s = run.score.section;
-            film.sections.push({ start: before, mode: s.mode, tune: !!s.tune, shift: s.shift, chords: s.chords.map((c) => c.name).join(' ') });
+            film.sections.push({ start: before, index: s.index, mode: s.mode, tune: !!s.tune, shift: s.shift, chords: s.chords.map((c) => c.name).join(' ') });
           }
         }
       }
@@ -578,6 +600,37 @@ test('a first visit: silent until the first click, then the score comes in at th
   film.through(9); // the line that began with the click is over by 5.4 s, the next begins at 9.6 s
   assert.ok(film.stage() > lift * 0.95, 'and swelling after it');
   assert.deepEqual(warnings, []);
+});
+
+test('a first visit whose click comes late joins the overture where the story is: it comes in on the section the story is in, and goes on from there', () => {
+  const whole = playFilm({ narrate: false }).through(FILM_LENGTH).sections;
+  assert.deepEqual(whole.map((s) => s.index), [0, 1, 2, 3], 'the whole overture is four sections');
+  // seconds clear of a section boundary (the bar in progress at the click is what the piece joins at)
+  const nearBoundary = (t) => whole.some((s) => Math.abs(s.start - t) < 0.3);
+  for (const clickAt of [0, 3, 9, 14, 17, 22, 28, 31, 36, 42, 46]) {
+    assert.ok(!nearBoundary(clickAt), `${clickAt}s is a fair test (no section begins within a third of a second)`);
+    const film = playFilm({ state: 'suspended', narrate: false });
+    film.through(clickAt);
+    assert.equal(film.ctx.sources.length, 0, 'silent until the click');
+    film.unlock();
+    film.through(FILM_LENGTH);
+    const heard = film.sections;
+    const there = whole[Math.max(0, whole.findLastIndex((s) => s.start <= clickAt))]; // the section the story is in at the click
+    assert.ok(heard.length >= 1 && film.ctx.sources.length > 20, `a click at ${clickAt}s: the music begins`);
+    assert.equal(heard[0].index, there.index, `a click at ${clickAt}s: the section the story is in (${there.index}), not the first`);
+    assert.equal(heard[0].mode, there.mode, 'calm or tense as the story is');
+    heard.forEach((s, i) => assert.equal(s.index, there.index + i, 'and the sections that follow come in order'));
+    for (const s of heard) {
+      if (s.index === 1) assert.ok(s.tune, 'the tune is in the second section, wherever the click was: it comes with the god');
+      if (s.mode === 'tense' && s.tune) assert.ok(s.shift, 'and a tune in a battle is sung an octave up');
+    }
+    assert.deepEqual(warnings, []);
+  }
+  const titans = playFilm({ state: 'suspended', narrate: false });
+  titans.through(31);
+  titans.unlock();
+  titans.through(33);
+  assert.equal(titans.sections[0].mode, 'tense', 'a click at 31 s is into the titans\' battle, not the dawn');
 });
 
 test('with the music muted, or the slider at nothing, the film plays on without a score and without asking for a click', () => {

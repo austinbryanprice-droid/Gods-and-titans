@@ -9,6 +9,7 @@ import { FakeAudioContext, reaches } from './fake-audio.js';
 import { sfx } from '../../src/audio/sfx.js';
 import { MusicEngine, DUCKS, MUSIC_GAIN, MUSIC_THEME_IDS, renderMusicOffline, COMPOSE_AHEAD } from '../../src/audio/music.js';
 import { THEMES } from '../../src/audio/music-themes.js';
+import { createScore, composeBar } from '../../src/audio/music-composer.js';
 
 const warn = console.warn;
 beforeEach(() => {
@@ -387,6 +388,139 @@ test('conduct() sets the intensity exactly, at once and for good: no easing up o
   engine.setIntensity(0.6); // the ordinary call still eases from where the conductor left it
   advance(ctx, engine, 1.5);
   assert.ok(engine.state().level > 0.3 && engine.state().level < 0.5, `eased ${engine.state().level}`);
+});
+
+// ---------------------------------------------------------------- a piece joined part-way in (the film's score after a late click)
+
+/** A piece composed from its start at the intensity `levelAt(second a bar starts)`: [{ start, dur, section, index }] for every bar. */
+function pieceFromStart(themeId, seed, levelAt, seconds) {
+  const score = createScore(THEMES[themeId], seed);
+  const bars = [];
+  for (let start = 0; start < seconds; ) {
+    const bar = composeBar(score, levelAt(start));
+    bars.push({ start, dur: bar.dur, section: score.section, index: score.bar - 1 });
+    start += bar.dur;
+  }
+  return bars;
+}
+
+const kindOf = (section) => `${section.mode}${section.tune ? '+tune' : ''}${section.shift ? '+octave' : ''}`;
+
+test('joining a piece part-way in: the bars before that second are composed without a sound, and the one in progress is the first to sound', () => {
+  const levelAt = (s) => (s < 14 ? 0.2 : 0.9); // calm, then a battle: sections of different kinds on either side
+  const piece = pieceFromStart('menu', 82, levelAt, 200);
+  assert.ok(new Set(piece.map((b) => kindOf(b.section))).size >= 3, `the piece has sections of several kinds (${[...new Set(piece.map((b) => kindOf(b.section)))]})`);
+  for (const at of [0.2, 6, 14.5, 18, 25, 31, 47, 70]) {
+    const k = piece.findIndex((b) => b.start + b.dur > at); // the bar in progress at that second
+    const { ctx, engine } = setup();
+    engine.conduct(0.9); // what the live bars after the join are composed at
+    engine.play('menu', { seed: 82, joinAt: () => ({ seconds: at, levelAt }) });
+    const run = engine.run;
+    assert.equal(run.bars, k + 1, `${at}s: ${k} bars skipped, the one in progress composed`);
+    assert.equal(run.score.bar, k + 1);
+    const want = piece[k].section;
+    const got = run.score.section;
+    assert.equal(got.index, want.index, `${at}s: the same section as a piece played from the start (${kindOf(want)})`);
+    assert.equal(kindOf(got), kindOf(want));
+    assert.deepEqual(got.chords.map((c) => c.name), want.chords.map((c) => c.name));
+    assert.ok(ctx.sources.length > 0, 'it sounds at once');
+    assert.ok(Math.min(...ctx.sources.map((s) => s.started)) >= 0.12 - 1e-9, 'from the run\'s first bar on, nothing from the skipped ones');
+    assert.ok(ctx.sources.some((s) => reaches(s, run.bus.pad)), `${at}s: the pad chord is struck for the bar in progress, whether or not the skipped bars held it`);
+    if (at >= 14) {
+      // the live bars after the join are the piece's own: the same sections, in the same order
+      advance(ctx, engine, 40);
+      const j = run.score.bar - 1;
+      assert.ok(j > k + 4, `${at}s: it went on for several sections`);
+      assert.equal(run.score.section.index, piece[j].section.index, `${at}s: and is in the section the piece is in at that bar`);
+      assert.equal(kindOf(run.score.section), kindOf(piece[j].section));
+    }
+  }
+});
+
+test('a piece joined in a bar through which a pad chord is held strikes the chord again, or that bar would have no pad', () => {
+  const levelAt = () => 0.9; // the menu theme holds a chord across two bars only in its tense progressions
+  const piece = pieceFromStart('menu', 82, levelAt, 60);
+  // a bar whose chord is the one before it: the pad was struck a bar back and is held through this one
+  const held = piece.findIndex((b) => b.index % 4 !== 0 && b.section.chords[b.index % 4].name === b.section.chords[(b.index % 4) - 1].name);
+  assert.ok(held > 0, 'the menu theme holds a chord across two bars somewhere');
+  const { ctx, engine } = setup();
+  engine.play('menu', { seed: 82, joinAt: () => ({ seconds: piece[held].start + 0.1, levelAt }) });
+  assert.equal(engine.run.score.bar, held + 1, 'joined in the bar the chord is held through');
+  assert.ok(ctx.sources.some((s) => reaches(s, engine.run.bus.pad)), 'the held chord sounds');
+});
+
+test('joinAt is asked each time a run is made, so a run made after an unmute joins where the piece is by then', () => {
+  const levelAt = () => 0.5;
+  const { ctx, engine } = setup();
+  let at = 20;
+  let asked = 0;
+  engine.play('menu', { seed: 7, joinAt: () => (asked++, { seconds: at, levelAt }) });
+  assert.equal(asked, 1);
+  const first = engine.run;
+  const piece = pieceFromStart('menu', 7, levelAt, 90);
+  assert.equal(first.bars, piece.findIndex((b) => b.start + b.dur > 20) + 1);
+  engine.mute(true);
+  advance(ctx, engine, 1);
+  assert.equal(engine.run, null, 'muted: the piece is gone');
+  at = 61;
+  engine.mute(false);
+  advance(ctx, engine, 0.25);
+  assert.notEqual(engine.run, first, 'unmuted: a run of its own');
+  assert.equal(asked, 2, 'which asked again');
+  assert.equal(engine.run.bars, piece.findIndex((b) => b.start + b.dur > 61) + 1, 'and came in where the piece is by now');
+  engine.play('menu');
+  engine.tick();
+  assert.equal(asked, 2, 'asking for the piece that is already wanted changes nothing');
+});
+
+test('with nowhere to join, or nonsense, a piece begins at its start; a joinAt that fails is warned of once and the music plays', () => {
+  const levelAt = () => 0.9;
+  const begins = (join) => {
+    const { ctx, engine } = setup();
+    engine.play('menu', { seed: 82, joinAt: join });
+    return { ctx, engine, run: engine.run };
+  };
+  for (const [what, join] of [
+    ['nothing to say', () => null],
+    ['no time at all', () => ({ seconds: 0, levelAt })],
+    ['a time that is not one', () => ({ seconds: Number.NaN, levelAt })],
+    ['a time before the start', () => ({ seconds: -5, levelAt })],
+    ['no function at all', 'soon'],
+  ]) {
+    const { ctx, run } = begins(join);
+    assert.equal(run.bars, 1, `${what}: the first bar`);
+    assert.equal(run.score.section.index, 0);
+    assert.ok(ctx.sources.length > 0);
+  }
+  const warnings = [];
+  console.warn = (...a) => warnings.push(a.join(' '));
+  for (const join of [
+    () => {
+      throw new Error('no clock');
+    },
+    () => ({ seconds: 20, levelAt: null }),
+  ]) {
+    const { ctx, engine, run } = begins(join);
+    assert.ok(run && ctx.sources.length > 0, 'the music plays on');
+    assert.equal(engine.disabled, false, 'one failed join is not a fault of the scheduler');
+  }
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /could not join the piece/);
+  // a levelAt that answers nonsense is read as calm, and the join still ends
+  const { run } = begins(() => ({ seconds: 30, levelAt: () => 'loud' }));
+  const piece = pieceFromStart('menu', 82, () => 0, 90);
+  assert.equal(run.bars, piece.findIndex((b) => b.start + b.dur > 30) + 1);
+  assert.equal(warnings.length, 2, 'with no warning');
+});
+
+test('joining is bounded: a time far past the piece composes a few hundred bars and no more, and the music plays on from there', () => {
+  const { ctx, engine } = setup();
+  const started = Date.now();
+  engine.play('menu', { seed: 1, joinAt: () => ({ seconds: Infinity, levelAt: () => 0.5 }) });
+  assert.ok(Date.now() - started < 2000, 'quickly');
+  assert.ok(engine.run.bars > 100 && engine.run.bars < 1000, `${engine.run.bars} bars`);
+  advance(ctx, engine, 5);
+  assert.ok(ctx.sources.length > 0);
 });
 
 test('the stage is a gain of its own after the volume and the stingers\' dip: setStage eases it, with a delay, and touches no other gain', () => {
