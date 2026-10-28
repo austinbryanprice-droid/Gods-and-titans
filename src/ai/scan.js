@@ -14,6 +14,8 @@ export function workerJob(u) {
     case 'repair': return 'build';
     case 'attack':
     case 'attackMove': return 'fight';
+    case 'relic':
+    case 'deliver': return 'relic'; // carrying a relic to a Temple (ai/relics.js)
     default: return 'busy';
   }
 }
@@ -96,7 +98,7 @@ export function scanWorld(world, me) {
     minions: [],
     gods: [],
     titan: null,
-    jobs: { gold: 0, wood: 0, pray: 0, build: 0, idle: 0, fight: 0, busy: 0 },
+    jobs: { gold: 0, wood: 0, pray: 0, build: 0, idle: 0, fight: 0, busy: 0, relic: 0 },
     job: new Map(), // worker id -> job this think (see workerJob)
     alive: new Map(), // type -> living count (not summoned)
     queued: new Map(), // type -> queued count

@@ -32,6 +32,7 @@ import { FireLayer } from './fires.js';
 import { SacredSiteLayer } from './sacred-sites.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
+import { RelicLayer } from './relics.js';
 import { PostFX, RESIZE_SETTLE_MS, DEFAULT_LOOK } from './post.js';
 import { createEnvironment, setCloudShadows, applyAtmosphere, setLampSpots, LAMP_SPOTS, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 import { Atmosphere } from './atmosphere.js';
@@ -151,6 +152,7 @@ export class GameRenderer {
     this.canvas = canvas;
     this.disposed = false;
     this.time = 0;
+    this.speed = 1; // setSpeed
     this.frame = 0;
     this.lastUpdateMs = 0;
     this.animCost = 0.02; // ms per unit animation (measured)
@@ -278,6 +280,7 @@ export class GameRenderer {
     }
 
     this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: Q.vfx });
+    this.relicLayer = new RelicLayer(scene, (x, y) => heightAt(this.map, x, y));
 
     this.blobs = new BlobLayer(this.groundFxRoot);
     this.rings = new RingLayer(this.overlayRoot);
@@ -1215,10 +1218,17 @@ export class GameRenderer {
   // ------------------------------------------------------------------ sync
 
   /** Advance one frame: sync meshes with the view state, animate, VFX, overlays. */
+  /** Game speed of a single-player match: animations, effects and the sky run this much faster. */
+  setSpeed(m) {
+    this.speed = Number.isFinite(m) && m > 0 ? m : 1;
+  }
+
   update(dt) {
     if (this.disposed) return;
     const t0 = now();
     dt = Number.isFinite(dt) ? clamp(dt, 0, 0.25) : 0;
+    const camDt = dt; // the camera keeps real time; the world runs at the game speed
+    dt *= this.speed;
     this.time += dt;
     this.frame++;
     const vs = this.vs;
@@ -1229,7 +1239,7 @@ export class GameRenderer {
       const t = this.time;
       this.camera.setShake(shake * (Math.sin(t * 41.3) * 0.6 + Math.sin(t * 73.1 + 1.7) * 0.4), shake * (Math.sin(t * 37.7 + 0.6) * 0.6 + Math.sin(t * 67.9 + 2.9) * 0.4));
     } else this.camera.setShake(0, 0);
-    this.camera.update(dt);
+    this.camera.update(camDt);
     _vp.multiplyMatrices(this.threeCamera.projectionMatrix, this.threeCamera.matrixWorldInverse);
     // the zoom too: the VFX lights go to what is on screen
     this.vfx.setFocus(this.camera.target.x, this.camera.target.y, this.camera.distance);
@@ -1245,6 +1255,7 @@ export class GameRenderer {
     this.syncUnits(dt);
     this.animateDying(dt);
     this.animateBuildings(dt);
+    this.relicLayer.update(vs, this.time, this.units, this.buildings);
     this.flushPendingHits();
 
     this.fow.update(dt);
@@ -2344,6 +2355,7 @@ export class GameRenderer {
     for (const m of this.mines.values()) m.model.dispose();
     this.mines.clear();
     this.farUnits.dispose();
+    this.relicLayer.dispose();
     this.sacredSites.dispose();
     this.placement.dispose();
     this.blobs.dispose();
