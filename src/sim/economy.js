@@ -91,8 +91,13 @@ export function deposit(world, u) {
   if (p) {
     // A harvest blessing (god power boon) adds to every load brought in while it lasts.
     const amount = Math.round(u.carryAmount * (1 + boonPct(p, 'gather')));
-    if (u.carry === 'g') p.gold += amount;
-    else p.wood += amount;
+    if (u.carry === 'g') {
+      p.gold += amount;
+      p.stats.gold += amount;
+    } else {
+      p.wood += amount;
+      p.stats.wood += amount;
+    }
     p.stats.gathered += amount;
   }
   u.carry = 0;
