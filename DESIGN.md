@@ -2318,11 +2318,14 @@ read the whole World, as they always have, so none of them scouts.) Hard and Bru
   it (`minArmy` pop), a squad of about `pop` population of its fastest soldiers (flyers first; no gods, Titans,
   siege or Priests, nobody under 70 % health) slips out to the enemy Worshippers worth hitting: three or more
   gathering in an 8-tile cell, at least 22 tiles from the centre of that enemy's army, with nothing there the squad
-  cannot beat 1.6 to 1. It marches along a ground route, attacks the Worshippers one by one, and moves on to a
+  cannot beat 1.6 to 1, of a player with no strike or cataclysm god power (4.11) still in hand (a squad is just
+  what such a strike is waiting for). It marches along a ground route, attacks the Worshippers one by one, and moves on to a
   second cluster within 25 tiles if the first is gone. It turns for home when the base is in serious trouble, when
   its health falls under 45 %, when what it meets is stronger (local fight ratio under 1.1), after 100 s on the way
   or 45 s at the target. Home at the rally point it rejoins the army. One raid at a time, the next at least `every`
   seconds after the last came home (Hard from 5:30, every 110 s, 10 pop; Brutal from 4:30, every 80 s, 12 pop).
+  A raid that lost more than it killed (a Worshipper counts 90 gold) doubles that wait, up to four times; one
+  that paid sets it back.
   The squad is left out of the army's own orders and focus fire while it is away.
 - **Wounded soldiers step back** (`src/ai/micro.js`, profile `pullWounded`): a soldier or creature in a fight
   under 30 % health (Brutal 32 %) with a Priest of its own within 14 tiles moves to a spot 2 tiles behind that
@@ -2341,8 +2344,10 @@ pickier god casting were all measured on top of Hard without the bonus and made 
 64), so Brutal keeps Hard's numbers.
 
 Measured (headless games like `tools/ai-tournament.mjs`, small maps, every map played twice with the sides
-swapped): the new Hard beat the Hard from before this change in 38 of 64 games and Normal in 51 of 64; Brutal
-beat the new Hard in 48 of 64; Normal with the centre fix beat the Normal from before in 34 of 64.
+swapped). Before the god powers (4.11) came in, the new Hard beat the Hard from before in 38 of 64 games. With
+them the AIs spend their strikes on raiding squads, and the new Hard and the Hard from before come out even (129
+to 127 in 256 games): Hard now plays smarter rather than measurably stronger. Hard beats Normal in 54 of 64;
+Brutal beats the new Hard in 91 of 128.
 Army mixes chosen to "counter" the enemy were tried and dropped: a strength-per-gold pick, fewer archers, more
 archers and a mix that answers the enemy's melee and ranged shares all did no better than the plain mix (the
 strength-per-gold pick and fewer archers clearly worse). With no damage types in the game the one counter that

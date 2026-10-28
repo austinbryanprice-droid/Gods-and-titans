@@ -4,14 +4,30 @@
 // when it is badly hurt or after a short while. The squad's units are left
 // out of the main army's orders (runMilitary) and its focus fire (micro.js)
 // until they are home again.
-import { newForce, addToForce, fightRatio } from './unit-info.js';
+import { newForce, addToForce, fightRatio, unitInfo } from './unit-info.js';
 import { localForces, command, computeRoute } from './military.js';
+import { powersFor } from '../data/powers.js';
+
+/** Has this player a strike or cataclysm power it could still call down on the squad? */
+function strikeInHand(p) {
+  if (!p || !p.powers) return false;
+  const list = powersFor(p.pantheon);
+  for (let i = 0; i < list.length; i++) {
+    const pw = list[i];
+    if (p.powers.used & (1 << i) || p.tier < pw.tier) continue;
+    const use = pw.ai && pw.ai.use;
+    if (use !== 'economy' && use !== 'heal') return true;
+  }
+  return false;
+}
 
 const CELL = 8; // tiles per cell when grouping enemy workers into targets
 const HIT_TIME = 45; // most seconds spent hitting workers
 const TRIP_TIME = 100; // most seconds from setting out to the target
 const HOME_TIME = 45; // most seconds to get home before the squad is released anyway
 const ARMY_CLEAR = 22; // tiles a target must be from the enemy army's centre
+const WORKER_VALUE = 90; // what a Worshipper killed is worth (its price and the gathering it would have done)
+const MAX_PENALTY = 4; // raids that cost more than they kill stretch the wait up to this many times
 
 function avgHp(units) {
   let a = 0;
@@ -26,7 +42,10 @@ function members(ai) {
   for (const id of r.ids) {
     const u = ai.world.entities.get(id);
     if (u && !u.dead) out.push(u);
-    else r.ids.delete(id);
+    else {
+      r.ids.delete(id);
+      r.lost += r.values.get(id) || 0;
+    }
   }
   return out;
 }
@@ -67,7 +86,8 @@ function pickTarget(ai, s, squadForce) {
   const home = ai.home();
   const cells = new Map();
   for (const e of s.enemies) {
-    if (e.defeated) continue;
+    // A small squad is just what a god power's strike is waiting for: raid a player only once theirs are spent.
+    if (e.defeated || strikeInHand(e.p)) continue;
     for (const u of e.units) {
       if (u.dead || u.def.class !== 'worker') continue;
       const o = u.order;
@@ -126,8 +146,22 @@ function goHome(ai, s, units, why) {
 
 function release(ai, s) {
   const r = ai.raid;
+  members(ai); // count the fallen
+  // Did it pay? Worshippers killed against soldiers lost; a losing raid makes the next one wait longer.
+  let kills = 0;
+  for (const id of r.hit) {
+    const e = ai.world.entities.get(id);
+    if (!e || e.dead) kills++;
+  }
+  const paid = kills * WORKER_VALUE >= r.lost;
+  r.penalty = paid ? 1 : Math.min(MAX_PENALTY, r.penalty * 2);
+  r.kills += kills;
+  if (ai.log) ai.log.push(`${(s.t / 60).toFixed(2)}m raid over: ${kills} Worshippers for ${Math.round(r.lost)} lost${paid ? '' : `, next waits x${r.penalty}`}`);
   for (const id of r.ids) ai.cmdMemo.delete(id);
   r.ids.clear();
+  r.hit.clear();
+  r.values.clear();
+  r.lost = 0;
   r.phase = null;
   r.lastEnd = s.t;
 }
@@ -136,12 +170,12 @@ function release(ai, s) {
 export function runRaids(ai, s) {
   const cfg = ai.prof.raids;
   if (!cfg) return;
-  if (!ai.raid) ai.raid = { ids: new Set(), phase: null, since: 0, lastEnd: 0, target: null, route: null, wp: 0, sent: 0 };
+  if (!ai.raid) ai.raid = { ids: new Set(), phase: null, since: 0, lastEnd: 0, target: null, route: null, wp: 0, sent: 0, kills: 0, hit: new Set(), values: new Map(), lost: 0, penalty: 1 };
   const r = ai.raid;
   const mil = ai.mil;
   if (!r.phase) {
     // Set out only from a quiet base, with the army at home and big enough to spare a squad.
-    if (s.peace || s.t < cfg.from || s.t - r.lastEnd < cfg.every || ai.threat) return;
+    if (s.peace || s.t < cfg.from || s.t - r.lastEnd < cfg.every * r.penalty || ai.threat) return;
     if (mil.mode !== 'home' || s.armyPop < cfg.minArmy + cfg.pop) return;
     const squad = pickSquad(ai, s, cfg.pop);
     if (!squad) return;
@@ -149,7 +183,7 @@ export function runRaids(ai, s) {
     for (const u of squad) addToForce(f, u);
     const target = pickTarget(ai, s, f);
     if (!target) {
-      r.lastEnd = s.t - cfg.every * 0.6; // look again a little later
+      r.lastEnd = s.t - cfg.every * r.penalty + cfg.every * 0.4; // look again a little later
       return;
     }
     const c = centroidOf(squad);
@@ -159,7 +193,10 @@ export function runRaids(ai, s) {
     r.phase = 'go';
     r.since = s.t;
     r.sent++;
-    for (const u of squad) r.ids.add(u.id);
+    for (const u of squad) {
+      r.ids.add(u.id);
+      r.values.set(u.id, unitInfo(u.type) ? unitInfo(u.type).value : 0);
+    }
     command(ai, squad, 'move', r.route[0].x, r.route[0].y, true);
     if (ai.log) ai.log.push(`${(s.t / 60).toFixed(2)}m raid ${squad.length} units -> p${target.owner} (${target.x.toFixed(0)},${target.y.toFixed(0)})`);
     return;
@@ -225,6 +262,7 @@ export function runRaids(ai, s) {
     if (best) {
       any = true;
       ai.issue({ type: 'attack', units: [u.id], target: best.id });
+      r.hit.add(best.id);
       ai.cmdMemo.delete(u.id);
     }
   }
