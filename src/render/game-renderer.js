@@ -37,6 +37,9 @@ import { PostFX, RESIZE_SETTLE_MS, DEFAULT_LOOK } from './post.js';
 import { createEnvironment, setCloudShadows, applyAtmosphere, setLampSpots, LAMP_SPOTS, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 import { Atmosphere } from './atmosphere.js';
 
+/** World units above the ground the shadow box keeps in view (roofs, heads, gods, hills): see updateShadowCamera. */
+const SHADOW_LIFT = 8;
+
 // Low draws straight to the canvas; the others go through the post-processing
 // pipeline (post.js: MSAA, bloom, + ambient occlusion on high / ultra), which
 // also does the antialiasing, so the canvas itself never needs it.
@@ -200,6 +203,8 @@ export class GameRenderer {
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 140;
     this.shadowR = 0;
+    this.shadowHx = 0;
+    this.shadowHy = 0;
     this.shadowShare = 1; // the share of the sun's shadow drawn at this zoom (zoom-lod.js)
     scene.add(this.sun);
     scene.add(this.sun.target);
@@ -2017,46 +2022,64 @@ export class GameRenderer {
       return;
     }
     const quad = this.camera.getViewQuad(this._quad || (this._quad = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }]));
-    let cx = 0;
-    let cy = 0;
+    // The shadow box is fitted to the view in the light's own frame. Everything whose shadow lands on a
+    // point of the view sits on that point's ray to the sun, at the same light-space x and y, so the box
+    // only has to cover the view's ground seen from the sun. A low sun lays the ground out along its rays:
+    // seen from a 14° sun a view 40 tiles deep is 10 wide, and a square box as wide as the view would
+    // reach 130 tiles up-sun, drawing every forest chunk along that strip into the map (twice the
+    // triangles of the visible scene) and spreading its texels over all of it.
+    const right = this._sr || (this._sr = new THREE.Vector3());
+    const up = this._su || (this._su = new THREE.Vector3());
+    right.set(0, 1, 0).cross(SUN_DIR).normalize(); // the key light moves through the day
+    up.crossVectors(SUN_DIR, right).normalize();
+    const gy = this.camera.groundY;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, d0 = Infinity, d1 = -Infinity;
     for (const p of quad) {
-      cx += p.x / 4;
-      cy += p.y / 4;
+      _v.set(p.x, gy, p.y);
+      const lx = _v.dot(right);
+      const ly = _v.dot(up);
+      const ld = _v.dot(SUN_DIR);
+      x0 = Math.min(x0, lx);
+      x1 = Math.max(x1, lx);
+      y0 = Math.min(y0, ly);
+      y1 = Math.max(y1, ly);
+      d0 = Math.min(d0, ld);
+      d1 = Math.max(d1, ld);
     }
-    let r = 0;
-    for (const p of quad) {
-      const dx = p.x - cx;
-      const dy = p.y - cy;
-      r = Math.max(r, Math.sqrt(dx * dx + dy * dy));
-    }
-    r = Math.ceil(Math.min(r * 1.05 + 3, 70) / 4) * 4; // quantized: texel size changes only in steps
+    // margins: hills and what stands on the ground (a soldier's head, a roof, a god) are seen above it
+    const lift = SHADOW_LIFT * Math.max(0, up.y);
+    // half sizes quantized, so the texel size changes only in steps (no crawl while zooming)
+    const hx = Math.ceil(Math.min((x1 - x0) / 2 + 3, 70) / 2) * 2;
+    const hy = Math.ceil(Math.min((y1 - y0) / 2 + lift / 2 + 3, 70) / 2) * 2;
+    const r = Math.max(hx, hy);
     const cam = this.sun.shadow.camera;
-    // A low sun lays the visible ground out along the light's axis (a 14° sun puts a view
-    // 70 tiles across about 70 tiles deep), so the light stands back and sees far with the view.
-    const back = r + 40;
-    if (r !== this.shadowR) {
+    // depth: the light stands back far enough for casters well up-sun of the view (a low sun's rays climb
+    // slowly: 8 units of height is 33 tiles of ray at 14°) and sees down to the view's farthest ground
+    const back = (d1 - d0) / 2 + 50;
+    const far = Math.ceil((back + (d1 - d0) / 2 + 20) / 8) * 8;
+    if (hx !== this.shadowHx || hy !== this.shadowHy || far !== cam.far) {
       this.shadowR = r;
-      cam.left = -r;
-      cam.right = r;
-      cam.top = r;
-      cam.bottom = -r;
+      this.shadowHx = hx;
+      this.shadowHy = hy;
+      cam.left = -hx;
+      cam.right = hx;
+      cam.top = hy;
+      cam.bottom = -hy;
       cam.near = 1;
-      cam.far = back + r + 30;
+      cam.far = far;
       cam.updateProjectionMatrix();
       this.sun.shadow.bias = -0.083 / (cam.far - cam.near); // the same ~0.08 world units whatever the depth range
     }
     // grazing light needs a bigger push off the surface to keep the terrain from striping itself
     this.sun.shadow.normalBias = 0.03 + 0.06 * clamp((0.65 - SUN_DIR.y) / 0.4, 0, 1);
-    // snap the center to shadow texels so edges do not shimmer while panning
-    const texel = (2 * r) / this.sun.shadow.mapSize.x;
-    const right = this._sr || (this._sr = new THREE.Vector3());
-    const up = this._su || (this._su = new THREE.Vector3());
-    right.set(0, 1, 0).cross(SUN_DIR).normalize(); // the key light moves through the day
-    up.crossVectors(SUN_DIR, right).normalize();
-    _v.set(cx, this.camera.groundY, cy);
-    const a = Math.round(_v.dot(right) / texel) * texel - _v.dot(right);
-    const b = Math.round(_v.dot(up) / texel) * texel - _v.dot(up);
-    _v.addScaledVector(right, a).addScaledVector(up, b);
+    // the box's center in the light's frame (lifted a little: the margin is all on the up-sun side, where the
+    // view's standing things reach), snapped to shadow texels so edges do not shimmer while panning
+    const tx = (2 * hx) / this.sun.shadow.mapSize.x;
+    const ty = (2 * hy) / this.sun.shadow.mapSize.y;
+    const lx = Math.round((x0 + x1) / 2 / tx) * tx;
+    const ly = Math.round(((y0 + y1) / 2 + lift / 2) / ty) * ty;
+    const ld = (d0 + d1) / 2;
+    _v.set(0, 0, 0).addScaledVector(right, lx).addScaledVector(up, ly).addScaledVector(SUN_DIR, ld);
     this.sun.target.position.copy(_v);
     this.sun.position.copy(_v).addScaledVector(SUN_DIR, back);
     this.sun.target.updateMatrixWorld();

@@ -13,7 +13,9 @@
                     building (City town center, titan gate, construction stages) of the
                     first pantheon; harness.focus.base / .army / .sites are camera spots
                     late: four AI players (2 v 2, medium map) play minutes=10 of game time before the
-                    first frame (about 230 units and 100 buildings spread over the map: the far zoom's load)
+                    first frame (about 230 units and 100 buildings spread over the map: the far zoom's load);
+                    fill=200 then fills every player to that population, armies sent to the middle
+                    (tools/fill-pop.mjs: the population cap's battle, tools/perf-late.mjs)
       seed=12345  size=small|medium  my=0 (-1 = spectator, sees all)
       pantheons=greek,norse,...  players=2      quality=low|medium|high|ultra
       tod=cycle|golden|day|dusk|night|dawn|<hour 0..24>   time of day (default cycle: follows the sim clock from 08:00)
@@ -60,6 +62,7 @@
     import { PLAYER_COLORS, DT, TERRAIN } from '../src/config.js';
     import { UNITS, PANTHEONS, PANTHEON_LIST, BUILDINGS } from '../src/data/index.js';
     import { createAI } from '../src/ai/ai.js';
+    import { fillToPop } from './fill-pop.mjs';
 
     const Q = new URLSearchParams(location.search);
     const SCENARIOS = ['base', 'battle', 'fog', 'construction', 'creeps', 'trees', 'perf', 'late', 'pantheon'];
@@ -342,6 +345,7 @@
           world.tick();
           world.events.length = 0;
         }
+        if (Number(Q.get('fill')) > 0) fillToPop(world, Number(Q.get('fill')));
         scripts.push(() => { for (const ai of ais) ai.tick(); });
       },
       perf() {

@@ -23,7 +23,7 @@ import { createAI } from '../src/ai/ai.js';
 import { HostSession, ClientSession } from '../src/net/session.js';
 import { createLoopbackPair } from '../src/net/transport.js';
 import { PLAYER_COLORS, TICK_RATE, POP_MAX } from '../src/config.js';
-import { PANTHEONS as PANTHEON_DATA, getUnitType } from '../src/data/index.js';
+import { fillToPop } from './fill-pop.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => {
   const m = a.match(/^--([^=]+)(?:=(.*))?$/);
@@ -49,40 +49,6 @@ function summary(values) {
   const s = Float64Array.from(values).sort();
   const sum = values.reduce((a, b) => a + b, 0);
   return { n: values.length, avg: values.length ? sum / values.length : 0, p50: pct(s, 0.5), p95: pct(s, 0.95), p99: pct(s, 0.99), max: s.length ? s[s.length - 1] : 0 };
-}
-
-/** Give every player `pop` population at once: Houses, 30 worshippers, 3 gods, the Titan and a mixed army. */
-function fillToPop(world, pop) {
-  for (const p of world.players) {
-    const tc = world.buildingList.find((b) => b.owner === p.index && b.type === 'town_center');
-    Object.assign(p, { gold: 20000, wood: 20000, faith: 5000 });
-    for (let n = 0; p.popCap < pop && n < 80; n++) {
-      const spot = world.findPlacement(p.index, 'house', tc.x, tc.y, 30);
-      if (!spot) break;
-      world.createBuilding(p.index, 'house', spot.tx, spot.ty, true, true);
-    }
-    const pan = PANTHEON_DATA[p.pantheon];
-    let k = 0;
-    const spawn = (type) => {
-      const a = k * 2.399963;
-      const r = 6 + (k % 7) + 3;
-      k++;
-      return world.spawnUnit(p.index, type, tc.x + Math.cos(a) * r, tc.y + Math.sin(a) * r, { silent: true });
-    };
-    while (world.unitList.filter((u) => u.owner === p.index && u.def.class === 'worker').length < 30) spawn('worshipper');
-    for (const g of pan.gods.slice(0, 3)) spawn(g.id);
-    spawn(pan.titan.id);
-    const mix = ['warrior', 'archer', 'warrior', 'archer', pan.creatures[0].id, 'priest', pan.creatures[1].id, 'warrior', 'archer', pan.creatures[0].id, pan.creatures[2].id, 'warrior'];
-    for (let m = 0; p.popUsed < Math.min(pop, p.popCap) && m < 1000; m++) {
-      const type = mix[m % mix.length];
-      if (p.popUsed + getUnitType(type).pop <= Math.min(pop, p.popCap)) spawn(type);
-      else if (p.popUsed >= Math.min(pop, p.popCap) - 1) break;
-    }
-    const army = world.unitList.filter((u) => u.owner === p.index && u.def.class !== 'worker').map((u) => u.id);
-    world.issueCommand(p.index, { type: 'attackMove', units: army, x: world.map.width / 2, y: world.map.height / 2 });
-  }
-  world.time = 600; // the AIs are past every first-attack timer
-  world.hash.rebuild(world.unitList);
 }
 
 async function main() {

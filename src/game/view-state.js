@@ -397,9 +397,10 @@ export class ViewState {
         v = { ix: e.x, iy: e.y, if: e.f || 0 };
         this.entities.set(e.id, v);
       }
-      if (src.get(e.id) !== e) {
+      const prev = src.get(e.id);
+      if (prev !== e) {
         // (Decoded snapshots share unchanged entity objects, which skip this copy.)
-        for (const k in v) if (!(k in e) && !KEEP_KEYS.has(k)) delete v[k];
+        if (prev) for (const k in prev) if (!(k in e)) delete v[k];
         Object.assign(v, e);
         src.set(e.id, e);
       }

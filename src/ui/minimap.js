@@ -357,7 +357,8 @@ export class Minimap {
     if (this.pings.length) {
       this.pings = this.pings.filter((p) => now - p.t0 < PING_MS);
       for (const p of this.pings) {
-        const t = (now - p.t0) / PING_MS;
+        // (A ping raised during this frame can be newer than the frame's timestamp: never a negative radius.)
+        const t = Math.max(0, (now - p.t0) / PING_MS);
         for (let r = 0; r < 2; r++) {
           const tt = (t * 3 + r * 0.5) % 1;
           ctx.beginPath();
@@ -386,7 +387,7 @@ export class Minimap {
     ctx.lineWidth = Math.max(1.5, w / 120);
     for (const m of marks) {
       const fade = Math.min(1, Math.max(0, (m.t1 - now) / 800));
-      const t = (now - m.t0) / 1000;
+      const t = Math.max(0, (now - m.t0) / 1000);
       ctx.strokeStyle = this.colorOf(m.from);
       for (let i = 0; i < 2; i++) {
         const tt = (t * 0.8 + i * 0.5) % 1;
