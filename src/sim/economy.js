@@ -89,8 +89,8 @@ export function deposit(world, u) {
   }
   const p = world.players[u.owner];
   if (p) {
-    // A harvest blessing (god power boon) adds to every load brought in while it lasts; a Brutal AI's loads count `income` times.
-    const amount = Math.round(u.carryAmount * (p.income || 1) * (1 + boonPct(p, 'gather')));
+    // A harvest blessing (god power boon) adds to every load brought in while it lasts.
+    const amount = Math.round(u.carryAmount * (1 + boonPct(p, 'gather')));
     if (u.carry === 'g') {
       p.gold += amount;
       p.stats.gold += amount;
