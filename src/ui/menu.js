@@ -1,8 +1,8 @@
 // Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
 // as an HTML overlay in #menu-root over an animated night-sky backdrop.
 //
-//   const menu = createMenu({ root, onStart, onIntro, onLoad })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
-//                                                                 // onLoad(slot) carries on a saved game (DESIGN 9.4)
+//   const menu = createMenu({ root, onStart, onIntro, onLoad, onReplay })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
+//                                                                           // onLoad(slot) carries on a saved game (DESIGN 9.4); onReplay(id | record) watches a replay (9.5)
 //   showMenu(screen = 'title')  /  hideMenu()
 //
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
@@ -21,6 +21,7 @@ import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
+import { renderReplays } from './menu-replays.js';
 import { getCareer, markSeen } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
 import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
@@ -99,7 +100,7 @@ function closeLobby(lobby) {
  * Build the menu inside `root`.
  * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void, onLoad?: (slot: string) => Promise<void> }} opts
  */
-export function createMenu({ root, onStart, onIntro = null, onLoad = null }) {
+export function createMenu({ root, onStart, onIntro = null, onLoad = null, onReplay = null }) {
   const params = urlParams();
   const useMock = params.get('mockLobby') === '1';
   const tOverride = params.get('transport');
@@ -1176,7 +1177,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null }) {
     const el = h('div.mw-center-screen.mw-wide-screen',
       h('section.mw-panel.mw-howto-panel.mw-career-panel',
         h('header.mw-panel-head', backBtn, h('h2.mw-h2', `Career of ${getSettings().name}`), h('span.mw-head-spacer')),
-        h('div.mw-scroll', renderCareerContent(c, unseen),
+        h('div.mw-scroll', renderCareerContent(c, unseen, onReplay ? renderReplays({ onWatch: (what) => onReplay(what), toast }) : null),
           h('p.mw-hint', 'Your career is kept in this browser on this device. A game counts once it ends, or when you leave it after its first minute.')),
       ),
     );
