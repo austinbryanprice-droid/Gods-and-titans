@@ -71,13 +71,15 @@ const START_IMAGES = { 1: [0], 2: [0, 2], 3: [0, 2, 1], 4: [0, 3, 1, 2] };
  * - a team of two (2v2, 2v1, 2v1v1): team layout, that team on the top side,
  *   the other players on the bottom side.
  * - a team of three (3v1): three neighbouring corners, the last one opposite.
+ * - every player on one team (the Trial of the Titans): the team layout, in player order
+ *   (two players share the top side; a third and fourth take the bottom side).
  * Groups are ordered by size, then by their lowest player index, so the
  * result depends only on the teams (deterministic in every browser).
  */
 export function startPlan(playerCount, teams = null) {
   const pc = Math.min(4, Math.max(1, Math.floor(Number(playerCount)) || 2));
   const classic = { mode: 'corners', slots: START_IMAGES[pc].slice() };
-  if (pc <= 2 || !Array.isArray(teams)) return classic;
+  if (pc === 1 || !Array.isArray(teams)) return classic;
   const groups = new Map();
   for (let i = 0; i < pc; i++) {
     const t = teams[i] ?? i + 1;
@@ -87,7 +89,8 @@ export function startPlan(playerCount, teams = null) {
   }
   const list = [...groups.values()].sort((a, b) => b.length - a.length || a[0] - b[0]);
   const big = list[0].length;
-  if (big <= 1 || big >= pc) return classic;
+  if (big >= pc) return { mode: 'teams', slots: Array.from({ length: pc }, (_, i) => i) };
+  if (pc <= 2 || big <= 1) return classic;
   const order = list.flat();
   const slots = new Array(pc);
   if (big === 2) {
@@ -1557,7 +1560,9 @@ export function mapHash(map) {
 /** generateMap options for a GameSetup: everyone (host, clients, tests) must build the same map. */
 export function mapOptions(setup) {
   const players = (setup && setup.players) || [];
-  const opts = { seed: setup.seed, mapSize: setup.mapSize, playerCount: players.length, teams: players.map((p) => p.team) };
+  // The Trial of the Titans puts every player on one team (World does too), so their bases stand side by side.
+  const together = setup && setup.survival === true;
+  const opts = { seed: setup.seed, mapSize: setup.mapSize, playerCount: players.length, teams: players.map((p) => (together ? 1 : p.team)) };
   if (isLandscape(setup.landscape) && setup.landscape !== 'classic') opts.landscape = setup.landscape;
   return opts;
 }

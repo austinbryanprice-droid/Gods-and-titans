@@ -41,9 +41,9 @@ export function playerFactor(players) {
   return 0.6 + 0.4 * Math.max(1, players);
 }
 
-/** Population worth of the monsters in wave n (a tier-1 creature is 2, tier 2 is 3, tier 3 is 5). */
+/** Population worth of the monsters in wave n (a tier-1 creature is 2, tier 2 is 3, tier 3 is 5): every wave larger than the last, and faster later on. */
 export function waveBudget(n, players) {
-  return Math.round((4 + 3 * n) * playerFactor(players));
+  return Math.round((4 + 3 * n + 0.08 * n * n) * playerFactor(players));
 }
 
 /** Health and damage multipliers of wave n's creatures: they toughen a little every wave, faster later on. */
@@ -136,8 +136,28 @@ function edgePoints(world) {
   return pts;
 }
 
-/** Where wave n comes out: one edge point early on, two from wave 5, three from wave 15, away from the players' buildings. */
-function spawnPoints(world, sv, n) {
+/** The players still in the game who have a building (the wave's targets), each with the middle of their buildings. */
+function targetPlayers(world) {
+  const out = new Map();
+  for (const b of world.buildingList) {
+    if (b.dead || b.owner < 0 || b.def.wall) continue;
+    const p = world.players[b.owner];
+    if (!p || p.defeated) continue;
+    let t = out.get(b.owner);
+    if (!t) out.set(b.owner, (t = { player: b.owner, x: 0, y: 0, n: 0 }));
+    t.x += b.x;
+    t.y += b.y;
+    t.n++;
+  }
+  return [...out.values()].map((t) => ({ player: t.player, x: t.x / t.n, y: t.y / t.n }));
+}
+
+/**
+ * Where wave n comes out, for each target player: the edge points at least 30 tiles from every player
+ * building that lie nearest that player's base (one point, two from wave 10), so every player meets
+ * their own share of the wave and none waits behind a teammate.
+ */
+function spawnFronts(world, sv, n, targets) {
   const blds = world.buildingList.filter((b) => !b.dead && b.owner >= 0 && !b.def.wall);
   const scored = edgePoints(world).map((p) => {
     let d = Infinity;
@@ -146,59 +166,21 @@ function spawnPoints(world, sv, n) {
   });
   let far = scored.filter((p) => p.d >= 30);
   if (far.length < 2) far = scored.sort((a, b) => b.d - a.d).slice(0, 4);
-  sv.rng.shuffle(far);
-  const k = n >= 15 ? 3 : n >= 5 ? 2 : 1;
-  return reachablePoints(world, far.slice(0, Math.min(k, far.length)));
-}
-
-/**
- * Move each spawn point whose nearby ground cannot reach the players (deep woods, a sea or a
- * ridge on the newer landscapes, DESIGN 6.7) to the nearest ground a Titan can walk from to
- * their bases, so no monster of a wave is stranded and every wave can be cleared.
- */
-function reachablePoints(world, points) {
-  const map = world.map;
-  const w = map.width;
-  const h = map.height;
-  const grid = map.pass3; // 3-wide ground: Titans lead waves too
-  const reach = new Uint8Array(w * h);
-  const queue = new Int32Array(w * h);
-  let tail = 0;
-  for (const b of world.buildingList) {
-    if (b.dead || b.owner < 0) continue;
-    const s = map.nearestPassable(b.x, b.y, 12, true);
-    if (!s) continue;
-    const i = s.ty * w + s.tx;
-    if (!reach[i]) {
-      reach[i] = 1;
-      queue[tail++] = i;
-    }
-  }
-  if (!tail) return points;
-  for (let head = 0; head < tail; head++) {
-    const i = queue[head];
-    const x = i % w;
-    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
-      if (j < 0 || j >= w * h || reach[j] || grid[j] !== 1) continue;
-      reach[j] = 1;
-      queue[tail++] = j;
-    }
-  }
-  const ok = (tx, ty) => reach[ty * w + tx] === 1;
-  return points.map((p) => {
-    const near = map.nearestPassable(p.x, p.y, 20, false); // where spawnUnit would put a monster
-    if (near && ok(near.tx, near.ty)) return p;
-    const t = map.spiralNearest(p.x, p.y, w + h, ok);
-    return t ? { ...p, x: t.tx + 0.5, y: t.ty + 0.5 } : p;
+  sv.rng.shuffle(far); // ties broken by the seed
+  const k = n >= 10 ? 2 : 1;
+  return targets.map((t) => {
+    const near = far.slice().sort((a, b) => hyp(a.x - t.x, a.y - t.y) - hyp(b.x - t.x, b.y - t.y));
+    return { player: t.player, points: near.slice(0, Math.min(k, near.length)) };
   });
 }
 
-/** The nearest building of a player still in the game (walls are broken through on the way, not hunted). */
-export function nearestTarget(world, x, y) {
+/** The nearest building of a player still in the game, or of `player` only (walls are broken through on the way, not hunted). */
+export function nearestTarget(world, x, y, player = -1) {
   let best = null;
   let bd = Infinity;
   for (const b of world.buildingList) {
     if (b.dead || b.owner < 0 || b.def.wall) continue;
+    if (player >= 0 && b.owner !== player) continue;
     const p = world.players[b.owner];
     if (!p || p.defeated) continue;
     const d = hyp(b.x - x, b.y - y);
@@ -220,39 +202,52 @@ export function edgeName(w, h, x, y) {
 function spawnWave(world, sv, n) {
   const players = world.players.length;
   const plan = wavePlan(n, players, sv.rng);
-  const points = spawnPoints(world, sv, n);
+  const targets = targetPlayers(world);
+  if (!targets.length) return;
+  const fronts = spawnFronts(world, sv, n, targets);
   sv.monsters = sv.monsters.filter((u) => !u.dead); // (pruned once a second; count only the living here)
   const room = Math.max(0, SURVIVAL_MAX_ALIVE - sv.monsters.length);
   const boost = waveBoost(n);
   const bboost = bossBoost(n, players);
   const spawned = [];
+  const groups = fronts.map(() => []);
   let boss = '';
+  // The boss goes at each player in turn (wave 5 at the first, wave 10 at the next...); the rest are dealt out
+  // one by one, so every player gets an even share.
+  const first = isBossWave(n) ? (n / SURVIVAL_BOSS_EVERY - 1) % fronts.length : 0;
   for (let i = 0; i < plan.length && spawned.length < room; i++) {
     const type = plan[i];
     const titan = i === 0 && isBossWave(n);
-    const p = points[i % points.length];
+    const fi = (first + i) % fronts.length;
+    const f = fronts[fi];
+    const p = f.points[Math.floor(i / fronts.length) % f.points.length];
     const a = sv.rng.next() * Math.PI * 2;
     const r = titan ? 0 : 1 + sv.rng.next() * 2.5;
     const u = world.spawnUnit(NEUTRAL, type, p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, { boost: titan ? bboost : boost, silent: true });
     if (!u) continue;
     u.wave = n;
+    u.waveTarget = f.player;
     if (titan) boss = type;
     spawned.push(u);
+    groups[fi].push(u);
   }
   sv.monsters.push(...spawned);
   // A wave the cap left empty is never "beaten": no reward for it.
   if (spawned.length) sv.alive.set(n, spawned.length);
-  // Each group marches on the players' nearest building.
-  for (const p of points) {
-    const group = spawned.filter((u) => hyp(u.x - p.x, u.y - p.y) < 12);
-    send(world, group);
-  }
-  const p0 = points[0] || { x: world.map.width / 2, y: 0 };
+  // Each player's share marches on that player's nearest building, and the player is told where it comes from.
+  fronts.forEach((f, fi) => {
+    const group = groups[fi];
+    if (!group.length) return;
+    send(world, group, f.player);
+    const p0 = f.points[0];
+    world.emit({ type: 'waveFront', n, player: f.player, count: group.length, x: Math.round(p0.x), y: Math.round(p0.y) });
+  });
+  const p0 = fronts[0].points[0] || { x: world.map.width / 2, y: 0 };
   world.emit({ type: 'wave', n, count: spawned.length, boss, x: Math.round(p0.x), y: Math.round(p0.y) });
 }
 
-/** Send monsters with nothing to do at the nearest player building. */
-function send(world, units) {
+/** Send monsters at the nearest building of `player` (any player's once that one has none left). */
+function send(world, units, player = -1) {
   if (!units.length) return;
   let cx = 0;
   let cy = 0;
@@ -260,7 +255,9 @@ function send(world, units) {
     cx += u.x;
     cy += u.y;
   }
-  const t = nearestTarget(world, cx / units.length, cy / units.length);
+  cx /= units.length;
+  cy /= units.length;
+  const t = (player >= 0 && nearestTarget(world, cx, cy, player)) || nearestTarget(world, cx, cy);
   if (t) groupOrder(world, units, t.x, t.y, 'attackMove', false);
 }
 
@@ -292,8 +289,8 @@ export function updateSurvival(world) {
       world.emit({ type: 'waveCleared', n, gold });
     }
   }
-  // Idle monsters (their building fell, or they finished a fight) go for the next one, each on its own.
-  for (const u of idle) send(world, [u]);
+  // Idle monsters (their building fell, or they finished a fight) go for their player's next one, each on its own.
+  for (const u of idle) send(world, [u], u.waveTarget ?? -1);
 }
 
 /** Snapshot record of the trial: waves out so far and wave monsters alive. */

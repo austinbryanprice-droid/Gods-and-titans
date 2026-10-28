@@ -100,6 +100,7 @@ export const EVENT_SHAPES = [
   ['gameOver', 'winningTeam', 'how'],
   ['wave', 'n', 'count', 'boss', 'x', 'y'], // Trial of the Titans (DESIGN 5.14)
   ['waveCleared', 'n', 'gold'],
+  ['waveFront', 'n', 'player', 'count', 'x', 'y'], // a player's share of a wave (5.14)
   ['godPower', 'player', 'power', 'x', 'y'],
 ].map(([type, ...keys]) => ({ type, keys }));
 const SHAPES_BY_TYPE = new Map();

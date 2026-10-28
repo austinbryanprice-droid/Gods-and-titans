@@ -1041,19 +1041,27 @@ export class Game {
       case 'objective':
         this.onObjective(ev);
         break;
+      case 'waveFront':
+        // My share of the wave (it comes just before the 'wave' event): where it comes from, for the banner.
+        if (ev.player === vs.myIndex) this.myFront = { n: ev.n, count: ev.count, x: ev.x, y: ev.y };
+        break;
       case 'wave': {
-        // Trial of the Titans: a wave comes out of the map's edge.
-        const from = edgeName(vs.width, vs.height, ev.x, ev.y);
+        // Trial of the Titans: a wave comes out of the map's edges, a share of it at each player.
+        const mine = this.myFront && this.myFront.n === ev.n ? this.myFront : null;
+        const at = mine || ev;
+        const from = edgeName(vs.width, vs.height, at.x, at.y);
         const boss = ev.boss ? UNITS[ev.boss] : null;
         if (boss) {
-          hud.showBanner(`Wave ${ev.n}: ${boss.name} comes from the ${from}!`, 'titan');
+          hud.showBanner(ev.count > 1 ? `Wave ${ev.n}: ${boss.name} leads ${ev.count - 1} monsters!` : `Wave ${ev.n}: ${boss.name} comes!`, 'titan');
           sfx.play('summon_titan', { volume: 0.8 });
         } else {
-          hud.showBanner(`Wave ${ev.n}: ${ev.count} monsters come from the ${from}!`, 'danger');
+          hud.showBanner(`Wave ${ev.n}: ${ev.count} monsters!`, 'danger');
           sfx.play('horn', { volume: 0.7 });
         }
-        hud.minimap.ping(ev.x, ev.y, boss ? '#ffc840' : '#ff3a2a');
-        if (this.input) this.input.noteAlert(ev.x, ev.y);
+        if (mine && mine.count < ev.count) hud.message(`${mine.count} of them come at you from the ${from}.`, 'alert', { icon: '🐉' });
+        else hud.message(`They come from the ${from}.`, 'alert', { icon: '🐉' });
+        hud.minimap.ping(at.x, at.y, boss ? '#ffc840' : '#ff3a2a');
+        if (this.input) this.input.noteAlert(at.x, at.y);
         break;
       }
       case 'waveCleared':
