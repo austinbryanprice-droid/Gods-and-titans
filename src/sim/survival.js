@@ -179,6 +179,7 @@ function spawnWave(world, sv, n) {
   const players = world.players.length;
   const plan = wavePlan(n, players, sv.rng);
   const points = spawnPoints(world, sv, n);
+  sv.monsters = sv.monsters.filter((u) => !u.dead); // (pruned once a second; count only the living here)
   const room = Math.max(0, SURVIVAL_MAX_ALIVE - sv.monsters.length);
   const boost = waveBoost(n);
   const bboost = bossBoost(n, players);
