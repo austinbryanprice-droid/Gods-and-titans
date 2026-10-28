@@ -242,7 +242,7 @@ export class World {
       dmgMult: 1, armorNow: def.armor, speedNow: def.speed, atkSpeedMult: 1, lifesteal, regen, shield: 0,
       stunned: false, invuln: false, slowPct: 0,
       dead: false, constructed: true, buildProgress: 1, queue: null, size: 0, amount: 0,
-      lastGather: null, camp: null,
+      lastGather: null, camp: null, jamT: 0,
       // Engagement bookkeeping (combat.js / surround.js): current target id, ticks approaching it,
       // ticks blocked, last progress check, the melee attack spot, and attackers claiming spots on us.
       engId: 0, engT: 0, blockedT: 0, engD: 0, engCk: 0, atk: null, claimers: null,

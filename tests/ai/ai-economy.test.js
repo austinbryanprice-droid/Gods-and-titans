@@ -5,7 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld } from '../../src/sim/world.js';
 import { createAI } from '../../src/ai/ai.js';
-import { minersFor } from '../../src/ai/economy.js';
+import { minersFor, shiftHelps } from '../../src/ai/economy.js';
+import { PANTHEON_LIST } from '../../src/data/index.js';
 import { TICK_RATE, MINE_SLOTS } from '../../src/config.js';
 
 /** A generated small map with player 0 run by the AI and player 1 idle. */
@@ -91,4 +92,53 @@ test('over the pop cap after a raid, the AI still rebuilds its Town Center and h
   assert.ok(world.buildingsOf(0).some((b) => b.type === 'town_center' && b.constructed), 'Town Center rebuilt');
   assert.ok(p.popCap >= p.popUsed, `houses back (${p.popUsed}/${p.popCap})`);
   assert.equal(ai.ai.errors, 0);
+});
+
+test('a worker moves between gold and wood only when that closes a real gap', () => {
+  // (need of the job it would join, need of the job it would leave; negative = a surplus)
+  assert.equal(shiftHelps(2, 0), true); // the other job is full
+  assert.equal(shiftHelps(1, -1), true); // the other job has one too many
+  assert.equal(shiftHelps(3, 1), true); // both short, this one much more
+  assert.equal(shiftHelps(2, 2), false); // both short alike: moving would only swap the gap
+  assert.equal(shiftHelps(2, 1), false); // ... and the move back would be just as good
+  assert.equal(shiftHelps(1, 0), false);
+  assert.equal(shiftHelps(0, -3), false);
+});
+
+test('AI workers are not sent back and forth between a mine and the trees', () => {
+  // Found in an AI-vs-AI game (seed 3, Hindu v Greek): short of workers for both gold and wood, the
+  // AI moved one worker to wood and back to gold every half second for minutes; it never arrived.
+  const ids = PANTHEON_LIST.map((p) => p.id);
+  const seed = 3;
+  const world = createWorld({
+    version: '0.1.0',
+    seed,
+    mapSize: 'small',
+    players: [ids[seed % ids.length], ids[(seed * 3 + 1) % ids.length]].map((pantheon, i) => ({ index: i, name: `AI ${i}`, team: i + 1, pantheon, kind: 'ai', difficulty: 'normal' })),
+  });
+  const ais = [0, 1].map((i) => createAI(world, i, 'normal'));
+  const orders = new Map(); // unit id -> ticks of its gather orders
+  for (const a of ais) {
+    const issue = a.ai.issue.bind(a.ai);
+    a.ai.issue = (cmd) => {
+      if (cmd.type === 'gather') for (const id of cmd.units) (orders.get(id) || orders.set(id, []).get(id)).push(world.tickCount);
+      return issue(cmd);
+    };
+  }
+  const end = 12 * 60 * TICK_RATE;
+  while (world.tickCount < end && !world.gameOver) {
+    for (const a of ais) a.tick();
+    world.tick();
+    world.events.length = 0;
+    world.felled.length = 0;
+  }
+  // The most gather orders one worker got within any 30 s.
+  let worst = 0;
+  for (const ticks of orders.values()) {
+    for (let i = 0, j = 0; j < ticks.length; j++) {
+      while (ticks[j] - ticks[i] > 30 * TICK_RATE) i++;
+      worst = Math.max(worst, j - i + 1);
+    }
+  }
+  assert.ok(worst <= 8, `a worker got ${worst} gather orders within 30 s`);
 });
