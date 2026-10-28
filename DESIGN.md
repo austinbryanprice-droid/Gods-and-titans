@@ -1573,7 +1573,7 @@ per-frame budget, so a revealed army appears over a few frames.
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
-  Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
+  Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
@@ -1854,6 +1854,36 @@ per-frame budget, so a revealed army appears over a few frames.
   sources sounding at once and of nodes made per second, the two things that load tracks, inside limits above
   today's. `tools/music-lab.html` plays any theme at any intensity.
 
+### 9.1 Career and achievements (src/game/career.js, src/game/career-tracker.js, src/data/achievements.js, src/ui/menu-career.js)
+
+Client only: nothing goes over the wire and the sim does not know about it. The career lives in
+localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
+`sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
+and wins per pantheon, records (most kills, most gathered, longest game, best survival wave once a
+survival mode exists: `recordMatch` takes an optional `wave`), the last 12 games, unlocked
+achievements with the time, and the ones not yet seen.
+
+- `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
+  events and snapshots: gods and Titans summoned (`spawn`), enemy Titans falling and own non-wall
+  buildings lost (`death`), `tierUp`, `levelUp`, `rankUp`, and once a game second the player record
+  (gods on the field, kills, gathered) and own entities (best god level and rank, a finished Manor or
+  stone wall). The sides come from the setup: own pantheon, team size, enemies with kind and AI difficulty,
+  and whether the Decade of Peace is on.
+- An achievement is `{ id, group, name, icon, desc, test(m, c), progress?(c) }`: `m` the match's facts,
+  `c` the career with the match counted. Mid-match the tracker checks with `m.result` null, so the ones
+  that need no result (Summon a Titan, a Champion, a Manor...) unlock at once: a feed line "Achievement
+  unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
+  draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
+  after its first minute (one the host ended, or left in its first minute, is not counted).
+- 35 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+  (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
+  losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
+  (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
+- Game-over screen: under the statistics, a card per achievement the match unlocked and a line
+  "Career: W wins in G games (P%) · U of 35 achievements". Title screen: a Career button (a red count of
+  unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
+  the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
+
 ## 10. AI (src/ai/)
 
 `createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
@@ -2111,6 +2141,7 @@ src/ui/hud.js, hud.css, input.js, command-card.js, minimap.js  HUD owner
 src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
 src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
 src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
+src/game/career*.js, src/data/achievements.js, src/ui/menu-career.js  career owner (9.1)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)
