@@ -8,8 +8,7 @@ import { createAI } from '../../src/ai/ai.js';
 import { PROFILES, profileFor } from '../../src/ai/profiles.js';
 import { DIFFICULTIES as LOBBY_DIFFICULTIES } from '../../src/net/lobby.js';
 import { DIFFICULTIES as MENU_DIFFICULTIES, slotKindOptions, kindPatch } from '../../src/ui/menu-model.js';
-import { TICK_RATE, AI_THINK_INTERVAL, AI_INCOME_BONUS, CARRY_AMOUNT } from '../../src/config.js';
-import { deposit } from '../../src/sim/economy.js';
+import { TICK_RATE, AI_THINK_INTERVAL } from '../../src/config.js';
 import { makeMap, makeSetup } from '../sim/helpers.js';
 
 function step(world, ais, seconds, each) {
@@ -26,16 +25,14 @@ test('Brutal is a difficulty everywhere: lobby, menu, AI profile and think rate'
   assert.deepEqual(LOBBY_DIFFICULTIES, ['easy', 'normal', 'hard', 'brutal']);
   assert.deepEqual(MENU_DIFFICULTIES, LOBBY_DIFFICULTIES);
   const opts = slotKindOptions({ kind: 'open' }, 1, { myIndex: 0, online: false });
-  assert.ok(opts.some((o) => o.value === 'ai:brutal' && o.label === `AI — Brutal (gathers ${Math.round(AI_INCOME_BONUS.brutal * 100)}% faster)`));
+  assert.ok(opts.some((o) => o.value === 'ai:brutal' && o.label === 'AI — Brutal'));
   assert.deepEqual(kindPatch('ai:brutal'), { kind: 'ai', difficulty: 'brutal' });
   assert.equal(profileFor('brutal'), PROFILES.brutal);
   assert.ok(AI_THINK_INTERVAL.brutal < AI_THINK_INTERVAL.hard);
   const { hard, brutal } = PROFILES;
-  // Hard's play, thinking faster and raiding more often; its edge is the gather bonus the menu names.
+  // Hard's play, thinking faster and raiding more often, and as fair as the rest.
   assert.ok(brutal.raids.every < hard.raids.every && brutal.raids.from < hard.raids.from);
   assert.equal(brutal.pullWounded, hard.pullWounded);
-  assert.ok(AI_INCOME_BONUS.brutal > 0);
-  for (const d of ['easy', 'normal', 'hard']) assert.ok(!AI_INCOME_BONUS[d], d);
   assert.ok(opts.some((o) => o.value === 'ai:hard' && o.label === 'AI — Hard'));
   // Easy and Normal play as before: no raids, no wounded pull.
   for (const d of ['easy', 'normal']) {
@@ -47,24 +44,6 @@ test('Brutal is a difficulty everywhere: lobby, menu, AI profile and think rate'
     { index: 1, name: 'B', team: 2, pantheon: 'norse', kind: 'ai', difficulty: 'normal' },
   ] }), 0, 'brutal');
   assert.equal(ai.ai.difficulty, 'brutal');
-});
-
-test('only a Brutal computer player gets the gather bonus, on every load it delivers', () => {
-  const world = createWorld({ version: '0.1.0', seed: 1, mapSize: 'small', players: [
-    { index: 0, name: 'You', team: 1, pantheon: 'norse', kind: 'human', difficulty: null },
-    { index: 1, name: 'AI (Hard)', team: 2, pantheon: 'norse', kind: 'ai', difficulty: 'hard' },
-    { index: 2, name: 'AI (Brutal)', team: 3, pantheon: 'norse', kind: 'ai', difficulty: 'brutal' },
-    { index: 3, name: 'Odd', team: 4, pantheon: 'norse', kind: 'human', difficulty: 'brutal' },
-  ] });
-  const got = world.players.map((p, i) => {
-    const u = world.unitsOf(i).find((w) => w.def.class === 'worker');
-    const before = p.gold;
-    u.carry = 'g';
-    u.carryAmount = CARRY_AMOUNT;
-    deposit(world, u);
-    return p.gold - before;
-  });
-  assert.deepEqual(got, [CARRY_AMOUNT, CARRY_AMOUNT, CARRY_AMOUNT * (1 + AI_INCOME_BONUS.brutal), CARRY_AMOUNT]);
 });
 
 test('a Hard AI raids the Worshippers at an unguarded mine, kills some and brings its squad home', () => {

@@ -139,9 +139,9 @@ export const PROFILES = {
   },
 };
 
-// Brutal: Hard's play, thinking faster and raiding more often, with a gather bonus
-// (AI_INCOME_BONUS in config.js, applied by the sim). Sharper fair timings were measured
-// and made no difference, so the bonus is what puts it above Hard.
+// Brutal: Hard's play, thinking faster and raiding more often; fair, like every AI (no bonus).
+// Sharper fair timings (earlier tiers, more workers, bolder waves, pickier casts) were measured
+// and made no difference, so it keeps Hard's numbers.
 PROFILES.brutal = {
   ...PROFILES.hard,
   think: AI_THINK_INTERVAL.brutal,

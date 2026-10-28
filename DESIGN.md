@@ -2348,7 +2348,7 @@ games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, 
 big fights); retreat badly hurt gods to base. It combines no Houses into Manors (5.3: it keeps building Houses ahead of its cap) and builds no walls, and wall segments are invisible to its scans (`worldDigest`,
 `scanWorld`, team targeting): they are neither buildings it counts nor targets it picks, and an army shut out by a
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
-once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats; Brutal's gather bonus is the one exception, below). Army size stops at the
+once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats), and so is Brutal. Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard and brutal 93 %), so normal and harder fill the
 population cap and easy stays well below it. In the Trial of the Titans (5.14) the wave monsters count as enemy
 units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
@@ -2362,8 +2362,8 @@ health or more within the rain; a strike on the enemy unit whose surroundings (t
 enemy health, at least 1,800 (a cataclysm 3,600, where an enemy building counts a quarter of its health), and only
 where its team can see (the sim's own `powerRefusal` decides). Easy's `castThreshold` raises every bar.
 
-**Difficulties** (`src/ai/profiles.js`): Easy, Normal, Hard and Brutal, every number in one profile each. Easy,
-Normal and Hard play fair: the same resources, rules and units as a player; Brutal's one bonus is below. (They all
+**Difficulties** (`src/ai/profiles.js`): Easy, Normal, Hard and Brutal, every number in one profile each. All
+four play fair: the same resources, rules and units as a player, with no bonus at any level. (They all
 read the whole World, as they always have, so none of them scouts.) Hard and Brutal play smarter than Normal in two ways:
 
 - **Worker raids** (`src/ai/raid.js`, profile `raids`): while the main army waits at home with enough left to hold
@@ -2388,18 +2388,16 @@ Every difficulty steers its army by where the bulk of it stands: the median posi
 (`centroid` in `src/ai/military.js`), not their mean, which stragglers walking out from home used to drag 30
 tiles back, so a siege kept restarting its march and a winning army stood idle by its first waypoint.
 
-**Brutal** is Hard's play thinking every 3 ticks and raiding more often, plus the one AI bonus in the game: every
-load of gold and wood its Worshippers deliver counts 20 % more (`AI_INCOME_BONUS` in `src/config.js`, set on the
-sim's player record as `income` for an `ai` slot of that difficulty; mines empty at the normal rate). The lobby's
-dropdown says so: "AI — Brutal (gathers 20% faster)". Earlier tiers, more workers, earlier and bolder waves and
-pickier god casting were all measured on top of Hard without the bonus and made no difference (28 to 36 wins in
-64), so Brutal keeps Hard's numbers.
+**Brutal** is Hard's play thinking every 3 ticks and raiding more often, and it plays fair like the rest (a 20 %
+gather bonus was tried and taken out: the AIs never cheat). Earlier tiers, more workers, earlier and bolder waves
+and pickier god casting were all measured on top of Hard and made no difference (28 to 36 wins in 64), so Brutal
+keeps Hard's numbers. It is a little sharper than Hard rather than much stronger.
 
 Measured (headless games like `tools/ai-tournament.mjs`, small maps, every map played twice with the sides
 swapped). Before the god powers (4.11) came in, the new Hard beat the Hard from before in 38 of 64 games. With
 them the AIs spend their strikes on raiding squads, and the new Hard and the Hard from before come out even (129
 to 127 in 256 games): Hard now plays smarter rather than measurably stronger. Hard beats Normal in 54 of 64;
-Brutal beats the new Hard in 91 of 128.
+Brutal against the new Hard wins 28 to 36 of 64, within the noise of a 64-game run.
 Army mixes chosen to "counter" the enemy were tried and dropped: a strength-per-gold pick, fewer archers, more
 archers and a mix that answers the enemy's melee and ranged shares all did no better than the plain mix (the
 strength-per-gold pick and fewer archers clearly worse). With no damage types in the game the one counter that
