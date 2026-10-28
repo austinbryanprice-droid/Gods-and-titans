@@ -13,7 +13,6 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
 import { edgeName } from '../sim/survival.js';
-import { recordSurvivalWave } from './survival-record.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
@@ -29,6 +28,8 @@ import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
+import { CareerTracker } from './career-tracker.js';
+import { getCareer } from './career.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -209,6 +210,7 @@ export class Game {
     this.tab = null; // TabAttention: the flashing title of a tab left in the background
     this.alerts = null; // AlertEngine
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
+    this.career = null; // CareerTracker: this match's facts for the career and the achievements
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -269,6 +271,9 @@ export class Game {
       this.alerts.dispose();
       this.tab.dispose();
     });
+    // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
+    this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
+    this.offs.push(() => this.career.dispose());
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
@@ -677,16 +682,18 @@ export class Game {
       const wt = vs.gameOver.winningTeam;
       const survival = typeof vs.survivalActive === 'function' && vs.survivalActive();
       const result = survival ? 'survival' : wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
-      // Trial of the Titans: the score is the wave reached, kept in this browser (survival-record.js) for players who took part.
+      // Trial of the Titans: the score is the wave reached; the career keeps the best (best.wave) for players who took part.
       const wave = survival ? (Number.isInteger(vs.gameOver.wave) ? vs.gameOver.wave : (vs.survival() || {}).wave || 0) : 0;
-      const record = survival && vs.me ? recordSurvivalWave(wave, { players: vs.players.length, pantheon: vs.me.pantheon }) : null;
+      const previous = survival ? getCareer().best.wave : 0;
       if (this.input) this.input.cancelMode();
+      const unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
+      const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, wave, record });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, wave, record });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -883,6 +890,34 @@ export class Game {
     }
   }
 
+  /** Achievements unlocked while the match runs: one line each, with a chime. */
+  onAchievements(list) {
+    if (this.disposed || !this.hud) return;
+    for (const a of list) this.hud.message(`Achievement unlocked: ${a.name}`, 'good', { icon: a.icon });
+    sfx.play('tier_up', { volume: 0.7 });
+  }
+
+  /**
+   * Leaving before the game-over screen counts in the career as a loss: a player already defeated
+   * (whose allies fought on), or one who quits a running match after its first minute. A match the
+   * host ended, or one left in its first minute, is not counted.
+   */
+  countLeave() {
+    const vs = this.viewState;
+    if (!this.career || !vs || vs.gameOver) return;
+    const defeated = !!(vs.me && vs.me.defeated);
+    if (defeated || (!this.ended && (vs.time || 0) >= 60)) {
+      try {
+        // A Trial of the Titans left early counts as a trial that reached its current wave, not a loss.
+        const sv = typeof vs.survival === 'function' ? vs.survival() : null;
+        if (sv) this.career.finish('survival', { wave: sv.wave });
+        else this.career.finish('defeat');
+      } catch (err) {
+        console.warn('[game] career record failed', err);
+      }
+    }
+  }
+
   /** "Your wall was breached!" at most once every few seconds while segments fall. */
   noteBreach(hud) {
     const now = performance.now();
@@ -986,6 +1021,7 @@ export class Game {
   /** Leave the match and go back to the title screen. */
   quitToMenu() {
     if (this.disposed) return;
+    this.countLeave();
     this.dispose();
     if (this.onExit) this.onExit();
   }

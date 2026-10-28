@@ -8,7 +8,6 @@
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
 import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY } from '../config.js';
-import { bestSurvivalWave } from '../game/survival-record.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
@@ -18,6 +17,8 @@ import { h, setChildren, copyText } from './menu-dom.js';
 import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
+import { renderCareerContent } from './menu-career.js';
+import { getCareer, markSeen } from '../game/career.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
@@ -241,6 +242,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     lobby: lobbyScreen,
     join: joinScreen,
     howto: howToScreen,
+    career: careerScreen,
     settings: settingsScreen,
   };
 
@@ -254,6 +256,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
     const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    const newCount = getCareer().unseen.length;
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
     const el = h('div.mw-title-screen',
@@ -273,6 +276,8 @@ export function createMenu({ root, onStart, onIntro = null }) {
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
+          h('button.mw-btn.mw-btn--small.mw-career-btn', { type: 'button', onclick: () => go('career') }, 'Career',
+            newCount ? h('span.mw-new-badge', { title: `${newCount} new achievement${newCount === 1 ? '' : 's'}` }, String(newCount)) : null),
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('settings') }, 'Settings'),
         ),
       ),
@@ -705,7 +710,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       peaceBtns.forEach((b) => b.classList.toggle('is-active', Number(b.dataset.peace) === peace));
       peaceRow.hidden = peace === 0;
       survivalRow.hidden = !survival;
-      const best = survival ? bestSurvivalWave() : 0;
+      const best = survival ? getCareer().best.wave : 0;
       survivalBest.textContent = best > 0 ? `Your best: wave ${best}.` : '';
       modeStatic.textContent = M.gameModeLabel(st());
     }
@@ -975,6 +980,23 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('section.mw-panel.mw-howto-panel',
         h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'How to Play'), h('span.mw-head-spacer')),
         h('div.mw-scroll', renderHowToContent()),
+      ),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
+  }
+
+  // ---------------------------------------------------------- career
+
+  function careerScreen() {
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const c = getCareer();
+    const unseen = new Set(c.unseen);
+    markSeen(); // the "New" badges show this time only
+    const el = h('div.mw-center-screen.mw-wide-screen',
+      h('section.mw-panel.mw-howto-panel.mw-career-panel',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', `Career of ${getSettings().name}`), h('span.mw-head-spacer')),
+        h('div.mw-scroll', renderCareerContent(c, unseen),
+          h('p.mw-hint', 'Your career is kept in this browser on this device. A game counts once it ends, or when you leave it after its first minute.')),
       ),
     );
     return { el, focus: backBtn, onEscape: () => go('title') };

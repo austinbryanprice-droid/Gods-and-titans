@@ -8,7 +8,8 @@ import { Selection } from '../../src/ui/hud-selection.js';
 import { ViewState } from '../../src/game/view-state.js';
 import { saveSettings } from '../../src/settings.js';
 import { survivalMode, gameModeLabel, startBlockReason } from '../../src/ui/menu-model.js';
-import { SURVIVAL_KEY, bestSurvivalWave, recordSurvivalWave, survivalRecord } from '../../src/game/survival-record.js';
+import { getCareer, recordMatch, resetCareer, careerSummary } from '../../src/game/career.js';
+import { ACHIEVEMENT_BY_ID } from '../../src/data/achievements.js';
 import { waveTime } from '../../src/sim/survival.js';
 import { makeWorld } from '../sim/helpers.js';
 import { installFakeDom } from './fake-dom.js';
@@ -99,22 +100,24 @@ test('the lobby names the mode and lets a lone player start it', () => {
   assert.equal(survivalMode({ ...lone, peace: 30 }), false, 'a peace wins');
 });
 
-test('the best wave is remembered in localStorage and survives bad data', () => {
-  const store = new Map();
-  globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
-  try {
-    assert.equal(bestSurvivalWave(), 0);
-    assert.deepEqual(recordSurvivalWave(6, { players: 2, pantheon: 'norse' }), { best: 6, previous: 0, isNew: true });
-    assert.deepEqual(recordSurvivalWave(4), { best: 6, previous: 6, isNew: false });
-    assert.equal(bestSurvivalWave(), 6);
-    const rec = survivalRecord();
-    assert.equal(rec.games, 2);
-    assert.equal(rec.last.wave, 4);
-    store.set(SURVIVAL_KEY, '{not json');
-    assert.ok(bestSurvivalWave() >= 0, 'unreadable data does not throw');
-    store.set(SURVIVAL_KEY, JSON.stringify({ best: -3, games: 'x' }));
-    assert.deepEqual(survivalRecord(), { best: 0, games: 0, last: null });
-  } finally {
-    delete globalThis.localStorage;
-  }
+test('a finished trial raises the best wave in the career, counts as a game but not as a win or a loss, and unlocks the wave achievements', () => {
+  resetCareer();
+  const m = { pantheon: 'norse', time: 1500, kills: 40, gathered: 9000, enemies: [], teamSize: 2 };
+  recordMatch({ ...m, result: 'victory' });
+  let got = recordMatch({ ...m, result: 'survival', wave: 12 });
+  let c = getCareer();
+  assert.equal(c.best.wave, 12);
+  assert.equal(c.games, 2);
+  assert.deepEqual([c.wins, c.losses, c.draws], [1, 0, 0]);
+  assert.equal(careerSummary(c).winRate, 1, 'the trial is left out of the win rate');
+  assert.equal(c.history[0].r, 'survival');
+  assert.ok(got.some((a) => a.id === 'hold_the_line'));
+  assert.ok(!Object.hasOwn(c.unlocked, 'titans_bane'));
+  assert.deepEqual(ACHIEVEMENT_BY_ID.titans_bane.progress(c), [12, 20]);
+  got = recordMatch({ ...m, result: 'survival', wave: 7 });
+  c = getCareer();
+  assert.equal(c.best.wave, 12, 'a worse trial keeps the best');
+  got = recordMatch({ ...m, result: 'survival', wave: 21 });
+  assert.ok(got.some((a) => a.id === 'titans_bane'));
+  resetCareer();
 });
