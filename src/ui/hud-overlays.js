@@ -13,6 +13,7 @@ import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
 import { MEDALS } from '../data/medals.js';
+import { SLOTS, saveInfo, savedAgo } from '../game/save-store.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -190,6 +191,9 @@ export class Overlays {
 
     const resume = btn('Resume', 'mw-btn--primary', () => this.closeMenu());
     const buttons = [resume];
+    // A solo match against the computer can be saved and carried on later (DESIGN 9.4).
+    const savable = typeof game.canSave === 'function' && game.canSave();
+    if (savable) buttons.push(btn('Save Game', '', () => this.openSaves()));
     if (!over && !defeated) {
       buttons.push(btn('Surrender', 'mw-btn--ghost is-danger', () => this.confirm(
         'Surrender?', 'Your buildings will crumble and you will be defeated.', 'Surrender',
@@ -205,7 +209,19 @@ export class Overlays {
     if (!over) {
       if (this.hostingOthers()) quitHint = 'The game ends for every player.';
       else if (game.session && !game.session.isHost) quitHint = 'An AI will take over your army.';
-      else quitHint = 'The battle will be lost.';
+      else quitHint = savable ? 'The battle will be lost. Save & Quit keeps it for Continue on the title screen.' : 'The battle will be lost.';
+    }
+    if (savable) {
+      buttons.push(btn('Save & Quit', 'mw-btn--ghost', (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = 'Saving…';
+        game.saveAndQuit().catch((err) => {
+          b.disabled = false;
+          b.textContent = 'Save & Quit';
+          if (game.hud) game.hud.message(`Could not save: ${err && err.message ? err.message : err}`, 'error');
+        });
+      }));
     }
     buttons.push(btn('Quit to Menu', 'mw-btn--ghost', () => {
       if (over) return game.quitToMenu();
@@ -235,6 +251,49 @@ export class Overlays {
     return wrap;
   }
 
+  /**
+   * The Save Game panel: the three slots with what each holds; a click saves there (over what was in it).
+   * Back (or Esc) returns to the game menu; the game stays paused throughout.
+   */
+  openSaves() {
+    const game = this.game;
+    const status = el('div', 'hud-ohint hud-save-status', 'Pick a slot. Saved games stay in this browser on this device.');
+    status.setAttribute('role', 'status');
+    const slotText = (slot) => {
+      const info = saveInfo(slot);
+      if (!info) return [el('b', null, `Slot ${slot}`), el('small', null, 'Empty')];
+      return [el('b', null, `Slot ${slot} · ${formatClock(info.time || 0)}`), el('small', null, `${info.label || 'Saved game'} · ${savedAgo(info.savedAt)}`)];
+    };
+    const rows = SLOTS.map((slot) => {
+      const b = el('button', 'mw-btn hud-obtn hud-save-slot', ...slotText(slot));
+      b.type = 'button';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.play('click');
+        rows.forEach((r) => (r.disabled = true));
+        status.textContent = 'Saving…';
+        game.saveGame(slot).then(() => {
+          b.replaceChildren(...slotText(slot));
+          status.textContent = `Saved to slot ${slot}.`;
+          sfx.play('select');
+        }, (err) => {
+          status.textContent = `Could not save: ${err && err.message ? err.message : err}`;
+          sfx.play('error');
+        }).finally(() => rows.forEach((r) => (r.disabled = false)));
+      });
+      return b;
+    });
+    const back = btn('Back', 'mw-btn--ghost', () => this.openMenu());
+    const node = this.panel('Save Game', null, el('div', 'hud-obtns is-col hud-save-slots', ...rows), status, el('div', 'hud-obtns', back));
+    if (this.current) {
+      // Swap panels without running the menu's onHide (keeps the pause).
+      this.current.el.remove();
+      this.current = null;
+    }
+    this.show('saves', node, () => this.openMenu());
+    setTimeout(() => rows[0].focus({ preventScroll: true }), 0);
+  }
+
   /** True on a host with other players connected: the game runs here, so leaving ends it for them. */
   hostingOthers() {
     const s = this.game.session;
@@ -242,14 +301,14 @@ export class Overlays {
   }
 
   closeMenu() {
-    if (this.name === 'menu' || this.name === 'confirm') {
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves') {
       this.hide();
       this.game.setPaused(false);
     }
   }
 
   toggleMenu() {
-    if (this.name === 'menu' || this.name === 'confirm') this.closeMenu();
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves') this.closeMenu();
     else this.openMenu();
   }
 

@@ -2157,6 +2157,32 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
+### 9.4 Saved games (src/game/save-game.js, src/game/save-store.js, src/game/game-saves.js, src/sim/save-graph.js)
+A match against the computer (one human, the rest AI; not the guided first match) can be saved and carried on.
+- In the match: the F10 menu has **Save Game** (three slots, each showing its match, game time and when it was
+  saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
+  without counting the match in the career: it counts when it ends after being carried on). The game is also
+  autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
+  ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept.
+- Title screen: **Continue** (above Play vs AI) loads the newest save, autosave or slot; **Load Game** (small
+  button, shown once a save exists) lists them all with Load and Delete.
+- What is saved: the whole World (entities, map state, pathfinding queue, projectiles, statuses, powers, relics,
+  sites, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
+  `packGraph` (sim/save-graph.js): object identity and cycles, Maps, Sets, typed arrays, NaN, ±Infinity and -0
+  survive; class instances come back on their prototypes (`CLASSES` in save-game.js; the pathfinder's scratch
+  buffers are rebuilt, not saved); unit and building data, config and the generated map are stored by name and
+  looked up again (the map is generated again from the setup's seed). A function in the state throws with its
+  path, so a test catches new state that cannot be saved. Also kept: the fog explored, enemy buildings and mines
+  as last seen, the camera, control groups, the chronicle's samples and the career tracker's tally.
+- Determinism: the loaded game plays the same ticks exactly as the saved one would have (the packed state of both,
+  compared after 90 more seconds of AI-vs-AI play, is identical: tests/game/save-game.test.js, also for the Trial of
+  the Titans, the Decade of Peace and Sacred Victory). A loaded game's `HostSession` (`resumed: true`) drops the
+  saved tick's leftover events and brings the felled trees down in its first snapshot.
+- Storage: on this device only. The state (about 400 KB of JSON at minute 8 of a small map, gzipped with
+  `CompressionStream` to a few tens of KB) goes to IndexedDB `mythicwar-saves`; the slot list goes to
+  localStorage `mythicwar-saves`. `SAVE_FORMAT` is checked on load; a save from an older build of the game loads
+  as long as the state it holds still fits the code (a save that no longer does fails on the start screen).
+
 ## 10. AI (src/ai/)
 
 `createAI(world, playerIndex, difficulty) → { tick() }` (difficulty `'tutorial'` is the sleeping camp of 5.13,

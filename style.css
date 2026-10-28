@@ -1145,6 +1145,14 @@ kbd {
 .mw-new-badge { position: absolute; top: -0.55em; right: -0.45em; min-width: 1.6em; padding: 0.15em 0.4em; border-radius: 1em; background: #d8452c; color: #fff; font: 700 0.75em/1.2 var(--mw-font-display); letter-spacing: 0; box-shadow: 0 0 10px rgba(255, 90, 50, 0.6); }
 .mw-new-badge.mw-start-badge { top: 0.45em; right: 0.55em; padding: 0.2em 0.65em; font-size: 0.6em; letter-spacing: 0.06em; white-space: nowrap; text-transform: uppercase; background: linear-gradient(180deg, #e9b44c, #b07a1c); color: #2a1a04; box-shadow: 0 0 12px rgba(255, 200, 90, 0.55); }
 
+/* Load Game screen and the title's Continue (src/ui/menu.js loadScreen) */
+.mw-load-panel { width: min(40em, 94vw); padding: 1.3em 1.6em 1.2em; }
+.mw-load-panel .mw-panel-head { margin-bottom: 0.8em; }
+.mw-save-list { display: flex; flex-direction: column; gap: 0.6em; }
+.mw-save-row { display: flex; align-items: center; gap: 0.6em; padding: 0.6em 0.8em; border: 1px solid var(--mw-line); border-radius: 0.5em; background: rgba(6, 8, 14, 0.45); }
+.mw-save-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15em; }
+.mw-save-text span { font-size: 0.85em; color: var(--mw-ink-dim); overflow-wrap: anywhere; }
+
 /* Career screen (src/ui/menu-career.js) */
 .mw-career-panel .mw-scroll > .mw-label { margin: 1.4em 0 0.6em; }
 .mw-car-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5em, 1fr)); gap: 0.6em; }
