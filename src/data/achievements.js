@@ -48,6 +48,10 @@ const pantheonAchievements = PANTHEON_LIST.map((p) => {
 /** Every achievement, in gallery order. */
 export const ACHIEVEMENTS = [
   // ---- career
+  { id: 'first_lessons', group: 'career', name: 'First Lessons', icon: '🎓', desc: 'Finish the guided first match (Learn to Play on the title screen).',
+    test: (m, c) => c.best.medal >= 1 },
+  { id: 'top_of_the_class', group: 'career', name: 'Top of the Class', icon: '🥇', desc: 'Earn the gold medal in the guided first match.',
+    test: (m, c) => c.best.medal >= 3 },
   { id: 'first_victory', group: 'career', name: 'First Victory', icon: '🏆', desc: 'Win a game.',
     test: (m, c) => c.wins >= 1, progress: (c) => count(c.wins, 1) },
   { id: 'seasoned', group: 'career', name: 'Seasoned Commander', icon: '🎖️', desc: 'Play 10 games to the end.',

@@ -6,6 +6,8 @@ A real-time strategy game in the style of Warcraft III, in low-poly 3D, that run
 
 Up to 4 players per match, each a person or a computer opponent (Easy, Normal or Hard). Play co-op against the computer or against each other.
 
+New to the game? **Learn to Play** on the title screen is a guided first match: an objective panel, an arrow to each target and glowing buttons walk you through gathering, building, praying, summoning a god, training soldiers and destroying a sleeping camp of raiders, with a gold, silver or bronze medal for how fast you win.
+
 ## Playing online with friends
 
 1. One player picks **Host Online Game** and sets up the slots (people, computer players, teams).

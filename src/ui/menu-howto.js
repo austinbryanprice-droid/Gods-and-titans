@@ -144,6 +144,7 @@ export function renderHowToContent() {
       `The host can pick the ${PEACE_NAME} game mode in the lobby: for ${PEACE_MINUTES_TEXT} no player can harm another with weapons or spells and nobody can build within ${PEACE_BUILD_GAP} tiles of an enemy Town Center (that ground turns red when you place a building), so everyone has time to build up and mass armies for one great battle. A countdown beside the game clock shows what is left, creatures still fight, and a horn sounds when the peace ends.`),
     step(7, '🔱', 'Know your pantheon',
       'Every pantheon plays its own way. Each has two blessings that work from the first second, an elite soldier trained at the Barracks, its own look, and its own creatures, gods and Titan. Hover the pantheon chip at the top left of the battlefield, or open Pantheons on the menu, to read yours.'),
+    h('p.mw-tip', h('strong', 'New here? '), 'Learn to Play on the title screen walks you through a whole first match, one objective at a time, against a sleeping camp of raiders, and gives a medal for the time you win in.'),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
   );
   const controls = h('div.mw-howto-controls',

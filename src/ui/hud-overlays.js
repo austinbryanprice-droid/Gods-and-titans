@@ -12,6 +12,7 @@ import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
+import { MEDALS } from '../data/medals.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -285,6 +286,16 @@ export class Overlays {
       el('div', 'hud-ach-cards', ...cards));
   }
 
+  /** The guided first match's medal, with the time the next better one needs (null without a medal). */
+  medalCard(medal) {
+    if (!medal) return null;
+    const better = MEDALS.filter((m) => m.rank > medal.rank).pop();
+    const hint = better ? `Win within ${formatClock(better.within)} for ${better.name.toLowerCase()}.` : 'The best there is.';
+    return el('div', `hud-medal is-${medal.id}`,
+      el('span', 'hud-medal-icon', medal.icon),
+      el('span', 'hud-medal-text', el('b', null, `${medal.name} medal`), el('small', null, hint)));
+  }
+
   /** "Career: 12 wins in 20 games (60%) · 9 of 35 achievements" (null for a spectator). */
   careerLine() {
     if ((this.game.viewState.myIndex ?? -1) < 0) return null;
@@ -296,17 +307,18 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen with the statistics table and what the match unlocked. */
-  showGameOver({ result, winningTeam, unlocked = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, medal = null, tutorial = false }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
-    const title = result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
-    const sub = result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
+    const title = result === 'victory' ? (tutorial ? 'Lesson Complete' : 'Victory') : result === 'defeat' ? 'Defeat' : 'Draw';
+    const sub = result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
       : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const node = el('div', `mw-panel hud-opanel hud-gameover is-${result}`,
       el('div', 'hud-go-crest', result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
+      this.medalCard(medal),
       this.statsTable(vs, winningTeam),
       this.unlockCards(unlocked),
       this.careerLine(),

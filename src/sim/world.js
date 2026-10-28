@@ -26,6 +26,7 @@ import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js'
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
 import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
+import { isTutorial, tutorialStart } from './tutorial.js';
 import { hyp, distPointRect } from './common.js';
 
 const ERRORS_GOLD = 'Not enough gold.';
@@ -114,7 +115,9 @@ export class World {
       const mine = this.mineList[i] || null;
       this.placeStartWorkers(i, tc, mine);
     });
-    spawnCreeps(this, mapData.camps || []);
+    // The guided first match (5.11) has no creep camps, a head start for the learner and a guarded enemy camp.
+    if (isTutorial(setup)) tutorialStart(this);
+    else spawnCreeps(this, mapData.camps || []);
     this.recomputePop();
     for (let i = 0; i < this.players.length; i++) this.recomputeTier(i, true);
     this.hash.rebuild(this.unitList);

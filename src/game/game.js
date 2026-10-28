@@ -28,6 +28,10 @@ import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
 import { CareerTracker } from './career-tracker.js';
+import { recordTutorial } from './career.js';
+import { TutorialDirector } from './tutorial.js';
+import { isTutorial } from '../sim/tutorial.js';
+import { medalFor } from '../data/medals.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -209,6 +213,7 @@ export class Game {
     this.alerts = null; // AlertEngine
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
+    this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -255,6 +260,10 @@ export class Game {
     const session = this.session;
     this.viewState = session.viewState;
     this.selection = new Selection(this.viewState);
+    // The guided first match (DESIGN 9.2): its objectives, read from the view and the selection; the HUD shows them.
+    if (isTutorial(session.setup) && session.isHost) {
+      this.tutorial = new TutorialDirector({ viewState: this.viewState, getSelection: () => this.selection.ids, onStep: (next, i, done) => this.onTutorialStep(next, done) });
+    }
 
     this.hud = new Hud({ root: this.hudRoot, game: this });
     if (session.mapMismatch) this.hud.setMapMismatch(true);
@@ -270,8 +279,11 @@ export class Game {
       this.tab.dispose();
     });
     // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
-    this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
-    this.offs.push(() => this.career.dispose());
+    // The guided first match is not a game of the career: its medal is kept instead (checkEnd).
+    if (!this.tutorial) {
+      this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
+      this.offs.push(() => this.career.dispose());
+    }
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
@@ -680,13 +692,16 @@ export class Game {
       const wt = vs.gameOver.winningTeam;
       const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
       if (this.input) this.input.cancelMode();
-      const unlocked = this.career ? this.career.finish(result) : null;
+      let unlocked = this.career ? this.career.finish(result) : null;
+      // The guided first match: a victory earns a medal by its game time, kept with the career.
+      const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
+      if (medal) unlocked = recordTutorial(medal.rank);
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, medal, tutorial: !!this.tutorial });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -694,6 +709,15 @@ export class Game {
       sfx.play('defeat');
       this.hud.overlays.showDefeated();
     }
+  }
+
+  /** A step of the guided first match was finished: say so, chime, and ping the next objective on the minimap. */
+  onTutorialStep(next, done) {
+    if (this.disposed || !this.hud) return;
+    if (done) this.hud.message(`Done: ${done.title}.`, 'good', { icon: '✅' });
+    sfx.play('tier_up', { volume: 0.55 });
+    const t = next && this.tutorial ? this.tutorial.target() : null;
+    if (t) this.hud.minimap.ping(t.x, t.y, '#ffd66e');
   }
 
   entityPos(id) {
