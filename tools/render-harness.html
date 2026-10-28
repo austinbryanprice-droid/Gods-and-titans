@@ -17,6 +17,7 @@
                     fill=200 then fills every player to that population, armies sent to the middle
                     (tools/fill-pop.mjs: the population cap's battle, tools/perf-late.mjs)
       seed=12345  size=small|medium  my=0 (-1 = spectator, sees all)
+      landscape=classic|highlands|rivers|islands|forest   the map's landscape (DESIGN 6.7)
       pantheons=greek,norse,...  players=2      quality=low|medium|high|ultra
       tod=cycle|golden|day|dusk|night|dawn|<hour 0..24>   time of day (default cycle: follows the sim clock from 08:00)
       t=20          simulate this many seconds before showing
@@ -94,6 +95,7 @@
         pantheon: pantheons[i % pantheons.length], color: PLAYER_COLORS[i], kind: i === 0 ? 'human' : 'ai', difficulty: 'normal',
       })),
     };
+    if (Q.get('landscape') && Q.get('landscape') !== 'classic') setup.landscape = Q.get('landscape');
     const world = createWorld(setup);
     const map = world.mapData;
     const vs = new ViewState({ setup, mapData: map, myIndex: Q.get('reveal') === '1' ? -1 : myIndex, interpDelayMs: 50 });

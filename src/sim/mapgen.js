@@ -21,6 +21,7 @@
 import { RNG, hashSeed } from './rng.js';
 import { MAP_SIZES, TERRAIN, TREE_WOOD, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT, SITE_CLEAR } from '../config.js';
 import { BUILDINGS, GOLD_MINE } from '../data/buildings.js';
+import { isLandscape } from '../data/landscapes.js';
 
 const { GRASS, DIRT, WATER, FOREST, ROCK, SAND } = TERRAIN;
 
@@ -42,6 +43,19 @@ const FRONT_DIST = 6; // a start's front yard: this far from its town center tow
 const POCKET_FILL_MAX = 60; // unreachable open pockets up to this size become forest
 const MAX_ATTEMPTS = 6;
 const SQRT_HALF = Math.sqrt(0.5);
+
+// Landscapes (src/data/landscapes.js): the same fair base layout with different ground between
+// the bases. forest: share of the free interior that is woods; lakes: side lakes on or off;
+// centers: the center features it may draw (null keeps the classic roll); lane: lane carve radius;
+// ridges / rivers / sea: the extra terrain pass (built from symmetric noise, so every start is
+// treated alike); rockLift: how high rock stands in the cosmetic heights.
+const LANDSCAPE_RULES = {
+  classic: { forest: [0.42, 0.5], lakes: true, centers: null, lane: 2.3, rockLift: 0.09 },
+  highlands: { forest: [0.2, 0.26], lakes: true, centers: ['lake', 'camp', 'open'], lane: 2.3, ridges: true, rockLift: 0.17, hills: 1.35 },
+  rivers: { forest: [0.34, 0.4], lakes: false, centers: ['open', 'camp'], lane: 2.3, rivers: true, rockLift: 0.09 },
+  islands: { forest: [0.34, 0.4], lakes: false, centers: ['camp'], lane: 2.3, sea: true, rockLift: 0.09 },
+  forest: { forest: [0.6, 0.66], lakes: true, centers: null, lane: 1.9, rockLift: 0.09 },
+};
 
 // Player index → symmetry image of the canonical (top-left) start.
 // 2 players: top-left, bottom-right. 3: top-left, bottom-right, top-right.
@@ -444,7 +458,7 @@ function ringTiles(n, x, y, s) {
 // ---------------------------------------------------------------------------
 // Layout planning
 
-function planLayout(rng, sym, pc, plan) {
+function planLayout(rng, sym, pc, plan, LS = LANDSCAPE_RULES.classic) {
   const { n, order, ks } = sym;
   const half = n / 2;
   const sc = n / 96;
@@ -556,7 +570,9 @@ function planLayout(rng, sym, pc, plan) {
   // Center feature.
   const roll = rng.next();
   // (No river in the team layout: its lakes would sit in the top-right base.)
-  const kind = order === 2 && !teamMode ? (roll < 0.34 ? 'river' : roll < 0.67 ? 'lake' : 'camp') : (roll < 0.5 ? 'lake' : 'camp');
+  let kind = order === 2 && !teamMode ? (roll < 0.34 ? 'river' : roll < 0.67 ? 'lake' : 'camp') : (roll < 0.5 ? 'lake' : 'camp');
+  // A landscape may draw from its own center features ('open': plain ground with a site or a lane crossing).
+  if (LS.centers) kind = LS.centers[Math.floor(roll * LS.centers.length)];
   const center = { kind, x: half, y: half, r: 0, level: n >= 112 ? 3 : 2 };
   const lakes = []; // all images: { x, y, r }
   let river = null;
@@ -611,6 +627,7 @@ function planLayout(rng, sym, pc, plan) {
   let lakeCount;
   if (order === 2) lakeCount = kind === 'camp' ? rng.int(1, 2) : rng.int(0, 1);
   else lakeCount = kind === 'camp' ? 1 : (rng.chance(0.5) ? 1 : 0);
+  if (!LS.lakes) lakeCount = 0;
   for (let placed = 0, tries = 0; placed < lakeCount && tries < 80; tries++) {
     const r = rng.range(3.4, 4.8) + (sc - 1) * 2;
     const lx = half2(rng.range(r + 7, order === 4 ? half - 2 : n - r - 7));
@@ -643,12 +660,14 @@ function resolveSize(mapSize) {
   return MAP_SIZES[mapSize] || MAP_SIZES.small;
 }
 
-function buildMap(seed, n, pc, attempt, plan) {
+function buildMap(seed, n, pc, attempt, plan, landscape = 'classic') {
   const teamMode = plan.mode === 'teams';
   const order = pc <= 2 || teamMode ? 2 : 4;
   const sym = new Symmetry(n, order);
   const { ks } = sym;
-  const rng = new RNG(hashSeed(`mythicwar-map|${seed}|${n}|${pc}|${attempt}${teamMode ? '|teams' : ''}`));
+  const LS = LANDSCAPE_RULES[landscape];
+  const tag = landscape === 'classic' ? '' : `|${landscape}`; // the classic map keeps its original seeds
+  const rng = new RNG(hashSeed(`mythicwar-map|${seed}|${n}|${pc}|${attempt}${teamMode ? '|teams' : ''}${tag}`));
   const N = n * n;
   const half = n / 2;
   const sc = n / 96;
@@ -679,7 +698,7 @@ function buildMap(seed, n, pc, attempt, plan) {
   const fShape = new Float64Array(N);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) fShape[y * n + x] = fDetail[x * n + y];
 
-  const L = planLayout(rng.fork('layout'), sym, pc, plan);
+  const L = planLayout(rng.fork('layout'), sym, pc, plan, LS);
   const lrng = rng.fork('local');
 
   // ---- Footprints (all images) ----
@@ -776,6 +795,9 @@ function buildMap(seed, n, pc, attempt, plan) {
     placed++;
   }
 
+  // ---- Landscape: ridges, rivers or the sea (every image alike, so starts stay fair) ----
+  if (LS.ridges || LS.rivers || LS.sea) landscapePass(n, sym, rng.fork(`landscape|${landscape}`), L, LS, terrainCamps, rock, water, dEdge);
+
   // ---- Base pockets, expansion clearings, camp and center clearings ----
   const back = new Uint8Array(N); // forced forest behind bases and expansion mines
   const clear = new Uint8Array(N); // forced open ground
@@ -826,7 +848,7 @@ function buildMap(seed, n, pc, attempt, plan) {
       if (!clear[i] && !back[i] && !water[i]) free.push(fForest[i]);
     }
   }
-  const thrForest = quantile(free, 1 - lrng.range(0.42, 0.5));
+  const thrForest = quantile(free, 1 - lrng.range(LS.forest[0], LS.forest[1]));
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
       const i = y * n + x;
@@ -939,7 +961,7 @@ function buildMap(seed, n, pc, attempt, plan) {
     for (const i of path) {
       const x = i % n;
       const y = (i - x) / n;
-      carve(x, y, 2.3);
+      carve(x, y, LS.lane);
       sym.stamp(road, x, y, 1);
     }
   }
@@ -1083,7 +1105,7 @@ function buildMap(seed, n, pc, attempt, plan) {
   const wood = new Uint16Array(N);
   for (let i = 0; i < N; i++) if (T[i] === FOREST) wood[i] = TREE_WOOD;
 
-  const sacred = placeSacredSites(n, sym, T, foot, L, startsOut, allMines, camps, dEdge);
+  const sacred = placeSacredSites(n, sym, T, foot, L, startsOut, allMines, camps, dEdge, landscape !== 'classic');
 
   const map = {
     width: n,
@@ -1097,10 +1119,83 @@ function buildMap(seed, n, pc, attempt, plan) {
     camps,
     sacred,
     decor: [],
-    meta: { symmetry: order, layout: plan.mode, center: L.center.kind, lakes: L.lakes.length + (L.center.kind === 'lake' ? 1 : 0), river: !!L.river },
+    meta: { symmetry: order, layout: plan.mode, landscape, center: L.center.kind, lakes: L.lakes.length + (L.center.kind === 'lake' ? 1 : 0), river: !!L.river },
   };
-  const layout = { bases: L.bases, expansions: L.expansions, center: L.center, road, sc };
+  const layout = { bases: L.bases, expansions: L.expansions, center: L.center, road, sc, rockLift: LS.rockLift, hills: LS.hills || 1 };
   return { map, layout };
+}
+
+/**
+ * The landscape's own terrain (LANDSCAPE_RULES), drawn before the base pockets and clearings
+ * (which still win over it). Every field is orbit-averaged, so all starts see the same ground.
+ * - ridges (Highlands): two-tile rock walls along two contour lines of a smooth field; the lanes
+ *   and the connectivity pass later cut the passes through them.
+ * - rivers: three- to four-tile rivers along two contour lines; where a lane crosses, its carve
+ *   leaves a sandy ford.
+ * - sea (Islands): water everywhere except an island under each base, expansion, camp and the
+ *   center, plus a few noise islets; the lanes become sandy land bridges.
+ * Ridges and rivers thin out near bases, expansions and camps, so they never press on a pocket.
+ */
+function landscapePass(n, sym, rng, L, LS, camps, rock, water, dEdge) {
+  const N = n * n;
+  const sc = n / 96;
+  const zones = L.zones;
+  // 0 inside a zone, rising to 1 a few tiles outside it.
+  const taper = (x, y) => {
+    let t = 1;
+    for (const z of zones) {
+      const d = dist(x, y, z.x, z.y);
+      if (d < z.r + 6) t = Math.min(t, smoothstep(z.r - 1, z.r + 6, d));
+    }
+    return t;
+  };
+  // Distance in tiles from each tile to a contour line of f (value / gradient length).
+  const contour = (f, levels, halfWidth, out) => {
+    for (let y = 1; y < n - 1; y++) {
+      for (let x = 1; x < n - 1; x++) {
+        const i = y * n + x;
+        const gx = (f[i + 1] - f[i - 1]) / 2;
+        const gy = (f[i + n] - f[i - n]) / 2;
+        const g = Math.sqrt(gx * gx + gy * gy) + 1e-6;
+        let near = Infinity;
+        for (const m of levels) near = Math.min(near, Math.abs(f[i] - m) / g);
+        if (near >= halfWidth) continue;
+        const w = halfWidth * taper(x + 0.5, y + 0.5);
+        if (near < w) out[i] = 1;
+      }
+    }
+  };
+  if (LS.ridges) {
+    const f = sym.field(fbm(rng.fork('ridges'), n, [[22 * sc, 0.8], [9 * sc, 0.2]]));
+    contour(f, [quantile(f, 0.38), quantile(f, 0.62)], 1.6, rock);
+  }
+  if (LS.rivers) {
+    const f = sym.field(fbm(rng.fork('rivers'), n, [[28 * sc, 0.82], [11 * sc, 0.18]]));
+    contour(f, [quantile(f, 0.5)], 1.8, water);
+  }
+  if (LS.sea) {
+    const fLand = sym.field(fbm(rng.fork('isles'), n, [[9 * sc, 0.62], [4 * sc, 0.38]]));
+    const p = new Float64Array(N);
+    const bumps = [];
+    for (const b of L.bases) bumps.push([b.cx, b.cy, 15, 23]);
+    for (const e of L.expansions) bumps.push([e.ex, e.ey, 8, 13], [e.mcx, e.mcy, 6, 10]);
+    for (const c of camps) bumps.push([c.x, c.y, 4, 8]);
+    if (L.center.kind !== 'lake') bumps.push([n / 2, n / 2, 7, 12]);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const i = y * n + x;
+        let v = 0.78 * fLand[i];
+        for (const [bx, by, r0, r1] of bumps) {
+          const d = dist(x + 0.5, y + 0.5, bx, by);
+          if (d < r1) v = Math.max(v, 1 - smoothstep(r0, r1, d));
+        }
+        v -= 0.7 * (1 - smoothstep(3, 13, dEdge(x, y)));
+        p[i] = v + 0.14 * (fLand[(n - 1 - x) * n + (n - 1 - y)] - 0.5); // a second wobble from the transposed field keeps coasts ragged
+      }
+    }
+    const thr = Math.min(0.62, quantile(p, 0.46));
+    for (let i = 0; i < N; i++) if (p[i] < thr) water[i] = 1;
+  }
 }
 
 /** Closest a sacred site comes to a start's Town Center footprint (then a gold mine's center, a creep camp, another site). */
@@ -1122,7 +1217,7 @@ const SITE_MIN_GAP = 12; // between two sites
  * Deterministic (integer and IEEE-exact math only): every browser places the same sites.
  * @returns {{x:number,y:number}[]} site centers in tile coordinates
  */
-function placeSacredSites(n, sym, T, foot, L, starts, allMines, camps, dEdge) {
+function placeSacredSites(n, sym, T, foot, L, starts, allMines, camps, dEdge, widen = false) {
   const half = n / 2;
   const { ks } = sym;
   // Reachable ground: the component of the first start's front tile.
@@ -1205,6 +1300,19 @@ function placeSacredSites(n, sym, T, foot, L, starts, allMines, camps, dEdge) {
   for (const [fx, fy, reach] of plan) {
     if (sites.length >= want) break;
     orbit(fx, fy, reach);
+  }
+  // The new landscapes leave less open ground (sea, deep woods, rivers): when the usual spots are
+  // taken, try the rest of the canonical half or quarter of the map, nearest the center first.
+  if (widen && sites.length < want) {
+    const spots = [];
+    for (let fy = 0.2; fy < 0.5; fy += 0.075) {
+      for (let fx = 0.2; fx < (four ? 0.5 : 0.8); fx += 0.075) spots.push([fx, fy, (fx - 0.5) * (fx - 0.5) + (fy - 0.5) * (fy - 0.5)]);
+    }
+    spots.sort((a, b) => a[2] - b[2]);
+    for (const [fx, fy] of spots) {
+      if (sites.length >= want) break;
+      orbit(fx, fy, 5);
+    }
   }
   return sites;
 }
@@ -1449,27 +1557,40 @@ export function mapHash(map) {
 /** generateMap options for a GameSetup: everyone (host, clients, tests) must build the same map. */
 export function mapOptions(setup) {
   const players = (setup && setup.players) || [];
-  return { seed: setup.seed, mapSize: setup.mapSize, playerCount: players.length, teams: players.map((p) => p.team) };
+  const opts = { seed: setup.seed, mapSize: setup.mapSize, playerCount: players.length, teams: players.map((p) => p.team) };
+  if (isLandscape(setup.landscape) && setup.landscape !== 'classic') opts.landscape = setup.landscape;
+  return opts;
 }
 
 /**
  * Generate a melee map (DESIGN.md 6.7). Pure and deterministic.
  * `teams` (team of each player, optional) groups teammates (startPlan).
- * @param {{ seed: number|string, mapSize?: 'small'|'medium'|number, playerCount?: number, teams?: Array<number|string> }} opts
+ * `landscape` (src/data/landscapes.js) picks the ground between the bases; unknown ids give the classic map.
+ * @param {{ seed: number|string, mapSize?: 'small'|'medium'|number, playerCount?: number, teams?: Array<number|string>, landscape?: string }} opts
  * @returns {{ width:number, height:number, seed:number|string, terrain:Uint8Array, heights:Float32Array,
  *   wood:Uint16Array, starts:{x:number,y:number}[], mines:{tx:number,ty:number,amount:number}[],
  *   camps:{x:number,y:number,level:number}[], decor:{x:number,y:number,kind:string,rot:number,scale:number}[] }}
  */
-export function generateMap({ seed = 1, mapSize = 'small', playerCount = 2, teams = null } = {}) {
+export function generateMap({ seed = 1, mapSize = 'small', playerCount = 2, teams = null, landscape = 'classic' } = {}) {
   const n = resolveSize(mapSize);
   const pc = Math.min(4, Math.max(1, Math.floor(Number(playerCount)) || 2));
   const plan = startPlan(pc, teams);
+  const ls = isLandscape(landscape) ? landscape : 'classic';
   let built = null;
+  let fallback = null; // a new landscape's first valid map without sacred sites, used if no attempt has any
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    built = buildMap(seed, n, pc, attempt, plan);
-    built.map.meta.attempt = attempt;
-    if (validateMap(built.map).length === 0) break;
+    const next = buildMap(seed, n, pc, attempt, plan, ls);
+    next.map.meta.attempt = attempt;
+    built = next;
+    if (validateMap(next.map).length !== 0) continue;
+    // Sea, deep woods and rivers can leave no room for a sacred site: try the next layout so Sacred Victory stays possible.
+    if (ls === 'classic' || next.map.sacred.length > 0) {
+      fallback = null;
+      break;
+    }
+    fallback = fallback || next;
   }
+  if (fallback) built = fallback;
   addRenderData(built.map, built.layout);
   return built.map;
 }
@@ -1491,6 +1612,7 @@ function buildHeights(map, layout, rng) {
   const hills = new Float64Array(V * V);
   addValueNoise(rng, V, 22 * layout.sc, 0.7, hills, 0);
   addValueNoise(rng, V, 9 * layout.sc, 0.3, hills, 0);
+  const hillAmp = layout.hills || 1; // Highlands roll higher
   let lo = Infinity;
   let hi = -Infinity;
   for (let i = 0; i < hills.length; i++) {
@@ -1498,7 +1620,7 @@ function buildHeights(map, layout, rng) {
     hi = Math.max(hi, hills[i]);
   }
   const land = new Float32Array(V * V);
-  for (let i = 0; i < land.length; i++) land[i] = 0.04 + 0.62 * Math.pow((hills[i] - lo) / (hi - lo || 1), 1.35);
+  for (let i = 0; i < land.length; i++) land[i] = 0.04 + 0.62 * hillAmp * Math.pow((hills[i] - lo) / (hi - lo || 1), 1.35);
   const vtx = (x, y) => Math.max(0, Math.min(V - 1, Math.round(y))) * V + Math.max(0, Math.min(V - 1, Math.round(x)));
 
   // Flatten around starts, mines, expansion clearings and camps (weighted toward each site's height).
@@ -1571,7 +1693,7 @@ function buildHeights(map, layout, rng) {
   for (let i = 0; i < out.length; i++) {
     let h = land[i];
     if (wsum[i] > 0) h += (tsum[i] / wsum[i] - h) * Math.min(1, wsum[i]);
-    h += 0.09 * rocky[i];
+    h += (layout.rockLift ?? 0.09) * rocky[i];
     if (wet[i] === 4) h = -0.6;
     else if (wet[i] > 0) h = -0.35;
     else h = -0.05 + (h + 0.05) * smoothstep(0, SHORE_SLOPE, dw[i]);

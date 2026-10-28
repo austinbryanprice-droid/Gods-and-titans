@@ -1,4 +1,5 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
+import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
 import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SACRED_NAME, SACRED_HOLD } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
@@ -381,6 +382,17 @@ export function gameModeLabel(state) {
   if (survivalMode(state)) return `${SURVIVAL_NAME}: everyone together against waves of monsters`;
   const m = peaceMinutes(state);
   return m ? `${PEACE_NAME}: no combat for ${m} minutes` : 'Standard: fight from the first minute';
+}
+
+/** The lobby's landscape choice (a landscape id or 'random'; DESIGN 6.7). */
+export function landscapeChoice(state) {
+  return LANDSCAPE_CHOICES.includes(state && state.landscape) ? state.landscape : 'classic';
+}
+
+/** The landscape in words: what a client sees where the host has buttons. */
+export function landscapeLabel(state) {
+  const info = landscapeInfo(landscapeChoice(state));
+  return `${info.icon} ${info.name}: ${info.blurb}`;
 }
 
 /** Is Sacred Victory on in the lobby (DESIGN 5.11)? Never in a Trial of the Titans. */

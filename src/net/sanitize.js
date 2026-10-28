@@ -7,6 +7,7 @@ import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS, 
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { MARKS } from '../data/marks.js';
 import { POWERS } from '../data/powers.js';
+import { isLandscape } from '../data/landscapes.js';
 import { sanitizeName } from './protocol.js';
 
 const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -161,6 +162,7 @@ export function validateSetup(setup, myIndex) {
   if (PEACE_LENGTHS.includes(setup.peaceMinutes)) clean.peaceMinutes = setup.peaceMinutes; // Decade of Peace
   else if (setup.survival === true) clean.survival = true; // Trial of the Titans (never together with a peace)
   if (setup.sacredVictory === true) clean.sacredVictory = true; // Sacred Victory (5.11)
+  if (isLandscape(setup.landscape) && setup.landscape !== 'classic') clean.landscape = setup.landscape; // DESIGN 6.7
   return { setup: clean, myIndex };
 }
 
