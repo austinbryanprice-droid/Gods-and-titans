@@ -27,6 +27,7 @@ import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
+import { CareerTracker } from './career-tracker.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -207,6 +208,7 @@ export class Game {
     this.tab = null; // TabAttention: the flashing title of a tab left in the background
     this.alerts = null; // AlertEngine
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
+    this.career = null; // CareerTracker: this match's facts for the career and the achievements
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -267,6 +269,9 @@ export class Game {
       this.alerts.dispose();
       this.tab.dispose();
     });
+    // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
+    this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
+    this.offs.push(() => this.career.dispose());
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
@@ -675,12 +680,13 @@ export class Game {
       const wt = vs.gameOver.winningTeam;
       const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
       if (this.input) this.input.cancelMode();
+      const unlocked = this.career ? this.career.finish(result) : null;
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -856,6 +862,31 @@ export class Game {
     }
   }
 
+  /** Achievements unlocked while the match runs: one line each, with a chime. */
+  onAchievements(list) {
+    if (this.disposed || !this.hud) return;
+    for (const a of list) this.hud.message(`Achievement unlocked: ${a.name}`, 'good', { icon: a.icon });
+    sfx.play('tier_up', { volume: 0.7 });
+  }
+
+  /**
+   * Leaving before the game-over screen counts in the career as a loss: a player already defeated
+   * (whose allies fought on), or one who quits a running match after its first minute. A match the
+   * host ended, or one left in its first minute, is not counted.
+   */
+  countLeave() {
+    const vs = this.viewState;
+    if (!this.career || !vs || vs.gameOver) return;
+    const defeated = !!(vs.me && vs.me.defeated);
+    if (defeated || (!this.ended && (vs.time || 0) >= 60)) {
+      try {
+        this.career.finish('defeat');
+      } catch (err) {
+        console.warn('[game] career record failed', err);
+      }
+    }
+  }
+
   /** "Your wall was breached!" at most once every few seconds while segments fall. */
   noteBreach(hud) {
     const now = performance.now();
@@ -959,6 +990,7 @@ export class Game {
   /** Leave the match and go back to the title screen. */
   quitToMenu() {
     if (this.disposed) return;
+    this.countLeave();
     this.dispose();
     if (this.onExit) this.onExit();
   }
