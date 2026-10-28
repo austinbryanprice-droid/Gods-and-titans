@@ -18,9 +18,9 @@ export function canCapture(def) {
   return !!def && (def.class === 'worker' || def.id === 'priest');
 }
 
-/** Is Sacred Victory on for this GameSetup? */
+/** Is Sacred Victory on for this GameSetup? (Never in a Trial of the Titans, where every player is on one team.) */
 export function sacredVictoryOn(setup) {
-  return !!(setup && setup.sacredVictory === true);
+  return !!(setup && setup.sacredVictory === true && setup.survival !== true);
 }
 
 /** World state for the map's sites: { x, y, owner, prog, by } each (by: the player whose capture is under way). */

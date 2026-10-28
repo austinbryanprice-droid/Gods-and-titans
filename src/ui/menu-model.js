@@ -1,5 +1,6 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
-import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SACRED_NAME, SACRED_HOLD, AI_INCOME_BONUS } from '../config.js';
+import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
+import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SACRED_NAME, SACRED_HOLD, AI_INCOME_BONUS } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
@@ -202,6 +203,7 @@ export function startBlockReason(state) {
   const slots = state?.slots || [];
   const waiting = slots.find((s) => s && s.kind === 'human' && s.connected === false);
   if (waiting) return `Waiting for ${waiting.name || 'a player'} to connect…`;
+  if (survivalMode(state)) return null; // everyone plays together: one player is enough
   const teams = teamsOf(state);
   const filled = slots.filter(isFilled).length;
   if (filled < 2) return 'Add an opponent: set a slot to AI or wait for a player to join.';
@@ -376,15 +378,32 @@ export function peaceMinutes(state) {
   return PEACE_LENGTHS.includes(m) ? m : 0;
 }
 
+/** Is the lobby set to the Trial of the Titans (survival against monster waves)? */
+export function survivalMode(state) {
+  return !!state && state.survival === true && !peaceMinutes(state);
+}
+
 /** The lobby's game mode in words: what a client sees where the host has buttons. */
 export function gameModeLabel(state) {
+  if (survivalMode(state)) return `${SURVIVAL_NAME}: everyone together against waves of monsters`;
   const m = peaceMinutes(state);
   return m ? `${PEACE_NAME}: no combat for ${m} minutes` : 'Standard: fight from the first minute';
 }
 
-/** Is Sacred Victory on in the lobby (DESIGN 5.11)? */
+/** The lobby's landscape choice (a landscape id or 'random'; DESIGN 6.7). */
+export function landscapeChoice(state) {
+  return LANDSCAPE_CHOICES.includes(state && state.landscape) ? state.landscape : 'classic';
+}
+
+/** The landscape in words: what a client sees where the host has buttons. */
+export function landscapeLabel(state) {
+  const info = landscapeInfo(landscapeChoice(state));
+  return `${info.icon} ${info.name}: ${info.blurb}`;
+}
+
+/** Is Sacred Victory on in the lobby (DESIGN 5.11)? Never in a Trial of the Titans. */
 export function sacredOn(state) {
-  return !!(state && state.sacred === true);
+  return !!(state && state.sacred === true) && !survivalMode(state);
 }
 
 /** The Sacred Victory toggle's one-line note and its tooltip. */
@@ -393,6 +412,7 @@ export const SACRED_HINT = `Besides destroying every enemy building, a team that
 
 /** The lobby's victory rules in words: what a client sees where the host has a toggle. */
 export function victoryLabel(state) {
+  if (survivalMode(state)) return 'Survive as many waves as you can';
   return sacredOn(state) ? `Conquest or ${SACRED_NAME} (hold every sacred site for ${SACRED_HOLD / 60} minutes)` : 'Conquest: destroy every enemy building';
 }
 

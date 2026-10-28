@@ -3,6 +3,7 @@
 // LobbyHost / LobbyClient, with a scripted friend joining and chatting.
 import { GAME_VERSION, MAX_PLAYERS, PLAYER_COLORS } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
+import { resolveLandscape } from '../data/landscapes.js';
 
 const later = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -63,7 +64,13 @@ function buildSetup(state, mySlotIndex) {
     });
   });
   const setup = { version: GAME_VERSION, seed, mapSize: state.mapSize, players };
+  const landscape = resolveLandscape(state.landscape, seed);
+  if (landscape !== 'classic') setup.landscape = landscape;
   if (state.peace) setup.peaceMinutes = state.peace;
+  else if (state.survival) {
+    setup.survival = true;
+    for (const p of players) p.team = 1;
+  }
   if (state.sacred) setup.sacredVictory = true;
   return { setup, myIndex };
 }
@@ -162,8 +169,20 @@ export class LobbyHost extends Emitter {
     this.emitChange();
   }
 
+  setLandscape(id) {
+    this.state.landscape = id;
+    this.emitChange();
+  }
+
   setPeace(minutes) {
     this.state.peace = minutes;
+    this.state.survival = false;
+    this.emitChange();
+  }
+
+  setSurvival(on) {
+    this.state.survival = !!on;
+    if (on) this.state.peace = 0;
     this.emitChange();
   }
 
@@ -173,6 +192,7 @@ export class LobbyHost extends Emitter {
   }
 
   startProblem() {
+    if (this.state.survival) return null;
     const filled = this.state.slots.filter((s) => ['host', 'human', 'ai'].includes(s.kind));
     const teams = new Set(filled.map((s) => s.team));
     return teams.size >= 2 ? null : 'Players must be on at least two different teams.';
@@ -219,6 +239,7 @@ export class LobbyClient extends Emitter {
     this.state = {
       roomCode,
       mapSize: 'medium',
+      landscape: 'rivers',
       peace: 45,
       sacred: true,
       slots: [

@@ -65,6 +65,7 @@ export class Ticker {
     this.onTick = onTick;
     this.onBatch = onBatch;
     this.rate = rate;
+    this.speed = 1; // game speed (single player): ticks run this many times faster than `rate`
     this.interval = 1000 / rate;
     this.maxCatchUp = maxCatchUp;
     this.useWorker = useWorker;
@@ -92,6 +93,22 @@ export class Ticker {
     this.running = false;
     this.pulse.stop();
     this.pulse = null;
+  }
+
+  /**
+   * Run the simulation `m` times faster (or slower) than its tick rate: the ticks themselves
+   * stay the same length in game time, only more (or fewer) of them run each real second.
+   * A running ticker re-anchors its clock at the new pace.
+   */
+  setSpeed(m) {
+    const speed = Number.isFinite(m) && m > 0 ? m : 1;
+    if (speed === this.speed) return;
+    this.speed = speed;
+    this.interval = 1000 / (this.rate * speed);
+    if (this.running) {
+      this.stop();
+      this.start();
+    }
   }
 
   /** Run the ticks the clock says are owed (at most maxCatchUp). Called by the pulse. */

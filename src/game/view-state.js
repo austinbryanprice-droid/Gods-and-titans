@@ -7,6 +7,7 @@
 import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
 import { peaceSeconds } from '../sim/peace.js';
+import { survivalOn, wavesBy, nextWaveIn, isBossWave } from '../sim/survival.js';
 import { sacredVictoryOn } from '../sim/sacred.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
@@ -45,9 +46,12 @@ export class ViewState {
    * @param {object} o.mapData MapData from generateMap (cloned; the original is never modified)
    * @param {number} o.myIndex my player index (-1 = spectator: sees everything)
    * @param {number} [o.interpDelayMs] render this far behind the newest snapshot
+   * @param {() => number} [o.clock] the local time in ms in place of the time passed in (a replay's
+   *   playback clock, which runs faster or slower than real time and stops while paused)
    */
-  constructor({ setup, mapData, myIndex, interpDelayMs = INTERP_DELAY_MS }) {
+  constructor({ setup, mapData, myIndex, interpDelayMs = INTERP_DELAY_MS, clock = null }) {
     this.setup = setup;
+    this.clock = clock;
     this.myIndex = myIndex;
     this.interpDelayMs = interpDelayMs;
     this.map = cloneMap(mapData);
@@ -75,6 +79,7 @@ export class ViewState {
     this.renderTime = 0; // interpolated sim time (s) of what update() shows
     this.fields = [];
     this.reveals = [];
+    this.relics = []; // RelicViews (DESIGN 6.3): { i, t, s: 'k'|'g'|'c'|'h', x?, y?, c?, b?, o? }
     // Sacred sites (DESIGN 5.11): the map's places until the first snapshot, then the host's rows
     // { x, y, o, p?, c?, cn? }; sacred is the Sacred Victory countdown { tm, end } or null.
     this.sites = (this.map.sacred || []).map((p) => ({ x: p.x, y: p.y, o: -1 }));
@@ -86,7 +91,8 @@ export class ViewState {
     this.snapshotCount = 0;
     this.listeners = new Map();
     this.hist = new Map(); // unit id → { t, x, y, f: Float64Array(HISTORY), n, head }
-    this.clockOffset = null; // local ms − sim ms of the newest snapshot (minimum-latency estimate)
+    this.rate = 1; // game seconds per real second (setRate)
+    this.clockOffset = null; // local ms × rate − sim ms of the newest snapshot (minimum-latency estimate)
     this.windowMin = Infinity; // smallest local ms − sim ms in the current CLOCK_WINDOW snapshots
     this.windowCount = 0;
     this.lastPushMs = 0;
@@ -158,6 +164,24 @@ export class ViewState {
   /** Is the Decade of Peace on? */
   peaceActive() {
     return this.peaceLeft() > 0;
+  }
+
+  // ---------------------------------------------------------------- Trial of the Titans
+
+  /** Is this game the Trial of the Titans? */
+  survivalActive() {
+    return survivalOn(this.setup);
+  }
+
+  /**
+   * The trial's state at the latest snapshot: { wave (waves out so far), alive (wave monsters alive),
+   * next (seconds to the next wave), nextBoss (a Titan leads it) }, or null in other games.
+   */
+  survival() {
+    if (!survivalOn(this.setup)) return null;
+    const sv = this.snapshot && this.snapshot.sv;
+    const wave = sv && Number.isInteger(sv.w) ? sv.w : wavesBy(this.time);
+    return { wave, alive: sv && Number.isInteger(sv.m) ? sv.m : 0, next: nextWaveIn(this.time), nextBoss: isBossWave(wave + 1) };
   }
 
   /** May my units hurt this owner's units and buildings now? Creatures always; rival players only once the peace is over. */
@@ -260,6 +284,56 @@ export class ViewState {
     return this.lastSeen.get(id) || null;
   }
 
+  // ---------------------------------------------------------------- relics (DESIGN 5.15)
+
+  /**
+   * Where a relic is drawn: its spot while guarded or on the ground, its carrier's (interpolated)
+   * position, or its Temple. Null when its holder is not in the view.
+   */
+  relicSpot(r) {
+    if (!r) return null;
+    if (r.s === 'c' || r.s === 'h') {
+      const e = this.entities.get(r.s === 'c' ? r.c : r.b);
+      return e ? { x: e.ix ?? e.x, y: e.iy ?? e.y, holder: e } : null;
+    }
+    return Number.isFinite(r.x) && Number.isFinite(r.y) ? { x: r.x, y: r.y, holder: null } : null;
+  }
+
+  /** Should the local player see this relic? On the ground once its tile is explored; carried or housed when the holder is. */
+  relicKnown(r) {
+    const p = this.relicSpot(r);
+    if (!p) return false;
+    if (p.holder) return this.isEntityVisible(p.holder);
+    return this.revealAll || this.isExplored(Math.floor(p.x), Math.floor(p.y));
+  }
+
+  /** The relic a unit carries, or null. */
+  relicCarriedBy(id) {
+    for (const r of this.relics) if (r.s === 'c' && r.c === id) return r;
+    return null;
+  }
+
+  /** Relics resting in a Temple. */
+  relicsIn(id) {
+    return this.relics.filter((r) => r.s === 'h' && r.b === id);
+  }
+
+  /** A relic on the ground, in sight, within `range` tiles of a point (the nearest), or null: what a right click picks up. */
+  relicNear(x, y, range = 1.2) {
+    let best = null;
+    let bestD = range;
+    for (const r of this.relics) {
+      if (r.s !== 'g' || !Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
+      if (!this.revealAll && !this.isVisibleAt(r.x, r.y)) continue;
+      const d = Math.hypot(r.x - x, r.y - y);
+      if (d <= bestD) {
+        bestD = d;
+        best = r;
+      }
+    }
+    return best;
+  }
+
   sightOf(e) {
     if (typeof e.sight === 'number') return e.sight;
     let s = this.sightCache.get(e.t);
@@ -280,6 +354,7 @@ export class ViewState {
    * @param {{ felledAll?: number[][] }} [extra] felledAll from a full resync
    */
   pushSnapshot(snap, now = nowMs(), extra = null) {
+    if (this.clock) now = this.clock();
     // Trees: this snapshot's treeFelled events fire as usual; trees known only from
     // `felled` or from a resync's `felledAll` get a synthetic event so the renderer
     // can remove them too (sync: true marks the ones felled before we joined).
@@ -307,7 +382,7 @@ export class ViewState {
     // A late snapshot (jitter) barely moves it; when every snapshot of the last second came
     // late (the sim paused or stalled, latency went up), it moves to the smallest of them.
     const simMs = (snap.time || 0) * 1000;
-    const target = now - simMs;
+    const target = now * this.rate - simMs;
     if (this.clockOffset === null || Math.abs(target - this.clockOffset) > 1000 || target < this.clockOffset) this.clockOffset = target;
     else this.clockOffset += Math.min(target - this.clockOffset, 2);
     this.windowMin = Math.min(this.windowMin, target);
@@ -326,9 +401,10 @@ export class ViewState {
         v = { ix: e.x, iy: e.y, if: e.f || 0 };
         this.entities.set(e.id, v);
       }
-      if (src.get(e.id) !== e) {
+      const prev = src.get(e.id);
+      if (prev !== e) {
         // (Decoded snapshots share unchanged entity objects, which skip this copy.)
-        for (const k in v) if (!(k in e) && !KEEP_KEYS.has(k)) delete v[k];
+        if (prev) for (const k in prev) if (!(k in e)) delete v[k];
         Object.assign(v, e);
         src.set(e.id, e);
       }
@@ -359,6 +435,7 @@ export class ViewState {
     if (this.me) this.myTeam = this.me.team;
     this.fields = snap.fields || [];
     this.reveals = snap.reveals || [];
+    this.relics = snap.relics || [];
     if (Array.isArray(snap.sites)) this.sites = snap.sites.filter((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
     this.sacred = snap.sacred && Number.isFinite(snap.sacred.end) ? snap.sacred : null;
     this.gameOver = snap.gameOver || null;
@@ -373,6 +450,37 @@ export class ViewState {
     for (const ev of synthetic) this.fire(ev);
     for (const ev of events) this.fire(ev);
     this.emit('snapshot', snap);
+  }
+
+  /**
+   * See the game as another player does (a replay's vision choice): their fog of war, or everything
+   * for -1. What the new eyes remember is not known, so the whole map counts as explored and no
+   * enemy building is remembered in the fog until it is seen.
+   */
+  setViewer(index) {
+    const i = Number.isInteger(index) && index >= 0 && this.setup && this.setup.players && index < this.setup.players.length ? index : -1;
+    if (i === this.myIndex) return;
+    this.myIndex = i;
+    this.me = this.players[i] || null;
+    const sp = i >= 0 ? this.me || this.setup.players[i] : null;
+    this.myTeam = sp ? sp.team : null;
+    this.revealAll = i < 0 || !!this.gameOver || !!(this.me && this.me.defeated);
+    this.explored.fill(1);
+    this.lastSeen.clear();
+    this.updateVisibility();
+    this.updateLastSeen();
+    this.updateSeenTerrain();
+  }
+
+  /**
+   * Play back at `r` game seconds per real second (the game speed of a single-player match).
+   * The clock runs on scaled local time, so it re-anchors on the next snapshot.
+   */
+  setRate(r) {
+    const rate = Number.isFinite(r) && r > 0 ? r : 1;
+    if (rate === this.rate) return;
+    this.rate = rate;
+    this.resetClock();
   }
 
   /** Re-anchor the playback clock on the next snapshot (after a pause: sim time stood still). */
@@ -497,8 +605,11 @@ export class ViewState {
    * @param {number} [now] local time in ms
    */
   update(now = nowMs()) {
+    if (this.clock) now = this.clock();
     if (this.clockOffset === null) return;
-    const rt = now - this.clockOffset - this.interpDelayMs;
+    // Faster than normal, the delay stays as long in real time (so twice the game time at double speed):
+    // the snapshots' jitter in real ms counts that much more in game time.
+    const rt = now * this.rate - this.clockOffset - this.interpDelayMs * Math.max(1, this.rate);
     this.renderTime = Math.max(0, Math.min(this.time, rt / 1000));
     for (const [id, h] of this.hist) {
       const v = this.entities.get(id);

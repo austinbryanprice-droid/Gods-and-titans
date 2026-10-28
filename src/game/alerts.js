@@ -16,7 +16,9 @@
 // The `alerts` setting picks 'all', 'important' or 'off' for the lines, sounds and pings; the
 // `tabAlerts` setting alone decides about the tab. Nothing here is sent over the wire.
 import { UNITS, UPGRADES, godsFor, titanFor } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { POP_MAX } from '../config.js';
+import { getRelic } from '../data/relics.js';
 import { sanitizeName } from '../net/protocol.js';
 import { getSettings } from '../settings.js';
 import { trainCheck } from '../ui/command-card.js';
@@ -55,7 +57,7 @@ const THREAT_CLASSES = new Set(['infantry', 'ranged', 'support', 'siege', 'creat
 const LEVEL_RANK = { off: 0, important: 1, all: 2 };
 
 /** Who matters more when two sounds want the same moment. */
-const PRIORITY = { enemies_near: 90, sacred: 85, ally_attacked: 80, peace_mark: 70, site_lost: 60, site_taken: 50, god_ready: 40, titan_ready: 40, idle_workers: 30, pop_capped: 25, army_idle: 22, research: 20, milestone: 10 };
+const PRIORITY = { enemies_near: 90, sacred: 85, ally_attacked: 80, peace_mark: 70, site_lost: 60, site_taken: 50, relic_lost: 50, relic_free: 45, relic_housed: 35, god_ready: 40, titan_ready: 40, idle_workers: 30, pop_capped: 25, army_idle: 22, research: 20, milestone: 10 };
 
 /** Milestones: the player's counts, the steps worth a cheer and the emblem of the card. */
 const MILESTONES = [
@@ -208,6 +210,11 @@ export class AlertEngine {
     if (ev.type === 'gameOver') {
       if (vs.myIndex < 0) return;
       const wt = ev.winningTeam;
+      if (vs.survivalActive && vs.survivalActive()) {
+        const sv = vs.survival();
+        this.emit({ id: 'game_over', level: 'important', attention: `The trial is over: you held out to wave ${sv ? sv.wave : 0}.` });
+        return;
+      }
       const won = wt !== null && wt !== undefined && wt === vs.myTeam;
       this.emit({ id: 'game_over', level: 'important', attention: wt === null || wt === undefined ? 'The battle is over: a draw.' : won ? 'Victory! The battle is won.' : 'Defeat. The battle is lost.' });
       return;
@@ -235,6 +242,18 @@ export class AlertEngine {
           this.emit({ id: 'titan_enemy', level: 'important', attention: `${t ? t.name : 'A Titan'} is being summoned by ${this.playerName(ev.player)}!` });
         }
         break;
+      case 'godPower': {
+        // An enemy's strike or cataclysm calls me back to the tab (the Game writes the line).
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (pw && ev.player !== me && !vs.isAlly(ev.player) && isHarmfulPower(pw)) {
+          this.emit({ id: 'power_enemy', level: 'important', attention: `${this.playerName(ev.player)} unleashes ${pw.name}!` });
+        }
+        break;
+      }
+      case 'wave':
+        // The Game writes the banner; a wave led by a Titan is worth the tab flash.
+        if (ev.boss) this.emit({ id: 'wave_boss', level: 'important', attention: `Wave ${ev.n}: ${UNITS[ev.boss] ? UNITS[ev.boss].name : 'a Titan'} is coming!` });
+        break;
       case 'peaceEnd':
         this.emit({ id: 'peace_end', level: 'important', attention: 'The Decade of Peace is over: war begins!' });
         break;
@@ -246,6 +265,9 @@ export class AlertEngine {
       }
       case 'tierUp':
         if (ev.player === me) this.emit({ id: 'tier_up', level: 'important', attention: 'Your settlement has grown!' });
+        break;
+      case 'relic':
+        this.relicEvent(ev);
         break;
       case 'siteCaptured':
       case 'siteLost':
@@ -263,6 +285,36 @@ export class AlertEngine {
         break;
       default:
         break;
+    }
+  }
+
+  /** A relic fell from a camp I cleared, came to rest in a Temple, or fell from my hands (DESIGN 5.15). */
+  relicEvent(ev) {
+    const vs = this.vs;
+    const me = vs.myIndex;
+    const r = getRelic(ev.t);
+    if (!r) return;
+    const where = Number.isFinite(ev.x) && Number.isFinite(ev.y) ? { x: ev.x, y: ev.y } : null;
+    const lower = `${r.description[0].toLowerCase()}${r.description.slice(1)}`;
+    if (ev.ev === 'drop' && ev.player === me) {
+      this.emit({
+        id: 'relic_free', level: 'important', kind: 'good', icon: r.icon,
+        text: `The ${r.name} lies free! Right-click it with a Worshipper or a god and carry it to your Temple.`,
+        sound: 'milestone', ping: where && { ...where, color: r.color }, jump: where,
+      });
+    } else if (ev.ev === 'house') {
+      if (ev.player === me) {
+        this.emit({ id: 'relic_housed', level: 'important', kind: 'good', icon: r.icon, text: `The ${r.name} rests in your Temple: ${lower}`, sound: 'research', attention: `The ${r.name} is yours!` });
+      } else if (Number.isInteger(ev.player) && ev.player >= 0) {
+        const ally = vs.isAlly(ev.player);
+        this.emit({ id: 'relic_rival', level: 'all', kind: ally ? 'good' : 'info', icon: r.icon, text: `${this.playerName(ev.player)} has brought the ${r.name} to their Temple.` });
+      }
+    } else if (ev.ev === 'lose' && ev.player === me) {
+      this.emit({
+        id: 'relic_lost', level: 'important', kind: 'alert', icon: r.icon,
+        text: `The ${r.name} has fallen to the ground! Take it back to a Temple.`,
+        sound: 'nudge', ping: where && { ...where, color: r.color }, jump: where, attention: `You lost the ${r.name}!`,
+      });
     }
   }
 

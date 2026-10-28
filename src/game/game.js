@@ -2,7 +2,9 @@
 // and AIs, or ClientSession), the 3D renderer, the HUD and the input
 // controller; runs the frame loop; turns view-state events into sounds and HUD
 // messages; handles waiting for the host, pause in single player, game over,
-// the host leaving, chat, and a full teardown back to the menu.
+// the host leaving, chat, and a full teardown back to the menu. The host records
+// the match (src/game/replay.js) and keeps it at the end; a replay plays in a Game
+// of its own, built on a ReplaySession instead of a live one (DESIGN 9.5).
 //
 //   const game = new Game({ launch, settings, onExit });   // launch from the menu
 //   await game.ready;                                      // view is up
@@ -11,8 +13,10 @@ import { HostSession, ClientSession } from '../net/session.js';
 import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { PEACE_NAME } from '../config.js';
+import { GAME_SPEEDS, PEACE_NAME, UI_SCALES } from '../config.js';
+import { edgeName } from '../sim/survival.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
@@ -29,6 +33,19 @@ import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
 import { CareerTracker } from './career-tracker.js';
+import { getCareer } from './career.js';
+import { recordTutorial } from './career.js';
+import { TutorialDirector } from './tutorial.js';
+import { isTutorial } from '../sim/tutorial.js';
+import { recordDaily, dailyChallenge } from './daily.js';
+import { scoreOf } from '../data/score.js';
+import { medalFor } from '../data/medals.js';
+import { ReplayRecorder } from './replay.js';
+import { saveReplay } from './replay-store.js';
+import { ReplaySession } from './replay-session.js';
+import { ReplayBar } from '../ui/hud-replay.js';
+import { MatchSaver, loadSaveGame } from './game-saves.js';
+import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -181,16 +198,26 @@ export class Game {
    * @param {object} [o.session] an already built HostSession / ClientSession (instead of launch)
    * @param {object} [o.settings] getSettings()
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
+   * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
+   * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
+   * @param {(record: object, opts?: object) => void} [o.onReplay] watch a replay (main.js tears this Game down and
+   *   builds the replay's): the game-over screen's Watch Replay, and a replay going back in time
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
+    this.replay = replay && replay.record ? replay : null;
+    this.onReplay = onReplay;
+    this.recorder = null; // ReplayRecorder: this match, kept for a replay at its end (the host only)
+    this.replayRecord = null; // the finished recording
+    this.replayBar = null;
     this.session = session;
     this.settings = settings || getSettings();
     this.onExit = onExit;
+    this.onRematch = onRematch;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -205,6 +232,8 @@ export class Game {
     this.lastFrame = 0;
     this.disposed = false;
     this.paused = false;
+    this.solo = false; // a match against the computer, so the game speed applies (set at start)
+    this.speed = 1; // game seconds per real second (applySpeed)
     this.showAllBarsHeld = false;
     this.overShown = false;
     this.ended = false;
@@ -217,6 +246,9 @@ export class Game {
     this.chronicle = null; // Chronicle: the match's numbers over time, for the game-over screen
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
+    this.dailyCounted = false; // a daily challenge's score is kept once (countDaily)
+    this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
+    this.saver = null; // MatchSaver: Save Game, Save & Quit and the autosave of a solo match (src/game/game-saves.js)
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -245,51 +277,109 @@ export class Game {
     this.root.hidden = false;
     this.setLoading(true);
     // Only a launch that runs the match here needs the AI module (a client's host runs the AIs).
-    const needsAI = !createAI && !this.session && !(this.launch && this.launch.role === 'client');
-    const [loadedAI, RendererClass] = await Promise.all([
+    const needsAI = !createAI && !this.session && !this.replay && !(this.launch && this.launch.role === 'client');
+    const resume = (!this.session && this.launch && this.launch.resume) || null; // a saved game to carry on (DESIGN 9.4)
+    const [loadedAI, RendererClass, saveGame] = await Promise.all([
       createAI ? Promise.resolve({ createAI, createVoices }) : needsAI ? loadAI() : Promise.resolve({ createAI: idleAI, createVoices: null }),
       Renderer ? Promise.resolve(Renderer) : import('../render/game-renderer.js').then((m) => m.GameRenderer),
+      resume ? loadSaveGame() : null,
     ]);
     if (this.disposed) return;
     const aiFailed = needsAI && !loadedAI;
+    let resumed = null; // the loaded save's extras
     const aiFactory = (loadedAI && loadedAI.createAI) || idleAI;
     const voiceFactory = (loadedAI && loadedAI.createVoices) || null;
 
+    if (!this.session && this.replay) {
+      const r = this.replay;
+      this.session = new ReplaySession({ record: r.record, createWorld, startAt: r.startAt || 0, viewer: r.viewer ?? -1, speed: r.speed || 1 });
+      if (r.paused) this.session.userPaused = true;
+      this.session.onRestart = (tick) => this.replayFrom(tick);
+    }
     if (!this.session) {
       const l = this.launch;
       if (!l || !l.setup) throw new Error('Game needs a launch or a session.');
       if (l.role === 'client') this.session = new ClientSession({ setup: l.setup, myIndex: l.myIndex, conn: l.conn });
-      else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
+      else if (resume) {
+        // The world and the computer players' minds come from the save; a missing mind starts afresh.
+        const loaded = saveGame.unpackMatch(resume);
+        resumed = loaded.extra;
+        this.session = new HostSession({
+          setup: loaded.world.setup, myIndex: l.myIndex ?? 0, conns: new Map(), resumed: true, createVoices: voiceFactory,
+          createWorld: () => loaded.world,
+          createAI: (world, index, difficulty) => loaded.ais.get(index) || aiFactory(world, index, difficulty),
+        });
+      } else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
     }
     const session = this.session;
     this.viewState = session.viewState;
     this.selection = new Selection(this.viewState);
+    // The guided first match (DESIGN 9.2): its objectives, read from the view and the selection; the HUD shows them.
+    if (isTutorial(session.setup) && session.isHost && !this.replay) {
+      this.tutorial = new TutorialDirector({ viewState: this.viewState, getSelection: () => this.selection.ids, onStep: (next, i, done) => this.onTutorialStep(next, done) });
+    }
 
     this.hud = new Hud({ root: this.hudRoot, game: this });
+    this.applyUiScale();
+    if (this.replay) {
+      this.replayBar = new ReplayBar({ root: this.hudRoot, game: this, onSeekBack: (tick) => this.replayFrom(tick) });
+      let speed = session.speed;
+      this.offs.push(session.onChange(() => {
+        if (session.speed === speed) return;
+        speed = session.speed;
+        this.applySpeed();
+      }));
+    }
     if (session.mapMismatch) this.hud.setMapMismatch(true);
     this.offs.push(session.onChat((line) => this.onChat(line)));
     if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
     this.offs.push(session.onEnd((info) => this.onEnd(info)));
     this.offs.push(this.viewState.on('*', (ev) => this.onEvent(ev)));
-    // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
-    this.tab = new TabAttention();
-    this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
-    // Score, army, resources and kills every 30 s of game time, for the game-over screen's timeline (src/game/chronicle.js).
-    this.chronicle = new Chronicle({ viewState: this.viewState }).attach();
-    this.offs.push(() => {
-      this.alerts.dispose();
-      this.chronicle.dispose();
-      this.tab.dispose();
-    });
+    // A replay is watched, not played: no alerts, chronicle, career or recording of its own.
+    if (!this.replay) {
+      // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
+      this.tab = new TabAttention();
+      this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
+      // Score, army, resources and kills every 30 s of game time, for the game-over screen's timeline (src/game/chronicle.js).
+      this.chronicle = new Chronicle({ viewState: this.viewState }).attach();
+      this.offs.push(() => {
+        this.alerts.dispose();
+        this.chronicle.dispose();
+        this.tab.dispose();
+      });
+    } else this.offs.push(() => this.replayBar && this.replayBar.dispose());
+    // The host keeps a replay of the match (src/game/replay.js): every command the World takes, with its tick.
+    // (Not a game carried on from a save: a replay plays from the setup, and the start of this one is gone.)
+    if (!this.replay && !this.tutorial && !resumed && session.isHost && session.world) {
+      this.recorder = new ReplayRecorder({ world: session.world, setup: session.setup, myIndex: session.myIndex }).attach();
+      this.offs.push(this.viewState.on('snapshot', () => this.recorder.sample()));
+      this.offs.push(session.onChat((line) => this.recorder.chat(line)));
+      this.offs.push(() => this.recorder.detach());
+    }
     // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
-    this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
-    this.offs.push(() => this.career.dispose());
+    // The guided first match is not a game of the career: its medal is kept instead (checkEnd).
+    if (!this.tutorial && !this.replay) {
+      this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
+      this.offs.push(() => this.career.dispose());
+    }
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
-    for (const line of session.chatLog || []) if (showChatLine(line)) this.hud.chat(line);
+    for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
+    if (session.isHost && !this.tutorial && !this.replay) {
+      this.saver = new MatchSaver(this, { resume: resumed });
+      if (resumed) this.saver.restore(resumed);
+    }
+    // The daily challenge (DESIGN 9.3): its twist, said once at the start.
+    if (this.launch && this.launch.daily && !resumed) {
+      const tw = dailyChallenge(this.launch.daily).twist;
+      this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
+    }
     session.start();
+    // Only a match against the computer can run faster or slower: nobody else has to keep up.
+    this.solo = !this.replay && isSolo(session);
+    this.applySpeed();
 
     // Clients wait for the first full snapshot.
     if (!session.isHost && !this.viewState.snapshot) {
@@ -315,7 +405,10 @@ export class Game {
     this.setLoading(false);
     this.resize();
     this.applyShowAllBars();
-    this.centerOnStart();
+    this.applySpeed();
+    if (!(this.saver && this.saver.restoreCamera())) this.centerOnStart();
+    if (resumed) this.hud.message('Saved game loaded.', 'system', { icon: '💾' });
+    if (this.replay && this.replay.camera) this.restoreCamera(this.replay.camera);
     this.input = new InputController({ game: this, canvas: this.canvas, overlayRoot: this.hudRoot });
     this.selection.onChange(() => this.renderer && this.renderer.setSelection(this.selection.ids));
 
@@ -433,9 +526,10 @@ export class Game {
 
   centerOnStart() {
     const vs = this.viewState;
+    const who = this.replay ? (vs.myIndex >= 0 ? vs.myIndex : this.replay.record.pov) : vs.myIndex;
     let best = null;
     for (const e of vs.entities.values()) {
-      if (e.o !== vs.myIndex) continue;
+      if (e.o !== who) continue;
       if (e.k === 'b' && e.t === 'town_center') {
         best = e;
         break;
@@ -516,11 +610,13 @@ export class Game {
     const t1 = performance.now();
     try {
       this.hud.update(now);
+      if (this.replayBar) this.replayBar.update();
     } catch (err) {
       this.frameFault(err);
     }
     try {
       this.checkEnd();
+      if (this.saver) this.saver.tick();
     } catch (err) {
       this.frameFault(err);
     }
@@ -609,6 +705,11 @@ export class Game {
   /** Pause the simulation (single player only). Returns true if the game is paused. */
   setPaused(on) {
     const s = this.session;
+    if (this.replay) {
+      // The menu holds a replay still; the picture keeps drawing, so the camera stays free.
+      if (s && typeof s.hold === 'function') s.hold(on);
+      return !!on;
+    }
     if (!isSolo(s)) return false;
     if (on && !this.paused) {
       s.ticker.stop();
@@ -638,8 +739,34 @@ export class Game {
     this.needsRender = true;
   }
 
+  /**
+   * The game speed setting (DESIGN 9), for a match against the computer only: the ticker runs more or fewer
+   * ticks a second, the view plays back at the same pace, and the renderer's animations follow.
+   */
+  applySpeed() {
+    if (this.replay) {
+      // A replay's own speed (the replay bar) runs its ticker and clock; the animations follow it here.
+      const r = this.renderer;
+      if (r && typeof r.setSpeed === 'function' && this.session) r.setSpeed(this.session.speed);
+      return;
+    }
+    const m = (this.solo && GAME_SPEEDS[this.settings.gameSpeed]) || 1;
+    this.speed = m;
+    const s = this.session;
+    if (s && s.ticker) s.ticker.setSpeed(m);
+    if (this.viewState) this.viewState.setRate(m);
+    if (this.renderer && typeof this.renderer.setSpeed === 'function') this.renderer.setSpeed(m);
+  }
+
+  /** The interface size setting: a factor on the HUD's base font size (hud.css), which every panel is sized in. */
+  applyUiScale() {
+    if (this.hudRoot && this.hudRoot.style) this.hudRoot.style.setProperty('--hud-scale', String(UI_SCALES[this.settings.uiScale] || 1));
+  }
+
   onSettings(s, changed) {
     this.settings = s;
+    if (changed.includes('gameSpeed')) this.applySpeed();
+    if (changed.includes('uiScale')) this.applyUiScale();
     if (changed.includes('showAllBars')) this.applyShowAllBars();
     if (changed.includes('quality') && this.renderer && typeof this.renderer.setQuality === 'function') {
       this.renderer.setQuality(s.quality);
@@ -655,6 +782,11 @@ export class Game {
 
   onChat(line) {
     if (!this.hud || !showChatLine(line)) return;
+    // A computer player's line (DESIGN 10.1) is a taunt at the top centre with a snarl of drums and brass.
+    if (line.voice && !line.system) {
+      if (this.hud.showTaunt(line)) sfx.play('taunt');
+      return;
+    }
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
   }
@@ -687,18 +819,30 @@ export class Game {
 
   checkEnd() {
     const vs = this.viewState;
+    if (this.replay) return; // the replay bar says when it is over
     if (vs.gameOver && !this.overShown) {
       this.overShown = true;
       const wt = vs.gameOver.winningTeam;
-      const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      const survival = typeof vs.survivalActive === 'function' && vs.survivalActive();
+      const result = survival ? 'survival' : wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      // Trial of the Titans: the score is the wave reached; the career keeps the best (best.wave) for players who took part.
+      const wave = survival ? (Number.isInteger(vs.gameOver.wave) ? vs.gameOver.wave : (vs.survival() || {}).wave || 0) : 0;
+      const previous = survival ? getCareer().best.wave : 0;
       if (this.input) this.input.cancelMode();
-      const unlocked = this.career ? this.career.finish(result) : null;
+      if (this.saver) this.saver.onGameOver();
+      let unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
+      const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
+      // The guided first match: a victory earns a medal by its game time, kept with the career.
+      const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
+      if (medal) unlocked = recordTutorial(medal.rank);
+      const daily = this.launch && this.launch.daily ? this.countDaily(result === 'victory') : null;
+      if (this.recorder) this.keepReplay(result, wt);
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record, daily });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -706,6 +850,15 @@ export class Game {
       sfx.play('defeat');
       this.hud.overlays.showDefeated();
     }
+  }
+
+  /** A step of the guided first match was finished: say so, chime, and ping the next objective on the minimap. */
+  onTutorialStep(next, done) {
+    if (this.disposed || !this.hud) return;
+    if (done) this.hud.message(`Done: ${done.title}.`, 'good', { icon: '✅' });
+    sfx.play('tier_up', { volume: 0.55 });
+    const t = next && this.tutorial ? this.tutorial.target() : null;
+    if (t) this.hud.minimap.ping(t.x, t.y, '#ffd66e');
   }
 
   entityPos(id) {
@@ -821,6 +974,27 @@ export class Game {
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system', { icon: '🏳️' });
         break;
+      case 'wave': {
+        // Trial of the Titans: a wave comes out of the map's edge.
+        const from = edgeName(vs.width, vs.height, ev.x, ev.y);
+        const boss = ev.boss ? UNITS[ev.boss] : null;
+        if (boss) {
+          hud.showBanner(`Wave ${ev.n}: ${boss.name} comes from the ${from}!`, 'titan');
+          sfx.play('summon_titan', { volume: 0.8 });
+        } else {
+          hud.showBanner(`Wave ${ev.n}: ${ev.count} monsters come from the ${from}!`, 'danger');
+          sfx.play('horn', { volume: 0.7 });
+        }
+        hud.minimap.ping(ev.x, ev.y, boss ? '#ffc840' : '#ff3a2a');
+        if (this.input) this.input.noteAlert(ev.x, ev.y);
+        break;
+      }
+      case 'waveCleared':
+        if (vs.me && !vs.me.defeated) {
+          hud.message(`Wave ${ev.n} is beaten! The gods reward you with ${ev.gold} gold.`, 'good', { icon: '🐉' });
+          sfx.play('tier_up', { volume: 0.6 });
+        }
+        break;
       case 'peaceEnd':
         hud.showBanner(`The ${PEACE_NAME} is over: war begins!`, 'danger');
         sfx.play('horn');
@@ -866,7 +1040,28 @@ export class Game {
       }
       case 'effect': {
         const [name, volume] = effectSound(ev);
-        this.worldSound(name, ev.x, ev.y, volume);
+        // A telegraphed effect (a god power's bolts, a delayed blast) sounds when it lands.
+        if (ev.delay > 0) setTimeout(() => !this.disposed && this.worldSound(name, ev.x, ev.y, volume), ev.delay * 1000);
+        else this.worldSound(name, ev.x, ev.y, volume);
+        break;
+      }
+      case 'godPower': {
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (!pw) break;
+        const harm = isHarmfulPower(pw);
+        if (ev.player === me) {
+          hud.message(`${pw.name}!`, 'good', { icon: pw.icon });
+          sfx.play('summon_god', { volume: 0.6 });
+        } else if (vs.isAlly(ev.player)) {
+          hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
+          if (harm) hud.minimap.ping(ev.x, ev.y, '#ffd84a');
+        } else if (harm) {
+          // An enemy's strike or cataclysm: everyone hears of it, and sees where it fell.
+          if (pw.tier >= 3) hud.showBanner(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'danger');
+          else hud.message(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'alert', { icon: pw.icon });
+          hud.minimap.ping(ev.x, ev.y, '#ff3a2a');
+          if (this.input) this.input.noteAlert(ev.x, ev.y);
+        } else hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
         break;
       }
       default:
@@ -887,15 +1082,37 @@ export class Game {
    * host ended, or one left in its first minute, is not counted.
    */
   countLeave() {
+    if (this.recorder) this.keepReplay(null);
     const vs = this.viewState;
     if (!this.career || !vs || vs.gameOver) return;
     const defeated = !!(vs.me && vs.me.defeated);
     if (defeated || (!this.ended && (vs.time || 0) >= 60)) {
       try {
-        this.career.finish('defeat');
+        // A Trial of the Titans left early counts as a trial that reached its current wave, not a loss.
+        const sv = typeof vs.survival === 'function' ? vs.survival() : null;
+        if (sv) this.career.finish('survival', { wave: sv.wave });
+        else this.career.finish('defeat');
       } catch (err) {
         console.warn('[game] career record failed', err);
       }
+      this.countDaily(false);
+    }
+  }
+
+  /**
+   * A daily challenge (DESIGN 9.3) counts once, like the career: its chronicle score as a try at today's
+   * best, and the day for the streak. Returns what the game-over screen shows, or null for another game.
+   */
+  countDaily(won) {
+    const vs = this.viewState;
+    const day = this.launch && this.launch.daily;
+    if (!day || this.dailyCounted || !vs || vs.myIndex < 0) return null;
+    this.dailyCounted = true;
+    try {
+      return recordDaily(day, scoreOf(vs.players[vs.myIndex]).total, won);
+    } catch (err) {
+      console.warn('[game] daily record failed', err);
+      return null;
     }
   }
 
@@ -997,6 +1214,104 @@ export class Game {
     this.renderer = null;
     this.input = null;
     if (typeof window !== 'undefined' && window.__game === this) window.__game = null;
+  }
+
+  // ---------------------------------------------------------------- replays
+
+  /**
+   * Keep this match's replay (once): at the game-over screen with how it ended, or on leaving
+   * (result null) when it ran long enough. The save is in the background; the record stays here for
+   * Watch Replay.
+   */
+  keepReplay(result, winningTeam = null) {
+    const rec = this.recorder;
+    if (!rec || rec.done) return this.replayRecord;
+    let record = null;
+    try {
+      record = rec.finish({ result, winningTeam });
+    } catch (err) {
+      console.warn('[game] the replay could not be finished', err);
+    }
+    this.replayRecord = record;
+    if (record) saveReplay(record).catch(() => {});
+    return record;
+  }
+
+  /** Can the game-over screen offer Watch Replay? */
+  canWatchReplay() {
+    return !!this.replayRecord && typeof this.onReplay === 'function' && !this.disposed;
+  }
+
+  /** Watch this match's replay from its start (the game-over screen). */
+  watchReplay() {
+    if (!this.canWatchReplay()) return;
+    const record = this.replayRecord;
+    const next = this.onReplay;
+    this.countLeave();
+    this.dispose();
+    next(record, {});
+  }
+
+  /** A replay going back: start it over at `tick`, keeping the speed, the eyes and the camera. */
+  replayFrom(tick) {
+    if (!this.replay || this.disposed || typeof this.onReplay !== 'function') return;
+    const s = this.session;
+    const record = this.replay.record;
+    const opts = { startAt: tick, viewer: s.myIndex, speed: s.speed, paused: !!s.userPaused && !s.ended, camera: this.cameraState() };
+    const next = this.onReplay;
+    this.dispose();
+    next(record, opts);
+  }
+
+  cameraState() {
+    const c = this.renderer && this.renderer.camera;
+    return c ? { x: c.goal.x, y: c.goal.y, distance: c.goalDistance, yaw: c.yaw || 0, tilt: c.tilt || 0 } : null;
+  }
+
+  restoreCamera(st) {
+    const c = this.renderer && this.renderer.camera;
+    if (!c || !st) return;
+    c.yaw = Number.isFinite(st.yaw) ? st.yaw : 0;
+    c.tilt = Number.isFinite(st.tilt) ? st.tilt : 0;
+    if (Number.isFinite(st.distance)) c.setDistance(st.distance, true);
+    c.centerOn(st.x, st.y);
+  }
+
+  /** True when the game-over screen may offer Play Again (a game against the computer only). */
+  canRematch() {
+    return typeof this.onRematch === 'function' && !this.disposed;
+  }
+
+  /** Play Again: leave this match (counted like Return to Menu) and start the same lobby anew. */
+  rematch() {
+    if (!this.canRematch()) return;
+    const next = this.onRematch;
+    this.countLeave();
+    this.dispose();
+    next();
+  }
+
+  /** Can the match be saved now (F10 menu)? A solo match against the computer that is still being played. */
+  canSave() {
+    return !!(this.saver && this.saver.canSave());
+  }
+
+  /** Save to a slot ('1'..'3', or the autosave). Resolves with the slot's info; rejects with a message to show. */
+  saveGame(slot) {
+    if (!this.saver) return Promise.reject(new Error('This game cannot be saved.'));
+    return this.saver.save(slot);
+  }
+
+  /**
+   * Save & Quit: keep the match in the autosave slot (Continue on the title screen) and leave. The
+   * match is not counted in the career yet: it counts when it ends, after it is carried on.
+   */
+  async saveAndQuit() {
+    if (this.disposed) return;
+    await this.saveGame(AUTO_SLOT);
+    if (this.disposed) return;
+    this.dispose();
+    if (this.onExit) this.onExit();
   }
 
   /** Leave the match and go back to the title screen. */

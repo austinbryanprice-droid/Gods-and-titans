@@ -1,16 +1,19 @@
 // Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
 // as an HTML overlay in #menu-root over an animated night-sky backdrop.
 //
-//   const menu = createMenu({ root, onStart, onIntro })   // onStart(launch) when a lobby starts; onIntro() replays the intro film
+//   const menu = createMenu({ root, onStart, onIntro, onLoad, onReplay })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
+//                                                                           // onLoad(slot) carries on a saved game (DESIGN 9.4); onReplay(id | record) watches a replay (9.5)
 //   showMenu(screen = 'title')  /  hideMenu()
 //
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
-import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SACRED_NAME } from '../config.js';
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY, SACRED_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
+import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, optionNote } from './speed-options.js';
 import { sfx } from '../audio/sfx.js';
 import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
 import { h, setChildren, copyText } from './menu-dom.js';
@@ -18,7 +21,13 @@ import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
+import { renderReplays } from './menu-replays.js';
 import { getCareer, markSeen } from '../game/career.js';
+import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
+import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
+import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
+import { tutorialSetup } from '../sim/tutorial.js';
+import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
@@ -34,6 +43,16 @@ export function showMenu(screen = 'title', opts = {}) {
 /** Hide the menu (the game is taking over the screen). */
 export function hideMenu() {
   if (instance) instance.hide();
+}
+
+/** 'fifth' for 5 (the boss rhythm of the Trial of the Titans), else '5th'. */
+function ordinal(n) {
+  return ({ 2: 'second', 3: 'third', 4: 'fourth', 5: 'fifth', 6: 'sixth', 10: 'tenth' })[n] || `${n}th`;
+}
+
+/** m:ss for whole seconds. */
+function clockText(sec) {
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
 function urlParams() {
@@ -79,9 +98,9 @@ function closeLobby(lobby) {
 
 /**
  * Build the menu inside `root`.
- * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void }} opts
+ * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void, onLoad?: (slot: string) => Promise<void> }} opts
  */
-export function createMenu({ root, onStart, onIntro = null }) {
+export function createMenu({ root, onStart, onIntro = null, onLoad = null, onReplay = null }) {
   const params = urlParams();
   const useMock = params.get('mockLobby') === '1';
   const tOverride = params.get('transport');
@@ -210,6 +229,16 @@ export function createMenu({ root, onStart, onIntro = null }) {
     }
   }
 
+  /** The guided first match (DESIGN 9.2): a fixed solo setup, no lobby. */
+  function startTutorial() {
+    try {
+      sfx.play('horn');
+      onStart({ role: 'host', setup: tutorialSetup({ name: getSettings().name, version: GAME_VERSION }), myIndex: 0, conns: new Map(), lobby: null });
+    } catch (err) {
+      toast(err?.message || 'Could not start the lesson.');
+    }
+  }
+
   async function hostOnline() {
     let cancelled = false;
     const done = busy('Opening a room on the network…', () => (cancelled = true));
@@ -234,7 +263,27 @@ export function createMenu({ root, onStart, onIntro = null }) {
     howto: howToScreen,
     career: careerScreen,
     settings: settingsScreen,
+    load: loadScreen,
   };
+
+  /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
+  async function loadSlot(slot) {
+    if (!onLoad) return;
+    const done = busy('Loading the saved game…');
+    try {
+      sfx.play('horn');
+      await onLoad(slot);
+    } catch (err) {
+      toast(err?.message || 'The saved game could not be loaded.');
+    } finally {
+      done();
+    }
+  }
+
+  /** "Greek vs Norse (Hard) · small map · 23:10 · 5 min ago" for a save's info. */
+  function saveLine(info) {
+    return `${info.label || 'Saved game'} · ${clockText(Math.floor(info.time || 0))} · ${savedAgo(info.savedAt)}`;
+  }
 
   function titleScreen() {
     const counts = {
@@ -246,7 +295,60 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
     const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
-    const newCount = getCareer().unseen.length;
+    // Quick Match: the last game against the computer again, in one click (src/game/rematch.js). Shown once the lobby
+    // module has read it back; none on a first visit.
+    const quickSub = h('span.mw-btn-sub', '');
+    const quickBtn = h('button.mw-btn.mw-btn--menu.mw-quick-btn', { type: 'button', hidden: true, onclick: () => quickMatch() },
+      h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
+      h('span.mw-btn-label', 'Quick Match'), quickSub,
+      h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
+    // Continue: the newest saved game (the autosave or a slot), in one click. Load Game lists them all.
+    const saves = onLoad ? listSaves() : [];
+    const continueBtn = saves.length ? mainBtn('Continue', saveLine(saves[0]), () => loadSlot(saves[0].slot), 'mw-continue-btn') : null;
+    let quick = null;
+    loadLobby().then((mod) => {
+      if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
+      quick = loadSkirmish(mod);
+      if (!quick) return;
+      quickSub.textContent = `Again: ${skirmishLabel(quick)}`;
+      quickBtn.hidden = false;
+    }).catch(() => {});
+    async function quickMatch() {
+      if (!quick) return;
+      try {
+        const launch = launchFrom(await loadLobby(), quick, getSettings().name);
+        if (!launch) throw new Error('That game can no longer start. Set it up again with Play vs AI.');
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the game.');
+      }
+    }
+    // The daily challenge (src/game/daily.js, DESIGN 9.3): the same seeded game for everyone today, today's best and the streak.
+    const daily = dailyStatus();
+    const dailySub = [`Today: ${dailyLabel(daily.challenge)}`];
+    if (daily.today) dailySub.push(`best ${daily.today.best.toLocaleString('en-US')}`);
+    const dailyBtn = mainBtn('Daily Challenge', dailySub.join(' · '), playDaily, 'mw-daily-btn');
+    dailyBtn.title = `${daily.challenge.twist.name}: ${daily.challenge.twist.desc}`;
+    if (daily.streak > 0) {
+      dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge.mw-streak-badge', {
+        title: daily.playedToday ? `${daily.streak} day${daily.streak === 1 ? '' : 's'} in a row` : `Play today to keep your ${daily.streak}-day streak`,
+      }, daily.playedToday ? `🔥 ${daily.streak}` : `🔥 ${daily.streak} · keep it`));
+    } else if (!daily.playedToday) dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New today'));
+    async function playDaily() {
+      try {
+        const launch = dailyLaunch(await import('../net/lobby.js'), daily.challenge.day, getSettings().name); // the real lobby: it builds the setup
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the daily challenge.');
+      }
+    }
+    const career = getCareer();
+    const newCount = career.unseen.length;
+    // A guided first match; a player who has never finished a game or the lesson is pointed at it.
+    const learnBtn = mainBtn('Learn to Play', career.best.medal ? `A guided first match · your best: ${medalLabel(career.best.medal)}` : 'A guided first match: gather, build, pray, summon and fight', startTutorial, 'mw-learn-btn');
+    if (!career.games && !career.best.medal) learnBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New? Start here'));
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
     const el = h('div.mw-title-screen',
@@ -261,10 +363,15 @@ export function createMenu({ root, onStart, onIntro = null }) {
       ),
       h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
+        continueBtn,
         playBtn,
+        quickBtn,
+        dailyBtn,
+        learnBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
+          saves.length ? h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('load') }, 'Load Game') : null,
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
           h('button.mw-btn.mw-btn--small.mw-career-btn', { type: 'button', onclick: () => go('career') }, 'Career',
             newCount ? h('span.mw-new-badge', { title: `${newCount} new achievement${newCount === 1 ? '' : 's'}` }, String(newCount)) : null),
@@ -277,7 +384,40 @@ export function createMenu({ root, onStart, onIntro = null }) {
         h('span.mw-foot-item', `v${GAME_VERSION}`),
       ),
     );
-    return { el, focus: playBtn, cleanup: off };
+    return { el, focus: continueBtn || playBtn, cleanup: off };
+  }
+
+  // ---------------------------------------------------------- load game
+
+  function loadScreen() {
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const list = h('div.mw-save-list');
+    function render() {
+      const saves = listSaves();
+      if (!saves.length) {
+        setChildren(list, h('p.mw-hint', 'No saved games yet. Save a game against the computer from the in-game menu (F10).'));
+        return;
+      }
+      setChildren(list, saves.map((info) => h('div.mw-save-row',
+        h('div.mw-save-text',
+          h('b', info.slot === AUTO_SLOT ? 'Autosave' : `Slot ${info.slot}`),
+          h('span', saveLine(info))),
+        h('button.mw-btn.mw-btn--primary.mw-btn--small', { type: 'button', onclick: () => loadSlot(info.slot) }, 'Load'),
+        h('button.mw-btn.mw-btn--ghost.mw-btn--small', { type: 'button', title: 'Delete this saved game', onclick: async () => {
+          if (typeof confirm === 'function' && !confirm(`Delete ${info.slot === AUTO_SLOT ? 'the autosave' : `slot ${info.slot}`}?`)) return;
+          await deleteSave(info.slot);
+          render();
+        } }, 'Delete'),
+      )));
+    }
+    render();
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-load-panel',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'Load Game'), h('span.mw-head-spacer')),
+        list,
+        h('p.mw-hint', 'Saved games are kept in this browser on this device. A game is autosaved every three minutes of game time; Save & Quit in the game menu keeps it for Continue.')),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
   }
 
   // ---------------------------------------------------------- lobby
@@ -297,7 +437,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     let leaving = false;
     let leaveArmed = false; // host: first Leave / Esc asks, the second one closes the room
     let leaveTimer = 0;
-    const st = () => lobby.state || { slots: [], mapSize: 'small', peace: 0 };
+    const st = () => lobby.state || { slots: [], mapSize: 'small', peace: 0, survival: false };
     const myIndex = () => {
       if (!isHost) return Number.isInteger(lobby.mySlot) ? lobby.mySlot : -1;
       const i = st().slots.findIndex((s) => s && s.kind === 'host');
@@ -371,7 +511,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       const state = st();
       const s = state.slots[i] || { kind: 'closed' };
       const me = myIndex();
-      const sig = JSON.stringify([s, me]);
+      const sig = JSON.stringify([s, me, M.survivalMode(state)]); // the trial shows "Together" in the team column
       if (sig === rowSig[i]) return;
       rowSig[i] = sig;
       const row = rows[i];
@@ -442,7 +582,9 @@ export function createMenu({ root, onStart, onIntro = null }) {
 
       // team
       let team = null;
-      if (filled) {
+      if (filled && M.survivalMode(st())) {
+        team = h('div.mw-team-static', { title: `In the ${SURVIVAL_NAME} every player is on one team.` }, 'Together');
+      } else if (filled) {
         if (canEditTeam(i, s)) {
           team = h('select.mw-select.mw-select--team', {
             'aria-label': `Team for slot ${i + 1}`,
@@ -488,6 +630,24 @@ export function createMenu({ root, onStart, onIntro = null }) {
       },
     }, h('span', id === 'small' ? 'Small' : 'Medium'), h('small', `${n}×${n}`)));
     const mapStatic = h('div.mw-map-static');
+    // Landscape (DESIGN 6.7): the ground between the bases, or Random (drawn when the game starts).
+    const landBtns = LANDSCAPE_CHOICES.map((id) => {
+      const info = landscapeInfo(id);
+      return h('button.mw-chip-btn', {
+        type: 'button',
+        title: info.blurb,
+        dataset: { landscape: id },
+        onclick: () => {
+          try {
+            if (typeof lobby.setLandscape === 'function') lobby.setLandscape(id);
+          } catch (err) {
+            toast(err?.message || 'Could not change the landscape.');
+          }
+        },
+      }, `${info.icon} ${info.name}`);
+    });
+    const landNote = h('div.mw-hint.mw-landscape-note');
+    const landStatic = h('div.mw-map-static');
     // Game mode: a standard game, or the Decade of Peace with the host's pick of 30 / 45 / 60 minutes.
     let lastPeace = PEACE_LENGTHS[0]; // the length the mode comes back with when it is switched on again
     const setPeace = (minutes) => {
@@ -497,9 +657,17 @@ export function createMenu({ root, onStart, onIntro = null }) {
         toast(err?.message || 'Could not change the game mode.');
       }
     };
+    const setSurvival = () => {
+      try {
+        if (typeof lobby.setSurvival === 'function') lobby.setSurvival(true);
+      } catch (err) {
+        toast(err?.message || 'Could not change the game mode.');
+      }
+    };
     const modeBtns = [
       ['standard', 'Standard', 'Fight from the first minute.', () => setPeace(0)],
       ['peace', PEACE_NAME, `No player can harm another, or build near an enemy Town Center, for the first ${PEACE_LENGTHS.join(', ')} minutes: time to build and mass armies for one great battle.`, () => setPeace(lastPeace)],
+      ['survival', SURVIVAL_NAME, `Survival: every player and AI on one team against ever larger waves of mythical monsters, with a Titan leading every ${ordinal(SURVIVAL_BOSS_EVERY)} wave. Hold out as long as you can.`, setSurvival],
     ].map(([id, label, title, pick]) => h('button.mw-seg', { type: 'button', title, dataset: { mode: id }, onclick: pick }, h('span', label)));
     const peaceBtns = PEACE_LENGTHS.map((m) => h('button.mw-seg', {
       type: 'button',
@@ -513,6 +681,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-peace-label', 'Peace lasts'),
       h('div.mw-segmented', peaceBtns),
       h('div.mw-hint.mw-peace-hint', 'Creatures still fight. A horn sounds when the peace ends.'),
+    );
+    const survivalBest = h('span.mw-survival-best');
+    const survivalRow = h('div.mw-peace-row.mw-survival-row',
+      h('div.mw-hint.mw-peace-hint', `Everyone plays on one team. The first wave comes at ${clockText(SURVIVAL_FIRST_WAVE)}, then one every ${SURVIVAL_INTERVAL} s, and a Titan leads every ${ordinal(SURVIVAL_BOSS_EVERY)} wave. Clearing a wave pays gold. The trial ends when your last building falls.`, ' ', survivalBest),
     );
     const modeStatic = h('div.mw-map-static');
     // Victory: destroy every enemy building, and with Sacred Victory on, holding every sacred site for 8 minutes too.
@@ -539,13 +711,17 @@ export function createMenu({ root, onStart, onIntro = null }) {
         h('div.mw-label', 'Map'),
         isHost ? h('div.mw-segmented', mapBtns) : mapStatic,
       ),
+      h('div.mw-opt-group.mw-landscape-group',
+        h('div.mw-label', 'Landscape'),
+        isHost ? [h('div.mw-chip-row', landBtns), landNote] : landStatic,
+      ),
       h('div.mw-opt-group.mw-mode-group',
         h('div.mw-label', 'Game mode'),
-        isHost ? [h('div.mw-segmented', modeBtns), peaceRow] : modeStatic,
+        isHost ? [h('div.mw-segmented', modeBtns), peaceRow, survivalRow] : [modeStatic, survivalRow],
       ),
       h('div.mw-opt-group.mw-victory-group',
         h('div.mw-label', 'Victory'),
-        isHost ? sacredToggle : victoryStatic,
+        isHost ? [sacredToggle, victoryStatic] : victoryStatic,
       ),
     );
 
@@ -673,7 +849,12 @@ export function createMenu({ root, onStart, onIntro = null }) {
 
     function renderFooter() {
       const parts = M.matchupSummary(st());
-      setChildren(matchup, parts.length ? parts.map((p, k) => [
+      if (M.survivalMode(st()) && parts.length) {
+        setChildren(matchup, h('span.mw-team',
+          h('span.mw-team-label', 'Together'),
+          parts.flatMap((p) => p.names.map((n, j) => h('span.mw-team-name', { style: { '--c': p.colors[j] } }, n)))),
+        h('span.mw-vs', 'vs'), h('span.mw-team', h('span.mw-team-label', 'The monster waves')));
+      } else setChildren(matchup, parts.length ? parts.map((p, k) => [
         k ? h('span.mw-vs', 'vs') : null,
         h('span.mw-team',
           h('span.mw-team-label', `Team ${p.team}`),
@@ -692,14 +873,28 @@ export function createMenu({ root, onStart, onIntro = null }) {
       mapBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.size === size));
       presetBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.preset === st().preset));
       mapStatic.textContent = `${size === 'medium' ? 'Medium' : 'Small'} (${MAP_SIZES[size] || '?'}×${MAP_SIZES[size] || '?'})`;
+      const land = M.landscapeChoice(st());
+      landBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.landscape === land));
+      landNote.textContent = landscapeInfo(land).blurb;
+      landStatic.textContent = M.landscapeLabel(st());
       const peace = M.peaceMinutes(st());
       if (peace) lastPeace = peace;
-      modeBtns.forEach((b) => b.classList.toggle('is-active', (b.dataset.mode === 'peace') === (peace > 0)));
+      const survival = M.survivalMode(st());
+      const mode = survival ? 'survival' : peace > 0 ? 'peace' : 'standard';
+      modeBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.mode === mode));
       peaceBtns.forEach((b) => b.classList.toggle('is-active', Number(b.dataset.peace) === peace));
       peaceRow.hidden = peace === 0;
+      survivalRow.hidden = !survival;
+      const best = survival ? getCareer().best.wave : 0;
+      survivalBest.textContent = best > 0 ? `Your best: wave ${best}.` : '';
       modeStatic.textContent = M.gameModeLabel(st());
       sacredInput.checked = M.sacredOn(st());
       victoryStatic.textContent = M.victoryLabel(st());
+      if (isHost) {
+        // A trial has no rival team to win against: the Sacred Victory toggle gives way to the trial's goal.
+        sacredToggle.hidden = survival;
+        victoryStatic.hidden = !survival;
+      }
     }
 
     function renderAll() {
@@ -982,7 +1177,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     const el = h('div.mw-center-screen.mw-wide-screen',
       h('section.mw-panel.mw-howto-panel.mw-career-panel',
         h('header.mw-panel-head', backBtn, h('h2.mw-h2', `Career of ${getSettings().name}`), h('span.mw-head-spacer')),
-        h('div.mw-scroll', renderCareerContent(c, unseen),
+        h('div.mw-scroll', renderCareerContent(c, unseen, onReplay ? renderReplays({ onWatch: (what) => onReplay(what), toast }) : null),
           h('p.mw-hint', 'Your career is kept in this browser on this device. A game counts once it ends, or when you leave it after its first minute.')),
       ),
     );
@@ -1111,6 +1306,22 @@ export function createMenu({ root, onStart, onIntro = null }) {
     };
     renderT();
 
+    // Game speed (matches against the computer) and the size of the in-game interface.
+    const segField = (key, options) => {
+      const note = h('div.mw-field-note');
+      const btns = options.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { v: id }, onclick: () => {
+        saveSettings({ [key]: id });
+        render();
+      } }, label));
+      const render = () => {
+        const v = getSettings()[key];
+        btns.forEach((b) => b.classList.toggle('is-active', b.dataset.v === v));
+        note.textContent = optionNote(options, v);
+      };
+      render();
+      return [h('div.mw-segmented', btns), note];
+    };
+
     // Alerts (src/game/alerts.js) and what a background tab does about them (src/ui/tab-attention.js).
     const aNote = h('div.mw-field-note');
     const aBtns = ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { a: id }, onclick: () => {
@@ -1153,9 +1364,11 @@ export function createMenu({ root, onStart, onIntro = null }) {
           h('span.mw-field-note', 'Every pantheon has its own score: calm while you build, louder in a fight. The Decade of Peace stays calm until the war horn.')),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
+        h('div.mw-field', h('span.mw-label', 'Game speed'), ...segField('gameSpeed', GAME_SPEED_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Interface size'), ...segField('uiScale', UI_SCALE_OPTIONS)),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
-          toggle('narration', 'Narration', browserSpeech() ? 'A voice reads the film\'s captions aloud. It follows the Volume above.' : 'This browser has no speech voice, so the film plays with its captions only.'),
+          toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),
           onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-watch', { type: 'button', onclick: () => onIntro() }, '▶ Watch it now') : null),
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),

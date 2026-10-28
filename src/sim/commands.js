@@ -9,8 +9,10 @@ import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbilit
 import { issueHouseUpgrade } from './homes.js';
 import { issueTrade } from './trade.js';
 import { peaceNotice } from './peace.js';
+import { castPower } from './powers.js';
 import { hyp } from './common.js';
 import { isWallType } from '../data/walls.js';
+import { relicAt, canCarry, relicOf, isRelicTemple } from './relics.js';
 
 // ---- Input normalization (commands are untrusted: network, AI, HUD) ----
 
@@ -19,7 +21,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses', 'godPower']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -69,12 +71,14 @@ export function normalizeCommand(cmd, map) {
       unit: nameOrId(cmd.unit),
       ability: typeof ability === 'string' && ability.length <= MAX_NAME ? ability : undefined,
       upgrade: typeof upgrade === 'string' && upgrade.length <= MAX_NAME ? upgrade : undefined,
+      power: typeof cmd.power === 'string' && cmd.power.length <= MAX_NAME ? cmd.power : undefined,
       on: cmd.on === true,
       to: Number.isSafeInteger(cmd.to) ? cmd.to : undefined,
       res: typeof cmd.res === 'string' && cmd.res.length <= MAX_NAME ? cmd.res : undefined,
       amount: num(cmd.amount),
       index: Number.isSafeInteger(cmd.index) ? cmd.index : undefined,
       count: Number.isSafeInteger(cmd.count) ? cmd.count : undefined,
+      relic: Number.isSafeInteger(cmd.relic) ? cmd.relic : undefined,
       queue: !!cmd.queue,
     };
   } catch {
@@ -180,7 +184,32 @@ function peaceReport(world, player, state) {
   world.error(player, peaceNotice(world.peaceLeft()));
 }
 
+/**
+ * A smart order on a relic lying on the ground (DESIGN 5.15): the nearest unit that can carry it goes
+ * to pick it up, the others walk along. Returns false when the relic is not there to be taken.
+ */
+function smartRelic(world, player, units, cmd) {
+  const r = relicAt(world, cmd.relic);
+  if (!r || r.state !== 'ground') return false;
+  let best = null;
+  let bestD = Infinity;
+  for (const u of units) {
+    if (!canCarry(world, u)) continue;
+    const d = hyp(u.x - r.x, u.y - r.y);
+    if (d < bestD) {
+      bestD = d;
+      best = u;
+    }
+  }
+  if (!best) world.error(player, 'Only a Worshipper or a god can carry a relic.');
+  else world.setOrder(best, { type: 'relic', relic: r.i }, !!cmd.queue);
+  const rest = units.filter((u) => u !== best);
+  if (rest.length) groupOrder(world, rest, r.x, r.y, 'move', !!cmd.queue);
+  return true;
+}
+
 function smart(world, player, units, cmd) {
+  if (cmd.relic !== undefined && smartRelic(world, player, units, cmd)) return;
   const tRaw = cmd.target ? world.entities.get(cmd.target) : null;
   const t = tRaw && !tRaw.dead ? tRaw : null;
   const tree = treeAt(world, cmd, t);
@@ -189,6 +218,11 @@ function smart(world, player, units, cmd) {
   const state = { fullReported: false };
   for (const u of units) {
     const worker = u.def.class === 'worker';
+    // A relic's carrier on its own Temple: the relic goes in (before praying, repairing...).
+    if (t && isRelicTemple(t, player) && relicOf(world, u)) {
+      world.setOrder(u, { type: 'deliver', building: t.id }, queue);
+      continue;
+    }
     if (t && t.kind !== 'mine' && world.areEnemies(player, t.owner)) {
       if (world.peaceBlocks(player, t.owner)) {
         // Decade of Peace: walk up to another player's unit or building instead of attacking it.
@@ -399,6 +433,9 @@ export function applyCommand(world, player, cmd) {
       break;
     case 'cast':
       castCommand(world, player, cmd);
+      break;
+    case 'godPower':
+      castPower(world, player, cmd.power, cmd.x, cmd.y);
       break;
     case 'surrender':
       world.defeatPlayer(player, true);

@@ -7,7 +7,7 @@
 //
 //   node tools/shot-zoom.mjs [--port 8322] [--out DIR] [--prefix zoom] [--quality low] [--scenario late]
 //        [--size medium] [--dists 25,44,100,170] [--tod golden] [--width 1280] [--height 720] [--seed 4242]
-//        [--at X,Y] [--sel army] [--lod auto|full|far] [--fow] [--frames 3] [--no-shots] [--eval 'h.renderer...'] [--timeout 600000]
+//        [--landscape islands] [--at X,Y] [--sel army] [--lod auto|full|far] [--fow] [--frames 3] [--no-shots] [--eval 'h.renderer...'] [--timeout 600000]
 //
 // --lod auto   the zoom's own levels (default); full: every level pinned to full detail (what the game drew
 //              before the far zoom); far: every level pinned to its far form (also at close zoom, to look at it).
@@ -34,6 +34,7 @@ const quality = opt('quality', 'low');
 const scenario = opt('scenario', 'late');
 const size = opt('size', 'medium');
 const seed = Number(opt('seed', '4242'));
+const landscape = opt('landscape', ''); // classic | highlands | rivers | islands | forest
 const dists = opt('dists', '25,44,100,170').split(',').map(Number);
 const width = Number(opt('width', '1280'));
 const height = Number(opt('height', '720'));
@@ -58,7 +59,7 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console.error', m.text()); });
 
 try {
-  const url = `http://localhost:${port}/tools/render-harness.html?manual=1&scenario=${scenario}&reveal=${fow ? 0 : 1}&seed=${seed}&size=${size}&t=0&quality=${quality}&tod=${encodeURIComponent(timeOfDay)}${sel ? `&sel=${sel}` : ''}`;
+  const url = `http://localhost:${port}/tools/render-harness.html?manual=1&scenario=${scenario}&reveal=${fow ? 0 : 1}&seed=${seed}&size=${size}${landscape ? `&landscape=${landscape}` : ''}&t=0&quality=${quality}&tod=${encodeURIComponent(timeOfDay)}${sel ? `&sel=${sel}` : ''}`;
   await page.goto(url);
   await page.waitForFunction(() => window.harness && window.harness.ready === true, null, { timeout });
   await page.addStyleTag({ content: '#panel, #stats, #box { display: none !important; }' });

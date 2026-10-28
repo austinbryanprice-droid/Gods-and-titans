@@ -14,6 +14,9 @@ import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
+import { runRelics } from './relics.js';
+import { runPowers } from './powers.js';
+import { createTutorialAI } from './tutorial-ai.js';
 import { runSacred } from './sacred.js';
 import { runRaids } from './raid.js';
 
@@ -56,7 +59,7 @@ export class AIPlayer {
     this.thinks = 0;
     this.errors = 0;
     this.loggedError = false;
-    this.stats = { casts: 0, thinkMs: 0, thinks: 0 };
+    this.stats = { casts: 0, thinkMs: 0, thinks: 0, powers: 0 };
     this.lastOrder = new Map(); // unit id -> tick of its last AI order
     this.cmdMemo = new Map(); // unit id -> { type, x, y, tick } of its last move-like order
     this._focusAt = 0; // focus-fire rotation through the army
@@ -113,7 +116,9 @@ export class AIPlayer {
     lap('econ');
     runRaids(this, s);
     runMilitary(this, s);
+    if (this.thinks % 3 === 0) runPowers(this, s);
     lap('military');
+    runRelics(this, s);
     runSacred(this, s);
     manageWorkers(this, s);
     resumeSites(this, s);
@@ -406,10 +411,11 @@ export class AIPlayer {
  * Create an AI controller for one player.
  * @param {object} world the authoritative World
  * @param {number} playerIndex
- * @param {'easy'|'normal'|'hard'|'brutal'} [difficulty]
- * @returns {{ tick(): void, ai: AIPlayer }}
+ * @param {'easy'|'normal'|'hard'|'brutal'|'tutorial'} [difficulty] ('tutorial': the sleeping camp of the guided first match)
+ * @returns {{ tick(): void, ai?: AIPlayer }}
  */
 export function createAI(world, playerIndex, difficulty = 'normal') {
+  if (difficulty === 'tutorial') return createTutorialAI(world, playerIndex);
   const ai = new AIPlayer(world, playerIndex, difficulty);
   return {
     ai,

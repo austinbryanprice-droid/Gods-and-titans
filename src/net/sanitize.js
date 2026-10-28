@@ -6,6 +6,8 @@
 import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS, MAX_QUEUE } from '../config.js';
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { MARKS } from '../data/marks.js';
+import { POWERS } from '../data/powers.js';
+import { isLandscape } from '../data/landscapes.js';
 import { sanitizeName } from './protocol.js';
 
 const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -39,6 +41,7 @@ const FIELD = {
   buildingType: (v) => (hasOwn(BUILDINGS, v) ? v : undefined),
   ability: (v) => (hasOwn(ABILITIES, v) ? v : undefined),
   upgrade: (v) => (hasOwn(UPGRADES, v) ? v : undefined),
+  power: (v) => (hasOwn(POWERS, v) ? v : undefined),
   resource: (v) => (TRADE_RESOURCES.includes(v) ? v : undefined),
   amount: (v) => (Number.isSafeInteger(v) && v > 0 && v <= TRADE_MAX ? v : undefined),
 };
@@ -53,7 +56,7 @@ const COMMANDS = {
   move: { units: U, x: ['x', true], y: ['y', true], queue: Q },
   attackMove: { units: U, x: ['x', true], y: ['y', true], queue: Q },
   attack: { units: U, target: ['id', true], queue: Q },
-  smart: { units: U, x: XO, y: YO, target: TGT, tx: ['tx', false], ty: ['ty', false], queue: Q },
+  smart: { units: U, x: XO, y: YO, target: TGT, tx: ['tx', false], ty: ['ty', false], relic: ['index', false], queue: Q },
   gather: { units: U, target: TGT, tx: ['tx', false], ty: ['ty', false], x: XO, y: YO, queue: Q },
   pray: { units: U, target: ['id', true], queue: Q },
   returnCargo: { units: U, queue: Q },
@@ -75,6 +78,7 @@ const COMMANDS = {
   autoRepair: { on: ['bool', false] },
   trade: { to: ['index', true], res: ['resource', true], amount: ['amount', true] },
   autocast: { units: U, ability: ['ability', false], on: ['bool', false] },
+  godPower: { power: ['power', true], x: XO, y: YO },
 };
 export const COMMAND_TYPES = Object.keys(COMMANDS);
 export const COMMAND_SPECS = COMMANDS; // read-only: fingerprinted into the protocol version (wire-version.js)
@@ -156,7 +160,9 @@ export function validateSetup(setup, myIndex) {
   const clean = { version: typeof setup.version === 'string' ? setup.version.slice(0, 32) : '', seed, mapSize, players };
   if (typeof setup.mapHash === 'string' && setup.mapHash.length <= 64) clean.mapHash = setup.mapHash;
   if (PEACE_LENGTHS.includes(setup.peaceMinutes)) clean.peaceMinutes = setup.peaceMinutes; // Decade of Peace
+  else if (setup.survival === true) clean.survival = true; // Trial of the Titans (never together with a peace)
   if (setup.sacredVictory === true) clean.sacredVictory = true; // Sacred Victory (5.11)
+  if (isLandscape(setup.landscape) && setup.landscape !== 'classic') clean.landscape = setup.landscape; // DESIGN 6.7
   return { setup: clean, myIndex };
 }
 
@@ -172,7 +178,7 @@ export function isValidSnapshot(snap) {
     if (!isObject(e) || !Number.isFinite(e.id) || typeof e.k !== 'string' || !Number.isFinite(e.x) || !Number.isFinite(e.y)) return false;
   }
   for (const p of snap.players) if (!isObject(p)) return false;
-  for (const key of ['events', 'fields', 'reveals', 'sites']) {
+  for (const key of ['events', 'fields', 'reveals', 'sites', 'relics']) {
     const list = snap[key];
     if (list === undefined) continue;
     if (!Array.isArray(list)) return false;

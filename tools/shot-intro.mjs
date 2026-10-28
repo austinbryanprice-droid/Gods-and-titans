@@ -8,6 +8,7 @@
 //   node tools/shot-intro.mjs --flow       # the page flow: the film plays on its own clock, Esc skips it
 //   node tools/shot-intro.mjs --narration  # the voice: each caption read as it comes up, Esc cuts it, a click unlocks it
 //   node tools/shot-intro.mjs --music      # the score, on the page's real audio graph, in real time (about three minutes; --scenes 2 runs one of the four)
+//   node tools/shot-intro.mjs --voice      # the recorded narration: real clips decoded and played through the sound engine, each with its caption, Esc stops it
 //   node tools/shot-intro.mjs --sound      # a first visit as a browser gives it: the card that waits for a key, and the film with its sound where the browser allows it (about three minutes; --scenes 2 runs one of the four)
 //
 // The film runs in manual mode (src/ui/intro.js playIntro({ manual: true })): the tool moves it on in
@@ -288,7 +289,7 @@ async function narration(browser, errors) {
   await ctx.addInitScript(installSpeechStandIn);
   const page = await ctx.newPage();
   watchErrors(page, errors);
-  await page.goto(`${base}?intro=0`);
+  await page.goto(`${base}?intro=0&voice=browser`);
   await page.waitForSelector('.mw-title-screen');
   await page.mouse.click(5, 5); // the player's first input: from here the browser lets the page sound (on the page itself the card's key press does it), so only the voice's own refusals bring the hint up
   await page.addStyleTag({ content: '.mw-intro-loading { display: none !important; }' }); // the card fades by the clock; these runs have none
@@ -367,7 +368,7 @@ async function narration(browser, errors) {
   for (const on of [true, false]) {
     await reset();
     await page.evaluate((narrate) => localStorage.setItem('mythicwar-settings', JSON.stringify({ quality: 'low', narration: narrate })), on);
-    await page.goto(`${base}?intro=1`);
+    await page.goto(`${base}?intro=1&voice=browser`);
     await page.waitForSelector('.mw-intro.is-gated', { timeout: 30000 }); // a first visit: the film waits for a key press or a click
     await page.keyboard.press('a');
     await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
@@ -519,7 +520,7 @@ async function score(browser, errors, only = [1, 2, 3]) {
     await ctx.addInitScript(installTimedSpeech);
     const page = await ctx.newPage();
     watchErrors(page, errors);
-    await page.goto(`${base}?intro=0`);
+    await page.goto(`${base}?intro=0&voice=browser`);
     await page.waitForSelector('.mw-title-screen');
     await page.addStyleTag({ content: '.mw-intro-loading { display: none !important; }' });
     if (click) {
@@ -779,7 +780,7 @@ async function sound(browser, errors, only = [1, 2, 3, 4]) {
         writeFileSync(join(out, name), Buffer.from(data, 'base64'));
       },
     };
-    await page.goto(`${base}?intro=1`);
+    await page.goto(`${base}?intro=1&voice=browser`);
     await look.until((s) => s.shown, 30000);
     return { page, look };
   };
@@ -899,6 +900,122 @@ async function sound(browser, errors, only = [1, 2, 3, 4]) {
   return results;
 }
 
+// ---------------------------------------------------------------- the recorded voice
+
+/**
+ * Runs in the page: tags each downloaded clip with its file name through fetch and decodeAudioData, and records every
+ * buffer source started or stopped (with the clip, the caption on the screen and the film's second), and every speak
+ * asked of the browser's own voice (there should be none).
+ */
+function installVoiceProbe() {
+  const log = [];
+  window.__voice = { log };
+  const names = new WeakMap();
+  const fetch0 = window.fetch.bind(window);
+  window.fetch = async (url, ...rest) => {
+    const r = await fetch0(url, ...rest);
+    const m = String(url).match(/narration\/([^/?]+)$/);
+    if (!m) return r;
+    const ab = r.arrayBuffer.bind(r);
+    r.arrayBuffer = async () => {
+      const data = await ab();
+      names.set(data, m[1]);
+      return data;
+    };
+    return r;
+  };
+  const decode0 = BaseAudioContext.prototype.decodeAudioData;
+  BaseAudioContext.prototype.decodeAudioData = function (data, ...rest) {
+    const name = names.get(data);
+    return decode0.call(this, data, ...rest).then((buf) => {
+      if (name) buf.__clip = name;
+      return buf;
+    });
+  };
+  const here = () => {
+    const cap = document.querySelector('.mw-intro-caption');
+    return { caption: cap ? cap.textContent : null, t: window.__intro && window.__intro.film ? window.__intro.film.t : null, at: performance.now() };
+  };
+  const start0 = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (when, ...rest) {
+    if (this.buffer && this.buffer.__clip) log.push({ what: 'clip', clip: this.buffer.__clip, seconds: this.buffer.duration, delay: (when || 0) - this.context.currentTime, state: this.context.state, ...here() });
+    return start0.call(this, when, ...rest);
+  };
+  const stop0 = AudioBufferSourceNode.prototype.stop;
+  AudioBufferSourceNode.prototype.stop = function (...rest) {
+    if (this.buffer && this.buffer.__clip) log.push({ what: 'stop', clip: this.buffer.__clip, ...here() });
+    return stop0.apply(this, rest);
+  };
+  if (window.speechSynthesis) {
+    const speak0 = speechSynthesis.speak.bind(speechSynthesis);
+    speechSynthesis.speak = (u) => {
+      log.push({ what: 'speak', text: u.text, ...here() });
+      return speak0(u);
+    };
+  }
+}
+
+async function voice(browser, errors) {
+  const { results, ok } = reporter();
+  const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } });
+  await ctx.addInitScript(installVoiceProbe);
+  const page = await ctx.newPage();
+  watchErrors(page, errors);
+  const clips = await (async () => {
+    await page.goto(`${base}?intro=0`);
+    await page.waitForSelector('.mw-title-screen');
+    return page.evaluate(async () => (await import('/src/intro/voiceover.js')).VOICE_CLIPS);
+  })();
+  const captions = await page.evaluate(async () => (await import('/src/intro/script.js')).CAPTIONS);
+  const log = () => page.evaluate(() => window.__voice.log);
+  const gone = () => page.waitForSelector('.mw-intro', { state: 'detached', timeout: 180000 });
+  console.log('recorded voice:');
+
+  // 1. the whole script on the film's own manual clock: each caption's clip, decoded from the real file, in order
+  await page.mouse.click(5, 5); // the player's first input: the browser lets the page sound
+  await page.addStyleTag({ content: '.mw-intro-loading { display: none !important; }' });
+  await page.evaluate(async () => {
+    const { playIntro } = await import('/src/ui/intro.js');
+    const intro = playIntro({ manual: true, guard: false, quality: 'low', volume: 0.6 });
+    window.__intro = intro;
+    await intro.ready;
+  });
+  await page.waitForTimeout(1500); // the clips download and decode while the film loads
+  const began = Date.now(); // in real time, so a line is over before the next comes, as on the page
+  for (let to = 0.5; to <= 47; to += 0.5) {
+    await page.evaluate((target) => {
+      const intro = window.__intro;
+      while (intro.film && intro.film.t < target - 1e-6) intro.advance(Math.min(0.05, target - intro.film.t));
+    }, to);
+    await page.waitForTimeout(Math.max(0, began + to * 1000 - Date.now()));
+  }
+  const all = await log();
+  const played = all.filter((r) => r.what === 'clip');
+  ok('one clip for each caption, in order', JSON.stringify(played.map((r) => r.clip)) === JSON.stringify(captions.map((c) => clips[c.text])), played.map((r) => r.clip).join(', '));
+  ok('each starts with its caption on the screen', played.length === captions.length && played.every((r, i) => r.caption === captions[i].text && r.t >= captions[i].from && r.t < captions[i].from + 0.6), played.map((r) => `${r.t.toFixed(2)} "${r.caption}"`).join('; '));
+  ok('each is a real recording, 1 to 4 seconds long', played.length > 0 && played.every((r) => r.seconds > 1 && r.seconds < 4), played.map((r) => r.seconds.toFixed(2)).join(' '));
+  ok('on a running context, a moment after the hand-over', played.every((r) => r.state === 'running' && r.delay > 0.05 && r.delay < 0.5), played.map((r) => `${r.state} +${r.delay.toFixed(2)}`).join(' '));
+  ok('the browser\'s own voice is never asked', !all.some((r) => r.what === 'speak'));
+  await page.evaluate(() => window.__intro.skip());
+  await gone();
+
+  // 2. the page as a player gets it: a first visit, the card, a key, the first line; Esc stops it
+  await page.goto(`${base}?intro=1`);
+  await page.waitForSelector('.mw-intro.is-gated', { timeout: 30000 });
+  await page.keyboard.press('a');
+  await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
+  await page.waitForFunction(() => window.__voice.log.some((r) => r.what === 'clip'), null, { timeout: 120000 });
+  const first = (await log()).find((r) => r.what === 'clip');
+  ok('after the key, the first line is the first clip, with its caption up', first.clip === clips[captions[0].text] && first.caption === captions[0].text, `${first.clip} "${first.caption}"`);
+  await page.keyboard.press('Escape');
+  const cut = await log();
+  ok('Esc stops the clip at once', cut.some((r) => r.what === 'stop' && r.clip === first.clip), cut.map((r) => `${r.what} ${r.clip || r.text}`).join(', '));
+  ok('and the browser\'s voice was never asked', !cut.some((r) => r.what === 'speak'));
+  await gone();
+  await ctx.close();
+  return results;
+}
+
 // ---------------------------------------------------------------- main
 
 const server = await ensureServer();
@@ -913,6 +1030,8 @@ try {
     failed = (await narration(browser, errors)).filter((r) => !r.pass).length;
   } else if (flag('music')) {
     failed = (await score(browser, errors, opt('scenes', '1,2,3,4').split(',').map(Number))).filter((r) => !r.pass).length;
+  } else if (flag('voice')) {
+    failed = (await voice(browser, errors)).filter((r) => !r.pass).length;
   } else if (flag('sound')) {
     failed = (await sound(browser, errors, opt('scenes', '1,2,3,4').split(',').map(Number))).filter((r) => !r.pass).length;
   } else {

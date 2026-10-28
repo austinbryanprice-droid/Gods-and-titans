@@ -23,10 +23,15 @@ import { updateProduction } from './production.js';
 import { cancelMerge } from './homes.js';
 import { awardSpoils, accrueBlessedFaith } from './spoils.js';
 import { spawnCreeps } from './creeps.js';
+import { setupRelics, updateRelics, onCampMemberKilled } from './relics.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
 import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
+import { newPowerState, updatePowers, boonPct } from './powers.js';
+import { createSurvival, updateSurvival, survivalOn } from './survival.js';
+import { isTutorial, tutorialStart } from './tutorial.js';
+import { startOf } from '../data/twists.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
 
@@ -52,6 +57,7 @@ export class World {
     this.mineList = [];
     this.auraHolders = [];
     this.camps = [];
+    this.relics = []; // sim/relics.js
     this.nextId = 1;
     this.nextFieldId = 1;
     this.events = [];
@@ -62,6 +68,7 @@ export class World {
     this.fields = [];
     this.reveals = [];
     this.cmdQueue = [];
+    this.onCommand = null; // (tick, player, command) for every command accepted: the replay recorder (src/game/replay.js)
     this.hash = new SpatialHash(this.map.width, this.map.height, 2);
     this.paths = new PathService(this.map);
     this.maxRadius = 0.5;
@@ -74,6 +81,8 @@ export class World {
     // Decade of Peace: until peaceEnd (game seconds) players cannot harm each other (see canHarm).
     this.peaceEnd = peaceSeconds(setup);
     this.peace = this.peaceEnd > 0;
+    // Trial of the Titans: every player on one team against waves of monsters (survival.js); null in other games.
+    this.survival = createSurvival(this);
     // Sacred Sites (5.11): the map's holy ground, and the Sacred Victory countdown ({ team, end } while a team holds them all).
     this.sites = createSites(mapData.sacred);
     this.sacredVictory = sacredVictoryOn(setup) && this.sites.length > 0;
@@ -81,21 +90,23 @@ export class World {
     this.perf = { lastTickMs: 0, commandErrors: 0, lastCommandError: '' };
 
     const pickRng = this.rng.fork('pantheons');
+    // The daily challenge's twist (data/twists.js) may change everyone's start.
+    this.start = startOf(setup, START_RESOURCES, START_WORKERS);
     this.players = setup.players.map((sp, i) => {
       let pantheon = sp.pantheon;
       if (typeof pantheon !== 'string' || !Object.hasOwn(PANTHEONS, pantheon)) pantheon = pickRng.pick(PANTHEON_LIST).id;
       return {
         index: i,
         name: sp.name || `Player ${i + 1}`,
-        team: sp.team ?? i + 1,
+        team: survivalOn(setup) ? 1 : sp.team ?? i + 1, // the Trial of the Titans is played together
         pantheon,
         color: sp.color || PLAYER_COLORS[i % PLAYER_COLORS.length],
         kind: sp.kind || 'human',
         difficulty: sp.difficulty ?? null,
         income: 1 + ((sp.kind === 'ai' && AI_INCOME_BONUS[sp.difficulty]) || 0), // gold and wood per load delivered, times this (a Brutal AI's bonus)
-        gold: START_RESOURCES.gold,
-        wood: START_RESOURCES.wood,
-        faith: START_RESOURCES.faith,
+        gold: this.start.gold,
+        wood: this.start.wood,
+        faith: this.start.faith,
         faithRate: 0,
         tier: 1,
         popUsed: 0,
@@ -104,8 +115,10 @@ export class World {
         fallen: {},
         upgrades: {}, // researched upgrade id -> true
         upList: [], // the same ids in the order they finished (snapshot)
+        relics: [], // relic types resting in their Temples (sim/relics.js), folded into mods
         mods: computeMods([], pantheon), // their pantheon's blessings and upgrades combined (data/upgrades.js computeMods)
         autoRepair: false, // idle worshippers mend nearby damaged buildings
+        powers: newPowerState(), // god powers spent and boons running (sim/powers.js)
         lastAlert: -Infinity,
         stats: newStats(),
       };
@@ -121,7 +134,10 @@ export class World {
       const mine = this.mineList[i] || null;
       this.placeStartWorkers(i, tc, mine);
     });
-    spawnCreeps(this, mapData.camps || []);
+    // The guided first match (5.13) has no creep camps, a head start for the learner and a guarded enemy camp.
+    if (isTutorial(setup)) tutorialStart(this);
+    else spawnCreeps(this, mapData.camps || []);
+    setupRelics(this);
     this.recomputePop();
     for (let i = 0; i < this.players.length; i++) this.recomputeTier(i, true);
     this.hash.rebuild(this.unitList);
@@ -141,7 +157,7 @@ export class World {
       }
     }
     spots.sort((a, b) => a.d - b.d || a.y - b.y || a.x - b.x);
-    for (let k = 0; k < START_WORKERS; k++) {
+    for (let k = 0; k < this.start.workers; k++) {
       const s = spots[k] || spots[k % Math.max(1, spots.length)] || { x: tc.x, y: tc.ty + tc.size + 0.5 };
       this.spawnUnit(player, 'worshipper', s.x, s.y, { facing: Math.atan2(ty - s.y, tx - s.x), silent: true });
     }
@@ -243,7 +259,8 @@ export class World {
       dmgMult: 1, armorNow: def.armor, speedNow: def.speed, atkSpeedMult: 1, lifesteal, regen, shield: 0,
       stunned: false, invuln: false, slowPct: 0,
       dead: false, constructed: true, buildProgress: 1, queue: null, size: 0, amount: 0,
-      lastGather: null, camp: null,
+      lastGather: null, camp: null, jamT: 0, // jamT: tick until which the unit squeezes through allies (movement.js)
+      boost: opts.boost || null, // Trial of the Titans: a wave monster's { hp, dmg } multipliers
       // Engagement bookkeeping (combat.js / surround.js): current target id, ticks approaching it,
       // ticks blocked, last progress check, the melee attack spot, and attackers claiming spots on us.
       engId: 0, engT: 0, blockedT: 0, engD: 0, engCk: 0, atk: null, claimers: null,
@@ -271,12 +288,13 @@ export class World {
     const m = unitMods(p ? p.mods : NO_MODS, def);
     const lv = def.class === 'god' ? u.level - 1 : 0;
     const rk = rankBonus(u.rank);
-    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp) * (1 + rk.hp);
-    const newMax = hpMult === 1 ? def.hp : Math.round(def.hp * hpMult);
+    const boost = u.boost;
+    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp) * (1 + rk.hp) * (boost ? boost.hp : 1);
+    const newMax = hpMult === 1 ? def.hp : Math.max(1, Math.round(def.hp * hpMult));
     if (full) u.hp = newMax;
     else u.hp = Math.max(1, Math.min(newMax, u.hp + (newMax - u.maxHp)));
     u.maxHp = newMax;
-    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) * (1 + rk.damage) : 0;
+    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) * (1 + rk.damage) * (boost ? boost.dmg : 1) : 0;
     u.baseArmor = def.armor + GOD_LEVEL_ARMOR * lv + m.armor + rk.armor;
     u.baseRegen = u.regen0 + m.regen;
     u.baseSpeed = def.speed * (1 + m.speed);
@@ -300,11 +318,18 @@ export class World {
     if (!p || p.upgrades[upId]) return;
     p.upgrades[upId] = true;
     p.upList.push(upId);
-    p.mods = computeMods(p.upList, p.pantheon);
+    this.refreshMods(i);
+    this.emit({ type: 'researched', player: i, up: upId });
+  }
+
+  /** Recombine player i's blessings, upgrades and relics and apply them to everything the player owns. */
+  refreshMods(i) {
+    const p = this.players[i];
+    if (!p) return;
+    p.mods = computeMods(p.upList, p.pantheon, p.relics);
     for (const u of this.unitList) if (!u.dead && u.owner === i) this.applyUnitStats(u);
     for (const b of this.buildingList) if (!b.dead && b.owner === i) this.applyBuildingStats(b);
     this.recomputePopCap(i);
-    this.emit({ type: 'researched', player: i, up: upId });
   }
 
   gainXp(u, amount) {
@@ -470,7 +495,6 @@ export class World {
 
   // ------------------------------------------------------------- commands
 
-  /** Queue a command; it is applied at the start of the next tick. */
   /**
    * Queue a command for the next tick. Untrusted input: anything that is not a
    * well-formed command is dropped (never throws); see normalizeCommand.
@@ -482,6 +506,7 @@ export class World {
     if (!clean) return;
     this.cmdCounts[playerIndex]++;
     this.cmdQueue.push([playerIndex, clean]);
+    if (this.onCommand) this.onCommand(this.tickCount, playerIndex, clean);
   }
 
   setOrder(u, o, queue = false) {
@@ -550,6 +575,7 @@ export class World {
           this.emit({ type: 'bounty', player: killer, amount, x: r2(e.x), y: r2(e.y) });
         }
       }
+      if (e.camp) onCampMemberKilled(this, e, killer);
     } else if (e.kind === 'building') {
       this.emit({ type: 'death', id: e.id, t: e.type, o: e.owner, x: r2(e.x), y: r2(e.y), k: 'b' });
       this.releaseBuilding(e);
@@ -715,7 +741,16 @@ export class World {
   }
 
   checkVictory() {
-    if (this.gameOver || !this.multiTeam) return;
+    if (this.gameOver) return;
+    if (this.survival) {
+      // Trial of the Titans: nobody wins; the trial ends when the last player falls, and the score is the wave reached.
+      if (this.players.some((p) => !p.defeated)) return;
+      this.winningTeam = null;
+      this.gameOver = { winningTeam: null, wave: this.survival.wave };
+      this.emit({ type: 'gameOver', winningTeam: null });
+      return;
+    }
+    if (!this.multiTeam) return;
     const teams = new Set();
     for (const p of this.players) if (!p.defeated) teams.add(p.team);
     if (teams.size > 1) return;
@@ -746,6 +781,7 @@ export class World {
       }
     }
 
+    if (this.survival) updateSurvival(this);
     if (this.tickCount % 10 === 0) updateAuras(this);
     const units = this.unitList;
     for (let i = 0; i < units.length; i++) {
@@ -788,6 +824,7 @@ export class World {
     updateProjectiles(this);
     updateDelayed(this);
     updateFields(this);
+    updatePowers(this);
 
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
@@ -796,6 +833,7 @@ export class World {
       if (u.expire <= 1e-9) this.killEntity(u, null, true);
     }
 
+    updateRelics(this);
     updateSites(this);
     this.accrueFaith();
     this.cleanup();
@@ -817,7 +855,7 @@ export class World {
       b.prayingCount = n;
       const p = this.players[b.owner];
       if (p && n > 0) {
-        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith);
+        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith) * (1 + boonPct(p, 'faith'));
         p.faithRate += rate;
         p.faith += rate * DT;
         p.stats.faith += rate * DT;

@@ -1,10 +1,14 @@
 // Entry point: boots settings and audio, shows the menu, and hands a started
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
-// completely, so matches can be played one after another without a reload.
+// completely, so matches can be played one after another without a reload. Replays
+// (DESIGN 9.4) play in a Game of their own, from the Career screen or the game-over screen.
 import { getSettings, onSettingsChange } from './settings.js';
 import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
+import { isSoloLaunch, saveSkirmish, launchFrom } from './game/rematch.js';
+import { readSave, saveInfo } from './game/save-store.js';
+import { dailyLaunch } from './game/daily.js';
 
 export { showMenu, hideMenu };
 
@@ -22,8 +26,8 @@ function loadGameModule() {
   return gameModule;
 }
 
-/** Tear down the running game (if any) and show the title screen. */
-function backToMenu() {
+/** Tear down the running game (if any) and show the title screen (or another menu screen). */
+function backToMenu(screen = 'title') {
   if (current) {
     const g = current;
     current = null;
@@ -32,18 +36,18 @@ function backToMenu() {
   clearStartNotice();
   const root = document.getElementById('game-root');
   if (root) root.hidden = true;
-  showMenu('title');
+  showMenu(screen);
 }
 
 /** Full-screen "loading" notice between Start and the first frame (the HUD draws over it). */
-function showStartNotice() {
+function showStartNotice(text = 'Raising the battlefield…') {
   clearStartNotice();
   const app = document.getElementById('app');
   if (!app) return null;
   const el = document.createElement('div');
   el.id = 'start-message';
   el.setAttribute('role', 'status');
-  el.textContent = 'Raising the battlefield…';
+  el.textContent = text;
   app.appendChild(el);
   return el;
 }
@@ -75,6 +79,11 @@ export async function startGame(launch) {
     current = null;
   }
   const notice = showStartNotice();
+  // A game against the computer only: remember its lobby for Quick Match, and offer Play Again at its end.
+  // The daily challenge (DESIGN 9.4) is not a lobby to remember: Play Again tries the same day's challenge again.
+  const daily = launch && launch.daily ? launch.daily : null;
+  const skirmish = !daily && isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
+  if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
     const { Game } = await loadGameModule();
@@ -85,6 +94,8 @@ export async function startGame(launch) {
         if (current === game) current = null;
         backToMenu();
       },
+      onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : null,
+      onReplay: (record, opts) => startReplay(record, opts),
     });
     current = game;
     await game.ready;
@@ -98,6 +109,90 @@ export async function startGame(launch) {
     }
   } finally {
     clearStartNotice(notice);
+  }
+}
+
+/**
+ * Watch a replay: a kept one by its id (the Career screen), or a record (a file, the game-over screen,
+ * or a replay starting over at an earlier moment, with { startAt, viewer, speed, camera }).
+ */
+export async function startReplay(what, opts = {}) {
+  hideMenu();
+  if (current) {
+    current.dispose();
+    current = null;
+  }
+  const notice = showStartNotice('Unrolling the chronicle…');
+  try {
+    await paintedFrame();
+    let record = what;
+    if (typeof what === 'string') {
+      const store = await import('./game/replay-store.js');
+      record = await store.loadReplay(what);
+    }
+    if (!record) throw new Error('that replay could not be read');
+    const { Game } = await loadGameModule();
+    const game = new Game({
+      replay: { ...opts, record },
+      settings: getSettings(),
+      onExit: () => {
+        if (current === game) current = null;
+        backToMenu('career');
+      },
+      onReplay: (r, o) => startReplay(r, o),
+    });
+    current = game;
+    await game.ready;
+  } catch (err) {
+    console.error('[main] the replay failed to start', err);
+    if (!current) {
+      showMenu('career');
+      if (menu) menu.toast('That replay could not be played.');
+    }
+  } finally {
+    clearStartNotice(notice);
+  }
+}
+
+/** Play Again: the same lobby, a fresh seed (a new map, new random pantheons). */
+async function rematch(state) {
+  try {
+    const mod = await import('./net/lobby.js');
+    const launch = launchFrom(mod, state, getSettings().name);
+    if (!launch) throw new Error('that lobby can no longer start');
+    await startGame(launch);
+  } catch (err) {
+    console.error('[main] the rematch failed to start', err);
+    backToMenu();
+  }
+}
+
+/**
+ * Continue / Load Game (DESIGN 9.4): read a saved game and start it. Rejects (the menu shows the
+ * message) when the slot cannot be read; a save that cannot be rebuilt fails on the game's start screen.
+ */
+async function loadGame(slot) {
+  let save;
+  try {
+    save = await readSave(slot);
+  } catch (err) {
+    console.error('[main] the saved game could not be read', err);
+    throw new Error('The saved game could not be read.');
+  }
+  if (!save || !save.setup) throw new Error('That saved game is gone.');
+  const info = saveInfo(slot) || {};
+  const extra = save.extra || {};
+  await startGame({ role: 'host', setup: save.setup, myIndex: Number.isInteger(extra.myIndex) ? extra.myIndex : 0, conns: new Map(), lobby: null, skirmish: info.skirmish || null, daily: info.daily || null, resume: save });
+}
+
+/** Play Again on a daily challenge: the same day's game (same map and sides) once more; the best score is kept. */
+async function retryDaily(day) {
+  try {
+    const mod = await import('./net/lobby.js');
+    await startGame(dailyLaunch(mod, day, getSettings().name));
+  } catch (err) {
+    console.error('[main] the daily challenge failed to start', err);
+    backToMenu();
   }
 }
 
@@ -154,7 +249,7 @@ function boot() {
   const settings = getSettings();
   initAudio(settings); // the sound effects and the music: one audio context, started now where the browser allows it and otherwise at the first key press or click
   onSettingsChange(syncAudio);
-  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onIntro: () => watchIntro('settings', false) });
+  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onLoad: loadGame, onIntro: () => watchIntro('settings', false), onReplay: (what) => startReplay(what) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
   const webgl2 = hasWebGL2();

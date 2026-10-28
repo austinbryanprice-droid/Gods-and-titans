@@ -1,13 +1,15 @@
 // The Career screen (DESIGN 9.1): the profile kept on this device (games, wins, win rate,
-// favourite pantheon, records, wins per pantheon, the last games) and the achievements
+// favourite pantheon, records, wins per pantheon, the last games), the replays kept here
+// (src/ui/menu-replays.js) and the achievements
 // gallery, grouped, with the locked ones dimmed and a progress bar where one counts.
 import { h } from './menu-dom.js';
 import { pantheonEmblem } from './menu-pantheons.js';
 import { PANTHEON_LIST, PANTHEONS } from '../data/pantheon-list.js';
 import { ACHIEVEMENTS, ACHIEVEMENT_GROUPS } from '../data/achievements.js';
 import { careerSummary } from '../game/career.js';
+import { medalLabel } from '../data/medals.js';
 
-const RESULT_TEXT = { victory: ['Won', '🏆'], defeat: ['Lost', '💀'], draw: ['Draw', '⚖️'] };
+const RESULT_TEXT = { victory: ['Won', '🏆'], defeat: ['Lost', '💀'], draw: ['Draw', '⚖️'], survival: ['Trial of the Titans', '🐉'] };
 
 /** 3725 s -> "1 h 2 min"; 125 -> "2 min". */
 export function formatPlayTime(seconds) {
@@ -34,6 +36,7 @@ function profile(c) {
     stat('Enemies slain', fmt(c.kills), c.best.kills ? `best ${fmt(c.best.kills)} in a game` : null),
     stat('Resources gathered', fmt(c.gathered), c.best.gathered ? `best ${fmt(c.best.gathered)}` : null),
     c.best.wave ? stat('Best survival wave', fmt(c.best.wave)) : null,
+    c.best.medal ? stat('Guided first match', medalLabel(c.best.medal)) : null,
     stat('Achievements', `${s.unlocked} / ${s.total}`),
   );
 }
@@ -86,14 +89,16 @@ function gallery(c, unseen) {
  * The screen's body for a career `c`; `unseen` (ids unlocked since the screen was last open)
  * get a "New" badge.
  */
-export function renderCareerContent(c, unseen = new Set()) {
+export function renderCareerContent(c, unseen = new Set(), replays = null) {
   return [
     profile(c),
     h('h3.mw-label', 'Wins by pantheon'),
     pantheonGrid(c),
     h('h3.mw-label', 'Last games'),
     history(c),
+    replays ? h('h3.mw-label', 'Replays') : null,
+    replays,
     h('h2.mw-h2.mw-car-ach-title', 'Achievements'),
     ...gallery(c, unseen),
-  ];
+  ].filter(Boolean);
 }

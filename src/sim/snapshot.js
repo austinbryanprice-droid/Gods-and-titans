@@ -2,6 +2,9 @@
 import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
+import { relicViews } from './relics.js';
+import { powerView } from './powers.js';
+import { survivalView } from './survival.js';
 import { siteViews } from './sacred.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -54,6 +57,7 @@ function unitView(u) {
     v.xp = Math.floor(u.xp);
     if (u.rank > 0) v.rk = u.rank;
   }
+  if (u.boost && u.boost.dmg !== 1) v.wd = Math.round(u.boost.dmg * 1000) / 1000; // Trial of the Titans: damage boost for the info panel
   const cd = {};
   for (const k in u.cooldowns) cd[k] = r1(u.cooldowns[k]);
   v.cd = cd;
@@ -119,26 +123,32 @@ export function buildSnapshot(world) {
   const players = world.players.map((p, i) => {
     const fallen = {};
     for (const k in p.fallen) fallen[k] = p.fallen[k].level;
-    return {
+    const out = {
       i, name: p.name, team: p.team, pantheon: p.pantheon, color: p.color, kind: p.kind,
       gold: Math.floor(p.gold), wood: Math.floor(p.wood), faith: Math.floor(p.faith + 1e-6), faithRate: r2(p.faithRate),
       pop: p.popUsed, popCap: p.popCap, tier: p.tier, defeated: p.defeated,
       gods: gods[i], fallen, titan: titan[i],
       up: p.upList.slice(), ar: p.autoRepair,
       stats: { ...p.stats, faith: Math.floor(p.stats.faith + 1e-6), army: army[i] },
+      ...powerView(p),
     };
+    if (p.relics.length) out.rl = p.relics.slice(); // relic types resting in their Temples
+    return out;
   });
-  return {
+  const snap = {
     tick: world.tickCount,
     time: r2(world.time),
     players,
     entities,
     fields: world.fields.map((f) => ({ id: f.id, x: r2(f.x), y: r2(f.y), r: r2(f.r), el: f.el, rem: r1(f.rem) })),
     reveals: world.reveals.map((v) => ({ x: r2(v.x), y: r2(v.y), r: r2(v.r), tm: v.team, rem: r1(v.rem) })),
+    relics: relicViews(world),
     events: world.events,
     felled: world.felled,
     sites: siteViews(world), // sacred sites (5.11): { x, y, o, p?, c?, cn? }
     sacred: world.sacred ? { tm: world.sacred.team, end: world.sacred.end } : null, // Sacred Victory countdown
     gameOver: world.gameOver ? { ...world.gameOver } : null,
   };
+  if (world.survival) snap.sv = survivalView(world); // Trial of the Titans: { w: waves out, m: wave monsters alive }
+  return snap;
 }

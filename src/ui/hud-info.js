@@ -15,7 +15,7 @@ import { sanitizeName } from '../net/protocol.js';
 import { el, setText, setStyle, setHidden, setClass, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import {
   defOf, nameOf, iconOf, typeIcon, typeName, isComplete, isWallEntity, tierName, workersAt, workerTasks, modsOf, upgradesOf, WORKER_TASKS,
-  workText, mineTripText,
+  workText, mineTripText, relicIcon, relicLine, relicCarryText, templeRelicsText,
 } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 
@@ -364,6 +364,10 @@ export class InfoView {
     }
     s.parts.researched = el('div', 'hi-note is-dim');
     extra.appendChild(s.parts.researched);
+    if (e.t === 'temple') {
+      s.parts.relics = el('div', 'hi-note is-relics');
+      extra.appendChild(s.parts.relics);
+    }
     if (queueing) return;
     if (e.t === 'town_center' && e.o === vs.myIndex) {
       extra.appendChild(el('div', 'hi-note is-dim', 'Trains Worshippers. Gold and wood are delivered here.'));
@@ -411,7 +415,7 @@ export class InfoView {
       const um = unitMods(modsOf(vs, e.o), def);
       const rb = rankBonus(rk);
       if (p.dmg) {
-        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage) * (1 + rb.damage);
+        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage) * (1 + rb.damage) * (e.wd > 0 ? e.wd : 1); // wd: a Trial of the Titans monster's damage boost
         setText(p.dmg, `${Math.round(dmg)}${def.attack.splash ? ' (splash)' : ''}`);
         setText(p.range, rangeText(def.attack));
       }
@@ -436,11 +440,17 @@ export class InfoView {
       }
       setText(p.state, unitStateText(e, def, vs.myIndex));
       const fx = e.fx || [];
-      const sig = fx.join(',') + (e.c || '');
+      const relic = vs.relicCarriedBy(e.id);
+      const sig = fx.join(',') + (e.c || '') + (relic ? relic.t : '');
       if (sig !== p.statusSig) {
         p.statusSig = sig;
         p.status.textContent = '';
         if (e.c) p.status.appendChild(el('span', 'hi-chip is-carry', e.c === 'g' ? '💰' : '🌲'));
+        if (relic) {
+          const chip = el('span', 'hi-chip is-relic', relicIcon(relic.t));
+          chip.title = relicCarryText(relic.t);
+          p.status.appendChild(chip);
+        }
         for (const code of fx) {
           const [icon, label] = STATUS[code] || ['❔', code];
           const chip = el('span', `hi-chip is-${code}`, icon);
@@ -469,6 +479,11 @@ export class InfoView {
         setText(p.buildText, `${Math.floor((e.bp || 0) * 100)}%`);
       }
       if (p.trainFill && e.q && e.q[0]) setStyle(p.trainFill, 'width', pct(e.q[0].p || 0));
+      if (p.relics) {
+        const list = vs.relicsIn(e.id);
+        setText(p.relics, templeRelicsText(list.map((r) => r.t)));
+        p.relics.title = list.map((r) => relicLine(r.t)).join('\n');
+      }
       if (p.pray) {
         const n = e.pr || 0;
         const rate = def.faithRate * (1 + buildingMods(modsOf(vs, e.o), e.t).faith);

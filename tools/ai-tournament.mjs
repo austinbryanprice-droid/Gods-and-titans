@@ -8,7 +8,7 @@
 //   node tools/ai-tournament.mjs [--pantheons=greek,norse,...] [--seeds=1-4]
 //        [--d0=normal --d1=normal | --diff=hard] [--size=small|medium]
 //        [--pairs=greek:norse,aztec:celtic] [--mode=round|mirror|vs]
-//        [--teams=2v2|ffa] [--max=40] [--workers=2] [--json=out.json] [--quiet]
+//        [--teams=2v2|ffa] [--landscape=islands] [--max=40] [--workers=2] [--json=out.json] [--quiet]
 //
 // --mode=round (default): every pantheon pair from --pantheons, once per seed,
 //   sides swapped on odd seeds. --mode=vs: each pantheon of --pantheons plays
@@ -32,6 +32,7 @@ export function runGame(g) {
     version: '0.1.0',
     seed: g.seed,
     mapSize: g.size || 'small',
+    ...(g.landscape && g.landscape !== 'classic' ? { landscape: g.landscape } : {}),
     players: g.players.map((p, i) => ({ index: i, name: `AI ${i}`, team: p.team ?? i + 1, pantheon: p.pantheon, color: null, kind: 'ai', difficulty: p.difficulty })),
   };
   const world = createWorld(setup);
@@ -196,6 +197,7 @@ function buildGames(opt) {
       games.push({ seed, size, maxMinutes, players: [p0, p1] });
     }
   }
+  if (opt.landscape) for (const g of games) g.landscape = opt.landscape;
   return games;
 }
 

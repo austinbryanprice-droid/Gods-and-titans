@@ -7,6 +7,11 @@ export const GAME_VERSION = '0.1.0';
 // ---- Simulation timing ----
 export const TICK_RATE = 20; // ticks per second
 export const DT = 1 / TICK_RATE; // seconds per tick
+// Game speed of a match against the computer (DESIGN 9): game seconds per real second. Online games
+// always run at 'normal'. The ticks stay DT long; the ticker just runs more or fewer of them a second.
+export const GAME_SPEEDS = { slow: 0.5, normal: 1, fast: 1.5, faster: 2 };
+// Size of the in-game interface (DESIGN 9): a factor on the HUD's base font size, which scales with the window.
+export const UI_SCALES = { small: 0.85, normal: 1, large: 1.15, larger: 1.3 };
 
 // ---- Players ----
 export const MAX_PLAYERS = 4;
@@ -93,6 +98,12 @@ export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can 
 export const PEACE_NAME = 'Decade of Peace';
 export const PEACE_BUILD_GAP = 20; // while the peace lasts nobody builds within this many empty tiles of an enemy Town Center (kept clear around it; DESIGN 5.10)
 
+// ---- Trial of the Titans (survival game mode, DESIGN 5.14) ----
+export const SURVIVAL_NAME = 'Trial of the Titans';
+export const SURVIVAL_FIRST_WAVE = 120; // game seconds before the first wave comes out of the map's edge
+export const SURVIVAL_INTERVAL = 90; // seconds between waves, whether the last one is beaten or not
+export const SURVIVAL_BOSS_EVERY = 5; // every fifth wave a hostile Titan leads it
+export const SURVIVAL_MAX_ALIVE = 120; // wave monsters alive at once at most (a wave that would pass it comes smaller)
 // ---- Sacred Sites (DESIGN 5.11) ----
 export const SITE_CLEAR = 3; // mapgen: open ground within this radius of a site's center
 export const SITE_RADIUS = 3; // a Worshipper or Priest within this many tiles of the center can capture it

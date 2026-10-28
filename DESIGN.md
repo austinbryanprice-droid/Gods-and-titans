@@ -304,6 +304,40 @@ sim reads it through the same pipes as building upgrades.
   here may change a rule for the other players; a new `perk` needs one line in `PERK_STATS`, one sim hook, one
   test and one sentence in its blessing's description. Icons are single Emoji.
 
+### 4.11 God powers (src/data/powers.js, src/sim/powers.js)
+Age of Mythology's god powers: each pantheon has three **one-use** divine powers, one per settlement tier,
+that the player casts from the power bar beside the minimap with no unit casting them. `GOD_POWERS[pantheonId]`
+lists them Village, Town, City; `POWERS` has every one by id (30 in all; `validatePowers`, run by
+`validateData`, holds the rules below).
+- **Village: a blessing** that helps the caster's people and hurts nobody: a harvest (every load of gold and wood
+  brought in counts 50% more for 60 s), a festival (prayer gives twice the faith for 60 s), a healing rain
+  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (300 gold and 150 wood).
+- **Town: a strike** aimed at a spot within about 3–5 tiles: a storm of bolts, a hammerfall, a swarm, a gale, a
+  summoning of crows.
+- **City: a cataclysm** over 7–12 tiles: an earthquake, a winter, a flood, a tsunami, an eclipse, a tempest.
+- **Shape:** `{ id, pantheon, tier, kind: 'blessing'|'strike'|'cataclysm', name, icon, description, target:
+  'none'|'point', effects, vfx: { element, shape }, ai: { use: 'economy'|'heal'|'damage' } }`. Effects are the
+  ability effects of 4.4 that need no caster's body (not blink, dash, chain, line, invulnerable, nor `at: 'self'`),
+  applied by `applyEffect` with a stand-in caster for the player (id 0, `kind: 'power'`, already "dead", so
+  nothing retaliates against it and nothing ranks up), at scale 1. Kills, plunder, sacrifice, god experience and
+  the victims' under-attack alerts are the caster's as with any spell; spell damage to buildings is halved
+  (`SPELL_VS_BUILDING`). Two effects are the powers' own: `boon { stat: 'gather'|'faith', pct, duration }`
+  (`p.powers.boons`; `deposit` multiplies each load by `1 + boonPct(p, 'gather')`, `accrueFaith` the prayer rate
+  by `1 + boonPct(p, 'faith')`) and `barrage { count, amount, radius, spread, every, stun? }` (bolt k lands
+  `0.5 + k × every` s after the cast, the first on the spot and the rest on seeded random spots within `spread`,
+  each a `damage` (and `stun`) of `radius`; the whole barrage lasts at most `BARRAGE_MAX_SECONDS`, 4 s, because the
+  renderer telegraphs an effect at most that far ahead).
+- **Rules** (`castPower` / `powerRefusal`, the `godPower` command): a power is spent when it is cast, never
+  before (a refused one stays). It needs the settlement tier (`Requires Town.` / `Requires City.`); a strike or
+  cataclysm needs a spot the caster's team can see (`teamSees`: the spot's tile lies in an allied unit's or
+  building's `sight` or a reveal, by `tileInSight`, the rule the clients' fog grid stamps, so the HUD and the sim agree;
+  `You must be able to see the target.`) and waits out the Decade of Peace (5.10, `The Decade of Peace
+  holds for another m:ss: no god powers against other players yet.`), while a blessing works during it. Used:
+  `<Name> has already been used.` Powers never hurt the caster's own side. A blessing with no target shines over
+  the caster's first Town Center.
+- **Numbers** are first guesses for Austin to tune after play; change them in `src/data/powers.js` only (the
+  builders `boon`, `healRain` and `barrage` keep the ten pantheons comparable).
+
 ## 5. Rules
 
 ### 5.1 Start
@@ -696,7 +730,6 @@ has 3 to 5 (`mapData.sacred`, 6.7); they exist in every game. Rules in `src/sim/
 - **Client:** the 🛐 chip beside the clock (`src/ui/hud-sites.js`: sites held / total, and the countdown, green
   when it is your side's, red and pulsing when a rival's), alerts (9), the minimap diamond, the 3D site (8), the
   red ghost, How to Play, two tips, and the game-over line for a Sacred Victory.
-
 ### 5.12 Match statistics and score
 Each player's `stats` (`newStats` in `src/data/score.js`, shared by the sim and the HUD) count:
 `gathered` (gold + wood delivered) and the two apart (`gold`, `wood`); `faith` earned (prayer,
@@ -709,6 +742,101 @@ and floors `faith`. Bounties and plunder are income, not gathering.
 - **Score** (`scoreOf`, Age of Empires style): economy `(gathered + faith) / 10`, military
   `killValue / 5`, civilization `100` per tier above Village and `25` per finished upgrade.
 - Nothing here changes a rule; the numbers feed the after-game chronicle (section 9) and the alerts.
+
+### 5.13 The guided first match (`src/sim/tutorial.js`)
+A GameSetup with `tutorial: true` (built by `tutorialSetup({ name, version })`, started by the title
+screen's Learn to Play, solo, no lobby) is the lesson of 9.2. Fixed: seed `TUTORIAL.seed`, the small map,
+the learner as Greek on team 1 and a Norse AI "Raiders of the North" on team 2 with difficulty `'tutorial'`.
+The World then (`tutorialStart`) gives the learner 600 gold, 300 wood and 100 faith, spawns no creep camps,
+gives the raiders' Town Center 1200 health instead of 2000 and stands three Warriors and an Archer in front
+of it. The `'tutorial'` AI (`src/ai/tutorial-ai.js`) sends its five Worshippers to its mine on its first tick
+and does nothing else; its guards answer attacks like every unit. Every other rule is unchanged, so the
+match stays a pure function of setup and commands. A scripted learner who does each objective as soon as
+it can wins at 5:39 (tests/game/tutorial.test.js).
+
+### 5.14 Trial of the Titans (survival game mode)
+An optional game mode the host picks in the lobby (third button of the Game mode row; one mode at a time, so
+picking it clears a Decade of Peace and the other two buttons clear it): `GameSetup.survival` is `true`. Every
+player and AI plays on team 1 (`buildSetup`, and `World` forces it too), so one player alone may start it and the
+lobby's team column reads "Together". Rules live in `src/sim/survival.js` (the schedule helpers are shared with the
+HUD) and run from `World.tick` (`updateSurvival`, before the units move):
+- **The clock.** Wave n comes out at `SURVIVAL_FIRST_WAVE + (n − 1) × SURVIVAL_INTERVAL` game seconds (2:00, then every
+  90 s), whether the last wave is beaten or not, so a slow defence is buried. Every `SURVIVAL_BOSS_EVERY` (5th) wave
+  a hostile Titan of a random pantheon leads it.
+- **What a wave holds** (`wavePlan`, deterministic from a `${seed}:survival` RNG): creatures of every pantheon worth
+  `waveBudget(n, players) = round((4 + 3n) × (0.6 + 0.4 × players))` population (60% of it on a boss wave). Waves 1–2 are
+  tier 1 only, tier 2 joins at wave 3 and tier 3 at wave 7; flyers stay out until wave 6 (the first Barracks has no
+  archers yet) and are never more than a third of a wave. Health and damage grow every wave (`waveBoost`: ×1.33 /
+  ×1.25 at wave 6, ×1.69 / ×1.52 at 11, ×3.27 / ×2.48 at 26) through `u.boost`, applied in `applyUnitStats`. The boss
+  Titan has `bossBoost(n, players)`: health × n/10 × (0.7 + 0.3 × players) (half a Titan at wave 5 alone, a whole one at
+  wave 10), damage × (0.6 + 0.04n). At most `SURVIVAL_MAX_ALIVE` (120) wave monsters live at once; a wave that would pass
+  it comes smaller.
+- **Where.** Each wave comes out of one edge point (two from wave 5, three from wave 15) of the eight around the map
+  (corners and the middle of each side, 3 tiles in) that lie at least 30 tiles from every player building, as
+  neutral (owner −1) units with no camp, so no leash. Each group gets an attack-move on the nearest building of a
+  player still in the game (walls are broken through on the way, not hunted); once a second, any wave monster left
+  with no order (its target fell, its fight is over) is sent on to the next nearest one.
+- **Pay.** Killing a wave monster pays the usual creep bounty. When the last monster of wave n dies, every player
+  still in the game gets `waveReward(n) = 40 + 20n` gold once, with `{ type: 'waveCleared', n, gold }`.
+- **The end.** Players fall as in 5.8 (no buildings left). Nobody wins: when the last player falls the game is over
+  with `gameOver: { winningTeam: null, wave }`, the wave reached (the last that came out) as the score. Camps and the
+  rest of the rules are unchanged.
+- **Net.** The setup flag (validateSetup keeps it only when exactly `true` and there is no peace), a top-level
+  snapshot record `sv: { w, m }` (waves out, wave monsters alive) that rides the delta's "everything else" keys, the
+  `wave { n, count, boss, x, y }` and `waveCleared { n, gold }` event shapes, and `gameOver.wave`.
+- **Client.** `ViewState.survival()` → `{ wave, alive, next, nextBoss }` (next from the clock). A wave chip beside the
+  game clock ("Wave 1 in 2:00", then "Wave 3 · 7 left · next 1:12"; gold when a Titan leads the next wave, pulsing
+  in its last 10 s), an opening line, a "Wave n comes in 10 s" line, a banner and a minimap ping when a wave comes out
+  (with the Titan's name and the summon sound on a boss wave), a gold line when one is beaten, a boss wave flashes the
+  tab, and the music heats up. The end screen is titled "Wave n" with the best wave beside it.
+- **Best wave.** The career (9.1) keeps it: the Game counts a finished trial with `CareerTracker.finish('survival',
+  { wave })` (a trial left early counts with the wave it had reached, not as a loss), which raises `best.wave`; a
+  trial is neither a win nor a loss, so the win rate leaves it out. The lobby line ("Your best: wave 12.") and the
+  end screen ("A new best! Your old best was wave 9.") read `getCareer().best.wave`; two achievements, Hold the Line
+  and Titans' Bane, ask for waves 10 and 20.
+- **AI.** `scan` adds the living wave monsters to `s.enemyUnits`, so the usual threat and defence logic turns out
+  against them and helps allies; with no rival players it never launches an attack.
+  Measured (seeds 3 to 9, AIs only): one Easy AI falls at wave 20 (30:44), one Normal AI at wave 21 (32:37), two Normal
+  AIs at wave 25 (38:44), four Hard AIs at wave 28 (42:50, the 120-monster cap reached); every AI beat waves 1 to 10.
+
+### 5.15 Relics (src/data/relics.js, src/sim/relics.js)
+Treasures of world myth that give creeping a reward beyond the bounty (WC3 items, Age of Mythology relics).
+- **Where:** every creep camp of level `RELIC_CAMP_LEVEL` (2) or more guards one relic (4 or 5 on the usual
+  maps; level 1 camps guard none). Types are drawn without repeats from the ten in `RELIC_LIST`, shuffled by an
+  RNG seeded with `${seed}:relics` (the sim RNG is untouched, so nothing else in a game changes).
+- **Dropping:** when the camp's last creature dies (`World.killEntity` calls `onCampMemberKilled`) the relic lies
+  on the ground at the camp's centre and `{ type: 'relic', ev: 'drop', player }` names the killer's owner.
+- **Carrying:** a smart order with `relic: index` sends the nearest unit that can carry (a Worshipper or a god of
+  a player, not summoned, not already carrying one) to it; the rest of the selection walks along. Soldiers get
+  `Only a Worshipper or a god can carry a relic.` A relic still guarded, or already taken, makes it a plain move.
+  Picked up within 0.6 tiles (edge distance) (`ev: 'take'`), the carrier sets off at once for its owner's nearest
+  finished Temple (an order `deliver`) unless more orders were queued; an idle carrier is sent there every
+  10 ticks once a Temple stands. A carrier on its own finished Temple with a smart order delivers before it would
+  pray or repair. Any player can take a relic from the ground, enemies included.
+- **Resting:** next to the Temple it goes in (`ev: 'house'`) and its effects (the upgrade vocabulary of 4.3) are
+  folded into the owner's mods: `computeMods(upList, pantheon, p.relics)` and `World.refreshMods(i)`, the same path
+  as a researched upgrade, so every stat is applied at once. There is no limit per Temple.
+- **Losing it:** a carrier that dies drops it where it fell; a Temple that falls drops what rested in it on its
+  south side, and the owner loses the bonus (`ev: 'lose'`, player: the previous holder). A defeated player's
+  relics fall with their last Temple.
+  A relic on the ground under a building raised over it rolls to the nearest open tile (checked every 10 ticks).
+- **The ten:** Golden Fleece (Greek, soldiers +10% health), Brísingamen (Norse, +25% Faith at Shrines and
+  Temples), Eye of Horus (Egyptian, buildings +2 armor), Pot of Amrita (Hindu, gods regenerate +1.5 hp/s),
+  Kusanagi (Japanese, Warriors and Archers +8% damage), Peaches of Immortality (Chinese, soldiers and creatures
+  heal 0.5 hp/s), Smoking Mirror (Aztec, god and Titan abilities recharge 10% faster), Cauldron of the Dagda
+  (Celtic, +2 gold and wood per trip), Tablet of Destinies (Mesopotamian, research and growing 20% faster), Box of
+  Stories (West African, Worshippers work 10% faster). Each is a small, always-on edge, like a blessing (4.10).
+- **Net:** the snapshot's `relics` list (6.3) changes only when a relic changes state (a carried one goes by its
+  carrier's id, so walking costs nothing); the player record's `rl` lists the types resting in their Temples.
+- **Shown:** a glowing jewel in a gold ring, tinted per relic, over the ground under a beam of light while it is
+  guarded or free (brighter and pulsing once free), smaller over its carrier's head, circling over the Temple's
+  roof once it rests there (src/render/relics.js); a gold diamond on the minimap; the cursor's hand over a free
+  relic in sight; a relic chip at the top left ("1/5", the bonuses and where the others are in its tooltip); a
+  chip on a carrier's selection panel and a Relics line on a Temple's; alerts when a camp I cleared drops one,
+  when one comes to rest in my Temple or a rival's, and when I lose one. How to Play and a tip explain it.
+- **AI:** `src/ai/relics.js` sends the nearest gathering or idle Worshipper for a free relic within 70 tiles of
+  home once it has a finished Temple and no enemy stands within 10 tiles of the relic; the economy leaves a
+  Worshipper on that errand alone (job `relic`). In AI-vs-AI games each side brought home two or three.
 
 ## 6. Simulation API (src/sim/)
 
@@ -724,8 +852,11 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 ```js
 {
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
+  landscape: 'highlands' | 'rivers' | 'islands' | 'forest', // optional (6.7): absent = the classic Wildlands; never 'random' (the host draws it)
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
   sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
+  tutorial: true,              // optional, the guided first match (5.13); local only, never from a lobby
+  survival: true,              // optional, Trial of the Titans (5.14): every player on team 1 against monster waves
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -747,7 +878,7 @@ counted in `world.perf.commandErrors`.
 { type: 'move',       units: [ids], x, y, queue }
 { type: 'attackMove', units, x, y, queue }
 { type: 'attack',     units, target: id, queue }
-{ type: 'smart',      units, x, y, target?: id, tx?, ty?, queue } // right-click; sim decides (below)
+{ type: 'smart',      units, x, y, target?: id, tx?, ty?, relic?: index, queue } // right-click; sim decides (below)
 { type: 'gather',     units, target?: mineId, tx?, ty? }          // mine or tree tile
 { type: 'pray',       units, target: buildingId }
 { type: 'returnCargo', units }
@@ -768,9 +899,11 @@ counted in `world.perf.commandErrors`.
 { type: 'hold',       units }
 { type: 'kill',       units }                                   // the Delete key: own units die, no killer (below)
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
+{ type: 'godPower',   power: powerId, x?, y? }               // cast one of my pantheon's god powers (4.11); x / y for a strike
 { type: 'surrender' }
 ```
-**smart** resolution per unit: enemy target → attack; worker + gold mine → gather; worker +
+**smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
+(5.15). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
@@ -801,7 +934,7 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That House is being combined into a Manor.` (and `Not enough gold. Combined 1 of 2 squares.` when the purse
 runs short part way) Trades: `Choose a teammate to send to.` `You can only send resources
 to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
-`Choose gold, wood or faith to send.` `You cannot trade now.`
+`Choose gold, wood or faith to send.` `You cannot trade now.` Relics: `Only a Worshipper or a god can carry a relic.`
 
 ### 6.3 ViewSnapshot (`world.getSnapshot()`)
 Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to integers.
@@ -811,15 +944,20 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
-              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army } }], // 5.12
+              rl?: [relic types resting in their Temples] (5.15; omitted when none),
+              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army }, // 5.12
+              gp, gb? }],               // god powers (4.11): gp bit i = the tier i+1 power is spent; gb = boons running [[stat, pct, seconds left]]
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
+  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.15: index, type, state 'k' guarded | 'g' on the ground (x, y)
+                              // | 'c' carried (c: carrier id, o) | 'h' resting in a Temple (b: its id, o)
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
   sites: [{ x, y, o, p?, c?, cn? }], // sacred sites (5.11): holder, capture progress, capturing player, contested
   sacred: null | { tm, end },  // Sacred Victory countdown: the team holding every site, the game time it wins at
-  gameOver: null | { winningTeam, how? }, // how: 'sacred' for a Sacred Victory
+  gameOver: null | { winningTeam, how?, wave? }, // how: 'sacred' for a Sacred Victory; wave: the Trial of the Titans' score (5.14)
+  sv,                         // Trial of the Titans only: { w: waves out so far, m: wave monsters alive }
 }
 EntityView = {
   id, k,          // 'u' unit | 'b' building | 'm' gold mine
@@ -867,6 +1005,7 @@ EntityView = {
 { type: 'tierUp',  player, tier }
 { type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
+{ type: 'relic',   ev, i, t, player, x, y }                          // 5.15: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
 { type: 'levelUp', id, level }
 { type: 'rankUp',  id, rank }                                        // a soldier reached a new rank (5.9)
 { type: 'treeFelled', tx, ty }
@@ -880,7 +1019,10 @@ EntityView = {
 { type: 'siteLost', site, player }                                   // the holder lost it (torn down or defeated)
 { type: 'sacredHold', team, end }                                    // Sacred Victory countdown starts
 { type: 'sacredBroken', team }                                       // ... and stops
+{ type: 'wave',    n, count, boss, x, y }                            // Trial of the Titans: wave n came out at (x, y); boss = Titan type or ''
+{ type: 'waveCleared', n, gold }                                     // every monster of wave n is dead; each survivor got gold
 { type: 'gameOver', winningTeam }
+{ type: 'godPower', player, power, x, y }                            // a god power was cast (4.11); x, y = its spot (a blessing: the caster's Town Center)
 ```
 
 ### 6.5 Read API (for AI and tests)
@@ -908,7 +1050,23 @@ tx, ty, size, amount`.
 → `Uint8Array visible` (1 = visible). Circles, no line-of-sight blocking. Used client-side.
 
 ### 6.7 Map data (`src/sim/mapgen.js`)
-`generateMap({ seed, mapSize, playerCount, teams })` → pure deterministic function (same input → identical output in every browser and in Node).
+`generateMap({ seed, mapSize, playerCount, teams, landscape })` → pure deterministic function (same input → identical output in every browser and in Node).
+**Landscapes** (`src/data/landscapes.js`, picked in the lobby): every landscape keeps the same
+fair base layout (starts, start mines, wood line behind each base, expansions, camps, sacred
+sites); only the ground between the bases changes, drawn from noise fields averaged over the
+symmetry orbits so every start sees the same ground. `classic` (shown as **Wildlands**, the
+default and the original generator, byte-for-byte unchanged), `highlands` (two-tile rock ridges
+along two contour lines of a smooth field, open moors with less forest, rock raised higher in the
+cosmetic heights; lanes and the connectivity pass cut the passes), `rivers` (three- to four-tile
+rivers along one contour line, no side lakes; where a lane crosses, its carve leaves a sandy ford),
+`islands` (sea everywhere except an island under each base, expansion, camp and the center plus a
+few noise islets; the lanes become sandy land bridges) and `forest` (Great Forest: about 60% of the
+free ground is woods and the lanes are narrower). Ridges and rivers thin out near bases,
+expansions and camps. The lobby may also hold `'random'`, which `buildSetup` resolves from the
+seed (`resolveLandscape`) so the GameSetup always names a concrete landscape; the classic one is
+left out of the setup. When the usual sacred-site spots are taken on a new landscape the search
+widens over the rest of the map. `meta.landscape` names it. Preview: `node tools/map-preview.mjs
+--landscapes highlands,islands --sheet`; in 3D: `tools/render-harness.html?landscape=islands`.
 `mapOptions(setup)` builds these options from a GameSetup (`teams` = each player's team); host,
 clients, World and the lobby's `mapHash` all use it, so teammates are grouped identically everywhere.
 **Start positions** (`startPlan(playerCount, teams)`): 1–2 players and free-for-all use the
@@ -1028,7 +1186,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'|'brutal'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, landscape (a landscape id from 6.7 or 'random'; `LobbyHost.setLandscape`), peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.14; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'|'brutal'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1068,6 +1226,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   vs.on(type | '*', cb) → unsubscribe  // fired for every event in each pushed snapshot; also 'snapshot'
   vs.getEntity(id)
   vs.peaceLeft(); vs.peaceActive(); vs.canHarm(owner) // Decade of Peace (5.10): setup.peaceMinutes vs the snapshot time; may my units hurt this owner now
+  vs.survivalActive(); vs.survival() // Trial of the Titans (5.14): { wave, alive, next, nextBoss } from snapshot.sv and the wave clock, or null
   vs.sites; vs.sacred; vs.sacredVictoryOn(); vs.sacredLeft(); vs.sitesHeld(team) // Sacred Sites (5.11): map.sacred until the first snapshot
   ```
   Host local view uses a 50 ms delay; clients use `INTERP_DELAY_MS`.
@@ -1456,6 +1615,17 @@ per-frame budget, so a revealed army appears over a few frames.
   markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
   keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
   shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
+  The sun's shadow box (`updateShadowCamera`) is fitted each frame to the view's ground quad as the
+  sun sees it (its extent along the light's right and up axes, plus a margin on the up-sun side for
+  what stands 8 units above the ground), not a square as wide as the view: anything whose shadow
+  falls in the view lies on the same sun ray as the point it darkens, so this covers every caster,
+  and a low sun no longer stretches the box 100+ tiles up-sun (that drew every forest chunk along
+  the strip into the map, more triangles than the visible scene). Its half sizes step by 2 tiles and
+  its center snaps to texels. Forest chunks are culled by their instances' box as well as their
+  bounding sphere (`chunkInFrustum` in props.js; the box grows by `CHUNK_BOX_PAD` for what the
+  shader does to a tree: a spruce's own shape and the wind). Late game at the population cap, Medium, default
+  zoom: shadow-pass triangles 1.0M to 0.6M, whole frame 1.75M to 1.1M, draw calls 373 to 228
+  (`node tools/perf-late.mjs`, which also profiles the real game with `--game`).
   Buildings (`src/render/models/building-*.js`, four layers): `building-core.js` holds the colors,
   surface classes and geometry primitives and the Kit that merges a building's parts into four
   vertex-colored buckets (foundation, body, team, glow); `building-materials.js` the shared materials
@@ -1643,8 +1813,9 @@ per-frame budget, so a revealed army appears over a few frames.
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
-  Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
-  30 / 45 / 60 min buttons, the host's pick; clients see it as text), victory (a Sacred Victory toggle, 5.11;
+  Random, team, AI difficulty; presets; map size; landscape (Wildlands, Highlands, Rivers, Islands, Great Forest or Random, 6.7, as chips with a one-line note; clients see it as text); game mode (Standard, Decade of Peace with
+  30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
+  clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
@@ -1691,6 +1862,22 @@ per-frame budget, so a revealed army appears over a few frames.
   and keeps each player's largest army; all of it is read from the players' snapshot records, so nothing is sent for
   it and a client charts the same match as the host (a player who joined late has a shorter chart).
   `tools/shot-chronicle.mjs` stills the four tabs over a made-up 24-minute match.
+  **Play Again and Quick Match** (`src/game/rematch.js`): a game hosted here with only AI players besides the local
+  one (`isSoloLaunch`) keeps its lobby state (checked by `sanitizeLobbyState`: one host slot, no other humans, two
+  teams or more) in localStorage (`mythicwar-last-skirmish`). Its game-over screen leads with Play Again, which leaves
+  the match like Return to Menu and starts that lobby anew with a fresh seed (`launchFrom` → `buildSetup`: a new map,
+  random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
+  AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
+  Online games offer neither.
+  **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
+  choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
+  (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the
+  F10 menu: `Ticker.setSpeed` runs that many more or fewer ticks a real second (each tick is still `DT` of game time,
+  so the sim and its determinism are untouched), `ViewState.setRate` plays the snapshots back on local time × rate
+  (re-anchoring the clock; above normal the interpolation delay stays as long in real time), and
+  `GameRenderer.setSpeed` scales the animations' dt but not the camera's. Online games always run at Normal and their
+  F10 menu leaves the row out. The interface size multiplies the HUD's base font size (`--hud-scale` on #hud-root):
+  Small 0.85, Normal 1, Large 1.15, Larger 1.3; every HUD panel is sized in em, so all of it follows.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
@@ -1780,6 +1967,18 @@ per-frame budget, so a revealed army appears over a few frames.
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
+- God power bar (`src/ui/hud-powers.js`, `PowerBar`): three round buttons on the left of the minimap, one per power
+  of my pantheon (4.11), Village at the top. Locked (grey) until my settlement reaches the tier, ready (a slow
+  golden glow) once it has, dark once spent; the tooltip names the power, its tier, what it does, its area and why
+  it cannot be used now (`powerState`: tier, spent, or a strike during the Decade of Peace). A running blessing
+  counts its seconds down on its button. Pressing a ready one arms `{ kind: 'target', order: 'power', power }`
+  (`input.armPower`, the marker buttons' plumbing: the button again, Esc or right-click puts it away); the next
+  click on the map or minimap casts it there, and while armed a ring (`.hud-powerring`, projected each frame) shows
+  its area under the cursor, red where I cannot see. A strike aimed into the fog stays armed with "You must be able
+  to see the target." Every cast is announced (`godPower` event, `game.js`): mine as a line and a chime; an ally's as
+  a line and a gold minimap ping; an enemy's strike as an alert line, a red minimap ping and the Space jump, its
+  cataclysm as a banner, and it flashes the tab (`power_enemy`). A telegraphed effect's sound waits for its
+  `delay`, so a barrage cracks bolt by bolt.
 - Team pings and markers (`src/data/marks.js`, `src/game/team-marks.js`, `src/ui/hud-marks.js`; the wire is in 7).
   Five kinds: Ping 📍 (stands 6 s), Attack ⚔️, Defend 🛡️, Help 🆘 (the urgent one: a louder chime) and Gather 🚩
   (12 s each). **Placing**: Alt+click or a middle click on the map or the minimap pings that spot (a unit or
@@ -1948,8 +2147,8 @@ per-frame budget, so a revealed army appears over a few frames.
 Client only: nothing goes over the wire and the sim does not know about it. The career lives in
 localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
 `sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
-and wins per pantheon, records (most kills, most gathered, longest game, best survival wave once a
-survival mode exists: `recordMatch` takes an optional `wave`), the last 12 games, unlocked
+and wins per pantheon, records (most kills, most gathered, longest game, best Trial of the Titans wave:
+`recordMatch` takes an optional `wave`, 5.14), the last 12 games, unlocked
 achievements with the time, and the ones not yet seen.
 
 - `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
@@ -1964,18 +2163,127 @@ achievements with the time, and the ones not yet seen.
   unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
   draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
   after its first minute (one the host ended, or left in its first minute, is not counted).
-- 36 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+- 40 achievements in six groups: Career (the two lesson medals of 9.2, first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
   (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
   losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
-  (Normal, Hard and Brutal AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
+  (Normal, Hard and Brutal AI, a human enemy, an ally, the Decade of Peace, waves 10 and 20 of the Trial of the Titans, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
-  "Career: W wins in G games (P%) · U of 36 achievements". Title screen: a Career button (a red count of
+  "Career: W wins in G games (P%) · U of 40 achievements". Title screen: a Career button (a red count of
   unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
+- The guided first match (9.2) is not a game of the career: no tracker runs in it. Its victory keeps the best
+  medal (`best.medal`, 1 bronze … 3 gold, `recordTutorial`) and unlocks First Lessons (any medal) and Top of
+  the Class (gold), which with the Trial's two and Brutal's one makes 40 achievements; the career screen lists the medal.
+
+### 9.2 Guided first match (src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js)
+Learn to Play (title screen, under Play vs AI; a gold "New? Start here" tag while the career has no game and
+no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the match:
+- `TutorialDirector` (Game, host only) reads the ViewState and the selection twice a second and walks
+  `TUTORIAL_STEPS` in order, each `{ id, icon, title, text(c), done(c), progress?(c), target?(c), guide?(c) }`:
+  choose the Worshippers (a selection with one), three mining (`tk` gold), two chopping, a finished House,
+  a Shrine, two praying, a Temple, a god on the field, a Barracks, four Barracks soldiers alive, and the
+  victory. A step once done stays done, and several finish at once when the player ran ahead.
+- HUD: the objective panel takes the getting-started checklist's corner (no checklist and no gameplay tips
+  in this match): step n of 11, icon, title, the text with `[[Key]]` caps, the progress ("2/3", "Faith 140/200",
+  "Their Town Center: 64%"), a row of step bars, a green glow for a moment when a step is finished. A gold
+  "Here" pin (the team marks' layer, `GuidePointer`) stands over the step's spot (the Worshippers, the start
+  mine, the forest tile nearest home, the Shrine, Temple, Barracks, the raiders' Town Center) and rides the
+  screen edge as an arrow when it is out of view; a click takes the camera there. The command-card buttons
+  the step needs glow (`lightCard`: Build and the building, the four god buttons, Warrior and Archer, Attack).
+  A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
+- The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
+  silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
+
+### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
+One game against the computer per local calendar day, the same on every device: everything comes from the day's
+key ('YYYY-MM-DD'): the map seed, my pantheon, any AI ally's and the rivals' pantheons (no pantheon twice) and a
+twist. The nine twists come round in a seeded shuffle of nine days, so every twist appears once a cycle:
+- Start changes the sim applies to every city, AI included (`setup.twist`, read by the World through
+  `startOf`; an unknown id is a normal game): Golden Age (three times the gold and wood), Blessed Start
+  (+350 faith), Humble Beginnings (two worshippers, half the gold and wood), Crowded Hearths (ten worshippers).
+- Sides and modes built into the lobby state: A Worthy Foe (one Hard AI), Outnumbered (a Normal and an Easy AI
+  allied against me, medium map), Brothers in Arms (an AI ally against two Normal AIs), Holy Ground
+  (Sacred Victory, 5.11), Trial of the Titans (with an AI ally, 5.14). Other twists face one Normal AI on a small map.
+
+Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
+today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
+loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
+with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in
+localStorage under `mythicwar-daily`: `{ days: { day: { best, plays, won } } }`, the last 60 days. The streak
+is the run of days played up to today, or up to yesterday while today is not played yet.
+
+### 9.4 Saved games (src/game/save-game.js, src/game/save-store.js, src/game/game-saves.js, src/sim/save-graph.js)
+A match against the computer (one human, the rest AI; not the guided first match) can be saved and carried on.
+- In the match: the F10 menu has **Save Game** (three slots, each showing its match, game time and when it was
+  saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
+  without counting the match in the career: it counts when it ends after being carried on). The game is also
+  autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
+  ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept.
+- Title screen: **Continue** (above Play vs AI) loads the newest save, autosave or slot; **Load Game** (small
+  button, shown once a save exists) lists them all with Load and Delete.
+- What is saved: the whole World (entities, map state, pathfinding queue, projectiles, statuses, powers, relics,
+  sites, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
+  `packGraph` (sim/save-graph.js): object identity and cycles, Maps, Sets, typed arrays, NaN, ±Infinity and -0
+  survive; class instances come back on their prototypes (`CLASSES` in save-game.js; the pathfinder's scratch
+  buffers are rebuilt, not saved); unit and building data, config and the generated map are stored by name and
+  looked up again (the map is generated again from the setup's seed). A function in the state throws with its
+  path, so a test catches new state that cannot be saved. Also kept: the fog explored, enemy buildings and mines
+  as last seen, the camera, control groups, the chronicle's samples and the career tracker's tally.
+- Determinism: the loaded game plays the same ticks exactly as the saved one would have (the packed state of both,
+  compared after 90 more seconds of AI-vs-AI play, is identical: tests/game/save-game.test.js, also for the Trial of
+  the Titans, the Decade of Peace and Sacred Victory). A loaded game's `HostSession` (`resumed: true`) drops the
+  saved tick's leftover events and brings the felled trees down in its first snapshot.
+- Storage: on this device only. The state (about 400 KB of JSON at minute 8 of a small map, gzipped with
+  `CompressionStream` to a few tens of KB) goes to IndexedDB `mythicwar-saves`; the slot list goes to
+  localStorage `mythicwar-saves`. `SAVE_FORMAT` is checked on load; a save from an older build of the game loads
+  as long as the state it holds still fits the code (a save that no longer does fails on the start screen).
+
+### 9.5 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
+The sim is deterministic (same setup and the same commands on the same ticks give the same game), so a
+replay is not a video: it is the GameSetup, every command the World accepted with its tick, the chat with
+its ticks, and checksums.
+- Recording (host only: a client has no World): `ReplayRecorder` sets `World.onCommand`, which
+  `issueCommand` calls for each command it queues, from every player (the AIs and an AI that took over
+  from a player who left too), as the compact form of `normalizeCommand`'s copy (empty fields dropped;
+  normalizing it again gives the same command). On each host snapshot, at most every 10 s of game time,
+  it keeps `worldChecksum` (the tick, every player's resources, every living unit's id, place and health,
+  every building's health), and one on the last tick. The guided first match is not recorded, nor is a game
+  carried on from a save (9.4: a replay starts from the setup, and that game's start is not kept).
+- Kept: at the game-over screen (with the result) or on leaving (result null, "Left early"), when the game
+  ran 30 s or more. `saveReplay` stores it in IndexedDB (`mythicwar-replays`: a `meta` list row and the
+  `data`, gzip-compressed by CompressionStream; a 2-player 15-minute game is about 26 KB, a 4-player
+  22-minute one about 100 KB), keeping the newest 12. Storage that is off keeps nothing, silently.
+  A record: `{ format: 1, id, version (PROTOCOL_VERSION), date, setup, pov, ticks, result, winningTeam,
+  mode, players, truncated, cmds: [[tick, player, cmd]], chat: [[tick, from, text, voice?, system?]],
+  sums: [[tick, hash]] }`. Loading (and opening a file, untrusted) goes through `sanitizeReplay`:
+  the setup through `validateSetup`, the commands in tick order through `normalizeCommand`.
+- Playback: a Game built with `replay` runs a `ReplaySession` (the HostSession surface) whose World gets
+  the recorded commands on their ticks: no AIs, no orders taken, no alerts, chronicle, career or recording.
+  Speeds ½×, 1×, 2×, 4×, 8× (the ticker runs that fast, a snapshot every speed/2 ticks); the ViewState's
+  `clock` is a `PlaybackClock` running at the same speed and stopping while paused, so units move smoothly
+  at every speed. A jump ahead runs the ticks in 24 ms slices (events dropped, the trees felled on the way
+  fall at once with `felledAll`). Going back starts a new Game at that tick (a World cannot run backwards,
+  nor can the trees regrow), keeping speed, eyes and camera. A checksum that does not match marks the
+  moment the replay parted from the recorded game (a replay from an earlier build, whose rules have
+  changed): the timeline gets a red mark and the bar says so; one from another build says it may differ.
+- Eyes: everyone (`myIndex` -1, no fog) or one player (`ViewState.setViewer`: their fog of war and top bar;
+  the map counts as explored, as no memory of it was kept). The free camera turns round its target and
+  tilts (`CameraController.rotate`, `tiltBy`, `resetAngle`: pan and edge scroll turn with it; the pitch
+  stays 22° to 68°).
+- The bar (above the bottom panel; the command card and the marker and power buttons are hidden): ⏮, play /
+  pause (↻ at the end), +30 s, the speeds, the timeline (click: go there), the eyes, turn ⟲ ⟳, tilt ⤒ ⤓,
+  the normal view ⌖, Leave. Keys: Space play / pause, [ and ] speed, J +30 s, V next eyes, Q / E turn,
+  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free).
+- Where: the game-over screen's Watch Replay (this match from its start), and the Career screen's Replays:
+  each kept game with its sides, result, date, mode and length, Watch, Save (a `.mwreplay` file, the packed
+  record) and Delete, and Open a replay file.
 
 ## 10. AI (src/ai/)
 
-`createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
+`createAI(world, playerIndex, difficulty) → { tick() }` (difficulty `'tutorial'` is the sleeping camp of 5.13,
+`src/ai/tutorial-ai.js`; it is never offered in the lobby). Called every sim tick on the host;
 thinks every `AI_THINK_INTERVAL[difficulty]` ticks. Reads world state, acts **only** through
 `world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers up to what its
 mines, wood line and prayer slots can use (at most 15/30/34/34 by difficulty; a mine takes only
@@ -1990,11 +2298,17 @@ big fights); retreat badly hurt gods to base. It combines no Houses into Manors 
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats; Brutal's gather bonus is the one exception, below). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard and brutal 93 %), so normal and harder fill the
-population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
+population cap and easy stays well below it. In the Trial of the Titans (5.14) the wave monsters count as enemy
+units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
 break a rival's Sacred Victory countdown (5.11).
+God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing once 12 of its worshippers gather
+(easy: more), a festival once 5 pray, a caravan from 1:30, a healing rain where its hurt army is missing 1,200
+health or more within the rain; a strike on the enemy unit whose surroundings (the power's area) hold the most
+enemy health, at least 1,800 (a cataclysm 3,600, where an enemy building counts a quarter of its health), and only
+where its team can see (the sim's own `powerRefusal` decides). Easy's `castThreshold` raises every bar.
 
 **Difficulties** (`src/ai/profiles.js`): Easy, Normal, Hard and Brutal, every number in one profile each. Easy,
 Normal and Hard play fair: the same resources, rules and units as a player; Brutal's one bonus is below. (They all
@@ -2062,6 +2376,12 @@ returns as chat lines from that player with `voice: true`. Only the setup's own 
 that took over from a player who left keeps quiet). It only reads the World. Each player hides
 the lines with the `aiChat` setting ("AI chatter", in Settings → Gameplay and the in-game menu;
 default on): `showChatLine` in `src/game/game.js` filters them, live chat and the replayed log alike.
+A shown line is not a feed card but a taunt at the top centre (`Hud.showTaunt`, `.hud-taunt` in hud.css),
+under the banners: the speaker's pantheon emblem in a ring, their name in their colour, the words in
+quotes at 1.6em (the feed's cards are 1.18em), slamming in with a short shake (none under reduced
+motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. It comes with the
+`taunt` sound (sfx-alerts.js): two war-drum blows under a low brass fifth that bends down into the
+note with a growl, measured at peak -3.6 dB / loudest 400 ms -13.1 dB RMS, next to the war horn's -5.2 / -14.0.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 
@@ -2124,8 +2444,18 @@ address bar, Site settings, Sound, Allow (or `chrome://settings/content/sound`, 
 here by writing that exception into a profile, not by clicking through Chrome's menus. Nobody has heard it with speakers: the
 checks read the audio context's state, the effects the engine schedules and what the voice is asked and answered.
 
-**Narration** (`src/intro/narrator.js`): a voice reads each caption of `CAPTIONS` aloud, with the browser's own speech
-synthesis (`speechSynthesis`; no audio files), as the film's clock reaches the caption's `from` second: the caption's
+**Narration** (`src/intro/narrator.js`, `src/intro/voiceover.js`): a voice reads each caption of `CAPTIONS` aloud as the
+film's clock reaches the caption's `from` second. The lines are recorded: one short clip per caption in
+`assets/narration/` (mono MP3, 64 kbps, -20 LUFS, about 90 KB in all), rendered offline with Kokoro-82M (Apache 2.0),
+voice `bm_george` (a deep British narrator, Austin's pick of three) at speed 0.85, by `tools/narration/render.py`; a
+changed caption needs its clip rendered again (`tests/intro/voiceover.test.js` checks every caption has one).
+`RecordedSpeech` downloads and decodes them on the sound engine's context as the film loads and plays each through the
+engine's master gain (so it follows the volume and the mute) with a 0.12 send to its hall reverb, 0.15 s after the
+hand-over so the score has begun to step back. It has the browser speech synthesis's shape, so the narrator below is the
+same for both: a line whose clip cannot be had (no Web Audio, a failed download or decode, or a clip not there 1.5 s after
+its line came up) goes to the browser's own voice, as before; a suspended context that does not run within 0.4 s is
+reported as a refusal (`not-allowed`), and the click that resumes it says the line. `?voice=browser` uses the browser's
+voice alone. The browser's voice (`speechSynthesis`) says the caption's
 own words, `en-US`, rate 0.9 and pitch 0.9, at the Settings volume (0 is silence), a line at a time (the browser
 queues a line behind one still being said, so they never overlap; no voice is picked by name, since the browser's
 default for English is its best and a list can open on a novelty voice). The overlay's `paint` hands the voice the film's second each frame, so it
@@ -2254,8 +2584,10 @@ tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no
 mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
 changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
 plays, the card and a key press, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
-voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
-screen, Esc cutting it before the dip, the hint and the click, the setting); `--music` plays the film without its renderer
+browser voice (`?voice=browser`) against a stand-in speech synthesis that records its calls (each caption read as it is on the
+screen, Esc cutting it before the dip, the hint and the click, the setting); `--voice` checks the recorded voice in real Chromium (the real clips downloaded,
+decoded and started on a running context, one per caption with it on screen, the browser's voice never asked, a first
+visit's key starting the first line and Esc stopping it); `--music` plays the film without its renderer
 in real time (a stand-in voice that takes time) and reads the page's real Web Audio graph (the stage's gain, an analyser on
 the music's output) through the whole film, a skip in the middle of a line and a first visit before any click (about two
 minutes; `--scenes 2` runs one of the three); `--sound` is a first visit in real Chromium under the browser's own autoplay
@@ -2266,7 +2598,7 @@ film plays with its sound at once); the other scenes run under the browser's own
 launches Chromium with the autoplay switch (about three minutes; `--scenes 2` runs one of the four). `node tools/music-render.mjs --film --out DIR [--speech from-to,…]` renders the
 score offline, with the mix stepping back over those speech windows, for ffmpeg to measure and mix (a stand-in voice from
 ffmpeg's `flite` filter makes a preview). Don't sample stills at 19 or 36 s, the dips' black frames. Tests:
-`tests/intro/{script,stage,film,narrator,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
+`tests/intro/{script,stage,film,narrator,voiceover,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
 film on a strict fake audio context), `tests/render/camera-free.test.js`, `tests/ui/intro.test.js` (the card among them), `tests/audio/sfx.test.js` (the early start and `onReady`), and the engine's
 side in `tests/audio/music-engine.test.js`.
 
@@ -2299,6 +2631,7 @@ src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
 src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
 src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/career*.js, src/data/achievements.js, src/ui/menu-career.js  career owner (9.1)
+src/sim/tutorial.js, src/ai/tutorial-ai.js, src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js  guided first match (5.13, 9.2)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)

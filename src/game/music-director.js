@@ -29,6 +29,7 @@ export const HEAT = {
   ownBigDeath: 40, // a god or a Titan fell
   titanRising: 36, // a Titan is being summoned, or has appeared, anywhere
   peaceEnd: 40,
+  wave: 20, // Trial of the Titans: a wave comes out (a Titan's wave counts as titanRising too)
 };
 
 /** Heat in, intensity out. */
@@ -148,6 +149,9 @@ export class MusicDirector {
       }
       case 'peaceEnd':
         add(HEAT.peaceEnd);
+        break;
+      case 'wave':
+        add(ev.boss ? HEAT.titanRising : HEAT.wave);
         break;
       default:
         break;

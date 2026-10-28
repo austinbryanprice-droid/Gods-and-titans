@@ -1141,7 +1141,19 @@ kbd {
 }
 .mw-howto-panel .mw-panel-head { margin-bottom: 0.8em; }
 .mw-career-btn { position: relative; }
+.mw-learn-btn { position: relative; }
+.mw-daily-btn { position: relative; }
+.mw-new-badge.mw-streak-badge { background: linear-gradient(180deg, #ff8a3d, #c4401c); color: #fff4e0; box-shadow: 0 0 12px rgba(255, 120, 50, 0.55); }
 .mw-new-badge { position: absolute; top: -0.55em; right: -0.45em; min-width: 1.6em; padding: 0.15em 0.4em; border-radius: 1em; background: #d8452c; color: #fff; font: 700 0.75em/1.2 var(--mw-font-display); letter-spacing: 0; box-shadow: 0 0 10px rgba(255, 90, 50, 0.6); }
+.mw-new-badge.mw-start-badge { top: 0.45em; right: 0.55em; padding: 0.2em 0.65em; font-size: 0.6em; letter-spacing: 0.06em; white-space: nowrap; text-transform: uppercase; background: linear-gradient(180deg, #e9b44c, #b07a1c); color: #2a1a04; box-shadow: 0 0 12px rgba(255, 200, 90, 0.55); }
+
+/* Load Game screen and the title's Continue (src/ui/menu.js loadScreen) */
+.mw-load-panel { width: min(40em, 94vw); padding: 1.3em 1.6em 1.2em; }
+.mw-load-panel .mw-panel-head { margin-bottom: 0.8em; }
+.mw-save-list { display: flex; flex-direction: column; gap: 0.6em; }
+.mw-save-row { display: flex; align-items: center; gap: 0.6em; padding: 0.6em 0.8em; border: 1px solid var(--mw-line); border-radius: 0.5em; background: rgba(6, 8, 14, 0.45); }
+.mw-save-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15em; }
+.mw-save-text span { font-size: 0.85em; color: var(--mw-ink-dim); overflow-wrap: anywhere; }
 
 /* Career screen (src/ui/menu-career.js) */
 .mw-career-panel .mw-scroll > .mw-label { margin: 1.4em 0 0.6em; }
@@ -1275,3 +1287,16 @@ kbd {
   .mw-crest { display: none; }
   .mw-tagline { display: none; }
 }
+
+/* Career screen: replays (src/ui/menu-replays.js) */
+.mw-rp-list { display: flex; flex-direction: column; gap: 0.45em; margin: 0; padding: 0; list-style: none; }
+.mw-rp { display: flex; align-items: center; gap: 0.75em; padding: 0.55em 0.75em; border-radius: 6px; border: 1px solid rgba(196, 146, 72, 0.25); background: rgba(0, 0, 0, 0.22); }
+.mw-rp.is-victory { border-color: rgba(255, 210, 58, 0.5); }
+.mw-rp-icon { font-size: 1.5em; width: 1.3em; text-align: center; }
+.mw-rp-main { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; flex: 1; }
+.mw-rp-title { font: 600 0.95em/1.2 var(--mw-font-display); color: var(--mw-ink); }
+.mw-rp-result { color: var(--mw-gold); }
+.mw-rp-sub, .mw-rp-who { font-size: 0.8em; color: var(--mw-ink-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mw-rp-btns { display: flex; gap: 0.35em; flex-wrap: wrap; justify-content: flex-end; }
+.mw-rp-foot { display: flex; align-items: center; gap: 0.9em; margin-top: 0.6em; flex-wrap: wrap; }
+@media (max-width: 700px) { .mw-rp { flex-wrap: wrap; } .mw-rp-btns { width: 100%; } }

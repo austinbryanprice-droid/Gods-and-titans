@@ -4,6 +4,7 @@
 import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES } from '../data/index.js';
 import { MINE_TIME, CARRY_AMOUNT, PEACE_NAME } from '../config.js';
 import { NO_MODS, computeMods, workSpeed } from '../data/upgrades.js';
+import { getRelic } from '../data/relics.js';
 import { MANOR } from '../data/houses.js';
 import { peaceClock } from '../sim/peace.js';
 
@@ -177,6 +178,18 @@ export function messageDwell(text, kind) {
   return kind === 'alert' ? ms + MESSAGE_ALERT_EXTRA_MS : ms;
 }
 
+// An AI's taunt at the top centre (Hud.showTaunt, DESIGN 10.1): long enough to read twice, short enough not to linger.
+const TAUNT_BASE_MS = 4500;
+const TAUNT_MS_PER_CHAR = 55;
+const TAUNT_MIN_MS = 6000;
+const TAUNT_MAX_MS = 9500;
+
+/** How long an AI's taunt stays at the top centre: 6 to 9.5 s by length. */
+export function tauntDwell(text) {
+  const letters = String(text ?? '').length;
+  return Math.min(TAUNT_MAX_MS, Math.max(TAUNT_MIN_MS, TAUNT_BASE_MS + letters * TAUNT_MS_PER_CHAR));
+}
+
 /**
  * The connection warning for a joined (client) session while the host has been silent
  * for STALL_NOTICE_MS (session.stalled / stalledMs), else '' (also for a HostSession,
@@ -270,15 +283,71 @@ export function pantheonOf(vs, owner) {
 export function modsOf(vs, owner) {
   const up = upgradesOf(vs, owner);
   const pantheon = pantheonOf(vs, owner);
-  if (!up.length && !pantheon) return NO_MODS;
-  const key = `${pantheon || ''}|${up.join(',')}`;
+  const rl = relicsOf(vs, owner);
+  if (!up.length && !pantheon && !rl.length) return NO_MODS;
+  const key = `${pantheon || ''}|${up.join(',')}|${rl.join(',')}`;
   let m = modsCache.get(key);
   if (!m) {
     if (modsCache.size > 64) modsCache.clear();
-    m = computeMods(up, pantheon);
+    m = computeMods(up, pantheon, rl);
     modsCache.set(key, m);
   }
   return m;
+}
+
+// ---- Relics (DESIGN 5.15)
+
+/** Relic types resting in a player's Temples (the snapshot's `rl`; [] for none). */
+export function relicsOf(vs, owner) {
+  const p = Number.isInteger(owner) && owner >= 0 && vs.players ? vs.players[owner] : null;
+  return p && Array.isArray(p.rl) ? p.rl.filter((id) => getRelic(id)) : [];
+}
+
+export function relicIcon(type) {
+  const r = getRelic(type);
+  return r ? r.icon : '💎';
+}
+
+/** "🐏 Golden Fleece (Greek): Your soldiers have 10% more health." */
+export function relicLine(type) {
+  const r = getRelic(type);
+  return r ? `${r.icon} ${r.name} (${r.myth}): ${r.description}` : '💎 A relic';
+}
+
+/** A carrier's chip tooltip. */
+export function relicCarryText(type) {
+  const r = getRelic(type);
+  const name = r ? `the ${r.name}` : 'a relic';
+  return `Carrying ${name}. Bring it to your Temple${r ? `: ${r.description[0].toLowerCase()}${r.description.slice(1)}` : '.'}`;
+}
+
+/** A Temple's relic line in the selection panel. */
+export function templeRelicsText(types) {
+  if (!types.length) return 'Relics: none. Clear a guarded creep camp and carry its relic here.';
+  return `Relics: ${types.map((t) => `${relicIcon(t)} ${getRelic(t) ? getRelic(t).name : 'Relic'}`).join(', ')}`;
+}
+
+/**
+ * The top bar's relic chip: how many of the map's relics rest in my Temples, and a tooltip with
+ * what each gives and where the others are. Null on a map without relics.
+ */
+export function relicChip(vs) {
+  const all = vs.relics || [];
+  if (!all.length) return null;
+  const me = vs.myIndex;
+  const mine = all.filter((r) => r.s === 'h' && r.o === me);
+  const lines = [`Relics: ${mine.length} of ${all.length} rest in your Temples.`];
+  for (const r of mine) lines.push(relicLine(r.t));
+  const free = all.filter((r) => r.s === 'g').length;
+  const guarded = all.filter((r) => r.s === 'k').length;
+  const carried = all.filter((r) => r.s === 'c' && r.o === me).length;
+  const rivals = all.filter((r) => r.s === 'h' && r.o !== me).length;
+  lines.push('');
+  if (carried) lines.push(`${carried} on the way to your Temple.`);
+  if (free) lines.push(`${free} lying free: right-click one with a Worshipper or a god.`);
+  if (guarded) lines.push(`${guarded} still guarded by creep camps (a light beam marks them).`);
+  if (rivals) lines.push(`${rivals} in other players' Temples: destroy a Temple to free what rests in it.`);
+  return { count: mine.length, total: all.length, title: lines.join('\n').trim() };
 }
 
 /** "Normal" or "+30%": how much faster a player's Worshippers work (Work Songs and its later levels). */

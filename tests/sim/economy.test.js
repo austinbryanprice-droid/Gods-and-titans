@@ -174,6 +174,36 @@ test('a full Temple is named in the error', () => {
   assert.deepEqual(errorsOf(w.events), ['This Temple is full.']);
 });
 
+test('a shift-queued prayer still kneels when its reserved slot was given to someone else', () => {
+  // The queued prayer reserves a slot that only counts as taken once it begins; four others sent
+  // to the Shrine meanwhile took that one, and the queued worshipper used to give up on arrival.
+  const w = makeWorld();
+  const shrine = place(w, 0, 'shrine', 14, 12);
+  const ws = [...workers(w)];
+  ws.push(spawn(w, 0, 'worshipper', 12, 17));
+  const a = ws[0];
+  w.issueCommand(0, { type: 'move', units: [a.id], x: 4, y: 22 });
+  w.issueCommand(0, { type: 'pray', units: [a.id], target: shrine.id, queue: true });
+  w.tick();
+  w.issueCommand(0, { type: 'pray', units: ws.slice(1, 5).map((u) => u.id), target: shrine.id });
+  runUntil(w, () => a.state === 'pray', 40);
+  assert.equal(a.state, 'pray');
+  assert.equal(shrine.prayingCount, 5);
+  // A full Shrine still turns the queued worshipper away, with the usual message.
+  const b = ws[5];
+  w.issueCommand(0, { type: 'stop', units: [b.id] });
+  w.issueCommand(0, { type: 'move', units: [b.id], x: 4, y: 22 });
+  w.tick();
+  const victim = ws[1];
+  w.issueCommand(0, { type: 'stop', units: [victim.id] });
+  w.issueCommand(0, { type: 'pray', units: [b.id], target: shrine.id, queue: true });
+  w.tick();
+  w.issueCommand(0, { type: 'pray', units: [victim.id], target: shrine.id });
+  const events = runCollect(w, 30);
+  assert.ok(errorsOf(events).includes('This Shrine is full.'));
+  assert.equal(b.order, null);
+});
+
 test('temple prays at 0.7 faith/s per worshipper', () => {
   const w = makeWorld();
   place(w, 0, 'shrine', 20, 20);

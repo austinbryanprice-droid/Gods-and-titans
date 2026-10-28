@@ -6,6 +6,7 @@ import { MINE_TIME, CARRY_AMOUNT, CHOP_INTERVAL, DT } from '../config.js';
 import { moveToRect, moveToPoint, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
 import { NO_MODS, workSpeed, chopSpeed } from '../data/upgrades.js';
+import { boonPct } from './powers.js';
 
 const REACH = 0.5; // edge distance to work at a mine / tree / drop-off
 const SPOT_OFFSET = 0.42; // mining spots stand this far outside the mine's edge
@@ -88,7 +89,8 @@ export function deposit(world, u) {
   }
   const p = world.players[u.owner];
   if (p) {
-    const amount = u.carryAmount * (p.income || 1);
+    // A harvest blessing (god power boon) adds to every load brought in while it lasts; a Brutal AI's loads count `income` times.
+    const amount = Math.round(u.carryAmount * (p.income || 1) * (1 + boonPct(p, 'gather')));
     if (u.carry === 'g') {
       p.gold += amount;
       p.stats.gold += amount;
@@ -532,7 +534,18 @@ export function releasePrayerSlot(world, u, o) {
 /** Pray order: { type: 'pray', building, slot, kneel }. Returns true when finished. */
 export function updatePray(world, u, o) {
   const b = world.entities.get(o.building);
-  if (!b || b.dead || !b.constructed || b.owner !== u.owner || b.prayers[o.slot] !== u.id) return true;
+  if (!b || b.dead || !b.constructed || b.owner !== u.owner) return true;
+  if (b.prayers[o.slot] !== u.id) {
+    // A shift-queued prayer reserved its slot when it was queued, and that slot only counts as taken
+    // once the prayer begins: another worshipper may have been sent there since. Take any free one.
+    const slot = reservePrayerSlot(world, b, u);
+    if (slot < 0) {
+      world.error(u.owner, `This ${(b.def && b.def.name) || 'shrine'} is full.`);
+      return true;
+    }
+    o.slot = slot;
+    o.kneel = false;
+  }
   if (!b.praySpots || b.praySpotsVer !== world.map.version) computePrayerSpots(world, b);
   const spot = b.praySpots[o.slot];
   u.target = b.id;
