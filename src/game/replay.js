@@ -1,4 +1,4 @@
-// Match replays (DESIGN 9.4). The sim is deterministic: the same GameSetup and the same commands on
+// Match replays (DESIGN 9.5). The sim is deterministic: the same GameSetup and the same commands on
 // the same ticks give the same game (tests/sim/world.test.js). So a replay is the setup, every
 // command the World accepted (from every player, the AIs too) with the tick it was applied on, the
 // chat lines with their ticks, and now and then a checksum of the world, by which a replay played on

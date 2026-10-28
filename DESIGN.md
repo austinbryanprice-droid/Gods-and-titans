@@ -2197,7 +2197,33 @@ with the streak. Play Again replays the same day's challenge; it is not kept for
 localStorage under `mythicwar-daily`: `{ days: { day: { best, plays, won } } }`, the last 60 days. The streak
 is the run of days played up to today, or up to yesterday while today is not played yet.
 
-### 9.4 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
+### 9.4 Saved games (src/game/save-game.js, src/game/save-store.js, src/game/game-saves.js, src/sim/save-graph.js)
+A match against the computer (one human, the rest AI; not the guided first match) can be saved and carried on.
+- In the match: the F10 menu has **Save Game** (three slots, each showing its match, game time and when it was
+  saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
+  without counting the match in the career: it counts when it ends after being carried on). The game is also
+  autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
+  ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept.
+- Title screen: **Continue** (above Play vs AI) loads the newest save, autosave or slot; **Load Game** (small
+  button, shown once a save exists) lists them all with Load and Delete.
+- What is saved: the whole World (entities, map state, pathfinding queue, projectiles, statuses, powers, relics,
+  sites, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
+  `packGraph` (sim/save-graph.js): object identity and cycles, Maps, Sets, typed arrays, NaN, ±Infinity and -0
+  survive; class instances come back on their prototypes (`CLASSES` in save-game.js; the pathfinder's scratch
+  buffers are rebuilt, not saved); unit and building data, config and the generated map are stored by name and
+  looked up again (the map is generated again from the setup's seed). A function in the state throws with its
+  path, so a test catches new state that cannot be saved. Also kept: the fog explored, enemy buildings and mines
+  as last seen, the camera, control groups, the chronicle's samples and the career tracker's tally.
+- Determinism: the loaded game plays the same ticks exactly as the saved one would have (the packed state of both,
+  compared after 90 more seconds of AI-vs-AI play, is identical: tests/game/save-game.test.js, also for the Trial of
+  the Titans, the Decade of Peace and Sacred Victory). A loaded game's `HostSession` (`resumed: true`) drops the
+  saved tick's leftover events and brings the felled trees down in its first snapshot.
+- Storage: on this device only. The state (about 400 KB of JSON at minute 8 of a small map, gzipped with
+  `CompressionStream` to a few tens of KB) goes to IndexedDB `mythicwar-saves`; the slot list goes to
+  localStorage `mythicwar-saves`. `SAVE_FORMAT` is checked on load; a save from an older build of the game loads
+  as long as the state it holds still fits the code (a save that no longer does fails on the start screen).
+
+### 9.5 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
 The sim is deterministic (same setup and the same commands on the same ticks give the same game), so a
 replay is not a video: it is the GameSetup, every command the World accepted with its tick, the chat with
 its ticks, and checksums.
@@ -2206,7 +2232,8 @@ its ticks, and checksums.
   from a player who left too), as the compact form of `normalizeCommand`'s copy (empty fields dropped;
   normalizing it again gives the same command). On each host snapshot, at most every 10 s of game time,
   it keeps `worldChecksum` (the tick, every player's resources, every living unit's id, place and health,
-  every building's health), and one on the last tick. The guided first match is not recorded.
+  every building's health), and one on the last tick. The guided first match is not recorded, nor is a game
+  carried on from a save (9.4: a replay starts from the setup, and that game's start is not kept).
 - Kept: at the game-over screen (with the result) or on leaving (result null, "Left early"), when the game
   ran 30 s or more. `saveReplay` stores it in IndexedDB (`mythicwar-replays`: a `meta` list row and the
   `data`, gzip-compressed by CompressionStream; a 2-player 15-minute game is about 26 KB, a 4-player

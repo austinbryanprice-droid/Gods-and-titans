@@ -1,8 +1,8 @@
 // Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
 // as an HTML overlay in #menu-root over an animated night-sky backdrop.
 //
-//   const menu = createMenu({ root, onStart, onIntro, onReplay })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
-//                                                                  // onReplay(id | record) watches a replay (the Career screen)
+//   const menu = createMenu({ root, onStart, onIntro, onLoad, onReplay })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
+//                                                                           // onLoad(slot) carries on a saved game (DESIGN 9.4); onReplay(id | record) watches a replay (9.5)
 //   showMenu(screen = 'title')  /  hideMenu()
 //
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
@@ -23,6 +23,7 @@ import { renderCareerContent } from './menu-career.js';
 import { renderReplays } from './menu-replays.js';
 import { getCareer, markSeen } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
+import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
 import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { medalLabel } from '../data/medals.js';
@@ -96,9 +97,9 @@ function closeLobby(lobby) {
 
 /**
  * Build the menu inside `root`.
- * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void }} opts
+ * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void, onLoad?: (slot: string) => Promise<void> }} opts
  */
-export function createMenu({ root, onStart, onIntro = null, onReplay = null }) {
+export function createMenu({ root, onStart, onIntro = null, onLoad = null, onReplay = null }) {
   const params = urlParams();
   const useMock = params.get('mockLobby') === '1';
   const tOverride = params.get('transport');
@@ -261,7 +262,27 @@ export function createMenu({ root, onStart, onIntro = null, onReplay = null }) {
     howto: howToScreen,
     career: careerScreen,
     settings: settingsScreen,
+    load: loadScreen,
   };
+
+  /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
+  async function loadSlot(slot) {
+    if (!onLoad) return;
+    const done = busy('Loading the saved game…');
+    try {
+      sfx.play('horn');
+      await onLoad(slot);
+    } catch (err) {
+      toast(err?.message || 'The saved game could not be loaded.');
+    } finally {
+      done();
+    }
+  }
+
+  /** "Greek vs Norse (Hard) · small map · 23:10 · 5 min ago" for a save's info. */
+  function saveLine(info) {
+    return `${info.label || 'Saved game'} · ${clockText(Math.floor(info.time || 0))} · ${savedAgo(info.savedAt)}`;
+  }
 
   function titleScreen() {
     const counts = {
@@ -280,6 +301,9 @@ export function createMenu({ root, onStart, onIntro = null, onReplay = null }) {
       h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
       h('span.mw-btn-label', 'Quick Match'), quickSub,
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
+    // Continue: the newest saved game (the autosave or a slot), in one click. Load Game lists them all.
+    const saves = onLoad ? listSaves() : [];
+    const continueBtn = saves.length ? mainBtn('Continue', saveLine(saves[0]), () => loadSlot(saves[0].slot), 'mw-continue-btn') : null;
     let quick = null;
     loadLobby().then((mod) => {
       if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
@@ -338,6 +362,7 @@ export function createMenu({ root, onStart, onIntro = null, onReplay = null }) {
       ),
       h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
+        continueBtn,
         playBtn,
         quickBtn,
         dailyBtn,
@@ -345,6 +370,7 @@ export function createMenu({ root, onStart, onIntro = null, onReplay = null }) {
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
+          saves.length ? h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('load') }, 'Load Game') : null,
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
           h('button.mw-btn.mw-btn--small.mw-career-btn', { type: 'button', onclick: () => go('career') }, 'Career',
             newCount ? h('span.mw-new-badge', { title: `${newCount} new achievement${newCount === 1 ? '' : 's'}` }, String(newCount)) : null),
@@ -357,7 +383,40 @@ export function createMenu({ root, onStart, onIntro = null, onReplay = null }) {
         h('span.mw-foot-item', `v${GAME_VERSION}`),
       ),
     );
-    return { el, focus: playBtn, cleanup: off };
+    return { el, focus: continueBtn || playBtn, cleanup: off };
+  }
+
+  // ---------------------------------------------------------- load game
+
+  function loadScreen() {
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const list = h('div.mw-save-list');
+    function render() {
+      const saves = listSaves();
+      if (!saves.length) {
+        setChildren(list, h('p.mw-hint', 'No saved games yet. Save a game against the computer from the in-game menu (F10).'));
+        return;
+      }
+      setChildren(list, saves.map((info) => h('div.mw-save-row',
+        h('div.mw-save-text',
+          h('b', info.slot === AUTO_SLOT ? 'Autosave' : `Slot ${info.slot}`),
+          h('span', saveLine(info))),
+        h('button.mw-btn.mw-btn--primary.mw-btn--small', { type: 'button', onclick: () => loadSlot(info.slot) }, 'Load'),
+        h('button.mw-btn.mw-btn--ghost.mw-btn--small', { type: 'button', title: 'Delete this saved game', onclick: async () => {
+          if (typeof confirm === 'function' && !confirm(`Delete ${info.slot === AUTO_SLOT ? 'the autosave' : `slot ${info.slot}`}?`)) return;
+          await deleteSave(info.slot);
+          render();
+        } }, 'Delete'),
+      )));
+    }
+    render();
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-load-panel',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'Load Game'), h('span.mw-head-spacer')),
+        list,
+        h('p.mw-hint', 'Saved games are kept in this browser on this device. A game is autosaved every three minutes of game time; Save & Quit in the game menu keeps it for Continue.')),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
   }
 
   // ---------------------------------------------------------- lobby

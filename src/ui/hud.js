@@ -78,7 +78,7 @@ export class Hud {
     root.textContent = '';
     root.classList.add('hud');
     const game = this.game;
-    // A replay (DESIGN 9.4) is watched: no command card, marker or power buttons, tips or hints.
+    // A replay (DESIGN 9.5) is watched: no command card, marker or power buttons, tips or hints.
     root.classList.toggle('is-replay', !!game.replay);
 
     // Team pings and markers: pins over the battlefield, under every panel (so added first).

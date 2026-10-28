@@ -1,4 +1,4 @@
-// Where the replays live (DESIGN 9.4): in this browser on this device, in IndexedDB (a replay is a
+// Where the replays live (DESIGN 9.5): in this browser on this device, in IndexedDB (a replay is a
 // few hundred kilobytes of JSON, far past what localStorage holds), gzip-compressed where the browser
 // has CompressionStream (to about a twentieth). The newest MAX_REPLAYS are kept; saving one more
 // drops the oldest. Every call is async and never throws: storage that is off (a private window, a

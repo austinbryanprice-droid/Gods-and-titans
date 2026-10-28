@@ -1,4 +1,4 @@
-// Replay playback (DESIGN 9.4): a session with the surface of HostSession (setup, myIndex, mapData,
+// Replay playback (DESIGN 9.5): a session with the surface of HostSession (setup, myIndex, mapData,
 // viewState, onChat, onEnd, start, stop, …) whose World is driven by a replay's recorded commands
 // instead of players and AIs. It plays at 0.5× to 8× (the ticker runs that many times faster, a
 // snapshot every few ticks), pauses, jumps ahead (running the ticks in slices of a few milliseconds so
