@@ -113,6 +113,7 @@ export function sanitizeLobbyState(state) {
     mapSize: MAP_SIZE_NAMES.includes(state.mapSize) ? state.mapSize : 'small',
     preset: PRESETS.includes(state.preset) ? state.preset : null,
     peace: PEACE_LENGTHS.includes(state.peace) ? state.peace : 0,
+    sacred: state.sacred === true,
     started: state.started === true,
     slots,
   };
@@ -162,6 +163,7 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   });
   const setup = { version, seed, mapSize: state.mapSize, players };
   if (PEACE_LENGTHS.includes(state.peace)) setup.peaceMinutes = state.peace; // Decade of Peace
+  if (state.sacred === true) setup.sacredVictory = true; // Sacred Victory (DESIGN 5.11)
   if (typeof mapgen.mapHash === 'function') {
     setup.mapHash = mapgen.mapHash(mapgen.generateMap(mapgen.mapOptions(setup)));
   }
@@ -203,6 +205,7 @@ export class LobbyHost {
       mapSize: 'small',
       preset: null,
       peace: 0,
+      sacred: false,
       started: false,
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
@@ -442,6 +445,14 @@ export class LobbyHost {
   setPeace(minutes) {
     if (this.started || (minutes !== 0 && !PEACE_LENGTHS.includes(minutes)) || this.state.peace === minutes) return false;
     this.state.peace = minutes;
+    this.changed();
+    return true;
+  }
+
+  /** Sacred Victory (DESIGN 5.11): holding every sacred site for 8 minutes also wins the game. */
+  setSacred(on) {
+    if (this.started || typeof on !== 'boolean' || this.state.sacred === on) return false;
+    this.state.sacred = on;
     this.changed();
     return true;
   }

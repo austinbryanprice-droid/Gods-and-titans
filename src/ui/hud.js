@@ -1,5 +1,5 @@
 // In-game HUD (DESIGN 9): a Warcraft III–style HTML overlay in #hud-root.
-//   top bar      gold, wood, faith (+rate), population, tier, clock, peace countdown, ping, menu, market
+//   top bar      gold, wood, faith (+rate), population, tier, clock, peace countdown, sacred sites, ping, menu, market
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
@@ -16,6 +16,7 @@ import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
+import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
@@ -102,6 +103,10 @@ export class Hud {
     this.peaceChip.title = `${PEACE_NAME}: no player can harm another, or build near an enemy Town Center, until this clock runs out. Neutral creatures still fight.`;
     this.peaceChip.hidden = true;
     this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
+    // Sacred sites held by my side (and the Sacred Victory countdown when a side holds them all).
+    this.siteText = el('span', 'hud-clock');
+    this.siteChip = el('div', 'hud-time hud-sites', el('i', 'hud-res-i', SITE_ICON), this.siteText);
+    this.siteChip.hidden = true;
     this.ping = el('span', 'hud-ping');
     const res = (cls, icon, title) => {
       const v = el('b', 'hud-res-v');
@@ -120,7 +125,7 @@ export class Hud {
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.ping, this.rPantheon.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.ping, this.rPantheon.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -305,6 +310,7 @@ export class Hud {
     }
     setText(this.clock, formatClock(vs.time));
     this.updatePeace();
+    this.updateSites();
     const s = game.session;
     const stall = stallText(s);
     if (s && !s.isHost) {
@@ -321,6 +327,7 @@ export class Hud {
       const lead = leadText(vs);
       if (lead) this.message(lead, 'good', { icon: PANTHEON_EMBLEMS[this.pantheonId] });
       if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good', { icon: PEACE_ICON });
+      if (vs.sacredVictoryOn() && vs.time < 60) this.message(sacredStartText(), 'good', { icon: SITE_ICON });
       // Only a match with a teammate has anyone to ping.
       if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info', { icon: '📍' });
     }
@@ -382,6 +389,17 @@ export class Hud {
     const passed = PEACE_WARNINGS.filter((s) => left <= s).length;
     if (this.peaceMarks !== null && passed > this.peaceMarks) this.message(peaceWarning(PEACE_WARNINGS[passed - 1]), 'alert', { icon: PEACE_ICON });
     this.peaceMarks = passed;
+  }
+
+  /** The Sacred Sites chip: sites my side holds, and the Sacred Victory countdown while one side holds them all. */
+  updateSites() {
+    const c = siteChip(this.vs);
+    setHidden(this.siteChip, c.hidden);
+    if (c.hidden) return;
+    setText(this.siteText, c.text);
+    setClass(this.siteChip, 'is-ours', c.cls === 'is-ours');
+    setClass(this.siteChip, 'is-theirs', c.cls === 'is-theirs');
+    if (!this.siteChip.title) this.siteChip.title = siteChipTitle(this.vs);
   }
 
   /** Current command card (input.js reads it for hotkeys). */

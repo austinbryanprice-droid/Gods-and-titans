@@ -11,6 +11,7 @@ import { moveToRect, stopMove } from './movement.js';
 import { workSpeedOf } from './economy.js';
 import { hyp, distPointRect } from './common.js';
 import { peaceBuildNotice } from './peace.js';
+import { SITE_IN_WAY } from './sacred.js';
 
 const BUILD_REACH = 0.6;
 
@@ -56,10 +57,11 @@ function buildableDef(typeId) {
  * (Town Center, Storehouse) keep a Chebyshev gap of DROPOFF_MINE_GAP empty
  * tiles from every gold mine.
  * While a Decade of Peace lasts (DESIGN 5.10) no site within PEACE_BUILD_GAP
- * tiles of an enemy Town Center is valid either.
+ * tiles of an enemy Town Center is valid either, and no footprint comes within
+ * SITE_KEEP of a sacred site's center (DESIGN 5.11).
  * When several things are wrong the text names the first of: water / rock /
  * map edge ("Can't build there."), trees, a building, a gold mine, a unit,
- * the peace's kept-clear ground, the mine gap.
+ * the peace's kept-clear ground, a sacred site, the mine gap.
  * @returns {string|null} null when the site is valid, else the error message
  */
 export function placementError(world, player, typeId, tx, ty) {
@@ -96,6 +98,7 @@ export function placementError(world, player, typeId, tx, ty) {
     if (distPointRect(u.x, u.y, tx, ty, tx + s, ty + s) < u.radius * 0.8) return UNIT_IN_WAY;
   }
   if (world.peaceBuildBlocks(player, tx, ty, s)) return peaceBuildNotice(world.peaceLeft());
+  if (world.siteBlocks(tx, ty, s)) return SITE_IN_WAY;
   if (def.dropOff) {
     for (const m of world.mineList) {
       if (m.dead) continue;

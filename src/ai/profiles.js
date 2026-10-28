@@ -45,6 +45,9 @@ const BASE = {
   militia: true, // workers fight in emergencies
   helpAllies: true,
   armyCap: Math.round(POP_MAX * 0.8), // pop the army (gods and Titan included) stops growing at
+  pilgrimsFrom: 150, // Worshippers go out to capture sacred sites from this time (ai/sacred.js)
+  pilgrims: 2, // at most this many at once (+1 with Sacred Victory on)
+  stealSites: true, // also take a rival's unguarded site
 };
 
 export const PROFILES = {
@@ -85,6 +88,9 @@ export const PROFILES = {
     micro: false,
     militia: false,
     armyCap: Math.round(POP_MAX * 0.4),
+    pilgrimsFrom: 360,
+    pilgrims: 1,
+    stealSites: false,
   },
   normal: { ...BASE },
   hard: {
@@ -116,6 +122,8 @@ export const PROFILES = {
     expandBelow: 4000,
     expandAt: 270,
     expandAt2: 720,
+    pilgrimsFrom: 100,
+    pilgrims: 3,
     towersMax: 3,
     godRetreat: 0.3,
     godRejoin: 0.55,

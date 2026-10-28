@@ -93,6 +93,16 @@ export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can 
 export const PEACE_NAME = 'Decade of Peace';
 export const PEACE_BUILD_GAP = 20; // while the peace lasts nobody builds within this many empty tiles of an enemy Town Center (kept clear around it; DESIGN 5.10)
 
+// ---- Sacred Sites (DESIGN 5.11) ----
+export const SITE_CLEAR = 3; // mapgen: open ground within this radius of a site's center
+export const SITE_RADIUS = 3; // a Worshipper or Priest within this many tiles of the center can capture it
+export const SITE_CAPTURE_TIME = 15; // seconds to capture a neutral site
+export const SITE_NEUTRALIZE_TIME = 10; // seconds to tear down a rival's hold first
+export const SITE_FAITH = 1; // faith per second for the player who holds it
+export const SITE_KEEP = 3; // buildings keep this many tiles between their footprint and a site's center
+export const SACRED_HOLD = 480; // Sacred Victory: hold every site for this many seconds (8 minutes)
+export const SACRED_NAME = 'Sacred Victory';
+
 // ---- Map ----
 export const MAP_SIZES = { small: 96, medium: 128 };
 export const TERRAIN = { GRASS: 0, DIRT: 1, WATER: 2, FOREST: 3, ROCK: 4, SAND: 5 };

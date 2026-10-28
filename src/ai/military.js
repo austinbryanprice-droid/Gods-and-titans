@@ -6,6 +6,7 @@ import { newForce, addToForce, addBuildingToForce, addTypeToForce, fightRatio, f
 import { teamTarget, clearTeamTarget } from './team.js';
 import { doneOf } from './scan.js';
 import { POP_MAX } from '../config.js';
+import { sacredTarget } from './sacred.js';
 
 const THREAT_RANGE = 12; // enemy units this close to a building threaten the base
 const ROUTE_STEP = 10; // tiles between march waypoints
@@ -312,6 +313,7 @@ function setMode(ai, mode, extra = {}) {
   mil.wp = 0;
   mil.phase = null;
   mil.camp = null;
+  mil.site = null;
   mil.targetB = null;
   Object.assign(mil, extra);
 }
@@ -425,10 +427,32 @@ export function runMilitary(ai, s) {
       runAttack(ai, s, fighters, rams, all, c, armyForce);
       break;
     }
+    case 'site': {
+      // A rival side holds every sacred site (their Sacred Victory clock runs): take the nearest back.
+      const holy = sacredTarget(ai, s);
+      if (!holy || t - mil.since > 180) {
+        setMode(ai, 'home');
+        break;
+      }
+      mil.site = holy;
+      command(ai, all, 'attackMove', holy.x, holy.y);
+      if (c && dist(c, holy) < 12) {
+        const lf = localForces(ai, holy.x, holy.y, 13);
+        if (lf.theirs.n > 0 && fightRatio(lf.mine, lf.theirs) < prof.retreatRatio) setMode(ai, 'retreat');
+      }
+      break;
+    }
     default: {
       // home: gather at the rally point, then creep or attack.
       if (fighters.length === 0) {
         command(ai, all, 'attackMove', rally.x, rally.y);
+        break;
+      }
+      // A rival's Sacred Victory clock comes before everything else the army could do.
+      const holy = sacredTarget(ai, s);
+      if (holy) {
+        setMode(ai, 'site', { site: holy });
+        command(ai, all, 'attackMove', holy.x, holy.y);
         break;
       }
       const target = teamTarget(ai.world, s.team);
@@ -629,6 +653,6 @@ function manageMilitia(ai, s, armyForce, c) {
 }
 
 export function newMilitary() {
-  return { mode: 'home', since: 0, waves: 0, lastAttackEnd: 0, lastThreat: -999, route: null, wp: 0, phase: null, camp: null, target: -1, targetB: null, ratio: 0 };
+  return { mode: 'home', since: 0, waves: 0, lastAttackEnd: 0, lastThreat: -999, route: null, wp: 0, phase: null, camp: null, site: null, target: -1, targetB: null, ratio: 0 };
 }
 
