@@ -151,6 +151,7 @@ export class GameRenderer {
     this.canvas = canvas;
     this.disposed = false;
     this.time = 0;
+    this.speed = 1; // setSpeed
     this.frame = 0;
     this.lastUpdateMs = 0;
     this.animCost = 0.02; // ms per unit animation (measured)
@@ -1215,10 +1216,17 @@ export class GameRenderer {
   // ------------------------------------------------------------------ sync
 
   /** Advance one frame: sync meshes with the view state, animate, VFX, overlays. */
+  /** Game speed of a single-player match: animations, effects and the sky run this much faster. */
+  setSpeed(m) {
+    this.speed = Number.isFinite(m) && m > 0 ? m : 1;
+  }
+
   update(dt) {
     if (this.disposed) return;
     const t0 = now();
     dt = Number.isFinite(dt) ? clamp(dt, 0, 0.25) : 0;
+    const camDt = dt; // the camera keeps real time; the world runs at the game speed
+    dt *= this.speed;
     this.time += dt;
     this.frame++;
     const vs = this.vs;
@@ -1229,7 +1237,7 @@ export class GameRenderer {
       const t = this.time;
       this.camera.setShake(shake * (Math.sin(t * 41.3) * 0.6 + Math.sin(t * 73.1 + 1.7) * 0.4), shake * (Math.sin(t * 37.7 + 0.6) * 0.6 + Math.sin(t * 67.9 + 2.9) * 0.4));
     } else this.camera.setShake(0, 0);
-    this.camera.update(dt);
+    this.camera.update(camDt);
     _vp.multiplyMatrices(this.threeCamera.projectionMatrix, this.threeCamera.matrixWorldInverse);
     // the zoom too: the VFX lights go to what is on screen
     this.vfx.setFocus(this.camera.target.x, this.camera.target.y, this.camera.distance);

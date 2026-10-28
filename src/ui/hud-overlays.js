@@ -9,6 +9,7 @@ import { el } from './hud-dom.js';
 import { chronicleView } from './hud-chronicle.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS } from './speed-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
@@ -149,6 +150,9 @@ export class Overlays {
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
+    // Game speed only in a match against the computer: an online game runs at one pace for everyone.
+    const speed = game.solo ? choiceRow('Game speed', GAME_SPEED_OPTIONS, s.gameSpeed, (v) => saveSettings({ gameSpeed: v })) : null;
+    const uiScale = choiceRow('Interface size', UI_SCALE_OPTIONS, s.uiScale, (v) => saveSettings({ uiScale: v }));
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
     const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
@@ -216,7 +220,9 @@ export class Overlays {
       el('div', 'hud-obtns is-col', ...buttons),
       el('div', 'hud-options',
         el('div', 'mw-label', 'Options'),
+        speed && speed.row,
         sky.row,
+        uiScale.row,
         bars.row,
         edge.row,
         tips.row,

@@ -11,6 +11,7 @@ import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, optionNote } from './speed-options.js';
 import { sfx } from '../audio/sfx.js';
 import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
 import { h, setChildren, copyText } from './menu-dom.js';
@@ -1195,6 +1196,22 @@ export function createMenu({ root, onStart, onIntro = null }) {
     };
     renderT();
 
+    // Game speed (matches against the computer) and the size of the in-game interface.
+    const segField = (key, options) => {
+      const note = h('div.mw-field-note');
+      const btns = options.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { v: id }, onclick: () => {
+        saveSettings({ [key]: id });
+        render();
+      } }, label));
+      const render = () => {
+        const v = getSettings()[key];
+        btns.forEach((b) => b.classList.toggle('is-active', b.dataset.v === v));
+        note.textContent = optionNote(options, v);
+      };
+      render();
+      return [h('div.mw-segmented', btns), note];
+    };
+
     // Alerts (src/game/alerts.js) and what a background tab does about them (src/ui/tab-attention.js).
     const aNote = h('div.mw-field-note');
     const aBtns = ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { a: id }, onclick: () => {
@@ -1237,6 +1254,8 @@ export function createMenu({ root, onStart, onIntro = null }) {
           h('span.mw-field-note', 'Every pantheon has its own score: calm while you build, louder in a fight. The Decade of Peace stays calm until the war horn.')),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
+        h('div.mw-field', h('span.mw-label', 'Game speed'), ...segField('gameSpeed', GAME_SPEED_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Interface size'), ...segField('uiScale', UI_SCALE_OPTIONS)),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
           toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),

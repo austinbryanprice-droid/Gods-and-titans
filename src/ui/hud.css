@@ -30,7 +30,8 @@
   overflow: hidden;
   pointer-events: none;
   font-family: var(--mw-font-ui);
-  font-size: clamp(11px, min(1.48vh, 0.84vw), 28px);
+  /* --hud-scale: the Interface size setting (game.applyUiScale) */
+  font-size: calc(clamp(11px, min(1.48vh, 0.84vw), 28px) * var(--hud-scale, 1));
   line-height: 1.3;
   color: var(--mw-ink);
   user-select: none;
