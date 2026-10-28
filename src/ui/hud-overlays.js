@@ -140,6 +140,7 @@ export class Overlays {
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
+    const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
     const tabAlerts = choiceRow('When this tab is in the background', TAB_ALERT_OPTIONS, s.tabAlerts, async (v) => {
       const got = await chooseTabAlerts(v); // 'notify' asks the browser for permission first
@@ -210,6 +211,7 @@ export class Overlays {
         edge.row,
         tips.row,
         hints.row,
+        aiChat.row,
         alerts.row,
         tabAlerts.row,
         el('label', 'hud-vol', el('span', null, 'Sound effects'), vol, volText),

@@ -130,13 +130,15 @@ export class HostSession extends SessionBase {
    * @param {Map<number, object>} [o.conns] player index → connection (from LobbyHost.start)
    * @param {(setup: object) => object} o.createWorld e.g. createWorld from src/sim/world.js
    * @param {(world: object, index: number, difficulty: string) => { tick(): void }} [o.createAI]
+   * @param {(world: object, players: number[]) => { step(events: object[]): { from: number, text: string }[] }} [o.createVoices]
+   *   the AI players' chat lines (src/ai/voice.js); only the setup's own AI slots speak
    * @param {boolean} [o.autoTick] run the ticker on start() (tests step manually with step())
    * @param {boolean} [o.useWorker] allow the background-proof worker metronome
    * @param {number} [o.viewDelayMs] local interpolation delay
    * @param {number} [o.connTimeoutMs] silence after which a client counts as gone (GAME_TIMEOUT_MS)
    */
   constructor({
-    setup, myIndex = 0, conns = new Map(), createWorld, createAI = null, autoTick = true, useWorker = true, viewDelayMs = HOST_VIEW_DELAY_MS,
+    setup, myIndex = 0, conns = new Map(), createWorld, createAI = null, createVoices = null, autoTick = true, useWorker = true, viewDelayMs = HOST_VIEW_DELAY_MS,
     connTimeoutMs = GAME_TIMEOUT_MS,
   }) {
     super(setup, myIndex);
@@ -152,6 +154,16 @@ export class HostSession extends SessionBase {
     this.pingMs = 0;
     this.ais = new Map();
     for (const p of setup.players) if (p.kind === 'ai') this.addAI(p.index, p.difficulty || 'normal');
+    // An AI that took over from a player who left keeps quiet: it speaks under that player's name.
+    this.voices = null;
+    const voiced = [...this.ais.keys()];
+    if (createVoices && voiced.length) {
+      try {
+        this.voices = createVoices(this.world, voiced);
+      } catch (err) {
+        this.reportError('voice-create', err);
+      }
+    }
     this.clients = new Map();
     this.leftPlayers = new Set();
     this.felledAll = [];
@@ -306,6 +318,21 @@ export class HostSession extends SessionBase {
     this.broadcastChat({ from: -1, name: '', text, system: true });
   }
 
+  /** The AIs' chat lines for these events (DESIGN 10.1), flagged `voice` so that a player can hide them. */
+  speak(events) {
+    let lines;
+    try {
+      lines = this.voices.step(events);
+    } catch (err) {
+      this.reportError('voice', err);
+      return;
+    }
+    for (const l of lines || []) {
+      const text = sanitizeChat(l.text);
+      if (text && this.ais.has(l.from)) this.broadcastChat({ from: l.from, name: this.playerName(l.from), text, system: false, voice: true });
+    }
+  }
+
   broadcastChat(line) {
     this.emitChat(line);
     const msg = { t: MSG.CHAT, ...line };
@@ -359,6 +386,7 @@ export class HostSession extends SessionBase {
       return null;
     }
     this.ticksSinceSnap = 0;
+    if (this.voices && this.lastSnap) this.speak(snap.events);
     this.viewState.pushSnapshot(snap, now());
     if (this.lastSnap) this.broadcastSnapshot(snap);
     // felledAll in a `full` lists trees felled before that snapshot; its own felled come with it.
@@ -602,7 +630,9 @@ export class ClientSession extends SessionBase {
         if (!text) return;
         const system = msg.system === true;
         const from = Number.isInteger(msg.from) && msg.from >= -1 && msg.from < this.setup.players.length ? msg.from : -1;
-        this.emitChat({ from, name: system ? '' : sanitizeName(msg.name, this.playerName(from)), text, system });
+        const line = { from, name: system ? '' : sanitizeName(msg.name, this.playerName(from)), text, system };
+        if (msg.voice === true && !system) line.voice = true; // an AI's line (DESIGN 10.1)
+        this.emitChat(line);
         break;
       }
       case MSG.MARK: {

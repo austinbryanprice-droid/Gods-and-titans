@@ -924,7 +924,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
     only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`,
     `mark {kind, x, y}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
-    `delta {d}`, `chat {from, text}`, `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
+    `delta {d}`, `chat {from, name, text, system, voice?}` (`voice: true` marks a computer player's line, 10.1), `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
     teammates only), `kick {reason}`, `end {reason}`
 - **Team marks** (pings and markers, 9): a mark is a signal, not world state, so it never rides in a
   snapshot (snapshots go to everyone). The kinds are the table `MARKS` in `src/data/marks.js`. The sender's
@@ -1875,6 +1875,35 @@ population cap and easy stays well below it. In a Decade of Peace (5.10) no wave
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot.
+
+### 10.1 AI voices (src/ai/voice.js, src/ai/voice-lines.js)
+
+Computer players talk, the way AoE II's AIs do: a short in-character chat line at the moments that
+matter, each pantheon in its own voice (Olympian hubris, Norse sagas and mead, Egyptian eternity, karma
+and the wheel, the kami's honour, the Mandate of Heaven, the hungry Fifth Sun, the wild Celtic woods,
+Sumerian scribes and clay tablets, West African drums and ancestors). The moments (`VOICE_TRIGGERS`):
+a greeting a few seconds in (70 % of AIs, staggered), first contact with another player (an enemy
+player's unit within 14 tiles of one of its units or buildings, scanned every 2 game seconds; the
+line names that player), the first blow a player strikes against it (the `underAttack` event, with
+the nearest enemy player's unit as the attacker; wild creatures do not count), the end of a Decade
+of Peace (one AI), a god's first arrival (a revived god comes back quietly), a Titan being summoned,
+a god falling, being nearly beaten (its buildings down to 35 % of the most it had, at least 5, or no
+Town Center left; once), its defeat, and victory (one AI of the winning team). `{unit}` and `{enemy}`
+in a line are the god or Titan and the other player's name; every pantheon has at least two lines
+per moment, walked in a shuffled order.
+
+Rate limits (`VOICE`, game seconds, so a paused game stays quiet): an ordinary line waits 45 s after
+the same AI's last line and 15 s after any AI's, and 150 s after that AI's last line of the same
+kind; a Titan and "nearly beaten" skip those but stay 2 s apart; defeat and victory always go out.
+A line that cannot go out is dropped, not queued; one AI says at most 24 lines a match. A whole
+normal 1v1 comes to roughly one line a minute.
+
+It runs on the host beside the AIs: `HostSession` (option `createVoices`, which the game controller
+loads from `src/ai/ai.js` with `createAI`) feeds it each snapshot's events and broadcasts what it
+returns as chat lines from that player with `voice: true`. Only the setup's own AI slots speak (an AI
+that took over from a player who left keeps quiet). It only reads the World. Each player hides
+the lines with the `aiChat` setting ("AI chatter", in Settings → Gameplay and the in-game menu;
+default on): `showChatLine` in `src/game/game.js` filters them, live chat and the replayed log alike.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 
