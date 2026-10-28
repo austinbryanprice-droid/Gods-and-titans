@@ -552,7 +552,7 @@ export class InputController {
       cmd.x = px;
       cmd.y = py;
       let kind = 'move';
-      // A relic on the ground under the cursor (DESIGN 5.14): the nearest carrier picks it up.
+      // A relic on the ground under the cursor (DESIGN 5.15): the nearest carrier picks it up.
       const relic = p && !(target && target.k !== 'm' && (vs.isEnemy(target.o) || target.o < 0) && vs.canHarm(target.o)) ? vs.relicNear(p.x, p.y) : null;
       if (relic) {
         cmd.relic = relic.i;

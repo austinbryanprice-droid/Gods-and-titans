@@ -415,7 +415,7 @@ export class InfoView {
       const um = unitMods(modsOf(vs, e.o), def);
       const rb = rankBonus(rk);
       if (p.dmg) {
-        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage) * (1 + rb.damage);
+        const dmg = def.attack.damage * (isGod ? 1 + GOD_LEVEL_DAMAGE * (lv - 1) : 1) * (1 + um.damage) * (1 + rb.damage) * (e.wd > 0 ? e.wd : 1); // wd: a Trial of the Titans monster's damage boost
         setText(p.dmg, `${Math.round(dmg)}${def.attack.splash ? ' (splash)' : ''}`);
         setText(p.range, rangeText(def.attack));
       }

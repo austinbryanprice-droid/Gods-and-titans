@@ -7,6 +7,7 @@
 import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
 import { peaceSeconds } from '../sim/peace.js';
+import { survivalOn, wavesBy, nextWaveIn, isBossWave } from '../sim/survival.js';
 import { sacredVictoryOn } from '../sim/sacred.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
@@ -161,6 +162,24 @@ export class ViewState {
     return this.peaceLeft() > 0;
   }
 
+  // ---------------------------------------------------------------- Trial of the Titans
+
+  /** Is this game the Trial of the Titans? */
+  survivalActive() {
+    return survivalOn(this.setup);
+  }
+
+  /**
+   * The trial's state at the latest snapshot: { wave (waves out so far), alive (wave monsters alive),
+   * next (seconds to the next wave), nextBoss (a Titan leads it) }, or null in other games.
+   */
+  survival() {
+    if (!survivalOn(this.setup)) return null;
+    const sv = this.snapshot && this.snapshot.sv;
+    const wave = sv && Number.isInteger(sv.w) ? sv.w : wavesBy(this.time);
+    return { wave, alive: sv && Number.isInteger(sv.m) ? sv.m : 0, next: nextWaveIn(this.time), nextBoss: isBossWave(wave + 1) };
+  }
+
   /** May my units hurt this owner's units and buildings now? Creatures always; rival players only once the peace is over. */
   canHarm(owner) {
     if (owner === undefined || owner === null) return false;
@@ -261,7 +280,7 @@ export class ViewState {
     return this.lastSeen.get(id) || null;
   }
 
-  // ---------------------------------------------------------------- relics (DESIGN 5.14)
+  // ---------------------------------------------------------------- relics (DESIGN 5.15)
 
   /**
    * Where a relic is drawn: its spot while guarded or on the ground, its carrier's (interpolated)

@@ -192,7 +192,7 @@ test('a whole AI game: a handful of lines at the right moments, well spaced, che
     version: '0.1.0', seed: 1, mapSize: 'small',
     players: ['greek', 'norse'].map((p, i) => ({ index: i, name: `AI ${i + 1}`, team: i + 1, pantheon: p, kind: 'ai', difficulty: 'normal' })),
   });
-  // No relics (DESIGN 5.14) in this game: a relic's bonus can end it before either side reaches its Titan,
+  // No relics (DESIGN 5.15) in this game: a relic's bonus can end it before either side reaches its Titan,
   // and this test is about the lines, so it keeps the game it was written for.
   world.relics.length = 0;
   const ais = [0, 1].map((i) => createAI(world, i, 'normal'));

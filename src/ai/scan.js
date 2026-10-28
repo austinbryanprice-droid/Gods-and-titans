@@ -131,6 +131,9 @@ export function scanWorld(world, me) {
     }
   }
 
+  // Trial of the Titans: the wave monsters are the enemy army (camp creatures stay out of it, as in every game).
+  if (world.survival) for (const u of world.survival.monsters) if (!u.dead) s.enemyUnits.push(u);
+
   for (const u of world.unitList) {
     if (u.dead || u.owner !== me) continue;
     if (u.def.class === 'worker') {

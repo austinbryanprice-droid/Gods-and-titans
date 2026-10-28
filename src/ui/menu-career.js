@@ -8,7 +8,7 @@ import { ACHIEVEMENTS, ACHIEVEMENT_GROUPS } from '../data/achievements.js';
 import { careerSummary } from '../game/career.js';
 import { medalLabel } from '../data/medals.js';
 
-const RESULT_TEXT = { victory: ['Won', '🏆'], defeat: ['Lost', '💀'], draw: ['Draw', '⚖️'] };
+const RESULT_TEXT = { victory: ['Won', '🏆'], defeat: ['Lost', '💀'], draw: ['Draw', '⚖️'], survival: ['Trial of the Titans', '🐉'] };
 
 /** 3725 s -> "1 h 2 min"; 125 -> "2 min". */
 export function formatPlayTime(seconds) {

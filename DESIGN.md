@@ -720,7 +720,52 @@ and does nothing else; its guards answer attacks like every unit. Every other ru
 match stays a pure function of setup and commands. A scripted learner who does each objective as soon as
 it can wins at 5:39 (tests/game/tutorial.test.js).
 
-### 5.14 Relics (src/data/relics.js, src/sim/relics.js)
+### 5.14 Trial of the Titans (survival game mode)
+An optional game mode the host picks in the lobby (third button of the Game mode row; one mode at a time, so
+picking it clears a Decade of Peace and the other two buttons clear it): `GameSetup.survival` is `true`. Every
+player and AI plays on team 1 (`buildSetup`, and `World` forces it too), so one player alone may start it and the
+lobby's team column reads "Together". Rules live in `src/sim/survival.js` (the schedule helpers are shared with the
+HUD) and run from `World.tick` (`updateSurvival`, before the units move):
+- **The clock.** Wave n comes out at `SURVIVAL_FIRST_WAVE + (n − 1) × SURVIVAL_INTERVAL` game seconds (2:00, then every
+  90 s), whether the last wave is beaten or not, so a slow defence is buried. Every `SURVIVAL_BOSS_EVERY` (5th) wave
+  a hostile Titan of a random pantheon leads it.
+- **What a wave holds** (`wavePlan`, deterministic from a `${seed}:survival` RNG): creatures of every pantheon worth
+  `waveBudget(n, players) = round((4 + 3n) × (0.6 + 0.4 × players))` population (60% of it on a boss wave). Waves 1–2 are
+  tier 1 only, tier 2 joins at wave 3 and tier 3 at wave 7; flyers stay out until wave 6 (the first Barracks has no
+  archers yet) and are never more than a third of a wave. Health and damage grow every wave (`waveBoost`: ×1.33 /
+  ×1.25 at wave 6, ×1.69 / ×1.52 at 11, ×3.27 / ×2.48 at 26) through `u.boost`, applied in `applyUnitStats`. The boss
+  Titan has `bossBoost(n, players)`: health × n/10 × (0.7 + 0.3 × players) (half a Titan at wave 5 alone, a whole one at
+  wave 10), damage × (0.6 + 0.04n). At most `SURVIVAL_MAX_ALIVE` (120) wave monsters live at once; a wave that would pass
+  it comes smaller.
+- **Where.** Each wave comes out of one edge point (two from wave 5, three from wave 15) of the eight around the map
+  (corners and the middle of each side, 3 tiles in) that lie at least 30 tiles from every player building, as
+  neutral (owner −1) units with no camp, so no leash. Each group gets an attack-move on the nearest building of a
+  player still in the game (walls are broken through on the way, not hunted); once a second, any wave monster left
+  with no order (its target fell, its fight is over) is sent on to the next nearest one.
+- **Pay.** Killing a wave monster pays the usual creep bounty. When the last monster of wave n dies, every player
+  still in the game gets `waveReward(n) = 40 + 20n` gold once, with `{ type: 'waveCleared', n, gold }`.
+- **The end.** Players fall as in 5.8 (no buildings left). Nobody wins: when the last player falls the game is over
+  with `gameOver: { winningTeam: null, wave }`, the wave reached (the last that came out) as the score. Camps and the
+  rest of the rules are unchanged.
+- **Net.** The setup flag (validateSetup keeps it only when exactly `true` and there is no peace), a top-level
+  snapshot record `sv: { w, m }` (waves out, wave monsters alive) that rides the delta's "everything else" keys, the
+  `wave { n, count, boss, x, y }` and `waveCleared { n, gold }` event shapes, and `gameOver.wave`.
+- **Client.** `ViewState.survival()` → `{ wave, alive, next, nextBoss }` (next from the clock). A wave chip beside the
+  game clock ("Wave 1 in 2:00", then "Wave 3 · 7 left · next 1:12"; gold when a Titan leads the next wave, pulsing
+  in its last 10 s), an opening line, a "Wave n comes in 10 s" line, a banner and a minimap ping when a wave comes out
+  (with the Titan's name and the summon sound on a boss wave), a gold line when one is beaten, a boss wave flashes the
+  tab, and the music heats up. The end screen is titled "Wave n" with the best wave beside it.
+- **Best wave.** The career (9.1) keeps it: the Game counts a finished trial with `CareerTracker.finish('survival',
+  { wave })` (a trial left early counts with the wave it had reached, not as a loss), which raises `best.wave`; a
+  trial is neither a win nor a loss, so the win rate leaves it out. The lobby line ("Your best: wave 12.") and the
+  end screen ("A new best! Your old best was wave 9.") read `getCareer().best.wave`; two achievements, Hold the Line
+  and Titans' Bane, ask for waves 10 and 20.
+- **AI.** `scan` adds the living wave monsters to `s.enemyUnits`, so the usual threat and defence logic turns out
+  against them and helps allies; with no rival players it never launches an attack.
+  Measured (seeds 3 to 9, AIs only): one Easy AI falls at wave 20 (30:44), one Normal AI at wave 21 (32:37), two Normal
+  AIs at wave 25 (38:44), four Hard AIs at wave 28 (42:50, the 120-monster cap reached); every AI beat waves 1 to 10.
+
+### 5.15 Relics (src/data/relics.js, src/sim/relics.js)
 Treasures of world myth that give creeping a reward beyond the bounty (WC3 items, Age of Mythology relics).
 - **Where:** every creep camp of level `RELIC_CAMP_LEVEL` (2) or more guards one relic (4 or 5 on the usual
   maps; level 1 camps guard none). Types are drawn without repeats from the ten in `RELIC_LIST`, shuffled by an
@@ -776,6 +821,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
   sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
   tutorial: true,              // optional, the guided first match (5.13); local only, never from a lobby
+  survival: true,              // optional, Trial of the Titans (5.14): every player on team 1 against monster waves
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -821,7 +867,7 @@ counted in `world.perf.commandErrors`.
 { type: 'surrender' }
 ```
 **smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
-(5.14). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
+(5.15). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
@@ -862,18 +908,19 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
-              rl?: [relic types resting in their Temples] (5.14; omitted when none),
+              rl?: [relic types resting in their Temples] (5.15; omitted when none),
               stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army } }], // 5.12
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
-  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.14: index, type, state 'k' guarded | 'g' on the ground (x, y)
+  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.15: index, type, state 'k' guarded | 'g' on the ground (x, y)
                               // | 'c' carried (c: carrier id, o) | 'h' resting in a Temple (b: its id, o)
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
   sites: [{ x, y, o, p?, c?, cn? }], // sacred sites (5.11): holder, capture progress, capturing player, contested
   sacred: null | { tm, end },  // Sacred Victory countdown: the team holding every site, the game time it wins at
-  gameOver: null | { winningTeam, how? }, // how: 'sacred' for a Sacred Victory
+  gameOver: null | { winningTeam, how?, wave? }, // how: 'sacred' for a Sacred Victory; wave: the Trial of the Titans' score (5.14)
+  sv,                         // Trial of the Titans only: { w: waves out so far, m: wave monsters alive }
 }
 EntityView = {
   id, k,          // 'u' unit | 'b' building | 'm' gold mine
@@ -921,7 +968,7 @@ EntityView = {
 { type: 'tierUp',  player, tier }
 { type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
-{ type: 'relic',   ev, i, t, player, x, y }                          // 5.14: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
+{ type: 'relic',   ev, i, t, player, x, y }                          // 5.15: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
 { type: 'levelUp', id, level }
 { type: 'rankUp',  id, rank }                                        // a soldier reached a new rank (5.9)
 { type: 'treeFelled', tx, ty }
@@ -935,6 +982,8 @@ EntityView = {
 { type: 'siteLost', site, player }                                   // the holder lost it (torn down or defeated)
 { type: 'sacredHold', team, end }                                    // Sacred Victory countdown starts
 { type: 'sacredBroken', team }                                       // ... and stops
+{ type: 'wave',    n, count, boss, x, y }                            // Trial of the Titans: wave n came out at (x, y); boss = Titan type or ''
+{ type: 'waveCleared', n, gold }                                     // every monster of wave n is dead; each survivor got gold
 { type: 'gameOver', winningTeam }
 ```
 
@@ -1083,7 +1132,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.14; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1123,6 +1172,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   vs.on(type | '*', cb) → unsubscribe  // fired for every event in each pushed snapshot; also 'snapshot'
   vs.getEntity(id)
   vs.peaceLeft(); vs.peaceActive(); vs.canHarm(owner) // Decade of Peace (5.10): setup.peaceMinutes vs the snapshot time; may my units hurt this owner now
+  vs.survivalActive(); vs.survival() // Trial of the Titans (5.14): { wave, alive, next, nextBoss } from snapshot.sv and the wave clock, or null
   vs.sites; vs.sacred; vs.sacredVictoryOn(); vs.sacredLeft(); vs.sitesHeld(team) // Sacred Sites (5.11): map.sacred until the first snapshot
   ```
   Host local view uses a 50 ms delay; clients use `INTERP_DELAY_MS`.
@@ -1698,8 +1748,9 @@ per-frame budget, so a revealed army appears over a few frames.
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
-  Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
-  30 / 45 / 60 min buttons, the host's pick; clients see it as text), victory (a Sacred Victory toggle, 5.11;
+  Random, team, AI difficulty; presets; map size; game mode (Standard, Decade of Peace with
+  30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
+  clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
@@ -2003,8 +2054,8 @@ per-frame budget, so a revealed army appears over a few frames.
 Client only: nothing goes over the wire and the sim does not know about it. The career lives in
 localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
 `sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
-and wins per pantheon, records (most kills, most gathered, longest game, best survival wave once a
-survival mode exists: `recordMatch` takes an optional `wave`), the last 12 games, unlocked
+and wins per pantheon, records (most kills, most gathered, longest game, best Trial of the Titans wave:
+`recordMatch` takes an optional `wave`, 5.14), the last 12 games, unlocked
 achievements with the time, and the ones not yet seen.
 
 - `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
@@ -2019,17 +2070,17 @@ achievements with the time, and the ones not yet seen.
   unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
   draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
   after its first minute (one the host ended, or left in its first minute, is not counted).
-- 37 achievements in six groups: Career (the two lesson medals of 9.2, first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+- 39 achievements in six groups: Career (the two lesson medals of 9.2, first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
   (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
   losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
-  (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
+  (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, waves 10 and 20 of the Trial of the Titans, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
-  "Career: W wins in G games (P%) · U of 37 achievements". Title screen: a Career button (a red count of
+  "Career: W wins in G games (P%) · U of 39 achievements". Title screen: a Career button (a red count of
   unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
 - The guided first match (9.2) is not a game of the career: no tracker runs in it. Its victory keeps the best
   medal (`best.medal`, 1 bronze … 3 gold, `recordTutorial`) and unlocks First Lessons (any medal) and Top of
-  the Class (gold), which makes 37 achievements; the career screen lists the medal.
+  the Class (gold), which with the Trial's two makes 39 achievements; the career screen lists the medal.
 
 ### 9.2 Guided first match (src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js)
 Learn to Play (title screen, under Play vs AI; a gold "New? Start here" tag while the career has no game and
@@ -2068,7 +2119,8 @@ big fights); retreat badly hurt gods to base. It combines no Houses into Manors 
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
-population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
+population cap and easy stays well below it. In the Trial of the Titans (5.14) the wave monsters count as enemy
+units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
