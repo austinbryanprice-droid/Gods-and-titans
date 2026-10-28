@@ -8,6 +8,8 @@ Up to 4 players per match, each a person or a computer opponent (Easy, Normal or
 
 New to the game? **Learn to Play** on the title screen is a guided first match: an objective panel, an arrow to each target and glowing buttons walk you through gathering, building, praying, summoning a god, training soldiers and destroying a sleeping camp of raiders, with a gold, silver or bronze medal for how fast you win.
 
+Then try the **Campaign**: Chapter I, *The Long Winter*, five story missions for the Greeks of Thera against raiders from the frozen north, each with its own map, objectives, scripted raids and reinforcements, and a narrated briefing. A mission opens when you win the one before it, and the last ends with Surtr, the fire giant.
+
 ## Playing online with friends
 
 1. One player picks **Host Online Game** and sets up the slots (people, computer players, teams).

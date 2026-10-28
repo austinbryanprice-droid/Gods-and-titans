@@ -838,6 +838,32 @@ Treasures of world myth that give creeping a reward beyond the bounty (WC3 items
   home once it has a finished Temple and no enemy stands within 10 tiles of the relic; the economy leaves a
   Worshipper on that errand alone (job `relic`). In AI-vs-AI games each side brought home two or three.
 
+### 5.16 Campaign missions (`src/data/campaign.js`, `src/sim/campaign.js`)
+A GameSetup with `campaign: '<mission id>'` (built by `campaignSetup(id, { name, version })`, started from the
+chapter screen of 9.3, solo, no lobby) plays one mission of Chapter I, "The Long Winter": five missions for the
+Greeks against Norse raiders, in order. The hero is always player 0; the mission's data fixes the seed, map size,
+the computer players (name, pantheon, team, difficulty; `'tutorial'` is the sleeping camp of 5.13), whether creep
+camps are spawned, and each side's start (`start[i]`: purse, a Town Center health in place of 2000, finished
+buildings placed in front of the Town Center, some tagged, and units). The hero's Town Center is tagged `home`.
+- Objectives (`kind`): `build` {type, count}, `gods` {count}, `army` {count}, `kill` {tag} (every unit an event
+  spawned with the tag is dead), `destroy` {tag} (every start building with the tag has fallen), `protect` {tag}
+  (fails the mission when every building with the tag has fallen), `survive` {seconds}, `hold` {count, seconds}
+  (the hero's team holds that many sacred sites at once for that long without a break), `conquer`. `optional`
+  ones are a bonus; `hidden` ones show once an event reveals them. Judged once a second; a finished one stays
+  finished.
+- Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
+  `{ owner, tag, units, at, march, target }`: units in a line in front of the owner's Town Center (none if the
+  owner is beaten), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
+  nearest building; idle marchers are sent again each second.
+- The end (`gameOver.how: 'campaign'`): won when every objective that is neither optional nor a protect one is
+  done, or when every enemy player is beaten (a conquest always wins); lost when a protect objective fails or the
+  hero is beaten. The mission line-up (all checked by AI-only runs with a Normal AI as the hero, which wins all
+  five; an Easy one wins the first three): Ashes on the Shore (build a Temple, summon a god, beat the raid that
+  lands at 4:30), Burn the Longhouses (destroy three tagged Barracks of an Easy AI), The Narrow Pass (hold a
+  tagged Temple ten minutes against six scripted waves, Spartans at 5:00), The Sacred Groves (hold three sacred
+  sites for 2:00 against an Easy AI, frost trolls at 7:00), Twilight of the North (conquer a Normal Norse AI with
+  an Egyptian ally; Surtr wakes at 14:00 and marches).
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -856,6 +882,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
   sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
   tutorial: true,              // optional, the guided first match (5.13); local only, never from a lobby
   survival: true,              // optional, Trial of the Titans (5.14): every player on team 1 against monster waves
+  campaign: 'shore',           // optional, a campaign mission (5.16); local only, never from a lobby
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -957,6 +984,7 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   sacred: null | { tm, end },  // Sacred Victory countdown: the team holding every site, the game time it wins at
   gameOver: null | { winningTeam, how?, wave? }, // how: 'sacred' for a Sacred Victory; wave: the Trial of the Titans' score (5.14)
   sv,                         // Trial of the Titans only: { w: waves out so far, m: wave monsters alive }
+  cp,                         // a campaign mission only (5.16): { o: per objective [state 0 open 1 done 2 failed, value, shown 0/1], h: seconds held, at: [x, y] | null }
 }
 EntityView = {
   id, k,          // 'u' unit | 'b' building | 'm' gold mine
@@ -1020,7 +1048,9 @@ EntityView = {
 { type: 'sacredBroken', team }                                       // ... and stops
 { type: 'wave',    n, count, boss, x, y }                            // Trial of the Titans: wave n came out at (x, y); boss = Titan type or ''
 { type: 'waveCleared', n, gold }                                     // every monster of wave n is dead; each survivor got gold
-{ type: 'gameOver', winningTeam }
+{ type: 'campaignSay', e }                                           // a campaign mission's event e has a line to show and say (5.16)
+{ type: 'objective', i, s }                                          // objective i was finished (s 1), failed (2) or revealed (0)
+{ type: 'gameOver', winningTeam, how? }                              // how: 'sacred' (5.11) or 'campaign' (5.16)
 { type: 'godPower', player, power, x, y }                            // a god power was cast (4.11); x, y = its spot (a blessing: the caster's Town Center)
 ```
 
@@ -2156,6 +2186,28 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
   A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
+
+### 9.3 Campaign (src/ui/menu-campaign.js, src/ui/hud-campaign.js, src/game/campaign-progress.js, src/game/campaign-voice.js)
+Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won") opens the
+chapter screen: the five missions down the left (locked with a padlock until the one before is won, a tick and
+the best time once won) and the chosen one's briefing on the right (where, who you face and who stands with
+you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in localStorage
+`mythicwar-campaign` (`{ won: { id: { best, at } } }`); missions are not games of the career.
+- The narrator: every briefing, every event's line and every victory text is a recorded clip in
+  assets/narration/campaign (Kokoro "George", as the intro film: `tools/narration/render.py --lines`, with the
+  list from `tools/narration/campaign-lines.mjs`), named `<mission>-<part>-<hash of the words>.mp3`, so new
+  words need a new render (a test checks every clip exists). It follows the Narration setting and the volume,
+  ducks the music while it speaks, and hands a line with no clip to the browser's voice. A briefing is read when
+  the screen opens or a mission is chosen.
+- In the match: the objective panel takes the checklist's corner (no checklist, no gameplay tips): "Chapter I ·
+  Mission n", the title, one row per shown objective (ticked, crossed out red when failed, dashed ring for a
+  protect one, italic for a bonus) with its count ("0/1", "3 left", the clock left, "1:05 of 2:00"). The lesson's
+  "Here" pin (`missionPointer`) stands over the current objective's spot from the snapshot's `cp.at`. An event
+  line goes to the feed (an enemy spawn as a red banner with a horn) and is spoken; objectives finished, failed
+  or revealed go to the feed.
+- The end: "Mission Complete" with the victory text (also spoken) and what opened ("The next mission is open:
+  …", a new best time, "Chapter I complete!"), and Next Mission (the chapter screen on the next briefing), Play
+  It Again, Campaign; "Mission Failed" with the defeat text and Retry Mission.
 
 ## 10. AI (src/ai/)
 

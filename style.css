@@ -1277,3 +1277,57 @@ kbd {
   .mw-crest { display: none; }
   .mw-tagline { display: none; }
 }
+
+/* ------------------------------------------------------------ campaign (src/ui/menu-campaign.js) */
+
+.mw-campaign-panel { width: min(64em, 100%); }
+.mw-campaign-body { display: grid; grid-template-columns: minmax(15em, 21em) minmax(0, 1fr); gap: 1.4em; align-items: start; }
+.mw-campaign-blurb { margin: 0 0 0.9em; font: italic 0.95em/1.45 var(--mw-font-body); color: var(--mw-ink-dim); }
+.mw-mission-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45em; }
+.mw-mission {
+  display: grid;
+  grid-template-columns: 2em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7em;
+  width: 100%;
+  padding: 0.6em 0.75em;
+  text-align: left;
+  color: var(--mw-ink);
+  background: linear-gradient(180deg, rgba(42, 50, 70, 0.7), rgba(20, 24, 36, 0.85));
+  border: 1px solid var(--mw-line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.mw-mission:hover:not(:disabled), .mw-mission:focus-visible { border-color: var(--mw-gold); box-shadow: var(--mw-focus); outline: none; }
+.mw-mission.is-selected { border-color: var(--mw-gold); background: linear-gradient(180deg, rgba(120, 90, 40, 0.45), rgba(40, 30, 18, 0.85)); }
+.mw-mission.is-locked { cursor: not-allowed; opacity: 0.55; }
+.mw-mission-n {
+  display: grid;
+  place-items: center;
+  width: 2em;
+  height: 2em;
+  border-radius: 50%;
+  border: 1px solid var(--mw-bronze);
+  font: 700 0.9em/1 var(--mw-font-display);
+  color: var(--mw-gold-hi);
+}
+.mw-mission.is-won .mw-mission-n { border-color: var(--mw-ok); color: var(--mw-ok); background: rgba(80, 190, 100, 0.18); }
+.mw-mission-body { display: flex; flex-direction: column; min-width: 0; }
+.mw-mission-title { font: 600 0.95em/1.25 var(--mw-font-display); letter-spacing: 0.04em; }
+.mw-mission-place { font-size: 0.8em; color: var(--mw-ink-mute); }
+.mw-mission-best { font: 700 0.8em/1 var(--mw-font-ui); color: var(--mw-ok); font-variant-numeric: tabular-nums; }
+.mw-briefing { min-width: 0; }
+.mw-briefing-kicker { margin: 0; font: 600 0.78em/1.3 var(--mw-font-ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--mw-ink-mute); }
+.mw-briefing-title { margin: 0.2em 0 0.55em; font: 600 1.6em/1.2 var(--mw-font-display); color: var(--mw-gold-hi); letter-spacing: 0.04em; }
+.mw-briefing-text { margin: 0 0 0.9em; font: 1.05em/1.6 var(--mw-font-body); color: var(--mw-ink); }
+.mw-briefing-sides { display: flex; flex-direction: column; gap: 0.2em; margin-bottom: 1em; font-size: 0.9em; color: var(--mw-ink-dim); }
+.mw-briefing-sides b { color: var(--mw-ink); font-weight: 600; }
+.mw-briefing-goals { list-style: none; margin: 0.5em 0 1.2em; padding: 0; display: flex; flex-direction: column; gap: 0.35em; }
+.mw-briefing-goals li { display: flex; gap: 0.6em; align-items: baseline; font-size: 0.95em; }
+.mw-briefing-goals li.is-optional { font-style: italic; color: var(--mw-ink-dim); }
+.mw-briefing-goals li.is-protect { color: var(--mw-ink-dim); }
+.mw-goal-icon { width: 1.4em; text-align: center; font-family: var(--mw-emoji); }
+.mw-briefing-btns { display: flex; flex-wrap: wrap; gap: 0.7em; align-items: center; }
+@media (max-width: 760px) {
+  .mw-campaign-body { grid-template-columns: 1fr; }
+}

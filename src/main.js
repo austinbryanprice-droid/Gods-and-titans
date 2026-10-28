@@ -23,8 +23,8 @@ function loadGameModule() {
   return gameModule;
 }
 
-/** Tear down the running game (if any) and show the title screen. */
-function backToMenu() {
+/** Tear down the running game (if any) and show the title screen (or another menu screen). */
+function backToMenu(screen = 'title', opts = {}) {
   if (current) {
     const g = current;
     current = null;
@@ -33,7 +33,7 @@ function backToMenu() {
   clearStartNotice();
   const root = document.getElementById('game-root');
   if (root) root.hidden = true;
-  showMenu('title');
+  showMenu(screen, opts);
 }
 
 /** Full-screen "loading" notice between Start and the first frame (the HUD draws over it). */
@@ -78,6 +78,8 @@ export async function startGame(launch) {
   const notice = showStartNotice();
   // A game against the computer only: remember its lobby for Quick Match, and offer Play Again at its end.
   const skirmish = isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
+  // A campaign mission (DESIGN 5.16): Retry starts it again, Next Mission and leaving go to the chapter screen.
+  const mission = launch && launch.setup && typeof launch.setup.campaign === 'string' ? launch.setup.campaign : null;
   if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
@@ -87,9 +89,13 @@ export async function startGame(launch) {
       settings: getSettings(),
       onExit: () => {
         if (current === game) current = null;
-        backToMenu();
+        backToMenu(mission ? 'campaign' : 'title', mission ? { mission } : {});
       },
-      onRematch: skirmish ? () => rematch(skirmish) : null,
+      onRematch: skirmish ? () => rematch(skirmish) : mission ? () => startGame({ ...launch, conns: new Map() }) : null,
+      onNextMission: mission ? (id) => {
+        if (current === game) current = null;
+        backToMenu('campaign', { mission: id, brief: true });
+      } : null,
     });
     current = game;
     await game.ready;

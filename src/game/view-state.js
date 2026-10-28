@@ -8,6 +8,7 @@ import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
 import { peaceSeconds } from '../sim/peace.js';
 import { survivalOn, wavesBy, nextWaveIn, isBossWave } from '../sim/survival.js';
+import { missionOf } from '../sim/campaign.js';
 import { sacredVictoryOn } from '../sim/sacred.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
@@ -178,6 +179,30 @@ export class ViewState {
     const sv = this.snapshot && this.snapshot.sv;
     const wave = sv && Number.isInteger(sv.w) ? sv.w : wavesBy(this.time);
     return { wave, alive: sv && Number.isInteger(sv.m) ? sv.m : 0, next: nextWaveIn(this.time), nextBoss: isBossWave(wave + 1) };
+  }
+
+  // ---------------------------------------------------------------- Campaign
+
+  /** The campaign mission this game plays (src/data/campaign.js), or null. */
+  mission() {
+    return missionOf(this.setup);
+  }
+
+  /**
+   * The mission's objectives at the latest snapshot: { mission, objectives: [{ ...def, state (0 open, 1 done, 2 failed),
+   * value, shown }], held (seconds of sacred ground held), at ({ x, y } of the current objective, or null) }, or null.
+   */
+  campaign() {
+    const m = missionOf(this.setup);
+    if (!m) return null;
+    const cp = (this.snapshot && this.snapshot.cp) || null;
+    const rows = cp && Array.isArray(cp.o) ? cp.o : [];
+    const objectives = m.objectives.map((o, i) => {
+      const r = Array.isArray(rows[i]) ? rows[i] : null;
+      return { ...o, state: r ? r[0] | 0 : 0, value: r && Number.isFinite(r[1]) ? r[1] : 0, shown: r ? !!r[2] : !o.hidden };
+    });
+    const at = cp && Array.isArray(cp.at) && Number.isFinite(cp.at[0]) && Number.isFinite(cp.at[1]) ? { x: cp.at[0], y: cp.at[1] } : null;
+    return { mission: m, objectives, held: cp && Number.isFinite(cp.h) ? cp.h : 0, at };
   }
 
   /** May my units hurt this owner's units and buildings now? Creatures always; rival players only once the peace is over. */
