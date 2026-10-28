@@ -4,6 +4,8 @@
 // their players would have to agree. The lobby module (src/net/lobby.js, loaded lazily by the menu)
 // is passed in, since it builds and checks the setups.
 
+import { SURVIVAL_NAME } from '../config.js';
+
 export const LAST_SKIRMISH_KEY = 'mythicwar-last-skirmish';
 
 function storage() {
@@ -23,14 +25,15 @@ export function isSoloLaunch(launch) {
 
 /**
  * The lobby state worth replaying, checked like a state from a host (lobby.sanitizeLobbyState), or null:
- * one host slot, nobody else human, at least two teams.
+ * one host slot, nobody else human, and at least two teams unless it is a Trial of the Titans (everyone on one side
+ * against the monsters).
  */
 export function cleanSkirmish(lobbyMod, raw) {
   const st = lobbyMod.sanitizeLobbyState(raw);
   if (!st) return null;
   const active = st.slots.filter((s) => s.kind === 'host' || s.kind === 'ai');
   if (st.slots.filter((s) => s.kind === 'host').length !== 1 || st.slots.some((s) => s.kind === 'human')) return null;
-  if (new Set(active.map((s) => s.team)).size < 2) return null;
+  if (!st.survival && new Set(active.map((s) => s.team)).size < 2) return null;
   return { ...st, roomCode: null, started: false, slots: st.slots.map((s) => ({ ...s, peerId: null })) };
 }
 
@@ -73,6 +76,10 @@ export function launchFrom(lobbyMod, state, name, seed = (Math.floor(Math.random
 /** "1 vs 1 · Normal AI · small map", and the game mode, for the Quick Match button. */
 export function skirmishLabel(state) {
   if (!state) return '';
+  if (state.survival) {
+    const n = state.slots.filter((s) => s.kind === 'host' || s.kind === 'ai').length;
+    return [`${SURVIVAL_NAME}`, n > 1 ? `${n} players` : 'alone', `${state.mapSize} map`].join(' · ');
+  }
   const active = state.slots.filter((s) => s.kind === 'host' || s.kind === 'ai');
   const host = active.find((s) => s.kind === 'host');
   const mine = active.filter((s) => s.team === host.team).length;

@@ -75,3 +75,13 @@ test('the Quick Match label says who fights whom, where and how', () => {
   assert.equal(skirmishLabel(cleanSkirmish(lobbyMod, big)), '2 vs 2 · Hard / Normal AI · medium map · Decade of Peace 45 min · Sacred Victory');
   assert.equal(skirmishLabel(null), '');
 });
+
+test('a Trial of the Titans is replayed too, with everyone on one side', () => {
+  const trial = soloState({ survival: true });
+  trial.slots[1].team = 1;
+  const st = cleanSkirmish(lobbyMod, trial);
+  assert.ok(st, 'one team is fine in a trial');
+  assert.equal(skirmishLabel(st), 'Trial of the Titans · 2 players · small map');
+  const launch = launchFrom(lobbyMod, st, 'Me', 5);
+  assert.equal(launch.setup.survival, true);
+});
