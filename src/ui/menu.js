@@ -21,6 +21,7 @@ import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
 import { getCareer, markSeen } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
+import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
@@ -296,6 +297,26 @@ export function createMenu({ root, onStart, onIntro = null }) {
         toast(err?.message || 'Could not start the game.');
       }
     }
+    // The daily challenge (src/game/daily.js, DESIGN 9.3): the same seeded game for everyone today, today's best and the streak.
+    const daily = dailyStatus();
+    const dailySub = [`Today: ${dailyLabel(daily.challenge)}`];
+    if (daily.today) dailySub.push(`best ${daily.today.best.toLocaleString('en-US')}`);
+    const dailyBtn = mainBtn('Daily Challenge', dailySub.join(' · '), playDaily, 'mw-daily-btn');
+    dailyBtn.title = `${daily.challenge.twist.name}: ${daily.challenge.twist.desc}`;
+    if (daily.streak > 0) {
+      dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge.mw-streak-badge', {
+        title: daily.playedToday ? `${daily.streak} day${daily.streak === 1 ? '' : 's'} in a row` : `Play today to keep your ${daily.streak}-day streak`,
+      }, daily.playedToday ? `🔥 ${daily.streak}` : `🔥 ${daily.streak} · keep it`));
+    } else if (!daily.playedToday) dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New today'));
+    async function playDaily() {
+      try {
+        const launch = dailyLaunch(await import('../net/lobby.js'), daily.challenge.day, getSettings().name); // the real lobby: it builds the setup
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the daily challenge.');
+      }
+    }
     const career = getCareer();
     const newCount = career.unseen.length;
     // A guided first match; a player who has never finished a game or the lesson is pointed at it.
@@ -317,6 +338,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
         playBtn,
         quickBtn,
+        dailyBtn,
         learnBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),

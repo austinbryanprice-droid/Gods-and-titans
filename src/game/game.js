@@ -35,6 +35,8 @@ import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
 import { TutorialDirector } from './tutorial.js';
 import { isTutorial } from '../sim/tutorial.js';
+import { recordDaily, dailyChallenge } from './daily.js';
+import { scoreOf } from '../data/score.js';
 import { medalFor } from '../data/medals.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
@@ -228,6 +230,7 @@ export class Game {
     this.chronicle = null; // Chronicle: the match's numbers over time, for the game-over screen
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
+    this.dailyCounted = false; // a daily challenge's score is kept once (countDaily)
     this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
     this.offs = [];
     this.lastAmbient = 0;
@@ -309,6 +312,11 @@ export class Game {
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
+    // The daily challenge (DESIGN 9.3): its twist, said once at the start.
+    if (this.launch && this.launch.daily) {
+      const tw = dailyChallenge(this.launch.daily).twist;
+      this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
+    }
     session.start();
     // Only a match against the computer can run faster or slower: nobody else has to keep up.
     this.solo = isSolo(session);
@@ -750,12 +758,13 @@ export class Game {
       // The guided first match: a victory earns a medal by its game time, kept with the career.
       const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
       if (medal) unlocked = recordTutorial(medal.rank);
+      const daily = this.launch && this.launch.daily ? this.countDaily(result === 'victory') : null;
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record, daily });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -1007,6 +1016,24 @@ export class Game {
       } catch (err) {
         console.warn('[game] career record failed', err);
       }
+      this.countDaily(false);
+    }
+  }
+
+  /**
+   * A daily challenge (DESIGN 9.3) counts once, like the career: its chronicle score as a try at today's
+   * best, and the day for the streak. Returns what the game-over screen shows, or null for another game.
+   */
+  countDaily(won) {
+    const vs = this.viewState;
+    const day = this.launch && this.launch.daily;
+    if (!day || this.dailyCounted || !vs || vs.myIndex < 0) return null;
+    this.dailyCounted = true;
+    try {
+      return recordDaily(day, scoreOf(vs.players[vs.myIndex]).total, won);
+    } catch (err) {
+      console.warn('[game] daily record failed', err);
+      return null;
     }
   }
 

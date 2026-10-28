@@ -31,6 +31,7 @@ import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
 import { newPowerState, updatePowers, boonPct } from './powers.js';
 import { createSurvival, updateSurvival, survivalOn } from './survival.js';
 import { isTutorial, tutorialStart } from './tutorial.js';
+import { startOf } from '../data/twists.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
 
@@ -88,6 +89,8 @@ export class World {
     this.perf = { lastTickMs: 0, commandErrors: 0, lastCommandError: '' };
 
     const pickRng = this.rng.fork('pantheons');
+    // The daily challenge's twist (data/twists.js) may change everyone's start.
+    this.start = startOf(setup, START_RESOURCES, START_WORKERS);
     this.players = setup.players.map((sp, i) => {
       let pantheon = sp.pantheon;
       if (typeof pantheon !== 'string' || !Object.hasOwn(PANTHEONS, pantheon)) pantheon = pickRng.pick(PANTHEON_LIST).id;
@@ -99,9 +102,9 @@ export class World {
         color: sp.color || PLAYER_COLORS[i % PLAYER_COLORS.length],
         kind: sp.kind || 'human',
         difficulty: sp.difficulty ?? null,
-        gold: START_RESOURCES.gold,
-        wood: START_RESOURCES.wood,
-        faith: START_RESOURCES.faith,
+        gold: this.start.gold,
+        wood: this.start.wood,
+        faith: this.start.faith,
         faithRate: 0,
         tier: 1,
         popUsed: 0,
@@ -152,7 +155,7 @@ export class World {
       }
     }
     spots.sort((a, b) => a.d - b.d || a.y - b.y || a.x - b.x);
-    for (let k = 0; k < START_WORKERS; k++) {
+    for (let k = 0; k < this.start.workers; k++) {
       const s = spots[k] || spots[k % Math.max(1, spots.length)] || { x: tc.x, y: tc.ty + tc.size + 0.5 };
       this.spawnUnit(player, 'worshipper', s.x, s.y, { facing: Math.atan2(ty - s.y, tx - s.x), silent: true });
     }
