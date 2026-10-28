@@ -758,24 +758,28 @@ it can wins at 5:39 (tests/game/tutorial.test.js).
 An optional game mode the host picks in the lobby (third button of the Game mode row; one mode at a time, so
 picking it clears a Decade of Peace and the other two buttons clear it): `GameSetup.survival` is `true`. Every
 player and AI plays on team 1 (`buildSetup`, and `World` forces it too), so one player alone may start it and the
-lobby's team column reads "Together". Rules live in `src/sim/survival.js` (the schedule helpers are shared with the
+lobby's team column reads "Together"; `mapOptions` passes one team to the map generator, so the bases stand side
+by side in the team layout (6.7: two players share the top edge, a third and fourth the bottom edge). Rules live in `src/sim/survival.js` (the schedule helpers are shared with the
 HUD) and run from `World.tick` (`updateSurvival`, before the units move):
 - **The clock.** Wave n comes out at `SURVIVAL_FIRST_WAVE + (n − 1) × SURVIVAL_INTERVAL` game seconds (2:00, then every
   90 s), whether the last wave is beaten or not, so a slow defence is buried. Every `SURVIVAL_BOSS_EVERY` (5th) wave
   a hostile Titan of a random pantheon leads it.
 - **What a wave holds** (`wavePlan`, deterministic from a `${seed}:survival` RNG): creatures of every pantheon worth
-  `waveBudget(n, players) = round((4 + 3n) × (0.6 + 0.4 × players))` population (60% of it on a boss wave). Waves 1–2 are
+  `waveBudget(n, players) = round((4 + 3n + 0.08n²) × (0.6 + 0.4 × players))` population (60% of it on a boss wave;
+  every wave larger than the last, and the step itself grows: 7 at wave 1, 42 at 10, 96 at 20 alone). Waves 1–2 are
   tier 1 only, tier 2 joins at wave 3 and tier 3 at wave 7; flyers stay out until wave 6 (the first Barracks has no
   archers yet) and are never more than a third of a wave. Health and damage grow every wave (`waveBoost`: ×1.33 /
   ×1.25 at wave 6, ×1.69 / ×1.52 at 11, ×3.27 / ×2.48 at 26) through `u.boost`, applied in `applyUnitStats`. The boss
   Titan has `bossBoost(n, players)`: health × n/10 × (0.7 + 0.3 × players) (half a Titan at wave 5 alone, a whole one at
   wave 10), damage × (0.6 + 0.04n). At most `SURVIVAL_MAX_ALIVE` (120) wave monsters live at once; a wave that would pass
   it comes smaller.
-- **Where.** Each wave comes out of one edge point (two from wave 5, three from wave 15) of the eight around the map
-  (corners and the middle of each side, 3 tiles in) that lie at least 30 tiles from every player building, as
-  neutral (owner −1) units with no camp, so no leash. Each group gets an attack-move on the nearest building of a
-  player still in the game (walls are broken through on the way, not hunted); once a second, any wave monster left
-  with no order (its target fell, its fight is over) is sent on to the next nearest one.
+- **Where.** Every player still in the game with a building gets an even share of each wave (dealt out one monster
+  at a time; the boss Titan goes at each player in turn), so nobody waits behind a teammate. A share comes out of the
+  edge point nearest that player (two points from wave 10) of the eight around the map (corners and the middle of
+  each side, 3 tiles in) that lie at least 30 tiles from every player building, as neutral (owner −1) units with no
+  camp, so no leash, each with `u.waveTarget`. A share gets an attack-move on its player's nearest building (walls are
+  broken through on the way, not hunted); once a second, any wave monster left with no order (its target fell, its
+  fight is over) is sent on to its player's next nearest one, or anyone's once that player has none.
 - **Pay.** Killing a wave monster pays the usual creep bounty. When the last monster of wave n dies, every player
   still in the game gets `waveReward(n) = 40 + 20n` gold once, with `{ type: 'waveCleared', n, gold }`.
 - **The end.** Players fall as in 5.8 (no buildings left). Nobody wins: when the last player falls the game is over
@@ -783,11 +787,12 @@ HUD) and run from `World.tick` (`updateSurvival`, before the units move):
   rest of the rules are unchanged.
 - **Net.** The setup flag (validateSetup keeps it only when exactly `true` and there is no peace), a top-level
   snapshot record `sv: { w, m }` (waves out, wave monsters alive) that rides the delta's "everything else" keys, the
-  `wave { n, count, boss, x, y }` and `waveCleared { n, gold }` event shapes, and `gameOver.wave`.
+  `waveFront { n, player, count, x, y }` (one per share, just before), `wave { n, count, boss, x, y }` and
+  `waveCleared { n, gold }` event shapes, and `gameOver.wave`.
 - **Client.** `ViewState.survival()` → `{ wave, alive, next, nextBoss }` (next from the clock). A wave chip beside the
   game clock ("Wave 1 in 2:00", then "Wave 3 · 7 left · next 1:12"; gold when a Titan leads the next wave, pulsing
-  in its last 10 s), an opening line, a "Wave n comes in 10 s" line, a banner and a minimap ping when a wave comes out
-  (with the Titan's name and the summon sound on a boss wave), a gold line when one is beaten, a boss wave flashes the
+  in its last 10 s), an opening line, a "Wave n comes in 10 s" line, a banner (the whole wave), a line and a minimap ping for
+  the local player's own share when a wave comes out (with the Titan's name and the summon sound on a boss wave), a gold line when one is beaten, a boss wave flashes the
   tab, and the music heats up. The end screen is titled "Wave n" with the best wave beside it.
 - **Best wave.** The career (9.1) keeps it: the Game counts a finished trial with `CareerTracker.finish('survival',
   { wave })` (a trial left early counts with the wave it had reached, not as a loss), which raises `best.wave`; a
@@ -796,8 +801,8 @@ HUD) and run from `World.tick` (`updateSurvival`, before the units move):
   and Titans' Bane, ask for waves 10 and 20.
 - **AI.** `scan` adds the living wave monsters to `s.enemyUnits`, so the usual threat and defence logic turns out
   against them and helps allies; with no rival players it never launches an attack.
-  Measured (seeds 3 to 9, AIs only): one Easy AI falls at wave 20 (30:44), one Normal AI at wave 21 (32:37), two Normal
-  AIs at wave 25 (38:44), four Hard AIs at wave 28 (42:50, the 120-monster cap reached); every AI beat waves 1 to 10.
+  Measured (seeds 3 to 9, AIs only, with the steeper budget and shared waves): one Easy AI falls at wave 17 (26:27),
+  one Normal AI at wave 20 (31:15), two Normal AIs at wave 23 (35:43), four Hard AIs at wave 24 (37:17).
 
 ### 5.15 Relics (src/data/relics.js, src/sim/relics.js)
 Treasures of world myth that give creeping a reward beyond the bounty (WC3 items, Age of Mythology relics).
@@ -1108,6 +1113,8 @@ so teammates start about 0.46 map widths apart and the nearest enemy about 0.67;
 natural per base on its side edge and a shared expansion between its two bases (no river). In
 the 2v1 the spare bottom-left base becomes a rich expansion. A team of three (3v1) takes three
 neighbouring corners in order (top-left, top-right, bottom-right) and the lone player the last.
+Every player on one team (2 to 4 players, the Trial of the Titans, 5.14) also takes the team layout,
+in player order (top-left, top-right, bottom-right, bottom-left); spare bases become rich expansions.
 `meta.layout` is `'corners'` or `'teams'`.
 ```js
 {

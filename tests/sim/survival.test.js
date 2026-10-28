@@ -10,6 +10,7 @@ import {
   survivalOn, waveTime, wavesBy, nextWaveIn, isBossWave, waveBudget, waveBoost, bossBoost, wavePlan, waveReward, edgeName,
 } from '../../src/sim/survival.js';
 import { makeWorld, run } from './helpers.js';
+import { createWorld } from '../../src/sim/world.js';
 
 /** Jump a world's clock to `sec` (the next tick starts there). */
 function jumpTo(world, sec) {
@@ -42,6 +43,9 @@ test('waves grow in size and strength, and with the number of players', () => {
   assert.ok(waveBoost(10).hp > waveBoost(5).hp && waveBoost(20).dmg > waveBoost(10).dmg);
   assert.ok(bossBoost(5, 1).hp < 1 && bossBoost(10, 1).hp === 1 && bossBoost(10, 4).hp > 1, 'half a Titan at wave 5 alone, a whole one at 10');
   assert.ok(waveReward(10) > waveReward(1));
+  // Every wave is larger than the last, and the step itself grows.
+  for (let n = 1; n < 40; n++) assert.ok(waveBudget(n + 1, 1) > waveBudget(n, 1), `wave ${n + 1} outgrows wave ${n}`);
+  assert.ok(waveBudget(21, 1) - waveBudget(20, 1) > waveBudget(2, 1) - waveBudget(1, 1));
 });
 
 test('a wave plan spends its budget: small creatures first, no flyers before wave 6, a Titan leads every fifth wave', () => {
@@ -198,4 +202,38 @@ test('a boosted monster carries its damage boost in the snapshot for the info pa
 test('Sacred Victory never runs in a trial, where every player is on one team', () => {
   assert.equal(sacredVictoryOn({ sacredVictory: true }), true);
   assert.equal(sacredVictoryOn({ sacredVictory: true, survival: true }), false);
+});
+
+test('teammates start side by side, and every player gets a share of each wave', () => {
+  const world = createWorld({
+    version: '0.1.0',
+    seed: 11,
+    mapSize: 'small',
+    survival: true,
+    players: [
+      { index: 0, name: 'A', team: 1, pantheon: 'greek', kind: 'human' },
+      { index: 1, name: 'B', team: 2, pantheon: 'norse', kind: 'ai', difficulty: 'normal' },
+    ],
+  });
+  const [a, b] = [0, 1].map((p) => world.buildingList.find((x) => x.owner === p && x.type === 'town_center'));
+  assert.ok(Math.hypot(a.x - b.x, a.y - b.y) < world.map.width * 0.55, 'the two bases share a side of the map');
+  for (const n of [1, 2, 5]) {
+    jumpTo(world, waveTime(n) - 0.05);
+    world.events.length = 0;
+    world.tick();
+    world.tick();
+    const fronts = world.events.filter((e) => e.type === 'waveFront' && e.n === n);
+    assert.deepEqual(fronts.map((e) => e.player).sort(), [0, 1], `wave ${n} comes at both players`);
+    const monsters = world.unitList.filter((u) => u.wave === n);
+    for (const p of [0, 1]) {
+      const mine = monsters.filter((u) => u.waveTarget === p);
+      assert.ok(mine.length >= 1, `player ${p} gets monsters on wave ${n}`);
+      assert.equal(fronts.find((e) => e.player === p).count, mine.length);
+      for (const u of mine) {
+        const t = world.buildingList.find((x) => Math.abs(x.x - u.order.x) < 1e-6 && Math.abs(x.y - u.order.y) < 1e-6);
+        assert.ok(!t || t.owner === p, 'each share marches on its own player');
+      }
+    }
+    assert.ok(Math.abs(monsters.filter((u) => u.waveTarget === 0).length - monsters.filter((u) => u.waveTarget === 1).length) <= 1, 'an even split');
+  }
 });

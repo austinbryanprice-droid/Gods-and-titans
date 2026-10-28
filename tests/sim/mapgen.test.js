@@ -137,7 +137,9 @@ test('startPlan: teams of two share a side, teams of three take neighbouring cor
   assert.deepEqual(startPlan(3, [2, 1, 1]), { mode: 'teams', slots: [2, 0, 1] }, 'the pair goes first, by size');
   assert.deepEqual(startPlan(4, [1, 2, 3, 1]), { mode: 'teams', slots: [0, 2, 3, 1] });
   assert.deepEqual(startPlan(4, [2, 1, 2, 2]), { mode: 'corners', slots: [0, 3, 1, 2] }, '3v1: trio on three neighbouring corners');
-  assert.deepEqual(startPlan(4, [1, 1, 1, 1]), { mode: 'corners', slots: [0, 3, 1, 2] }, 'one team only: classic');
+  assert.deepEqual(startPlan(2, [1, 1]), { mode: 'teams', slots: [0, 1] }, 'one team (the Trial of the Titans): side by side');
+  assert.deepEqual(startPlan(4, [1, 1, 1, 1]), { mode: 'teams', slots: [0, 1, 2, 3] });
+  assert.deepEqual(startPlan(1, [1]), { mode: 'corners', slots: [0] });
   // Same teams in any order of team numbers give the same plan.
   assert.deepEqual(startPlan(4, [7, 7, 3, 3]), startPlan(4, [1, 1, 2, 2]));
 });
