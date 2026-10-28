@@ -48,6 +48,10 @@ const pantheonAchievements = PANTHEON_LIST.map((p) => {
 /** Every achievement, in gallery order. */
 export const ACHIEVEMENTS = [
   // ---- career
+  { id: 'first_lessons', group: 'career', name: 'First Lessons', icon: '🎓', desc: 'Finish the guided first match (Learn to Play on the title screen).',
+    test: (m, c) => c.best.medal >= 1 },
+  { id: 'top_of_the_class', group: 'career', name: 'Top of the Class', icon: '🥇', desc: 'Earn the gold medal in the guided first match.',
+    test: (m, c) => c.best.medal >= 3 },
   { id: 'first_victory', group: 'career', name: 'First Victory', icon: '🏆', desc: 'Win a game.',
     test: (m, c) => c.wins >= 1, progress: (c) => count(c.wins, 1) },
   { id: 'seasoned', group: 'career', name: 'Seasoned Commander', icon: '🎖️', desc: 'Play 10 games to the end.',
@@ -102,6 +106,10 @@ export const ACHIEVEMENTS = [
     test: (m) => won(m) && m.teamSize >= 2 },
   { id: 'decade_of_peace', group: 'challenge', name: 'Peace, Then War', icon: '🕊️', desc: 'Win a Decade of Peace game.',
     test: (m) => won(m) && m.peace },
+  { id: 'hold_the_line', group: 'challenge', name: 'Hold the Line', icon: '🐉', desc: 'Reach wave 10 in the Trial of the Titans.',
+    test: (m, c) => c.best.wave >= 10, progress: (c) => count(c.best.wave, 10) },
+  { id: 'titans_bane', group: 'challenge', name: "Titans' Bane", icon: '🗿', desc: 'Reach wave 20 in the Trial of the Titans.',
+    test: (m, c) => c.best.wave >= 20, progress: (c) => count(c.best.wave, 20) },
   { id: 'the_long_war', group: 'challenge', name: 'The Long War', icon: '⏳', desc: 'Play one game for an hour of game time.',
     test: (m) => m.time >= 60 * 60 },
 ];

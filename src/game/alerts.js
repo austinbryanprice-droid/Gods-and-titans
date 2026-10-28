@@ -16,6 +16,7 @@
 // The `alerts` setting picks 'all', 'important' or 'off' for the lines, sounds and pings; the
 // `tabAlerts` setting alone decides about the tab. Nothing here is sent over the wire.
 import { UNITS, UPGRADES, godsFor, titanFor } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { POP_MAX } from '../config.js';
 import { sanitizeName } from '../net/protocol.js';
 import { getSettings } from '../settings.js';
@@ -208,6 +209,11 @@ export class AlertEngine {
     if (ev.type === 'gameOver') {
       if (vs.myIndex < 0) return;
       const wt = ev.winningTeam;
+      if (vs.survivalActive && vs.survivalActive()) {
+        const sv = vs.survival();
+        this.emit({ id: 'game_over', level: 'important', attention: `The trial is over: you held out to wave ${sv ? sv.wave : 0}.` });
+        return;
+      }
       const won = wt !== null && wt !== undefined && wt === vs.myTeam;
       this.emit({ id: 'game_over', level: 'important', attention: wt === null || wt === undefined ? 'The battle is over: a draw.' : won ? 'Victory! The battle is won.' : 'Defeat. The battle is lost.' });
       return;
@@ -234,6 +240,18 @@ export class AlertEngine {
           const t = UNITS[ev.t];
           this.emit({ id: 'titan_enemy', level: 'important', attention: `${t ? t.name : 'A Titan'} is being summoned by ${this.playerName(ev.player)}!` });
         }
+        break;
+      case 'godPower': {
+        // An enemy's strike or cataclysm calls me back to the tab (the Game writes the line).
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (pw && ev.player !== me && !vs.isAlly(ev.player) && isHarmfulPower(pw)) {
+          this.emit({ id: 'power_enemy', level: 'important', attention: `${this.playerName(ev.player)} unleashes ${pw.name}!` });
+        }
+        break;
+      }
+      case 'wave':
+        // The Game writes the banner; a wave led by a Titan is worth the tab flash.
+        if (ev.boss) this.emit({ id: 'wave_boss', level: 'important', attention: `Wave ${ev.n}: ${UNITS[ev.boss] ? UNITS[ev.boss].name : 'a Titan'} is coming!` });
         break;
       case 'peaceEnd':
         this.emit({ id: 'peace_end', level: 'important', attention: 'The Decade of Peace is over: war begins!' });

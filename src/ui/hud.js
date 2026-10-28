@@ -3,10 +3,11 @@
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
-//   bottom       minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
+//   bottom       god power buttons + minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
 //   team marks   pins over the battlefield (and arrows at its edge) for the pings and markers of my team
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
-//   tips         the getting-started checklist and now-and-then gameplay tips (top-right)
+//   tips         the getting-started checklist and now-and-then gameplay tips (top-right); in the guided
+//                first match its objective panel instead, a pin at the objective and lit card buttons
 //   overlays     waiting, in-game menu (F10), game over, host left
 // Only the panels take pointer events; everything else falls through to the canvas.
 import { UNITS, PANTHEONS } from '../data/index.js';
@@ -14,7 +15,7 @@ import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -22,14 +23,16 @@ import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
+import { TutorialView, GuidePointer, lightCard } from './hud-tutorial.js';
 import { HintsView, HintScheduler } from './hud-hints.js';
 import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
+import { PowerBar } from './hud-powers.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { POP_MAX, PEACE_NAME } from '../config.js';
+import { POP_MAX, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_BOSS_EVERY } from '../config.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -40,6 +43,8 @@ const ERROR_MS = 2600;
 const BANNER_MS = 4200;
 const MAX_MESSAGES = 6;
 const MAX_MESSAGE_CHARS = 240;
+const SURVIVAL_ICON = '🐉'; // the Trial of the Titans' wave chip and messages
+const WAVE_WARNING = 10; // seconds before a wave when the HUD says it is coming
 const PEACE_ICON = '🕊️'; // the Decade of Peace's card emblem, as on its clock chip
 const MARKS_HINT = 'Team ping: Alt+click or middle-click the map or minimap. The buttons beside the minimap mark where to attack, defend, gather or get help.';
 
@@ -83,6 +88,14 @@ export class Hud {
       getRenderer: () => game.renderer || null,
       getInsets: () => ({ top: this.top.offsetHeight || 0, bottom: this.bottom.offsetHeight || 0 }),
     });
+    // The guided first match (hud-tutorial.js): a pin over the current objective, under the panels too.
+    this.guidePointer = game.tutorial ? new GuidePointer({
+      root,
+      director: game.tutorial,
+      viewState: this.vs,
+      getRenderer: () => game.renderer || null,
+      getInsets: () => ({ top: this.top.offsetHeight || 0, bottom: this.bottom.offsetHeight || 0 }),
+    }) : null;
 
     // Top bar.
     this.menuBtn = el('button', 'hud-menu-btn', el('span', 'hud-menu-ico', '☰'), el('span', null, 'Menu'), el('kbd', null, 'F10'));
@@ -102,6 +115,12 @@ export class Hud {
     this.peaceChip.title = `${PEACE_NAME}: no player can harm another, or build near an enemy Town Center, until this clock runs out. Neutral creatures still fight.`;
     this.peaceChip.hidden = true;
     this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
+    // Trial of the Titans: the wave reached, the monsters still alive and the clock to the next wave.
+    this.waveText = el('span', 'hud-clock');
+    this.waveChip = el('div', 'hud-time hud-wave', el('i', 'hud-res-i', SURVIVAL_ICON), this.waveText);
+    this.waveChip.title = `${SURVIVAL_NAME}: monsters come out of the map's edges on this clock, more and stronger every wave, and a Titan leads every ${SURVIVAL_BOSS_EVERY}th one. Beating a wave pays gold. Hold out as long as you can.`;
+    this.waveChip.hidden = true;
+    this.waveWarned = null; // the last wave whose "coming in 10 s" message is behind us
     // Sacred sites held by my side (and the Sacred Victory countdown when a side holds them all).
     this.siteText = el('span', 'hud-clock');
     this.siteChip = el('div', 'hud-time hud-sites', el('i', 'hud-res-i', SITE_ICON), this.siteText);
@@ -124,7 +143,7 @@ export class Hud {
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.ping, this.rPantheon.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -159,6 +178,11 @@ export class Hud {
     this.errorEl = el('div', 'hud-error');
     this.banner = el('div', 'hud-banner');
     this.banner.hidden = true;
+    // A computer player's taunt (DESIGN 10.1): one big quote at the top centre, under the banners.
+    this.taunt = el('div', 'hud-taunt');
+    this.taunt.hidden = true;
+    this.taunt.setAttribute('role', 'status');
+    this.taunt.setAttribute('aria-live', 'polite');
     this.chatInput = el('input', 'hud-chat-input');
     this.chatInput.type = 'text';
     this.chatInput.maxLength = 200;
@@ -197,15 +221,17 @@ export class Hud {
     this.tip.hidden = true;
     // The marker buttons stand beside the minimap: pick one, then click the map or the minimap.
     this.markpad = new MarkPalette({ onPick: (kind) => game.input && game.input.armMark(kind) });
+    // The god powers stand on its other side: pick a ready one, then click where it should fall.
+    this.powerbar = new PowerBar({ onPick: (id) => game.input && game.input.armPower(id) });
     this.bottom = el('div', 'hud-bottom hud-panel',
-      el('div', 'hud-bottom-mini', mini, this.markpad.root),
+      el('div', 'hud-bottom-mini', this.powerbar.root, mini, this.markpad.root),
       el('div', 'hud-bottom-info', this.infoRoot),
       el('div', 'hud-bottom-card', this.cardGrid));
 
     this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
     for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root]) {
@@ -241,11 +267,13 @@ export class Hud {
       marks: this.teamMarks,
     });
 
+    // The guided first match shows its objectives where the checklist would be (and no gameplay tips).
+    this.tutorial = game.tutorial ? new TutorialView(root, { director: game.tutorial }) : null;
     // New players get the "getting started" checklist until they close or finish it.
     this.tips = null;
-    if (!getSettings().tipsDismissed) this.showTips();
+    if (!getSettings().tipsDismissed && !this.tutorial) this.showTips();
     this.offs.push(onSettingsChange((st, changed) => {
-      if (!changed.includes('tipsDismissed')) return;
+      if (!changed.includes('tipsDismissed') || this.tutorial) return;
       if (st.tipsDismissed) this.hideTips();
       else this.showTips();
     }));
@@ -307,6 +335,7 @@ export class Hud {
     }
     setText(this.clock, formatClock(vs.time));
     this.updatePeace();
+    this.updateWaves();
     this.updateSites();
     const s = game.session;
     const stall = stallText(s);
@@ -324,6 +353,8 @@ export class Hud {
       const lead = leadText(vs);
       if (lead) this.message(lead, 'good', { icon: PANTHEON_EMBLEMS[this.pantheonId] });
       if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good', { icon: PEACE_ICON });
+      const sv = vs.survival();
+      if (sv && sv.wave === 0) this.message(`${SURVIVAL_NAME}: build your defences. The first wave of monsters comes in ${peaceClock(sv.next)}.`, 'good', { icon: SURVIVAL_ICON });
       if (vs.sacredVictoryOn() && vs.time < 60) this.message(sacredStartText(), 'good', { icon: SITE_ICON });
       // Only a match with a teammate has anyone to ping.
       if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info', { icon: '📍' });
@@ -349,13 +380,19 @@ export class Hud {
       this.card = getCommandCard(game.selection.forCard(), vs, mode);
       this.cardView.render(this.card);
     }
+    if (this.tutorial) {
+      this.tutorial.update(now);
+      lightCard(this.cardView, this.tutorial.guide());
+    }
     this.minimap.update(now);
     this.marksLayer.update(now);
+    if (this.guidePointer) this.guidePointer.update(now);
     const m = input && input.mode;
     this.markpad.setArmed(m && m.kind === 'target' && m.order === 'mark' ? m.mark : null);
+    this.powerbar.update(vs, m && m.kind === 'target' && m.order === 'power' ? m.power : null);
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
-    this.hintTimer.update();
+    if (!this.tutorial) this.hintTimer.update();
     this.hints.update();
   }
 
@@ -385,6 +422,26 @@ export class Hud {
     const passed = PEACE_WARNINGS.filter((s) => left <= s).length;
     if (this.peaceMarks !== null && passed > this.peaceMarks) this.message(peaceWarning(PEACE_WARNINGS[passed - 1]), 'alert', { icon: PEACE_ICON });
     this.peaceMarks = passed;
+  }
+
+  /** The Trial of the Titans chip: the wave reached and the clock to the next one, and a word 10 s before it comes. */
+  updateWaves() {
+    const sv = this.vs.survival();
+    setHidden(this.waveChip, !sv);
+    if (!sv) return;
+    const clock = peaceClock(sv.next);
+    setText(this.waveText, sv.wave === 0 ? `Wave 1 in ${clock}` : `Wave ${sv.wave} · ${sv.alive} left · next ${clock}`);
+    setClass(this.waveChip, 'is-boss', sv.nextBoss);
+    setClass(this.waveChip, 'is-ending', sv.next <= WAVE_WARNING);
+    const coming = sv.wave + 1;
+    const close = sv.next <= WAVE_WARNING;
+    // A game first seen inside the last seconds before a wave stays quiet about that one.
+    if (this.waveWarned === null) this.waveWarned = close ? coming : coming - 1;
+    if (close && this.waveWarned < coming && !this.vs.gameOver) {
+      this.waveWarned = coming;
+      const secs = Math.ceil(sv.next);
+      this.message(sv.nextBoss ? `Wave ${coming} comes in ${secs} s, and a Titan leads it!` : `Wave ${coming} comes in ${secs} s.`, 'alert', { icon: SURVIVAL_ICON });
+    }
   }
 
   /** The Sacred Sites chip: sites my side holds, and the Sacred Victory countdown while one side holds them all. */
@@ -614,6 +671,34 @@ export class Hud {
     this.pushLine(card, CHAT_MS);
   }
 
+  /**
+   * A computer player's line (DESIGN 10.1) as a taunt at the top centre: their pantheon's emblem,
+   * their name in their colour and the words, larger than the feed. A new taunt replaces the one up.
+   */
+  showTaunt(line) {
+    if (!line || typeof line !== 'object') return false;
+    const text = sanitizeChat(line.text);
+    if (!text) return false;
+    const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
+    const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
+    const who = el('span', 'hud-taunt-from', sanitizeName(line.name || (p && p.name), 'Player'));
+    const quote = el('span', 'hud-taunt-text', `“${text}”`);
+    const t = this.taunt;
+    t.replaceChildren(who, quote);
+    t.dataset.icon = (p && PANTHEON_EMBLEMS[p.pantheon]) || '⚔️';
+    t.style.setProperty('--taunt-accent', safeColor(p && p.color, '#ff7a4a'));
+    t.hidden = false;
+    t.classList.remove('is-on');
+    void t.offsetWidth; // restart the slam-in for a taunt that replaces another
+    t.classList.add('is-on');
+    clearTimeout(this.tauntTimer);
+    this.tauntTimer = setTimeout(() => {
+      t.classList.remove('is-on');
+      this.tauntTimer = setTimeout(() => (t.hidden = true), 500);
+    }, tauntDwell(text));
+    return true;
+  }
+
   /** Big centred announcement under the top bar. */
   showBanner(text, kind = 'info') {
     this.banner.textContent = text;
@@ -659,9 +744,12 @@ export class Hud {
   dispose() {
     clearTimeout(this.errorTimer);
     clearTimeout(this.bannerTimer);
+    clearTimeout(this.tauntTimer);
     for (const line of this.msgs.children) clearTimeout(line._timer);
     this.minimap.dispose();
     this.marksLayer.dispose();
+    if (this.guidePointer) this.guidePointer.dispose();
+    if (this.tutorial) this.tutorial.dispose();
     this.hideTips();
     this.hintTimer.dispose();
     this.hints.dispose();

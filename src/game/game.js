@@ -12,7 +12,9 @@ import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
+import { edgeName } from '../sim/survival.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
@@ -29,6 +31,11 @@ import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
 import { CareerTracker } from './career-tracker.js';
+import { getCareer } from './career.js';
+import { recordTutorial } from './career.js';
+import { TutorialDirector } from './tutorial.js';
+import { isTutorial } from '../sim/tutorial.js';
+import { medalFor } from '../data/medals.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -181,16 +188,18 @@ export class Game {
    * @param {object} [o.session] an already built HostSession / ClientSession (instead of launch)
    * @param {object} [o.settings] getSettings()
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
+   * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.session = session;
     this.settings = settings || getSettings();
     this.onExit = onExit;
+    this.onRematch = onRematch;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -217,6 +226,7 @@ export class Game {
     this.chronicle = null; // Chronicle: the match's numbers over time, for the game-over screen
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
+    this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -264,6 +274,10 @@ export class Game {
     const session = this.session;
     this.viewState = session.viewState;
     this.selection = new Selection(this.viewState);
+    // The guided first match (DESIGN 9.2): its objectives, read from the view and the selection; the HUD shows them.
+    if (isTutorial(session.setup) && session.isHost) {
+      this.tutorial = new TutorialDirector({ viewState: this.viewState, getSelection: () => this.selection.ids, onStep: (next, i, done) => this.onTutorialStep(next, done) });
+    }
 
     this.hud = new Hud({ root: this.hudRoot, game: this });
     if (session.mapMismatch) this.hud.setMapMismatch(true);
@@ -282,13 +296,16 @@ export class Game {
       this.tab.dispose();
     });
     // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
-    this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
-    this.offs.push(() => this.career.dispose());
+    // The guided first match is not a game of the career: its medal is kept instead (checkEnd).
+    if (!this.tutorial) {
+      this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
+      this.offs.push(() => this.career.dispose());
+    }
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
-    for (const line of session.chatLog || []) if (showChatLine(line)) this.hud.chat(line);
+    for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
     session.start();
 
     // Clients wait for the first full snapshot.
@@ -655,6 +672,11 @@ export class Game {
 
   onChat(line) {
     if (!this.hud || !showChatLine(line)) return;
+    // A computer player's line (DESIGN 10.1) is a taunt at the top centre with a snarl of drums and brass.
+    if (line.voice && !line.system) {
+      if (this.hud.showTaunt(line)) sfx.play('taunt');
+      return;
+    }
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
   }
@@ -690,15 +712,23 @@ export class Game {
     if (vs.gameOver && !this.overShown) {
       this.overShown = true;
       const wt = vs.gameOver.winningTeam;
-      const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      const survival = typeof vs.survivalActive === 'function' && vs.survivalActive();
+      const result = survival ? 'survival' : wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      // Trial of the Titans: the score is the wave reached; the career keeps the best (best.wave) for players who took part.
+      const wave = survival ? (Number.isInteger(vs.gameOver.wave) ? vs.gameOver.wave : (vs.survival() || {}).wave || 0) : 0;
+      const previous = survival ? getCareer().best.wave : 0;
       if (this.input) this.input.cancelMode();
-      const unlocked = this.career ? this.career.finish(result) : null;
+      let unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
+      const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
+      // The guided first match: a victory earns a medal by its game time, kept with the career.
+      const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
+      if (medal) unlocked = recordTutorial(medal.rank);
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -706,6 +736,15 @@ export class Game {
       sfx.play('defeat');
       this.hud.overlays.showDefeated();
     }
+  }
+
+  /** A step of the guided first match was finished: say so, chime, and ping the next objective on the minimap. */
+  onTutorialStep(next, done) {
+    if (this.disposed || !this.hud) return;
+    if (done) this.hud.message(`Done: ${done.title}.`, 'good', { icon: '✅' });
+    sfx.play('tier_up', { volume: 0.55 });
+    const t = next && this.tutorial ? this.tutorial.target() : null;
+    if (t) this.hud.minimap.ping(t.x, t.y, '#ffd66e');
   }
 
   entityPos(id) {
@@ -821,6 +860,27 @@ export class Game {
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system', { icon: '🏳️' });
         break;
+      case 'wave': {
+        // Trial of the Titans: a wave comes out of the map's edge.
+        const from = edgeName(vs.width, vs.height, ev.x, ev.y);
+        const boss = ev.boss ? UNITS[ev.boss] : null;
+        if (boss) {
+          hud.showBanner(`Wave ${ev.n}: ${boss.name} comes from the ${from}!`, 'titan');
+          sfx.play('summon_titan', { volume: 0.8 });
+        } else {
+          hud.showBanner(`Wave ${ev.n}: ${ev.count} monsters come from the ${from}!`, 'danger');
+          sfx.play('horn', { volume: 0.7 });
+        }
+        hud.minimap.ping(ev.x, ev.y, boss ? '#ffc840' : '#ff3a2a');
+        if (this.input) this.input.noteAlert(ev.x, ev.y);
+        break;
+      }
+      case 'waveCleared':
+        if (vs.me && !vs.me.defeated) {
+          hud.message(`Wave ${ev.n} is beaten! The gods reward you with ${ev.gold} gold.`, 'good', { icon: '🐉' });
+          sfx.play('tier_up', { volume: 0.6 });
+        }
+        break;
       case 'peaceEnd':
         hud.showBanner(`The ${PEACE_NAME} is over: war begins!`, 'danger');
         sfx.play('horn');
@@ -866,7 +926,28 @@ export class Game {
       }
       case 'effect': {
         const [name, volume] = effectSound(ev);
-        this.worldSound(name, ev.x, ev.y, volume);
+        // A telegraphed effect (a god power's bolts, a delayed blast) sounds when it lands.
+        if (ev.delay > 0) setTimeout(() => !this.disposed && this.worldSound(name, ev.x, ev.y, volume), ev.delay * 1000);
+        else this.worldSound(name, ev.x, ev.y, volume);
+        break;
+      }
+      case 'godPower': {
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (!pw) break;
+        const harm = isHarmfulPower(pw);
+        if (ev.player === me) {
+          hud.message(`${pw.name}!`, 'good', { icon: pw.icon });
+          sfx.play('summon_god', { volume: 0.6 });
+        } else if (vs.isAlly(ev.player)) {
+          hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
+          if (harm) hud.minimap.ping(ev.x, ev.y, '#ffd84a');
+        } else if (harm) {
+          // An enemy's strike or cataclysm: everyone hears of it, and sees where it fell.
+          if (pw.tier >= 3) hud.showBanner(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'danger');
+          else hud.message(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'alert', { icon: pw.icon });
+          hud.minimap.ping(ev.x, ev.y, '#ff3a2a');
+          if (this.input) this.input.noteAlert(ev.x, ev.y);
+        } else hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
         break;
       }
       default:
@@ -892,7 +973,10 @@ export class Game {
     const defeated = !!(vs.me && vs.me.defeated);
     if (defeated || (!this.ended && (vs.time || 0) >= 60)) {
       try {
-        this.career.finish('defeat');
+        // A Trial of the Titans left early counts as a trial that reached its current wave, not a loss.
+        const sv = typeof vs.survival === 'function' ? vs.survival() : null;
+        if (sv) this.career.finish('survival', { wave: sv.wave });
+        else this.career.finish('defeat');
       } catch (err) {
         console.warn('[game] career record failed', err);
       }
@@ -997,6 +1081,20 @@ export class Game {
     this.renderer = null;
     this.input = null;
     if (typeof window !== 'undefined' && window.__game === this) window.__game = null;
+  }
+
+  /** True when the game-over screen may offer Play Again (a game against the computer only). */
+  canRematch() {
+    return typeof this.onRematch === 'function' && !this.disposed;
+  }
+
+  /** Play Again: leave this match (counted like Return to Menu) and start the same lobby anew. */
+  rematch() {
+    if (!this.canRematch()) return;
+    const next = this.onRematch;
+    this.countLeave();
+    this.dispose();
+    next();
   }
 
   /** Leave the match and go back to the title screen. */

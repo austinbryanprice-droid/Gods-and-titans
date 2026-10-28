@@ -6,8 +6,9 @@ import { pantheonEmblem } from './menu-pantheons.js';
 import { PANTHEON_LIST, PANTHEONS } from '../data/pantheon-list.js';
 import { ACHIEVEMENTS, ACHIEVEMENT_GROUPS } from '../data/achievements.js';
 import { careerSummary } from '../game/career.js';
+import { medalLabel } from '../data/medals.js';
 
-const RESULT_TEXT = { victory: ['Won', '🏆'], defeat: ['Lost', '💀'], draw: ['Draw', '⚖️'] };
+const RESULT_TEXT = { victory: ['Won', '🏆'], defeat: ['Lost', '💀'], draw: ['Draw', '⚖️'], survival: ['Trial of the Titans', '🐉'] };
 
 /** 3725 s -> "1 h 2 min"; 125 -> "2 min". */
 export function formatPlayTime(seconds) {
@@ -34,6 +35,7 @@ function profile(c) {
     stat('Enemies slain', fmt(c.kills), c.best.kills ? `best ${fmt(c.best.kills)} in a game` : null),
     stat('Resources gathered', fmt(c.gathered), c.best.gathered ? `best ${fmt(c.best.gathered)}` : null),
     c.best.wave ? stat('Best survival wave', fmt(c.best.wave)) : null,
+    c.best.medal ? stat('Guided first match', medalLabel(c.best.medal)) : null,
     stat('Achievements', `${s.unlocked} / ${s.total}`),
   );
 }
