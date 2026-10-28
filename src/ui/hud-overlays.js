@@ -1,12 +1,12 @@
 // Full-screen HUD overlays: "Waiting for the host…", the in-game menu (F10:
 // resume, options, surrender, quit), the confirm dialog, the defeat / victory
-// screen with the per-player statistics table, the achievements the match unlocked and a
-// line on the player's career, and "the host has left".
+// screen with the after-game chronicle (src/ui/hud-chronicle.js), the achievements the match
+// unlocked and a line on the player's career, and "the host has left".
 import { getSettings, saveSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { PANTHEONS } from '../data/index.js';
-import { sanitizeName, sanitizeReason } from '../net/protocol.js';
-import { el, fmt, safeColor } from './hud-dom.js';
+import { sanitizeReason } from '../net/protocol.js';
+import { el } from './hud-dom.js';
+import { chronicleView } from './hud-chronicle.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
@@ -260,23 +260,6 @@ export class Overlays {
 
   // ---------------------------------------------------------------- end screens
 
-  statsTable(vs, winningTeam) {
-    const head = el('tr', null, ...['Player', 'Pantheon', 'Gathered', 'Trained', 'Kills', 'Losses', 'Buildings'].map((h) => el('th', null, h)));
-    const rows = (vs.players || []).map((p) => {
-      const st = p.stats || {};
-      const name = el('td', 'hud-st-name', el('i', 'hud-st-dot'), sanitizeName(p.name, `Player ${(p.i ?? 0) + 1}`));
-      name.firstChild.style.background = safeColor(p.color);
-      if (winningTeam !== null && winningTeam !== undefined && p.team === winningTeam) name.appendChild(el('span', 'hud-st-crown', ' 👑'));
-      if (p.i === vs.myIndex) name.appendChild(el('span', 'hud-st-you', ' (you)'));
-      const pan = PANTHEONS[p.pantheon];
-      return el('tr', p.defeated ? 'is-defeated' : null, name,
-        el('td', null, pan ? pan.name : p.pantheon || ''),
-        el('td', null, fmt(st.gathered)), el('td', null, fmt(st.unitsTrained)), el('td', null, fmt(st.kills)),
-        el('td', null, fmt(st.losses)), el('td', null, fmt(st.buildings)));
-    });
-    return el('table', 'hud-stats', el('thead', null, head), el('tbody', null, ...rows));
-  }
-
   /** The achievements this match unlocked, as cards (null when there are none). */
   unlockCards(list) {
     if (!Array.isArray(list) || !list.length) return null;
@@ -308,7 +291,7 @@ export class Overlays {
     return el('div', 'hud-go-career', `Career: ${c.wins} win${c.wins === 1 ? '' : 's'} in ${games} (${Math.round(s.winRate * 100)}%) · ${s.unlocked} of ${s.total} achievements`);
   }
 
-  /** Victory / defeat / draw screen with the statistics table and what the match unlocked. */
+  /** Victory / defeat / draw screen with the chronicle and what the match unlocked (and the lesson's medal). */
   showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
@@ -324,7 +307,7 @@ export class Overlays {
       el('div', 'hud-osub', sub),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.medalCard(medal),
-      this.statsTable(vs, winningTeam),
+      chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
       this.careerLine(),
       el('div', 'hud-obtns',
@@ -360,7 +343,7 @@ export class Overlays {
     const text = (typeof reason === 'string' && Object.hasOwn(END_TEXT, reason) && END_TEXT[reason]) || sanitizeReason(reason, 'The game has ended.');
     const vs = this.game.viewState;
     const node = this.panel('Game Ended', text,
-      vs && vs.players && vs.players.length ? this.statsTable(vs, vs.gameOver ? vs.gameOver.winningTeam : null) : null,
+      vs && vs.players && vs.players.length ? chronicleView(vs, vs.gameOver ? vs.gameOver.winningTeam : null, this.game.chronicle || null) : null,
       el('div', 'hud-obtns', btn('Return to Menu', 'mw-btn--primary', () => this.game.quitToMenu())));
     this.show('ended', node, null);
   }

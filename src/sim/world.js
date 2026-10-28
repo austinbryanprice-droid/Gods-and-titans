@@ -7,6 +7,7 @@ import {
 import { BUILDINGS, GOLD_MINE, PANTHEONS, PANTHEON_LIST, getUnitType, xpValue } from '../data/index.js';
 import { NO_MODS, computeMods, buildingMods, unitMods } from '../data/upgrades.js';
 import { canRank, rankForXp, rankBonus, killXp } from '../data/ranks.js';
+import { newStats, costValue } from '../data/score.js';
 import { RNG, hashSeed } from './rng.js';
 import { generateMap, mapOptions } from './mapgen.js';
 import { MapState } from './map-state.js';
@@ -106,7 +107,7 @@ export class World {
         mods: computeMods([], pantheon), // their pantheon's blessings and upgrades combined (data/upgrades.js computeMods)
         autoRepair: false, // idle worshippers mend nearby damaged buildings
         lastAlert: -Infinity,
-        stats: { gathered: 0, unitsTrained: 0, kills: 0, losses: 0, buildings: 0 },
+        stats: newStats(),
       };
     });
     this.multiTeam = new Set(this.players.map((p) => p.team)).size >= 2;
@@ -120,7 +121,7 @@ export class World {
       const mine = this.mineList[i] || null;
       this.placeStartWorkers(i, tc, mine);
     });
-    // The guided first match (5.12) has no creep camps, a head start for the learner and a guarded enemy camp.
+    // The guided first match (5.13) has no creep camps, a head start for the learner and a guarded enemy camp.
     if (isTutorial(setup)) tutorialStart(this);
     else spawnCreeps(this, mapData.camps || []);
     this.recomputePop();
@@ -530,13 +531,19 @@ export class World {
       e.forced = null;
       const p = this.players[e.owner];
       if (p) {
-        if (!expired) p.stats.losses++;
+        if (!expired) {
+          p.stats.losses++;
+          if (!e.summoned) p.stats.lostValue += costValue(e.def);
+        }
         if (!e.summoned) p.popUsed = Math.max(0, p.popUsed - e.def.pop);
         if (e.def.class === 'god' && !e.summoned) p.fallen[e.type] = { level: e.level, xp: e.xp };
       }
       if (killer !== undefined && killer >= 0 && this.areEnemies(killer, e.owner)) {
         const kp = this.players[killer];
-        if (kp) kp.stats.kills++;
+        if (kp) {
+          kp.stats.kills++;
+          if (!e.summoned) kp.stats.killValue += costValue(e.def);
+        }
         this.grantXp(e, killer);
         if (src.kind === 'unit') this.gainRankXp(src, killXp(e));
         if (e.owner === NEUTRAL && kp) {
@@ -548,6 +555,16 @@ export class World {
     } else if (e.kind === 'building') {
       this.emit({ type: 'death', id: e.id, t: e.type, o: e.owner, x: r2(e.x), y: r2(e.y), k: 'b' });
       this.releaseBuilding(e);
+      if (e.constructed && !e.def.wall) {
+        // A loss whoever (or whatever) brought it down, as for units: creatures, a surrender.
+        const p = this.players[e.owner];
+        if (p) p.stats.lostValue += costValue(e.def);
+        const kp = killer !== undefined && killer >= 0 && this.areEnemies(killer, e.owner) ? this.players[killer] : null;
+        if (kp) {
+          kp.stats.razed++;
+          kp.stats.killValue += costValue(e.def);
+        }
+      }
       if (killer !== undefined && killer >= 0 && src.kind === 'unit' && this.areEnemies(killer, e.owner)) this.gainRankXp(src, killXp(e));
     }
     if (killer !== undefined && killer >= 0 && !expired && this.areEnemies(killer, e.owner)) awardSpoils(this, e, killer);
@@ -805,6 +822,7 @@ export class World {
         const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith);
         p.faithRate += rate;
         p.faith += rate * DT;
+        p.stats.faith += rate * DT;
       }
     }
     accrueBlessedFaith(this);

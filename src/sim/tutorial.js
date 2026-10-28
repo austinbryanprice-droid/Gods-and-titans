@@ -1,4 +1,4 @@
-// The guided first match (DESIGN 5.12): a fixed solo setup on one small map, a sleeping enemy camp
+// The guided first match (DESIGN 5.13): a fixed solo setup on one small map, a sleeping enemy camp
 // and a head start for the learner. Everything here is decided by the setup's `tutorial` flag, so
 // the match stays a pure function of setup + commands like every other game.
 //
