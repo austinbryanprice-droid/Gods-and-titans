@@ -1,4 +1,4 @@
-// Relics (DESIGN 5.11): the bigger creep camps guard one each; a cleared camp drops it, a Worshipper
+// Relics (DESIGN 5.12): the bigger creep camps guard one each; a cleared camp drops it, a Worshipper
 // or a god carries it to its owner's Temple, where it gives a lasting bonus until the Temple falls.
 import test from 'node:test';
 import assert from 'node:assert/strict';

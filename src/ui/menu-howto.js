@@ -5,9 +5,11 @@ import { RANK_NAMES } from '../data/ranks.js';
 import { MANOR, mergeRule } from '../data/houses.js';
 import { RELIC_LIST } from '../data/relics.js';
 import { DELETE_CONFIRM_ABOVE } from './delete-key.js';
+import { SITE_ICON } from './hud-sites.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME, PEACE_BUILD_GAP,
+  SITE_CAPTURE_TIME, SITE_NEUTRALIZE_TIME, SITE_FAITH, SACRED_HOLD, SACRED_NAME,
   MAX_WALL_LINE, WALL_PLACE_RANGE, MAX_QUEUE,
 } from '../config.js';
 
@@ -145,7 +147,8 @@ export function renderHowToContent() {
       `The bigger camps, marked by a beam of light, guard a relic from world myth (${RELIC_NAMES}). When the camp's last creature falls the relic drops: right-click it with a Worshipper or a god, who carries it to your Temple. While it rests there it gives you a lasting bonus, such as more health for your soldiers or faster research. A carrier that dies drops it, and a Temple that falls frees what rested in it.`,
       `Soldiers from the Barracks earn experience for the enemies and buildings they destroy (Priests for the wounds they mend) and rise from ${RANK_NAMES[0]} to ${rankLadder()}. Each rank adds ${Math.round(RANK_DAMAGE * 100)}% damage, ${Math.round(RANK_HP * 100)}% health and ${RANK_ARMOR} armor, and small bronze, silver and gold diamonds over a soldier show its rank.`,
       `Worshippers can lay walls too: choose Wooden Wall in the build menu (W), then press on a tile and drag to lay a line of up to ${MAX_WALL_LINE} segments, which your Worshippers build one by one; a line goes up only within ${WALL_PLACE_RANGE} tiles of the Worshippers you order. Walls block every ground unit, yours too, so enemy armies have to break through them; ranged units can shoot over a wall at anything within range. Select a wall and press U to upgrade it to stone (${WALL_UPGRADE_TEXT}). A Tower raised on a wall, or in line with one, becomes part of the wall, and you can dismantle a segment (D) to open a gap of your own.`,
-      `The host can pick the ${PEACE_NAME} game mode in the lobby: for ${PEACE_MINUTES_TEXT} no player can harm another with weapons or spells and nobody can build within ${PEACE_BUILD_GAP} tiles of an enemy Town Center (that ground turns red when you place a building), so everyone has time to build up and mass armies for one great battle. A countdown beside the game clock shows what is left, creatures still fight, and a horn sounds when the peace ends.`),
+      `The host can pick the ${PEACE_NAME} game mode in the lobby: for ${PEACE_MINUTES_TEXT} no player can harm another with weapons or spells and nobody can build within ${PEACE_BUILD_GAP} tiles of an enemy Town Center (that ground turns red when you place a building), so everyone has time to build up and mass armies for one great battle. A countdown beside the game clock shows what is left, creatures still fight, and a horn sounds when the peace ends.`,
+      `Sacred sites ${SITE_ICON}, rings of standing stones around a glowing altar, lie between the bases. A Worshipper or Priest standing at one with no enemy near captures it in ${SITE_CAPTURE_TIME} seconds (a rival's site takes ${SITE_NEUTRALIZE_TIME} more to tear down first), and each site you hold gives ${SITE_FAITH} faith a second. Soldiers cannot capture, but any enemy at a site stops a capture. The chip beside the clock counts the sites your side holds. When the host turns on ${SACRED_NAME} in the lobby, a side that holds every site for ${SACRED_HOLD / 60} minutes in a row also wins.`),
     step(7, '🔱', 'Know your pantheon',
       'Every pantheon plays its own way. Each has two blessings that work from the first second, an elite soldier trained at the Barracks, its own look, and its own creatures, gods and Titan. Hover the pantheon chip at the top left of the battlefield, or open Pantheons on the menu, to read yours.'),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),

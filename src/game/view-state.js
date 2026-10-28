@@ -7,6 +7,7 @@
 import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
 import { peaceSeconds } from '../sim/peace.js';
+import { sacredVictoryOn } from '../sim/sacred.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
 const HISTORY = 8; // position samples kept per unit
@@ -75,6 +76,10 @@ export class ViewState {
     this.fields = [];
     this.reveals = [];
     this.relics = []; // RelicViews (DESIGN 6.3): { i, t, s: 'k'|'g'|'c'|'h', x?, y?, c?, b?, o? }
+    // Sacred sites (DESIGN 5.11): the map's places until the first snapshot, then the host's rows
+    // { x, y, o, p?, c?, cn? }; sacred is the Sacred Victory countdown { tm, end } or null.
+    this.sites = (this.map.sacred || []).map((p) => ({ x: p.x, y: p.y, o: -1 }));
+    this.sacred = null;
     this.gameOver = null;
     this.snapshot = null;
     this.felledAll = [];
@@ -163,6 +168,25 @@ export class ViewState {
     return this.isEnemy(owner) && !this.peaceActive();
   }
 
+  // ---------------------------------------------------------------- Sacred Sites
+
+  /** Is Sacred Victory on in this game? */
+  sacredVictoryOn() {
+    return sacredVictoryOn(this.setup) && this.sites.length > 0;
+  }
+
+  /** Seconds left on the Sacred Victory countdown at the latest snapshot (0 when nobody holds every site). */
+  sacredLeft() {
+    return this.sacred ? Math.max(0, this.sacred.end - this.time) : 0;
+  }
+
+  /** How many sacred sites a team holds. */
+  sitesHeld(team) {
+    let n = 0;
+    for (const s of this.sites) if (s.o >= 0 && this.teamOf(s.o) === team) n++;
+    return n;
+  }
+
   // ---------------------------------------------------------------- fog of war
 
   /** True if the point (tile coords) is visible to my team now. */
@@ -237,7 +261,7 @@ export class ViewState {
     return this.lastSeen.get(id) || null;
   }
 
-  // ---------------------------------------------------------------- relics (DESIGN 5.11)
+  // ---------------------------------------------------------------- relics (DESIGN 5.12)
 
   /**
    * Where a relic is drawn: its spot while guarded or on the ground, its carrier's (interpolated)
@@ -387,6 +411,8 @@ export class ViewState {
     this.fields = snap.fields || [];
     this.reveals = snap.reveals || [];
     this.relics = snap.relics || [];
+    if (Array.isArray(snap.sites)) this.sites = snap.sites.filter((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
+    this.sacred = snap.sacred && Number.isFinite(snap.sacred.end) ? snap.sacred : null;
     this.gameOver = snap.gameOver || null;
     this.revealAll = this.myIndex < 0 || !!this.gameOver || !!(this.me && this.me.defeated);
     this.snapshotCount++;

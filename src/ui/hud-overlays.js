@@ -142,6 +142,7 @@ export class Overlays {
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
+    const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
     const tabAlerts = choiceRow('When this tab is in the background', TAB_ALERT_OPTIONS, s.tabAlerts, async (v) => {
       const got = await chooseTabAlerts(v); // 'notify' asks the browser for permission first
@@ -212,6 +213,7 @@ export class Overlays {
         edge.row,
         tips.row,
         hints.row,
+        aiChat.row,
         alerts.row,
         tabAlerts.row,
         el('label', 'hud-vol', el('span', null, 'Sound effects'), vol, volText),
@@ -296,12 +298,15 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen with the statistics table and what the match unlocked. */
-  showGameOver({ result, winningTeam, unlocked = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const title = result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
-    const sub = result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
-      : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
+    // how: 'sacred' when a side held every sacred site long enough (DESIGN 5.11).
+    const sub = how === 'sacred'
+      ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
+      : result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
+        : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const node = el('div', `mw-panel hud-opanel hud-gameover is-${result}`,
       el('div', 'hud-go-crest', result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),

@@ -27,6 +27,7 @@ import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js'
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
 import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
+import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
 
 const ERRORS_GOLD = 'Not enough gold.';
@@ -74,6 +75,10 @@ export class World {
     // Decade of Peace: until peaceEnd (game seconds) players cannot harm each other (see canHarm).
     this.peaceEnd = peaceSeconds(setup);
     this.peace = this.peaceEnd > 0;
+    // Sacred Sites (5.11): the map's holy ground, and the Sacred Victory countdown ({ team, end } while a team holds them all).
+    this.sites = createSites(mapData.sacred);
+    this.sacredVictory = sacredVictoryOn(setup) && this.sites.length > 0;
+    this.sacred = null;
     this.perf = { lastTickMs: 0, commandErrors: 0, lastCommandError: '' };
 
     const pickRng = this.rng.fork('pantheons');
@@ -394,6 +399,11 @@ export class World {
     return peaceBlocksFootprint(centers, tx, ty, size);
   }
 
+  /** Is a footprint too close to a sacred site's center (5.11)? */
+  siteBlocks(tx, ty, size) {
+    return siteBlocksFootprint(this.sites, tx, ty, size);
+  }
+
   /**
    * Entities touching a circle: units by edge distance, buildings and mines by footprint distance.
    * @param {function} [filter] (entity) => boolean
@@ -689,6 +699,15 @@ export class World {
     if (!deferVictory) this.checkVictory();
   }
 
+  /** Sacred Victory (5.11): `team` held every sacred site for SACRED_HOLD seconds. */
+  winSacred(team) {
+    if (this.gameOver) return;
+    this.sacred = null;
+    this.winningTeam = team;
+    this.gameOver = { winningTeam: team, how: 'sacred' };
+    this.emit({ type: 'gameOver', winningTeam: team, how: 'sacred' });
+  }
+
   checkVictory() {
     if (this.gameOver || !this.multiTeam) return;
     const teams = new Set();
@@ -772,6 +791,7 @@ export class World {
     }
 
     updateRelics(this);
+    updateSites(this);
     this.accrueFaith();
     this.cleanup();
     this.checkDefeats();
@@ -798,6 +818,7 @@ export class World {
       }
     }
     accrueBlessedFaith(this);
+    accrueSiteFaith(this);
   }
 
   cleanup() {

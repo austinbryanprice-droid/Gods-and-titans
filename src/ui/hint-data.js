@@ -8,7 +8,8 @@
 //   hintParts(text)       → ['Press ', { key: 'Space' }, ' to …'] for building the DOM
 import { BUILDINGS, UNITS, eliteFor } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
-import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME, PEACE_BUILD_GAP } from '../config.js';
+import { MAX_QUEUE, MINE_SLOTS, POP_MAX, REVIVE_COST_MULT, SPELL_VS_BUILDING, TRADE_TAX_PCT, PEACE_NAME, PEACE_BUILD_GAP, SITE_FAITH } from '../config.js';
+import { SITE_ICON } from './hud-sites.js';
 import { MARKS, DEFAULT_MARK } from '../data/marks.js';
 import { isWallEntity } from './hud-data.js';
 
@@ -36,6 +37,8 @@ export function hintContext(vs) {
     pantheon: me.pantheon || null,
     ally: false,
     peace: typeof vs.peaceActive === 'function' ? vs.peaceActive() : false,
+    sites: Array.isArray(vs.sites) ? vs.sites.length : 0, // sacred sites on the map, and how many my side holds
+    sitesHeld: typeof vs.sitesHeld === 'function' ? vs.sitesHeld(vs.myTeam) : 0,
     workers: 0,
     army: 0,
     damaged: false,
@@ -123,6 +126,10 @@ export const HINTS = [
   { id: 'peace', text: `The ${PEACE_NAME} is on: nobody can attack yet. Expand, grow and mass your army. A horn sounds when it ends.`, when: (c) => c.peace },
   { id: 'peace-build', text: `During the ${PEACE_NAME} nobody can build within ${PEACE_BUILD_GAP} tiles of an enemy Town Center, so expand elsewhere until the horn sounds.`, when: (c) => c.peace },
   { id: 'peace-creeps', text: `Neutral creatures still fight during the ${PEACE_NAME}, so they remain fair game.`, when: (c) => c.peace },
+
+  // ---- sacred sites
+  { id: 'sites', text: `Sacred sites (${SITE_ICON} on the minimap) give ${SITE_FAITH} faith a second to whoever holds them. Send a Worshipper to stand at one.`, when: (c) => c.time > 90 && c.sites > 0 && c.sitesHeld === 0 },
+  { id: 'sites-guard', text: 'Any enemy unit at a sacred site stops a capture. Guard yours with a few soldiers.', when: (c) => c.sitesHeld > 0 && c.time > 300 },
 ];
 
 /** [[Key]] markers → parts for the DOM: ['Press ', { key: 'Space' }, ' to go.']. */

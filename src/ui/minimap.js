@@ -239,6 +239,23 @@ export class Minimap {
     }
     // Fog over terrain and remembered things, under live units.
     ctx.drawImage(this.fog, 0, 0, w, h);
+    // Sacred sites (DESIGN 5.11): public knowledge, so drawn over the fog: a diamond in the holder's colour, pale gold when nobody holds it.
+    const r = Math.max(3.2, k * 1.9);
+    for (const site of vs.sites || []) {
+      const x = site.x * k;
+      const y = site.y * k;
+      ctx.beginPath();
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x - r, y);
+      ctx.closePath();
+      ctx.fillStyle = site.o >= 0 ? this.colorOf(site.o) : '#fff0c4';
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, k * 0.45);
+      ctx.strokeStyle = site.p > 0 ? '#ffffff' : 'rgba(0,0,0,0.9)';
+      ctx.stroke();
+    }
     // Units.
     const dot = Math.max(2.2, k * 1.15);
     for (const e of vs.entities.values()) {
@@ -253,7 +270,7 @@ export class Minimap {
       ctx.fillStyle = this.colorOf(e.o);
       ctx.fillRect(x - s / 2, y - s / 2, s, s);
     }
-    // Relics on the ground or still guarded (DESIGN 5.11): a gold diamond, brighter once free.
+    // Relics on the ground or still guarded (DESIGN 5.12): a gold diamond, brighter once free.
     const rs = Math.max(3, k * 1.6);
     for (const r of vs.relics || []) {
       if ((r.s !== 'g' && r.s !== 'k') || !vs.relicKnown(r)) continue;

@@ -183,7 +183,7 @@ function peaceReport(world, player, state) {
 }
 
 /**
- * A smart order on a relic lying on the ground (DESIGN 5.11): the nearest unit that can carry it goes
+ * A smart order on a relic lying on the ground (DESIGN 5.12): the nearest unit that can carry it goes
  * to pick it up, the others walk along. Returns false when the relic is not there to be taken.
  */
 function smartRelic(world, player, units, cmd) {

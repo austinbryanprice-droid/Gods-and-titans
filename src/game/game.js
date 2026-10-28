@@ -104,16 +104,21 @@ function loadingTip(text) {
 /** AI players that never move: for clients, which run no AI, and the fallback when the AI module is missing. */
 const idleAI = () => ({ tick() {} });
 
-/** The AI factory, or null when src/ai/ai.js cannot be loaded. */
+/** The AI module's { createAI, createVoices }, or null when src/ai/ai.js cannot be loaded. */
 async function loadAI() {
   try {
     const mod = await import('../ai/ai.js');
-    if (typeof mod.createAI === 'function') return mod.createAI;
+    if (typeof mod.createAI === 'function') return { createAI: mod.createAI, createVoices: typeof mod.createVoices === 'function' ? mod.createVoices : null };
     console.warn('[game] src/ai/ai.js has no createAI; AI players will stand still.');
   } catch (err) {
     console.warn('[game] AI module unavailable; AI players will stand still.', err && err.message ? err.message : err);
   }
   return null;
+}
+
+/** Is a chat line shown? An AI's in-character line (DESIGN 10.1) only while the AI chatter setting is on. */
+export function showChatLine(line) {
+  return !(line && line.voice) || getSettings().aiChat !== false;
 }
 
 /** A single-player match: this machine hosts it and nobody else is connected. */
@@ -177,9 +182,10 @@ export class Game {
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
+   * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, root = null, createAI = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.session = session;
     this.settings = settings || getSettings();
@@ -215,7 +221,7 @@ export class Game {
     this.stats = { frames: 0, cpuMs: 0, maxMs: 0, renderMs: 0, hudMs: 0, last: [] };
     this.errors = [];
     if (typeof window !== 'undefined') window.__game = this;
-    this.ready = this.init({ createAI, Renderer }).catch((err) => {
+    this.ready = this.init({ createAI, createVoices, Renderer }).catch((err) => {
       console.error('[game] failed to start', err);
       this.fail(err);
       throw err;
@@ -233,24 +239,25 @@ export class Game {
 
   // ---------------------------------------------------------------- startup
 
-  async init({ createAI, Renderer }) {
+  async init({ createAI, createVoices, Renderer }) {
     this.root.hidden = false;
     this.setLoading(true);
     // Only a launch that runs the match here needs the AI module (a client's host runs the AIs).
     const needsAI = !createAI && !this.session && !(this.launch && this.launch.role === 'client');
     const [loadedAI, RendererClass] = await Promise.all([
-      createAI ? Promise.resolve(createAI) : needsAI ? loadAI() : Promise.resolve(idleAI),
+      createAI ? Promise.resolve({ createAI, createVoices }) : needsAI ? loadAI() : Promise.resolve({ createAI: idleAI, createVoices: null }),
       Renderer ? Promise.resolve(Renderer) : import('../render/game-renderer.js').then((m) => m.GameRenderer),
     ]);
     if (this.disposed) return;
     const aiFailed = needsAI && !loadedAI;
-    const aiFactory = loadedAI || idleAI;
+    const aiFactory = (loadedAI && loadedAI.createAI) || idleAI;
+    const voiceFactory = (loadedAI && loadedAI.createVoices) || null;
 
     if (!this.session) {
       const l = this.launch;
       if (!l || !l.setup) throw new Error('Game needs a launch or a session.');
       if (l.role === 'client') this.session = new ClientSession({ setup: l.setup, myIndex: l.myIndex, conn: l.conn });
-      else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory });
+      else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
     }
     const session = this.session;
     this.viewState = session.viewState;
@@ -276,7 +283,7 @@ export class Game {
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
-    for (const line of session.chatLog || []) this.hud.chat(line);
+    for (const line of session.chatLog || []) if (showChatLine(line)) this.hud.chat(line);
     session.start();
 
     // Clients wait for the first full snapshot.
@@ -642,7 +649,7 @@ export class Game {
   // ---------------------------------------------------------------- events
 
   onChat(line) {
-    if (!this.hud) return;
+    if (!this.hud || !showChatLine(line)) return;
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
   }
@@ -686,7 +693,7 @@ export class Game {
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();

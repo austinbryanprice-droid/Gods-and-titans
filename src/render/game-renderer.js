@@ -29,6 +29,7 @@ import { createTerrain, WATER_LEVEL } from './terrain.js';
 import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } from './overlays.js';
 import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
+import { SacredSiteLayer } from './sacred-sites.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
 import { RelicLayer } from './relics.js';
@@ -269,6 +270,13 @@ export class GameRenderer {
     this.overlayRoot = new THREE.Group();
     this.overlayRoot.name = 'overlays';
     overlayScene.add(this.overlayRoot);
+
+    // sacred sites (DESIGN 5.11): built once from the map; the paving clears the props under it
+    this.sacredSites = new SacredSiteLayer(this.entityRoot, this.map.sacred || [], this.heightFn);
+    for (const p of this.map.sacred || []) {
+      this.decor.hideInRect(p.x - 3, p.y - 3, p.x + 3, p.y + 3);
+      this.groundCover.hideInRect(p.x - 2.9, p.y - 2.9, p.x + 2.9, p.y + 2.9);
+    }
 
     this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: Q.vfx });
     this.relicLayer = new RelicLayer(scene, (x, y) => heightAt(this.map, x, y));
@@ -1247,6 +1255,7 @@ export class GameRenderer {
     this.terrain.update(this.time);
     setBuildingTime(this.time);
     this.vfx.update(dt);
+    this.sacredSites.update(dt, vs.sites, (o) => this.colorOf(o));
     this.updateOverlays(dt);
     this.updateLook();
     this.updateLamps();
@@ -2339,6 +2348,7 @@ export class GameRenderer {
     this.mines.clear();
     this.farUnits.dispose();
     this.relicLayer.dispose();
+    this.sacredSites.dispose();
     this.placement.dispose();
     this.blobs.dispose();
     this.stars.dispose();

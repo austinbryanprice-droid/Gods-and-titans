@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Relics (DESIGN 5.11): a fixed-seed solo match. Stills of a camp guarding its relic under the
+// Relics (DESIGN 5.12): a fixed-seed solo match. Stills of a camp guarding its relic under the
 // beam, the relic lying free once the camp is cleared, a Worshipper carrying it, and the relic over
 // the Temple with the selection panel and the relic chip's tooltip.
 //   node tools/shot-relics.mjs [--port 8322] [--out DIR] [--prefix relics] [--quality low]

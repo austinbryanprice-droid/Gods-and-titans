@@ -1,4 +1,4 @@
-// Relics (DESIGN 5.11): once a camp near home is cleared, send the nearest Worshipper to pick up its
+// Relics (DESIGN 5.12): once a camp near home is cleared, send the nearest Worshipper to pick up its
 // relic and carry it to a Temple (the sim walks it there). Only when the AI has a finished Temple and
 // no enemy stands near the relic; one Worshipper per relic. A Worshipper on a relic errand is left
 // alone by the economy (scan.js workerJob: 'relic').

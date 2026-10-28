@@ -1,4 +1,4 @@
-// Relics on the client (DESIGN 5.11): what the ViewState makes of the snapshot's relic list, the
+// Relics on the client (DESIGN 5.12): what the ViewState makes of the snapshot's relic list, the
 // HUD's chip and texts, the stats the selection panel shows with a relic held, and the alerts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

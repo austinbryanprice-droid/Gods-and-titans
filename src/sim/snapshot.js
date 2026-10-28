@@ -3,6 +3,7 @@ import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
 import { relicViews } from './relics.js';
+import { siteViews } from './sacred.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -138,6 +139,8 @@ export function buildSnapshot(world) {
     relics: relicViews(world),
     events: world.events,
     felled: world.felled,
-    gameOver: world.gameOver ? { winningTeam: world.gameOver.winningTeam } : null,
+    sites: siteViews(world), // sacred sites (5.11): { x, y, o, p?, c?, cn? }
+    sacred: world.sacred ? { tm: world.sacred.team, end: world.sacred.end } : null, // Sacred Victory countdown
+    gameOver: world.gameOver ? { ...world.gameOver } : null,
   };
 }
