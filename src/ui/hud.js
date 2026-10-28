@@ -24,6 +24,7 @@ import { Overlays } from './hud-overlays.js';
 import { Minimap } from './minimap.js';
 import { TipsView } from './hud-tips.js';
 import { TutorialView, GuidePointer, lightCard } from './hud-tutorial.js';
+import { CampaignView, missionPointer } from './hud-campaign.js';
 import { HintsView, HintScheduler } from './hud-hints.js';
 import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
@@ -91,13 +92,15 @@ export class Hud {
       getInsets: () => ({ top: this.top.offsetHeight || 0, bottom: this.bottom.offsetHeight || 0 }),
     });
     // The guided first match (hud-tutorial.js): a pin over the current objective, under the panels too.
-    this.guidePointer = game.tutorial ? new GuidePointer({
+    // A campaign mission (hud-campaign.js) points at its current objective the same way.
+    const pointerOpts = {
       root,
-      director: game.tutorial,
       viewState: this.vs,
       getRenderer: () => game.renderer || null,
       getInsets: () => ({ top: this.top.offsetHeight || 0, bottom: this.bottom.offsetHeight || 0 }),
-    }) : null;
+    };
+    this.guidePointer = game.tutorial ? new GuidePointer({ ...pointerOpts, director: game.tutorial })
+      : game.mission ? missionPointer(pointerOpts) : null;
 
     // Top bar.
     this.menuBtn = el('button', 'hud-menu-btn', el('span', 'hud-menu-ico', '☰'), el('span', null, 'Menu'), el('kbd', null, 'F10'));
@@ -275,11 +278,14 @@ export class Hud {
 
     // The guided first match shows its objectives where the checklist would be (and no gameplay tips).
     this.tutorial = game.tutorial ? new TutorialView(root, { director: game.tutorial }) : null;
+    // A campaign mission shows its objectives there too (and no checklist or gameplay tips).
+    this.missionView = !game.tutorial && game.mission ? new CampaignView(root, { viewState: this.vs }) : null;
+    const guided = () => !!(this.tutorial || this.missionView);
     // New players get the "getting started" checklist until they close or finish it.
     this.tips = null;
-    if (!getSettings().tipsDismissed && !this.tutorial && !game.replay) this.showTips();
+    if (!getSettings().tipsDismissed && !guided()) this.showTips();
     this.offs.push(onSettingsChange((st, changed) => {
-      if (!changed.includes('tipsDismissed') || this.tutorial || game.replay) return;
+      if (!changed.includes('tipsDismissed') || guided()) return;
       if (st.tipsDismissed) this.hideTips();
       else this.showTips();
     }));
@@ -391,6 +397,7 @@ export class Hud {
       this.tutorial.update(now);
       lightCard(this.cardView, this.tutorial.guide());
     }
+    if (this.missionView) this.missionView.update(now);
     this.minimap.update(now);
     this.marksLayer.update(now);
     if (this.guidePointer) this.guidePointer.update(now);
@@ -399,7 +406,7 @@ export class Hud {
     this.powerbar.update(vs, m && m.kind === 'target' && m.order === 'power' ? m.power : null);
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
-    if (!this.tutorial && !game.replay) this.hintTimer.update();
+    if (!this.tutorial && !this.missionView && !game.replay) this.hintTimer.update();
     this.hints.update();
   }
 
@@ -769,6 +776,7 @@ export class Hud {
     this.marksLayer.dispose();
     if (this.guidePointer) this.guidePointer.dispose();
     if (this.tutorial) this.tutorial.dispose();
+    if (this.missionView) this.missionView.dispose();
     this.hideTips();
     this.hintTimer.dispose();
     this.hints.dispose();

@@ -199,6 +199,8 @@ test('sanitizeReplay keeps a good record and refuses a bad one', () => {
   assert.equal(clean.ticks, record.ticks);
   assert.equal(sanitizeReplay({ ...record, setup: { ...record.setup, twist: 'golden' } }).setup.twist, 'golden', 'a daily challenge\'s twist stays');
   assert.equal(sanitizeReplay({ ...record, setup: { ...record.setup, twist: 'nope' } }).setup.twist, undefined);
+  assert.equal(sanitizeReplay({ ...record, setup: { ...record.setup, campaign: 'shore' } }).setup.campaign, 'shore', 'a campaign mission stays');
+  assert.equal(sanitizeReplay({ ...record, setup: { ...record.setup, campaign: 'toString' } }).setup.campaign, undefined);
   assert.equal(sanitizeReplay({ ...record, format: 99 }), null);
   assert.equal(sanitizeReplay({ ...record, cmds: [[5, 0, { type: 'nope' }]] }), null);
   assert.equal(sanitizeReplay({ ...record, cmds: [[5, 9, { type: 'stop' }]] }), null, 'no such player');

@@ -14,6 +14,7 @@ import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
 import { MEDALS } from '../data/medals.js';
+import { CAMPAIGN } from '../data/campaign.js';
 import { SLOTS, saveInfo, savedAgo } from '../game/save-store.js';
 
 const END_TEXT = {
@@ -377,13 +378,16 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
-  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null, mission = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const survival = result === 'survival';
-    const title = survival ? `Wave ${wave}` : result === 'victory' ? (tutorial ? 'Lesson Complete' : 'Victory') : result === 'defeat' ? 'Defeat' : 'Draw';
+    const title = survival ? `Wave ${wave}`
+      : mission && result !== 'draw' ? (result === 'victory' ? 'Mission Complete' : 'Mission Failed')
+        : result === 'victory' ? (tutorial ? 'Lesson Complete' : 'Victory') : result === 'defeat' ? 'Defeat' : 'Draw';
     // how: 'sacred' when a side held every sacred site long enough (DESIGN 5.11).
     const sub = survival ? survivalLine(wave)
+      : mission && result !== 'draw' ? (result === 'victory' ? mission.m.victory : mission.m.defeat)
       : how === 'sacred'
         ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
         : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
@@ -399,15 +403,44 @@ export class Overlays {
       dailyLine(daily),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.medalCard(medal),
+      this.missionLine(mission),
       chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
       this.careerLine(),
-      el('div', 'hud-obtns',
-        this.canRematch() ? btn('Play Again', 'mw-btn--primary', () => this.game.rematch()) : null,
-        this.canWatchReplay() ? btn('Watch Replay', 'mw-btn--ghost', () => this.game.watchReplay()) : null,
-        btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
-        btn('Keep Watching', 'mw-btn--ghost', () => this.hide())));
+      el('div', 'hud-obtns', ...this.gameOverButtons(mission)));
     this.show('gameover', node, () => this.hide());
+  }
+
+  /** Play Again (or a mission's Next Mission and Retry), Watch Replay, Return to Menu and Keep Watching. */
+  gameOverButtons(mission) {
+    const watch = btn('Keep Watching', 'mw-btn--ghost', () => this.hide());
+    const replay = this.canWatchReplay() ? btn('Watch Replay', 'mw-btn--ghost', () => this.game.watchReplay()) : null;
+    if (mission) {
+      const next = mission.next && typeof this.game.nextMission === 'function' && typeof this.game.onNextMission === 'function';
+      return [
+        next ? btn('Next Mission', 'mw-btn--primary', () => this.game.nextMission()) : null,
+        this.canRematch() ? btn(mission.record ? 'Play It Again' : 'Retry Mission', next ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.rematch()) : null,
+        replay,
+        btn('Campaign', 'mw-btn--ghost', () => this.game.quitToMenu()),
+        watch,
+      ];
+    }
+    return [
+      this.canRematch() ? btn('Play Again', 'mw-btn--primary', () => this.game.rematch()) : null,
+      replay,
+      btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
+      watch,
+    ];
+  }
+
+  /** A won mission: a first win opens the next one, a replay may beat the best time; the last one ends the chapter. */
+  missionLine(mission) {
+    if (!mission || !mission.record) return null;
+    const r = mission.record;
+    const text = r.chapterDone ? `${CAMPAIGN.chapter} complete! ${CAMPAIGN.title} is told.`
+      : r.first ? (mission.next ? `The next mission is open: ${mission.next.title}.` : `Mission won in ${formatClock(r.best)}.`)
+        : r.best < r.previous ? `A new best time! ${formatClock(r.best)} (was ${formatClock(r.previous)}).` : `Your best time: ${formatClock(r.best)}.`;
+    return el('div', `hud-go-best${r.first || r.best < r.previous ? ' is-new' : ''}`, text);
   }
 
   /** Watch Replay: the host kept this match (Game.canWatchReplay). */
