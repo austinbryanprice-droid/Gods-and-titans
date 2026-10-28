@@ -75,3 +75,14 @@ test('score: economy, military and civilization parts', () => {
   assert.equal(s.total, 470);
   assert.deepEqual(scoreOf(null), { economy: 0, military: 0, civ: 0, total: 0 });
 });
+
+test('a building lost without an enemy player behind it still counts as lost (a surrender)', () => {
+  const w = makeWorld();
+  place(w, 1, 'house', 30, 32);
+  w.issueCommand(1, { type: 'surrender' });
+  run(w, 0.2);
+  const [a, b] = w.getSnapshot().players;
+  assert.equal(b.defeated, true);
+  assert.ok(b.stats.lostValue >= costValue(BUILDINGS.house) + costValue(BUILDINGS.town_center), `lost ${b.stats.lostValue}`);
+  assert.equal(a.stats.razed, 0, 'nobody razed them');
+});

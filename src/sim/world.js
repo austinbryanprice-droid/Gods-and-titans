@@ -542,14 +542,15 @@ export class World {
     } else if (e.kind === 'building') {
       this.emit({ type: 'death', id: e.id, t: e.type, o: e.owner, x: r2(e.x), y: r2(e.y), k: 'b' });
       this.releaseBuilding(e);
-      if (killer !== undefined && killer >= 0 && this.areEnemies(killer, e.owner) && e.constructed && !e.def.wall) {
-        const kp = this.players[killer];
+      if (e.constructed && !e.def.wall) {
+        // A loss whoever (or whatever) brought it down, as for units: creatures, a surrender.
+        const p = this.players[e.owner];
+        if (p) p.stats.lostValue += costValue(e.def);
+        const kp = killer !== undefined && killer >= 0 && this.areEnemies(killer, e.owner) ? this.players[killer] : null;
         if (kp) {
           kp.stats.razed++;
           kp.stats.killValue += costValue(e.def);
         }
-        const p = this.players[e.owner];
-        if (p) p.stats.lostValue += costValue(e.def);
       }
       if (killer !== undefined && killer >= 0 && src.kind === 'unit' && this.areEnemies(killer, e.owner)) this.gainRankXp(src, killXp(e));
     }
