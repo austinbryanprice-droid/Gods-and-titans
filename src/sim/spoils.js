@@ -37,6 +37,7 @@ export function awardSpoils(world, dead, killer) {
     const faith = Math.round(perks.sacrifice * (dead.def.pop || 0));
     if (faith > 0) {
       kp.faith += faith;
+      kp.stats.faith += faith;
       world.emit({ type: 'bounty', player: killer, amount: faith, x, y, res: 'f' });
     }
   }
@@ -65,5 +66,6 @@ export function accrueBlessedFaith(world) {
     if (rate <= 0) continue;
     p.faithRate += rate;
     p.faith += rate * DT;
+    p.stats.faith += rate * DT;
   }
 }

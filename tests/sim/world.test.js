@@ -17,7 +17,7 @@ test('snapshot shape: top level and player view', () => {
   for (const k of ['i', 'name', 'team', 'pantheon', 'color', 'kind', 'gold', 'wood', 'faith', 'faithRate', 'pop', 'popCap', 'tier', 'defeated', 'gods', 'fallen', 'titan', 'stats']) {
     assert.ok(k in p, `player.${k}`);
   }
-  assert.deepEqual(Object.keys(p.stats).sort(), ['buildings', 'gathered', 'kills', 'losses', 'unitsTrained']);
+  assert.deepEqual(Object.keys(p.stats).sort(), ['army', 'buildings', 'faith', 'gathered', 'gold', 'killValue', 'kills', 'losses', 'lostValue', 'razed', 'unitsTrained', 'wood']);
   // events are cleared by getSnapshot
   assert.deepEqual(w.getSnapshot().events, []);
 });
