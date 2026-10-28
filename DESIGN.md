@@ -655,6 +655,49 @@ for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the 
   mine sizes are not scaled for the mode. With no mines left the war is fought off that bank
   (one side was down to about 60 gold ten minutes in).
 
+### 5.11 Trial of the Titans (survival game mode)
+An optional game mode the host picks in the lobby (third button of the Game mode row; one mode at a time, so
+picking it clears a Decade of Peace and the other two buttons clear it): `GameSetup.survival` is `true`. Every
+player and AI plays on team 1 (`buildSetup`, and `World` forces it too), so one player alone may start it and the
+lobby's team column reads "Together". Rules live in `src/sim/survival.js` (the schedule helpers are shared with the
+HUD) and run from `World.tick` (`updateSurvival`, before the units move):
+- **The clock.** Wave n comes out at `SURVIVAL_FIRST_WAVE + (n − 1) × SURVIVAL_INTERVAL` game seconds (2:00, then every
+  90 s), whether the last wave is beaten or not, so a slow defence is buried. Every `SURVIVAL_BOSS_EVERY` (5th) wave
+  a hostile Titan of a random pantheon leads it.
+- **What a wave holds** (`wavePlan`, deterministic from a `${seed}:survival` RNG): creatures of every pantheon worth
+  `waveBudget(n, players) = round((4 + 3n) × (0.6 + 0.4 × players))` population (60% of it on a boss wave). Waves 1–2 are
+  tier 1 only, tier 2 joins at wave 3 and tier 3 at wave 7; flyers stay out until wave 6 (the first Barracks has no
+  archers yet) and are never more than a third of a wave. Health and damage grow every wave (`waveBoost`: ×1.33 /
+  ×1.25 at wave 6, ×1.69 / ×1.52 at 11, ×3.27 / ×2.48 at 26) through `u.boost`, applied in `applyUnitStats`. The boss
+  Titan has `bossBoost(n, players)`: health × n/10 × (0.7 + 0.3 × players) (half a Titan at wave 5 alone, a whole one at
+  wave 10), damage × (0.6 + 0.04n). At most `SURVIVAL_MAX_ALIVE` (120) wave monsters live at once; a wave that would pass
+  it comes smaller.
+- **Where.** Each wave comes out of one edge point (two from wave 5, three from wave 15) of the eight around the map
+  (corners and the middle of each side, 3 tiles in) that lie at least 30 tiles from every player building, as
+  neutral (owner −1) units with no camp, so no leash. Each group gets an attack-move on the nearest building of a
+  player still in the game (walls are broken through on the way, not hunted); once a second, any wave monster left
+  with no order (its target fell, its fight is over) is sent on to the next nearest one.
+- **Pay.** Killing a wave monster pays the usual creep bounty. When the last monster of wave n dies, every player
+  still in the game gets `waveReward(n) = 40 + 20n` gold once, with `{ type: 'waveCleared', n, gold }`.
+- **The end.** Players fall as in 5.8 (no buildings left). Nobody wins: when the last player falls the game is over
+  with `gameOver: { winningTeam: null, wave }`, the wave reached (the last that came out) as the score. Camps and the
+  rest of the rules are unchanged.
+- **Net.** The setup flag (validateSetup keeps it only when exactly `true` and there is no peace), a top-level
+  snapshot record `sv: { w, m }` (waves out, wave monsters alive) that rides the delta's "everything else" keys, the
+  `wave { n, count, boss, x, y }` and `waveCleared { n, gold }` event shapes, and `gameOver.wave`.
+- **Client.** `ViewState.survival()` → `{ wave, alive, next, nextBoss }` (next from the clock). A wave chip beside the
+  game clock ("Wave 1 in 2:00", then "Wave 3 · 7 left · next 1:12"; gold when a Titan leads the next wave, pulsing
+  in its last 10 s), an opening line, a "Wave n comes in 10 s" line, a banner and a minimap ping when a wave comes out
+  (with the Titan's name and the summon sound on a boss wave), a gold line when one is beaten, a boss wave flashes the
+  tab, and the music heats up. The end screen is titled "Wave n" with the best wave beside it.
+- **Best wave.** `src/game/survival-record.js` keeps `{ best, games, last }` in localStorage (`mythicwar-survival`):
+  `recordSurvivalWave` once per finished trial (by the Game, for a player who took part), `bestSurvivalWave()` for
+  the lobby line ("Your best: wave 12.") and the career profile.
+- **AI.** `scan` adds the living wave monsters to `s.enemyUnits`, so the usual threat and defence logic turns out
+  against them and helps allies; with no rival players it never launches an attack.
+  Measured (seeds 3 to 9, AIs only): one Easy AI falls at wave 20 (30:44), one Normal AI at wave 21 (32:37), two Normal
+  AIs at wave 25 (38:44), four Hard AIs at wave 28 (42:50, the 120-monster cap reached); every AI beat waves 1 to 10.
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -670,6 +713,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 {
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
+  survival: true,              // optional, Trial of the Titans (5.11): every player on team 1 against monster waves
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -761,7 +805,8 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
-  gameOver: null | { winningTeam },
+  gameOver: null | { winningTeam, wave? },  // wave: the Trial of the Titans' score (5.11)
+  sv,                         // Trial of the Titans only: { w: waves out so far, m: wave monsters alive }
 }
 EntityView = {
   id, k,          // 'u' unit | 'b' building | 'm' gold mine
@@ -818,6 +863,8 @@ EntityView = {
 { type: 'titanSummoning', player, t }                                // broadcast drama
 { type: 'playerDefeated', player }
 { type: 'peaceEnd' }                                                 // the Decade of Peace is over (once)
+{ type: 'wave',    n, count, boss, x, y }                            // Trial of the Titans: wave n came out at (x, y); boss = Titan type or ''
+{ type: 'waveCleared', n, gold }                                     // every monster of wave n is dead; each survivor got gold
 { type: 'gameOver', winningTeam }
 ```
 
@@ -965,7 +1012,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), survival (true for the Trial of the Titans, 5.11; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1005,6 +1052,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   vs.on(type | '*', cb) → unsubscribe  // fired for every event in each pushed snapshot; also 'snapshot'
   vs.getEntity(id)
   vs.peaceLeft(); vs.peaceActive(); vs.canHarm(owner) // Decade of Peace (5.10): setup.peaceMinutes vs the snapshot time; may my units hurt this owner now
+  vs.survivalActive(); vs.survival() // Trial of the Titans (5.11): { wave, alive, next, nextBoss } from snapshot.sv and the wave clock, or null
   ```
   Host local view uses a 50 ms delay; clients use `INTERP_DELAY_MS`.
 
@@ -1574,8 +1622,9 @@ per-frame budget, so a revealed army appears over a few frames.
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
-  Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
-  30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
+  Random, team, AI difficulty; presets; map size; game mode (Standard, Decade of Peace with
+  30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.11; the host's pick;
+  clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
@@ -1871,7 +1920,8 @@ big fights); retreat badly hurt gods to base. It combines no Houses into Manors 
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
-population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
+population cap and easy stays well below it. In the Trial of the Titans (5.11) the wave monsters count as enemy
+units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot.

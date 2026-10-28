@@ -79,3 +79,10 @@ test('team pings and markers are explained: the gestures, the buttons and who se
   assert.match(text, /Beside the minimap: Ping, Attack, Defend, Help and Gather/);
   assert.match(text, /Only your teammates/);
 });
+
+test('the Trial of the Titans game mode is explained with its clock and its boss waves', () => {
+  assert.match(text, /Or the Trial of the Titans: every player and AI in the lobby plays on one team/);
+  assert.match(text, /the first after 2 minutes and then one every 90 seconds/);
+  assert.match(text, /a hostile Titan leading every 5th wave/);
+  assert.match(text, /your score is the wave you reached/);
+});

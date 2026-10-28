@@ -17,6 +17,13 @@ const END_TEXT = {
   'game-over': 'The host has closed the game.',
 };
 
+/** The line under a finished Trial of the Titans. */
+function survivalLine(wave) {
+  if (wave <= 0) return 'The Trial of the Titans is over before the first wave even came.';
+  if (wave === 1) return 'The Trial of the Titans is over: the first wave broke your city.';
+  return `The Trial of the Titans is over: your people held out to wave ${wave}.`;
+}
+
 function btn(text, cls, onClick) {
   const b = el('button', `mw-btn hud-obtn ${cls || ''}`, text);
   b.type = 'button';
@@ -273,16 +280,22 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen with the statistics table. */
-  showGameOver({ result, winningTeam }) {
+  showGameOver({ result, winningTeam, wave = 0, record = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
-    const title = result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
-    const sub = result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
+    const survival = result === 'survival';
+    const title = survival ? `Wave ${wave}` : result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
+    const sub = survival ? survivalLine(wave)
+      : result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
       : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
-    const node = el('div', `mw-panel hud-opanel hud-gameover is-${result}`,
-      el('div', 'hud-go-crest', result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
+    const best = survival && record ? el('div', `hud-go-best${record.isNew ? ' is-new' : ''}`, record.isNew
+      ? (record.previous > 0 ? `A new best! Your old best was wave ${record.previous}.` : 'Your first trial: the bar is set.')
+      : `Your best: wave ${record.best}.`) : null;
+    const node = el('div', `mw-panel hud-opanel hud-gameover is-${survival ? 'defeat is-survival' : result}`,
+      el('div', 'hud-go-crest', survival ? '🐉' : result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
+      best,
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.statsTable(vs, winningTeam),
       el('div', 'hud-obtns',

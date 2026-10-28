@@ -12,6 +12,8 @@ import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
+import { edgeName } from '../sim/survival.js';
+import { recordSurvivalWave } from './survival-record.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
@@ -673,14 +675,18 @@ export class Game {
     if (vs.gameOver && !this.overShown) {
       this.overShown = true;
       const wt = vs.gameOver.winningTeam;
-      const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      const survival = typeof vs.survivalActive === 'function' && vs.survivalActive();
+      const result = survival ? 'survival' : wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      // Trial of the Titans: the score is the wave reached, kept in this browser (survival-record.js) for players who took part.
+      const wave = survival ? (Number.isInteger(vs.gameOver.wave) ? vs.gameOver.wave : (vs.survival() || {}).wave || 0) : 0;
+      const record = survival && vs.me ? recordSurvivalWave(wave, { players: vs.players.length, pantheon: vs.me.pantheon }) : null;
       if (this.input) this.input.cancelMode();
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, wave, record });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -802,6 +808,27 @@ export class Game {
       }
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system', { icon: '🏳️' });
+        break;
+      case 'wave': {
+        // Trial of the Titans: a wave comes out of the map's edge.
+        const from = edgeName(vs.width, vs.height, ev.x, ev.y);
+        const boss = ev.boss ? UNITS[ev.boss] : null;
+        if (boss) {
+          hud.showBanner(`Wave ${ev.n}: ${boss.name} comes from the ${from}!`, 'titan');
+          sfx.play('summon_titan', { volume: 0.8 });
+        } else {
+          hud.showBanner(`Wave ${ev.n}: ${ev.count} monsters come from the ${from}!`, 'danger');
+          sfx.play('horn', { volume: 0.7 });
+        }
+        hud.minimap.ping(ev.x, ev.y, boss ? '#ffc840' : '#ff3a2a');
+        if (this.input) this.input.noteAlert(ev.x, ev.y);
+        break;
+      }
+      case 'waveCleared':
+        if (vs.me && !vs.me.defeated) {
+          hud.message(`Wave ${ev.n} is beaten! The gods reward you with ${ev.gold} gold.`, 'good', { icon: '🐉' });
+          sfx.play('tier_up', { volume: 0.6 });
+        }
         break;
       case 'peaceEnd':
         hud.showBanner(`The ${PEACE_NAME} is over: war begins!`, 'danger');

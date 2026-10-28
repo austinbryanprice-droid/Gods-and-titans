@@ -93,6 +93,8 @@ export const EVENT_SHAPES = [
   ['rankUp', 'id', 'rank'],
   ['peaceEnd'],
   ['bounty', 'player', 'amount', 'x', 'y', 'res'],
+  ['wave', 'n', 'count', 'boss', 'x', 'y'], // Trial of the Titans (DESIGN 5.11)
+  ['waveCleared', 'n', 'gold'],
 ].map(([type, ...keys]) => ({ type, keys }));
 const SHAPES_BY_TYPE = new Map();
 EVENT_SHAPES.forEach((s, code) => {

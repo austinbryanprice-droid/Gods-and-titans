@@ -113,6 +113,7 @@ export function sanitizeLobbyState(state) {
     mapSize: MAP_SIZE_NAMES.includes(state.mapSize) ? state.mapSize : 'small',
     preset: PRESETS.includes(state.preset) ? state.preset : null,
     peace: PEACE_LENGTHS.includes(state.peace) ? state.peace : 0,
+    survival: state.survival === true && !PEACE_LENGTHS.includes(state.peace),
     started: state.started === true,
     slots,
   };
@@ -147,13 +148,14 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   const pantheons = resolvePantheons(active.map((a) => a.slot), seed);
   const slotToPlayer = new Map();
   const names = distinctNames(active.map(({ slot }, index) => slot.name || (slot.kind === 'ai' ? aiName(slot.difficulty) : `Player ${index + 1}`)));
+  const survival = state.survival === true && !PEACE_LENGTHS.includes(state.peace);
   const players = active.map(({ slot, slotIndex }, index) => {
     slotToPlayer.set(slotIndex, index);
     const ai = slot.kind === 'ai';
     return {
       index,
       name: names[index],
-      team: slot.team,
+      team: survival ? 1 : slot.team, // the Trial of the Titans is played together
       pantheon: pantheons[index],
       color: PLAYER_COLORS[slot.color] || PLAYER_COLORS[index % PLAYER_COLORS.length],
       kind: ai ? 'ai' : 'human',
@@ -162,6 +164,7 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   });
   const setup = { version, seed, mapSize: state.mapSize, players };
   if (PEACE_LENGTHS.includes(state.peace)) setup.peaceMinutes = state.peace; // Decade of Peace
+  else if (survival) setup.survival = true; // Trial of the Titans
   if (typeof mapgen.mapHash === 'function') {
     setup.mapHash = mapgen.mapHash(mapgen.generateMap(mapgen.mapOptions(setup)));
   }
@@ -203,6 +206,7 @@ export class LobbyHost {
       mapSize: 'small',
       preset: null,
       peace: 0,
+      survival: false,
       started: false,
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
@@ -440,8 +444,20 @@ export class LobbyHost {
 
   /** Decade of Peace: minutes of game time without combat between players (30 | 45 | 60), or 0 for a normal game. */
   setPeace(minutes) {
-    if (this.started || (minutes !== 0 && !PEACE_LENGTHS.includes(minutes)) || this.state.peace === minutes) return false;
+    if (this.started || (minutes !== 0 && !PEACE_LENGTHS.includes(minutes))) return false;
+    if (this.state.peace === minutes && !this.state.survival) return false;
     this.state.peace = minutes;
+    this.state.survival = false; // one game mode at a time (0 is the standard game)
+    this.changed();
+    return true;
+  }
+
+  /** Trial of the Titans: everyone on one team against waves of monsters (on), or back to the other modes (off). */
+  setSurvival(on) {
+    on = on === true;
+    if (this.started || (this.state.survival === on && !(on && this.state.peace))) return false;
+    this.state.survival = on;
+    if (on) this.state.peace = 0;
     this.changed();
     return true;
   }
@@ -512,7 +528,8 @@ export class LobbyHost {
   startProblem() {
     if (this.started) return 'The game has already started.';
     const active = this.state.slots.filter((s) => isPlayerKind(s.kind));
-    if (new Set(active.map((s) => s.team)).size < 2) return 'Players must be on at least two different teams.';
+    // (The Trial of the Titans puts everyone on one team, so it needs no opponent: one player is enough.)
+    if (!this.state.survival && new Set(active.map((s) => s.team)).size < 2) return 'Players must be on at least two different teams.';
     for (const s of this.state.slots) {
       if (s.kind !== 'human') continue;
       const m = [...this.members].find((x) => x.peerId === s.peerId);

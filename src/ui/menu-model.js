@@ -1,5 +1,5 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
-import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
@@ -196,6 +196,7 @@ export function startBlockReason(state) {
   const slots = state?.slots || [];
   const waiting = slots.find((s) => s && s.kind === 'human' && s.connected === false);
   if (waiting) return `Waiting for ${waiting.name || 'a player'} to connect…`;
+  if (survivalMode(state)) return null; // everyone plays together: one player is enough
   const teams = teamsOf(state);
   const filled = slots.filter(isFilled).length;
   if (filled < 2) return 'Add an opponent: set a slot to AI or wait for a player to join.';
@@ -370,8 +371,14 @@ export function peaceMinutes(state) {
   return PEACE_LENGTHS.includes(m) ? m : 0;
 }
 
+/** Is the lobby set to the Trial of the Titans (survival against monster waves)? */
+export function survivalMode(state) {
+  return !!state && state.survival === true && !peaceMinutes(state);
+}
+
 /** The lobby's game mode in words: what a client sees where the host has buttons. */
 export function gameModeLabel(state) {
+  if (survivalMode(state)) return `${SURVIVAL_NAME}: everyone together against waves of monsters`;
   const m = peaceMinutes(state);
   return m ? `${PEACE_NAME}: no combat for ${m} minutes` : 'Standard: fight from the first minute';
 }
