@@ -270,7 +270,7 @@ export class AlertEngine {
     }
   }
 
-  /** A relic fell from a camp I cleared, came to rest in a Temple, or fell from my hands (DESIGN 5.13). */
+  /** A relic fell from a camp I cleared, came to rest in a Temple, or fell from my hands (DESIGN 5.14). */
   relicEvent(ev) {
     const vs = this.vs;
     const me = vs.myIndex;

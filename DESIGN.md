@@ -709,7 +709,18 @@ and floors `faith`. Bounties and plunder are income, not gathering.
   `killValue / 5`, civilization `100` per tier above Village and `25` per finished upgrade.
 - Nothing here changes a rule; the numbers feed the after-game chronicle (section 9) and the alerts.
 
-### 5.13 Relics (src/data/relics.js, src/sim/relics.js)
+### 5.13 The guided first match (`src/sim/tutorial.js`)
+A GameSetup with `tutorial: true` (built by `tutorialSetup({ name, version })`, started by the title
+screen's Learn to Play, solo, no lobby) is the lesson of 9.2. Fixed: seed `TUTORIAL.seed`, the small map,
+the learner as Greek on team 1 and a Norse AI "Raiders of the North" on team 2 with difficulty `'tutorial'`.
+The World then (`tutorialStart`) gives the learner 600 gold, 300 wood and 100 faith, spawns no creep camps,
+gives the raiders' Town Center 1200 health instead of 2000 and stands three Warriors and an Archer in front
+of it. The `'tutorial'` AI (`src/ai/tutorial-ai.js`) sends its five Worshippers to its mine on its first tick
+and does nothing else; its guards answer attacks like every unit. Every other rule is unchanged, so the
+match stays a pure function of setup and commands. A scripted learner who does each objective as soon as
+it can wins at 5:39 (tests/game/tutorial.test.js).
+
+### 5.14 Relics (src/data/relics.js, src/sim/relics.js)
 Treasures of world myth that give creeping a reward beyond the bounty (WC3 items, Age of Mythology relics).
 - **Where:** every creep camp of level `RELIC_CAMP_LEVEL` (2) or more guards one relic (4 or 5 on the usual
   maps; level 1 camps guard none). Types are drawn without repeats from the ten in `RELIC_LIST`, shuffled by an
@@ -763,6 +774,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
   sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
+  tutorial: true,              // optional, the guided first match (5.13); local only, never from a lobby
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -808,7 +820,7 @@ counted in `world.perf.commandErrors`.
 { type: 'surrender' }
 ```
 **smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
-(5.13). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
+(5.14). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
@@ -849,12 +861,12 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
-              rl?: [relic types resting in their Temples] (5.13; omitted when none),
+              rl?: [relic types resting in their Temples] (5.14; omitted when none),
               stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army } }], // 5.12
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
-  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.13: index, type, state 'k' guarded | 'g' on the ground (x, y)
+  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.14: index, type, state 'k' guarded | 'g' on the ground (x, y)
                               // | 'c' carried (c: carrier id, o) | 'h' resting in a Temple (b: its id, o)
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
@@ -908,7 +920,7 @@ EntityView = {
 { type: 'tierUp',  player, tier }
 { type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
-{ type: 'relic',   ev, i, t, player, x, y }                          // 5.13: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
+{ type: 'relic',   ev, i, t, player, x, y }                          // 5.14: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
 { type: 'levelUp', id, level }
 { type: 'rankUp',  id, rank }                                        // a soldier reached a new rank (5.9)
 { type: 'treeFelled', tx, ty }
@@ -2006,18 +2018,41 @@ achievements with the time, and the ones not yet seen.
   unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
   draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
   after its first minute (one the host ended, or left in its first minute, is not counted).
-- 35 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+- 37 achievements in six groups: Career (the two lesson medals of 9.2, first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
   (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
   losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
   (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
-  "Career: W wins in G games (P%) · U of 35 achievements". Title screen: a Career button (a red count of
+  "Career: W wins in G games (P%) · U of 37 achievements". Title screen: a Career button (a red count of
   unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
+- The guided first match (9.2) is not a game of the career: no tracker runs in it. Its victory keeps the best
+  medal (`best.medal`, 1 bronze … 3 gold, `recordTutorial`) and unlocks First Lessons (any medal) and Top of
+  the Class (gold), which makes 37 achievements; the career screen lists the medal.
+
+### 9.2 Guided first match (src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js)
+Learn to Play (title screen, under Play vs AI; a gold "New? Start here" tag while the career has no game and
+no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the match:
+- `TutorialDirector` (Game, host only) reads the ViewState and the selection twice a second and walks
+  `TUTORIAL_STEPS` in order, each `{ id, icon, title, text(c), done(c), progress?(c), target?(c), guide?(c) }`:
+  choose the Worshippers (a selection with one), three mining (`tk` gold), two chopping, a finished House,
+  a Shrine, two praying, a Temple, a god on the field, a Barracks, four Barracks soldiers alive, and the
+  victory. A step once done stays done, and several finish at once when the player ran ahead.
+- HUD: the objective panel takes the getting-started checklist's corner (no checklist and no gameplay tips
+  in this match): step n of 11, icon, title, the text with `[[Key]]` caps, the progress ("2/3", "Faith 140/200",
+  "Their Town Center: 64%"), a row of step bars, a green glow for a moment when a step is finished. A gold
+  "Here" pin (the team marks' layer, `GuidePointer`) stands over the step's spot (the Worshippers, the start
+  mine, the forest tile nearest home, the Shrine, Temple, Barracks, the raiders' Town Center) and rides the
+  screen edge as an arrow when it is out of view; a click takes the camera there. The command-card buttons
+  the step needs glow (`lightCard`: Build and the building, the four god buttons, Warrior and Archer, Attack).
+  A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
+- The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
+  silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
 ## 10. AI (src/ai/)
 
-`createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
+`createAI(world, playerIndex, difficulty) → { tick() }` (difficulty `'tutorial'` is the sleeping camp of 5.13,
+`src/ai/tutorial-ai.js`; it is never offered in the lobby). Called every sim tick on the host;
 thinks every `AI_THINK_INTERVAL[difficulty]` ticks. Reads world state, acts **only** through
 `world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers up to what its
 mines, wood line and prayer slots can use (at most 15/30/34 by difficulty; a mine takes only
@@ -2303,6 +2338,7 @@ src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
 src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
 src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/career*.js, src/data/achievements.js, src/ui/menu-career.js  career owner (9.1)
+src/sim/tutorial.js, src/ai/tutorial-ai.js, src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js  guided first match (5.13, 9.2)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)

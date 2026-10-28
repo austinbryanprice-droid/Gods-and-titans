@@ -261,7 +261,7 @@ export class ViewState {
     return this.lastSeen.get(id) || null;
   }
 
-  // ---------------------------------------------------------------- relics (DESIGN 5.13)
+  // ---------------------------------------------------------------- relics (DESIGN 5.14)
 
   /**
    * Where a relic is drawn: its spot while guarded or on the ground, its carrier's (interpolated)
