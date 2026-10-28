@@ -2,7 +2,7 @@
 // Node and the browser; deterministic for a given setup and command stream.
 import {
   DT, START_RESOURCES, START_WORKERS, POP_MAX, GOD_XP_LEVELS, GOD_MAX_LEVEL, GOD_LEVEL_HP, GOD_LEVEL_DAMAGE,
-  GOD_LEVEL_ARMOR, XP_RANGE, UNDER_ATTACK_COOLDOWN, NEUTRAL, PLAYER_COLORS, MINE_SLOTS,
+  GOD_LEVEL_ARMOR, XP_RANGE, UNDER_ATTACK_COOLDOWN, NEUTRAL, PLAYER_COLORS, MINE_SLOTS, AI_INCOME_BONUS,
 } from '../config.js';
 import { BUILDINGS, GOLD_MINE, PANTHEONS, PANTHEON_LIST, getUnitType, xpValue } from '../data/index.js';
 import { NO_MODS, computeMods, buildingMods, unitMods } from '../data/upgrades.js';
@@ -92,6 +92,7 @@ export class World {
         color: sp.color || PLAYER_COLORS[i % PLAYER_COLORS.length],
         kind: sp.kind || 'human',
         difficulty: sp.difficulty ?? null,
+        income: 1 + ((sp.kind === 'ai' && AI_INCOME_BONUS[sp.difficulty]) || 0), // gold and wood per load delivered, times this (a Brutal AI's bonus)
         gold: START_RESOURCES.gold,
         wood: START_RESOURCES.wood,
         faith: START_RESOURCES.faith,

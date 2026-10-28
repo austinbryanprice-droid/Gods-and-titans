@@ -1,5 +1,5 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
-import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SACRED_NAME, SACRED_HOLD } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SACRED_NAME, SACRED_HOLD, AI_INCOME_BONUS } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
@@ -17,8 +17,14 @@ export const PANTHEON_EMBLEMS = {
   random: '🎲',
 };
 
-export const DIFFICULTIES = ['easy', 'normal', 'hard'];
-const DIFF_LABEL = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
+export const DIFFICULTIES = ['easy', 'normal', 'hard', 'brutal'];
+const DIFF_LABEL = { easy: 'Easy', normal: 'Normal', hard: 'Hard', brutal: 'Brutal' };
+
+/** What sets a difficulty apart, for its menu entry: the one with a gather bonus says so. */
+function diffHint(d) {
+  const bonus = AI_INCOME_BONUS[d] || 0;
+  return bonus > 0 ? ` (gathers ${Math.round(bonus * 100)}% faster)` : '';
+}
 
 /** Network params carried over into invite links (so test servers / TURN keep working). */
 const NET_PARAMS = ['transport', 'net', 'peerHost', 'peerPort', 'peerPath', 'peerSecure', 'turn', 'turnUser', 'turnPass', 'relay'];
@@ -112,7 +118,7 @@ export function slotName(slot) {
   return slot.name || 'Player';
 }
 
-/** Dropdown value for a slot's kind: 'you' | 'human' | 'open' | 'ai:easy' | 'ai:normal' | 'ai:hard' | 'closed'. */
+/** Dropdown value for a slot's kind: 'you' | 'human' | 'open' | 'ai:easy' | 'ai:normal' | 'ai:hard' | 'ai:brutal' | 'closed'. */
 export function slotKindValue(slot, index, myIndex) {
   if (!slot) return 'closed';
   if (index === myIndex) return 'you';
@@ -133,7 +139,7 @@ export function slotKindOptions(slot, index, { myIndex, online }) {
   const opts = [];
   if (slot && (slot.kind === 'human' || slot.kind === 'host')) opts.push({ value: 'human', label: slot.name || 'Player' });
   if (online) opts.push({ value: 'open', label: slot && slot.kind === 'human' ? 'Open (remove player)' : 'Open' });
-  for (const d of DIFFICULTIES) opts.push({ value: `ai:${d}`, label: `AI — ${DIFF_LABEL[d]}` });
+  for (const d of DIFFICULTIES) opts.push({ value: `ai:${d}`, label: `AI — ${DIFF_LABEL[d]}${diffHint(d)}` });
   opts.push({ value: 'closed', label: 'Closed' });
   return opts;
 }

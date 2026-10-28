@@ -88,14 +88,15 @@ export function deposit(world, u) {
   }
   const p = world.players[u.owner];
   if (p) {
+    const amount = u.carryAmount * (p.income || 1);
     if (u.carry === 'g') {
-      p.gold += u.carryAmount;
-      p.stats.gold += u.carryAmount;
+      p.gold += amount;
+      p.stats.gold += amount;
     } else {
-      p.wood += u.carryAmount;
-      p.stats.wood += u.carryAmount;
+      p.wood += amount;
+      p.stats.wood += amount;
     }
-    p.stats.gathered += u.carryAmount;
+    p.stats.gathered += amount;
   }
   u.carry = 0;
   u.carryAmount = 0;

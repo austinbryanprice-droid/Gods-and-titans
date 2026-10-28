@@ -1028,7 +1028,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'|'brutal'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1964,12 +1964,12 @@ achievements with the time, and the ones not yet seen.
   unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
   draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
   after its first minute (one the host ended, or left in its first minute, is not counted).
-- 35 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+- 36 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
   (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
   losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
-  (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
+  (Normal, Hard and Brutal AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
-  "Career: W wins in G games (P%) · U of 35 achievements". Title screen: a Career button (a red count of
+  "Career: W wins in G games (P%) · U of 36 achievements". Title screen: a Career button (a red count of
   unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
 
@@ -1978,7 +1978,7 @@ achievements with the time, and the ones not yet seen.
 `createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
 thinks every `AI_THINK_INTERVAL[difficulty]` ticks. Reads world state, acts **only** through
 `world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers up to what its
-mines, wood line and prayer slots can use (at most 15/30/34 by difficulty; a mine takes only
+mines, wood line and prayer slots can use (at most 15/30/34/34 by difficulty; a mine takes only
 2 miners at once, so it takes a second mine from about 5:30, hard 4:30, easy 11:00, and a
 third later), split them gold / wood / prayer (more prayer once a Temple exists), build houses ahead of the pop cap, Barracks, Shrine, Temple, summon gods, tier up,
 second Barracks, towers, Titan Gate in City; train a mix of warriors/archers/creatures; defend
@@ -1988,13 +1988,51 @@ games); gods cast abilities sensibly (damage on clumps, heals when allies hurt, 
 big fights); retreat badly hurt gods to base. It combines no Houses into Manors (5.3: it keeps building Houses ahead of its cap) and builds no walls, and wall segments are invisible to its scans (`worldDigest`,
 `scanWorld`, team targeting): they are neither buildings it counts nor targets it picks, and an army shut out by a
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
-once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
-profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
+once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats; Brutal's gather bonus is the one exception, below). Army size stops at the
+profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard and brutal 93 %), so normal and harder fill the
 population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
 break a rival's Sacred Victory countdown (5.11).
+
+**Difficulties** (`src/ai/profiles.js`): Easy, Normal, Hard and Brutal, every number in one profile each. Easy,
+Normal and Hard play fair: the same resources, rules and units as a player; Brutal's one bonus is below. (They all
+read the whole World, as they always have, so none of them scouts.) Hard and Brutal play smarter than Normal in two ways:
+
+- **Worker raids** (`src/ai/raid.js`, profile `raids`): while the main army waits at home with enough left to hold
+  it (`minArmy` pop), a squad of about `pop` population of its fastest soldiers (flyers first; no gods, Titans,
+  siege or Priests, nobody under 70 % health) slips out to the enemy Worshippers worth hitting: three or more
+  gathering in an 8-tile cell, at least 22 tiles from the centre of that enemy's army, with nothing there the squad
+  cannot beat 1.6 to 1. It marches along a ground route, attacks the Worshippers one by one, and moves on to a
+  second cluster within 25 tiles if the first is gone. It turns for home when the base is in serious trouble, when
+  its health falls under 45 %, when what it meets is stronger (local fight ratio under 1.1), after 100 s on the way
+  or 45 s at the target. Home at the rally point it rejoins the army. One raid at a time, the next at least `every`
+  seconds after the last came home (Hard from 5:30, every 110 s, 10 pop; Brutal from 4:30, every 80 s, 12 pop).
+  The squad is left out of the army's own orders and focus fire while it is away.
+- **Wounded soldiers step back** (`src/ai/micro.js`, profile `pullWounded`): a soldier or creature in a fight
+  under 30 % health (Brutal 32 %) with a Priest of its own within 14 tiles moves to a spot 2 tiles behind that
+  Priest, away from its attacker, is healed there and rejoins the army at 65 % health, after 15 s, or when the
+  Priest falls. Without a Priest near it fights on.
+
+Every difficulty steers its army by where the bulk of it stands: the median position of its ground units
+(`centroid` in `src/ai/military.js`), not their mean, which stragglers walking out from home used to drag 30
+tiles back, so a siege kept restarting its march and a winning army stood idle by its first waypoint.
+
+**Brutal** is Hard's play thinking every 3 ticks and raiding more often, plus the one AI bonus in the game: every
+load of gold and wood its Worshippers deliver counts 20 % more (`AI_INCOME_BONUS` in `src/config.js`, set on the
+sim's player record as `income` for an `ai` slot of that difficulty; mines empty at the normal rate). The lobby's
+dropdown says so: "AI — Brutal (gathers 20% faster)". Earlier tiers, more workers, earlier and bolder waves and
+pickier god casting were all measured on top of Hard without the bonus and made no difference (28 to 36 wins in
+64), so Brutal keeps Hard's numbers.
+
+Measured (headless games like `tools/ai-tournament.mjs`, small maps, every map played twice with the sides
+swapped): the new Hard beat the Hard from before this change in 38 of 64 games and Normal in 51 of 64; Brutal
+beat the new Hard in 48 of 64; Normal with the centre fix beat the Normal from before in 34 of 64.
+Army mixes chosen to "counter" the enemy were tried and dropped: a strength-per-gold pick, fewer archers, more
+archers and a mix that answers the enemy's melee and ranged shares all did no better than the plain mix (the
+strength-per-gold pick and fewer archers clearly worse). With no damage types in the game the one counter that
+matters is anti-air against flyers, which every AI already does.
 
 ### 10.1 AI voices (src/ai/voice.js, src/ai/voice-lines.js)
 

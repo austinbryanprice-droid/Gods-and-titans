@@ -150,7 +150,7 @@ export function validateSetup(setup, myIndex) {
       pantheon: p.pantheon,
       color: typeof p.color === 'string' && COLOR_RE.test(p.color) ? p.color : PLAYER_COLORS[i % PLAYER_COLORS.length],
       kind,
-      difficulty: kind === 'ai' && ['easy', 'normal', 'hard'].includes(p.difficulty) ? p.difficulty : kind === 'ai' ? 'normal' : null,
+      difficulty: kind === 'ai' && ['easy', 'normal', 'hard', 'brutal'].includes(p.difficulty) ? p.difficulty : kind === 'ai' ? 'normal' : null,
     });
   }
   const clean = { version: typeof setup.version === 'string' ? setup.version.slice(0, 32) : '', seed, mapSize, players };

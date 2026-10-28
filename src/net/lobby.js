@@ -17,7 +17,7 @@ import { validateSetup } from './sanitize.js';
 import { hostRoom, joinRoom, abortError } from './transport.js';
 
 export const SLOT_KINDS = ['host', 'human', 'ai', 'open', 'closed'];
-export const DIFFICULTIES = ['easy', 'normal', 'hard'];
+export const DIFFICULTIES = ['easy', 'normal', 'hard', 'brutal'];
 export const PRESETS = ['coop', '1v1', '2v2', 'ffa'];
 export const MAP_SIZE_NAMES = ['small', 'medium'];
 const HELLO_TIMEOUT_MS = 10000;

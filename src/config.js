@@ -115,7 +115,8 @@ export const SNAPSHOT_EVERY_TICKS = 1; // host sends a delta every N ticks
 export const INTERP_DELAY_MS = 100; // client render delay behind newest snapshot
 
 // ---- AI ----
-export const AI_THINK_INTERVAL = { easy: 20, normal: 10, hard: 5 }; // ticks between decisions
+export const AI_THINK_INTERVAL = { easy: 20, normal: 10, hard: 5, brutal: 3 }; // ticks between decisions
+export const AI_INCOME_BONUS = { brutal: 0.2 }; // extra share of every load of gold and wood a computer player of this difficulty brings in (the only AI bonus; the lobby says so)
 
 // ---- Element colors (VFX, UI accents) ----
 export const ELEMENT_COLORS = {

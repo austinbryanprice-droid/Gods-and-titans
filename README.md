@@ -4,7 +4,7 @@ A real-time strategy game in the style of Warcraft III, in low-poly 3D, that run
 
 **Play:** https://austinbryanprice-droid.github.io/Gods-and-titans/
 
-Up to 4 players per match, each a person or a computer opponent (Easy, Normal or Hard). Play co-op against the computer or against each other.
+Up to 4 players per match, each a person or a computer opponent (Easy, Normal, Hard or Brutal). Play co-op against the computer or against each other.
 
 ## Playing online with friends
 

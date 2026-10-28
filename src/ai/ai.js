@@ -15,8 +15,9 @@ import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
 import { runSacred } from './sacred.js';
+import { runRaids } from './raid.js';
 
-const DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
+const DIFFICULTIES = new Set(['easy', 'normal', 'hard', 'brutal']);
 
 /**
  * One computer player. Debug hooks (all off by default): `sections = {}`
@@ -28,7 +29,7 @@ export class AIPlayer {
   /**
    * @param {object} world authoritative World
    * @param {number} me player index
-   * @param {'easy'|'normal'|'hard'} difficulty
+   * @param {'easy'|'normal'|'hard'|'brutal'} difficulty
    */
   constructor(world, me, difficulty = 'normal') {
     this.world = world;
@@ -42,6 +43,8 @@ export class AIPlayer {
     this.roster = pantheonRoster(p ? p.pantheon : 'greek');
     this.mil = newMilitary();
     this.godRetreat = new Set();
+    this.wounded = new Map(); // soldier id -> { since, healer } while stepped back to a Priest (micro.js)
+    this.raid = null; // the raiding squad (raid.js)
     this.militia = new Set();
     this.pilgrims = new Map(); // worker id -> { site, since }: Worshippers sent to capture a sacred site
     this.pairs = [];
@@ -108,6 +111,7 @@ export class AIPlayer {
     refreshEconomy(this, s);
     this.updateExpansion(s);
     lap('econ');
+    runRaids(this, s);
     runMilitary(this, s);
     lap('military');
     runSacred(this, s);
@@ -402,7 +406,7 @@ export class AIPlayer {
  * Create an AI controller for one player.
  * @param {object} world the authoritative World
  * @param {number} playerIndex
- * @param {'easy'|'normal'|'hard'} [difficulty]
+ * @param {'easy'|'normal'|'hard'|'brutal'} [difficulty]
  * @returns {{ tick(): void, ai: AIPlayer }}
  */
 export function createAI(world, playerIndex, difficulty = 'normal') {

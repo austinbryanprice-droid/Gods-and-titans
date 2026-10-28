@@ -49,9 +49,9 @@ test('slot kind dropdown values, options and patches', () => {
   assert.equal(M.slotKindValue(slot('open'), 3, 0), 'open');
   assert.equal(M.slotKindValue(slot('closed'), 3, 0), 'closed');
   const online = M.slotKindOptions(human, 1, { myIndex: 0, online: true }).map((o) => o.value);
-  assert.deepEqual(online, ['human', 'open', 'ai:easy', 'ai:normal', 'ai:hard', 'closed']);
+  assert.deepEqual(online, ['human', 'open', 'ai:easy', 'ai:normal', 'ai:hard', 'ai:brutal', 'closed']);
   const offline = M.slotKindOptions(ai, 1, { myIndex: 0, online: false }).map((o) => o.value);
-  assert.deepEqual(offline, ['ai:easy', 'ai:normal', 'ai:hard', 'closed']); // nobody can join a local game
+  assert.deepEqual(offline, ['ai:easy', 'ai:normal', 'ai:hard', 'ai:brutal', 'closed']); // nobody can join a local game
   assert.deepEqual(M.kindPatch('ai:easy'), { kind: 'ai', difficulty: 'easy' });
   assert.deepEqual(M.kindPatch('open'), { kind: 'open' });
   assert.deepEqual(M.kindPatch('closed'), { kind: 'closed' });

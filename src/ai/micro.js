@@ -81,7 +81,75 @@ export function runMicro(ai, s) {
     const u = ai.world.entities.get(id);
     if (!u || u.dead) ai.godRetreat.delete(id);
   }
+  if (prof.pullWounded > 0) pullWounded(ai, s);
   if (prof.micro) focusFire(ai, s);
+}
+
+const PULL_MAX = 15; // most seconds a soldier stays back
+
+/** A point 2 tiles behind a Priest, away from where the danger came from. */
+function behind(ai, healer, from) {
+  const dx = healer.x - from.x;
+  const dy = healer.y - from.y;
+  const l = Math.hypot(dx, dy) || 1;
+  const map = ai.world.map;
+  const x = Math.max(0.5, Math.min(map.width - 0.5, healer.x + (dx / l) * 2));
+  const y = Math.max(0.5, Math.min(map.height - 0.5, healer.y + (dy / l) * 2));
+  return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+}
+const PULL_REJOIN = 0.65; // hp fraction at which it goes back in
+
+/**
+ * Hard and Brutal: a soldier badly hurt in a fight steps back to the nearest
+ * Priest (who heals it) instead of dying in the front line, and rejoins the
+ * army once mended. Without a Priest close by it fights on.
+ */
+function pullWounded(ai, s) {
+  const world = ai.world;
+  const t = s.t;
+  for (const [id, w] of ai.wounded) {
+    const u = world.entities.get(id);
+    const healer = world.entities.get(w.healer);
+    if (!u || u.dead || u.hp >= u.maxHp * PULL_REJOIN || t - w.since > PULL_MAX || !healer || healer.dead) {
+      ai.wounded.delete(id);
+      ai.cmdMemo.delete(id);
+      continue;
+    }
+    // Stand just behind the Priest, on the side away from the enemy; a soldier that turned to fight again is called back.
+    const spot = behind(ai, healer, w.from);
+    if (Math.hypot(u.x - spot.x, u.y - spot.y) > 1.5 || !u.order || u.order.type !== 'move') ai.issue({ type: 'move', units: [u.id], x: spot.x, y: spot.y });
+  }
+  if (ai.thinks % 2 !== 0) return;
+  const priests = [];
+  for (const u of s.army) if (u.def.class === 'support' && u.def.abilities.some((ab) => ab.ai && ab.ai.use === 'heal')) priests.push(u);
+  if (!priests.length) return;
+  const tmp = ai._ftmp;
+  for (const u of s.army) {
+    const c = u.def.class;
+    if (c === 'god' || c === 'titan' || c === 'siege' || c === 'support' || c === 'worker' || u.summoned) continue;
+    if (u.hp >= u.maxHp * ai.prof.pullWounded || ai.wounded.has(u.id) || (ai.raid && ai.raid.ids.has(u.id))) continue;
+    if (u.state !== 'attack' && !(u.order && u.order.type === 'attack')) continue;
+    let healer = null;
+    let hd = 14;
+    for (const p of priests) {
+      const d = Math.hypot(p.x - u.x, p.y - u.y);
+      if (d < hd && p.hp > p.maxHp * 0.4) {
+        hd = d;
+        healer = p;
+      }
+    }
+    if (!healer || hd < 2) continue;
+    // Only worth it while someone is hitting it: an enemy fighter within reach.
+    tmp.length = 0;
+    world.hash.query(u.x, u.y, 5, tmp);
+    if (!tmp.some((e) => !e.dead && e.kind === 'unit' && e.def.attack && world.canHarm(e.owner, u.owner) && e.owner >= 0)) continue;
+    const foe = tmp.find((e) => !e.dead && e.kind === 'unit' && e.def.attack && world.canHarm(e.owner, u.owner) && e.owner >= 0);
+    const w = { since: t, healer: healer.id, from: { x: foe.x, y: foe.y } };
+    ai.wounded.set(u.id, w);
+    const spot = behind(ai, healer, w.from);
+    ai.issue({ type: 'move', units: [u.id], x: spot.x, y: spot.y });
+    ai.cmdMemo.delete(u.id);
+  }
 }
 
 /** Switch a unit to another target, then let it resume its attack-move. */
@@ -114,7 +182,7 @@ function focusFire(ai, s) {
     if (!atk || atk.buildingsOnly || !u.target) continue;
     const melee = atk.range < 2;
     if (melee ? u.state !== 'move' : u.state !== 'attack') continue;
-    if (ai.godRetreat.has(u.id)) continue;
+    if (ai.godRetreat.has(u.id) || ai.wounded.has(u.id) || (ai.raid && ai.raid.ids.has(u.id))) continue;
     const cur = world.entities.get(u.target);
     if (!cur || cur.kind !== 'unit') continue;
     looked++;
