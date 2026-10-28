@@ -1175,6 +1175,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),
           toggle('tipsDismissed', 'Getting-started tips', 'Show the new-player checklist in your next game.', true),
           toggle('hints', 'Gameplay tips', 'A short tip now and then during a match.'),
+          toggle('aiChat', 'AI chatter', 'Computer players greet you, taunt you and beg for mercy in chat, each in the voice of its pantheon.'),
         ),
         h('div.mw-field', h('span.mw-label', 'Alerts'), h('div.mw-segmented', aBtns), aNote),
         h('div.mw-field', h('span.mw-label', 'When this tab is in the background'), h('div.mw-segmented', wBtns), wNote),
