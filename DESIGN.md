@@ -1562,8 +1562,9 @@ per-frame budget, so a revealed army appears over a few frames.
   and a low sun no longer stretches the box 100+ tiles up-sun (that drew every forest chunk along
   the strip into the map, more triangles than the visible scene). Its half sizes step by 2 tiles and
   its center snaps to texels. Forest chunks are culled by their instances' box as well as their
-  bounding sphere (`chunkInFrustum` in props.js). Late game at the population cap, Medium, default
-  zoom: shadow-pass triangles 1.0M to 0.55M, whole frame 1.75M to 1.06M, draw calls 373 to 224
+  bounding sphere (`chunkInFrustum` in props.js; the box grows by `CHUNK_BOX_PAD` for what the
+  shader does to a tree: a spruce's own shape and the wind). Late game at the population cap, Medium, default
+  zoom: shadow-pass triangles 1.0M to 0.6M, whole frame 1.75M to 1.1M, draw calls 373 to 228
   (`node tools/perf-late.mjs`, which also profiles the real game with `--game`).
   Buildings (`src/render/models/building-*.js`, four layers): `building-core.js` holds the colors,
   surface classes and geometry primitives and the Kit that merges a building's parts into four

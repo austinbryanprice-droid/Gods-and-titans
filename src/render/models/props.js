@@ -56,6 +56,12 @@ const _n = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _box = new THREE.Box3();
+/**
+ * How far the vertex shader can move a tree past its geometry's bounds: a spruce's per-tree shape (pineMorph
+ * widens a tier up to about 1.4 times, 0.35 more in radius at full scale) and the wind's lean and flutter.
+ * The chunk boxes grow by this, sideways and up, before they are used for culling.
+ */
+const CHUNK_BOX_PAD = new THREE.Vector3(1.2, 0.8, 1.2);
 
 /**
  * Frustum test of a forest chunk by its instances' bounding box as well as its sphere. A chunk is 20 tiles
@@ -1088,6 +1094,7 @@ export function createForest(mapData, heightFn, { variants = null, quality = 'me
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere();
     mesh.computeBoundingBox();
+    mesh.boundingBox.expandByVector(CHUNK_BOX_PAD);
     mesh.intersectsFrustum = chunkInFrustum;
     b.mesh = mesh;
     meshes.push(mesh);

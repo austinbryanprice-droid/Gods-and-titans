@@ -65,5 +65,17 @@ test('a forest chunk is drawn only where its trees can be, not wherever its boun
     assert.equal(m.intersectsFrustum(onTree), true, `${m.name}: drawn where its trees stand`);
   }
   assert.ok(culled >= 1, 'some chunk has sphere outside its box');
+  // the box leaves room for what the shader does to a tree (a spruce's own shape, the wind): a tree's
+  // geometry bounds sit at least a tile inside it sideways
+  for (const m of chunks) {
+    const at = new THREE.Matrix4();
+    const geo = m.geometry.boundingBox;
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, at);
+      const b = geo.clone().applyMatrix4(at);
+      assert.ok(b.min.x - m.boundingBox.min.x >= 1 && m.boundingBox.max.x - b.max.x >= 1, `${m.name}: room around tree ${i} along x`);
+      assert.ok(b.min.z - m.boundingBox.min.z >= 1 && m.boundingBox.max.z - b.max.z >= 1, `${m.name}: room around tree ${i} along z`);
+    }
+  }
   f.dispose();
 });
