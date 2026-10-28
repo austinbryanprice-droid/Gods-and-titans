@@ -188,16 +188,18 @@ export class Game {
    * @param {object} [o.session] an already built HostSession / ClientSession (instead of launch)
    * @param {object} [o.settings] getSettings()
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
+   * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.session = session;
     this.settings = settings || getSettings();
     this.onExit = onExit;
+    this.onRematch = onRematch;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -1079,6 +1081,20 @@ export class Game {
     this.renderer = null;
     this.input = null;
     if (typeof window !== 'undefined' && window.__game === this) window.__game = null;
+  }
+
+  /** True when the game-over screen may offer Play Again (a game against the computer only). */
+  canRematch() {
+    return typeof this.onRematch === 'function' && !this.disposed;
+  }
+
+  /** Play Again: leave this match (counted like Return to Menu) and start the same lobby anew. */
+  rematch() {
+    if (!this.canRematch()) return;
+    const next = this.onRematch;
+    this.countLeave();
+    this.dispose();
+    next();
   }
 
   /** Leave the match and go back to the title screen. */

@@ -92,3 +92,17 @@ test('axis steps are whole numbers, so no two grid labels read the same', () => 
   assert.equal(niceStep(10), 3, 'a 2.5 step rounds up');
   assert.equal(niceStep(100), 25);
 });
+
+test('Play Again leads the game-over buttons only when the game offers it', () => {
+  const vs = view();
+  let rematched = 0;
+  const game = { viewState: vs, chronicle: null, quitToMenu() {}, canRematch: () => true, rematch: () => rematched++ };
+  const root = document.createElement('div');
+  new Overlays(root, game).showGameOver({ result: 'victory', winningTeam: 1 });
+  root.button('Play Again').click();
+  assert.equal(rematched, 1);
+  const root2 = document.createElement('div');
+  new Overlays(root2, { ...game, canRematch: () => false }).showGameOver({ result: 'defeat', winningTeam: 2 });
+  assert.equal(root2.button('Play Again'), null, 'an online game has no Play Again');
+  assert.ok(root2.button('Return to Menu'));
+});
