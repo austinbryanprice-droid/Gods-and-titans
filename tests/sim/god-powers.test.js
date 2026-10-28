@@ -166,3 +166,17 @@ test('summoning powers raise temporary minions for the caster', () => {
   run(w, 41);
   assert.equal(w.unitList.filter((u) => u.owner === 0 && u.type === 'celtic_battle_crow' && !u.dead).length, 0);
 });
+
+test("the sim's sight check is the clients' fog grid, tile for tile", async () => {
+  const { computeVisibility } = await import('../../src/sim/visibility.js');
+  const w = arena();
+  const archer = dummy(w, 0, 20, 20, 'archer');
+  const grid = computeVisibility(64, 64, [{ x: archer.x, y: archer.y, r: archer.def.sight }]);
+  for (let ty = 0; ty < 64; ty++) {
+    for (let tx = 0; tx < 64; tx++) {
+      if (Math.hypot(tx - 20, ty - 20) > 30) continue; // far from both the archer and the Town Center
+      if (Math.hypot(tx - 8, ty - 8) < 16) continue; // the Town Center's own sight
+      assert.equal(teamSees(w, 0, tx + 0.9, ty + 0.1), grid[ty * 64 + tx] === 1, `tile ${tx},${ty}`);
+    }
+  }
+});

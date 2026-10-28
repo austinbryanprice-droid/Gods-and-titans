@@ -5,10 +5,12 @@
 import { DT } from '../config.js';
 import { powersFor, POWERS, isHarmfulPower, powerRadius } from '../data/powers.js';
 import { applyEffect } from './abilities.js';
-import { hyp, round2 } from './common.js';
+import { round2 } from './common.js';
 import { peaceClock } from './peace.js';
+import { tileInSight } from './visibility.js';
 
-const DEFAULT_SIGHT = 6;
+const DEFAULT_SIGHT = 6; // as ViewState.sightOf
+const SIGHT_SEARCH = 24; // farther than any unit or building sees
 
 /** A player's god power state at the start of a game. */
 export function newPowerState() {
@@ -28,15 +30,19 @@ export function boonPct(p, stat) {
   return s;
 }
 
-/** Can this player's team see the spot (a unit's or building's sight, or a reveal)? */
+/**
+ * Can this player's team see the spot? The tile it is on must lie in a unit's or building's sight, or in a
+ * reveal, by the rule the clients' fog of war uses (visibility.js), so a spot the HUD shows as seen is one here.
+ */
 export function teamSees(world, owner, x, y) {
+  const tx = Math.floor(x);
+  const ty = Math.floor(y);
   const team = world.teamOf(owner);
-  for (const v of world.reveals) if (v.team === team && hyp(v.x - x, v.y - y) <= v.r) return true;
-  const near = world.queryRadius(x, y, 16, (e) => e.kind !== 'mine' && e.owner >= 0 && !world.areEnemies(owner, e.owner));
+  for (const v of world.reveals) if (v.team === team && tileInSight(v.x, v.y, v.r, tx, ty)) return true;
+  const near = world.queryRadius(x, y, SIGHT_SEARCH, (e) => e.kind !== 'mine' && e.owner >= 0 && !world.areEnemies(owner, e.owner));
   for (const e of near) {
-    if (e.kind === 'building' && !e.constructed) continue;
-    const sight = (e.def && typeof e.def.sight === 'number' ? e.def.sight : DEFAULT_SIGHT);
-    if (hyp(e.x - x, e.y - y) <= sight) return true;
+    const sight = e.def && typeof e.def.sight === 'number' ? e.def.sight : DEFAULT_SIGHT;
+    if (tileInSight(e.x, e.y, sight, tx, ty)) return true;
   }
   return false;
 }

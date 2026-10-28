@@ -329,8 +329,9 @@ lists them Village, Town, City; `POWERS` has every one by id (30 in all; `valida
   renderer telegraphs an effect at most that far ahead).
 - **Rules** (`castPower` / `powerRefusal`, the `godPower` command): a power is spent when it is cast, never
   before (a refused one stays). It needs the settlement tier (`Requires Town.` / `Requires City.`); a strike or
-  cataclysm needs a spot the caster's team can see (`teamSees`: a finished building's or a unit's `sight`, or a
-  reveal; `You must be able to see the target.`) and waits out the Decade of Peace (5.10, `The Decade of Peace
+  cataclysm needs a spot the caster's team can see (`teamSees`: the spot's tile lies in an allied unit's or
+  building's `sight` or a reveal, by `tileInSight`, the rule the clients' fog grid stamps, so the HUD and the sim agree;
+  `You must be able to see the target.`) and waits out the Decade of Peace (5.10, `The Decade of Peace
   holds for another m:ss: no god powers against other players yet.`), while a blessing works during it. Used:
   `<Name> has already been used.` Powers never hurt the caster's own side. A blessing with no target shines over
   the caster's first Town Center.
