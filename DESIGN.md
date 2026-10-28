@@ -655,6 +655,19 @@ for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the 
   mine sizes are not scaled for the mode. With no mines left the war is fought off that bank
   (one side was down to about 60 gold ten minutes in).
 
+### 5.11 Match statistics and score
+Each player's `stats` (`newStats` in `src/data/score.js`, shared by the sim and the HUD) count:
+`gathered` (gold + wood delivered) and the two apart (`gold`, `wood`); `faith` earned (prayer,
+blessings, sacrifice spoils, resource spells; refunds do not count); `unitsTrained`; `kills` and
+`losses` (units); `buildings` completed (walls excluded); `razed`, the finished enemy buildings
+destroyed (walls excluded); `killValue`, the gold + wood + faith cost of the enemy units (not
+summoned) and finished buildings destroyed, and `lostValue`, the same for one's own. The snapshot
+adds `army`, the population in own fighting units right now (not worshippers, not summoned),
+and floors `faith`. Bounties and plunder are income, not gathering.
+- **Score** (`scoreOf`, Age of Empires style): economy `(gathered + faith) / 10`, military
+  `killValue / 5`, civilization `100` per tier above Village and `25` per finished upgrade.
+- Nothing here changes a rule; the numbers feed the after-game chronicle (section 9) and the alerts.
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -755,7 +768,7 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
-              stats: { gathered, unitsTrained, kills, losses, buildings } }],
+              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army } }], // 5.11
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
@@ -1601,7 +1614,20 @@ per-frame budget, so a revealed army appears over a few frames.
   text a refused click and the sim give).
   God portraits top-left (click selects, double-click centers). Messages (alerts, "Kronos is being summoned!",
   the game's other events, chat on Enter) are the stone cards at the bottom left ("The message feed" below);
-  an error is the red line over the console. Game-over overlay with stats, menu (surrender, quit).
+  an error is the red line over the console. Game-over overlay with the after-game chronicle (below), menu (surrender, quit).
+  **After-game chronicle** (`src/game/chronicle.js`, `src/ui/hud-chronicle.js`): the victory / defeat / draw screen and
+  the "game ended" screen have four tabs, after the Age of Empires score screens. Summary: pantheon, score (its tooltip
+  splits it into economy, military and civilization, 5.11), kills, losses and gathered, then the awards: Warlord (most
+  kills), Conqueror (most buildings razed), Tactician (best worth destroyed less worth lost), Marshal (largest army),
+  Treasurer (most gathered), Prophet (most faith), Architect (most buildings), each to the best player or players on a
+  tie, only when above zero and not shared by everyone, none in a match of one; the local player's awards are lit.
+  Economy: gold, wood, faith, trained, buildings, research count, tier. Military: kills, losses, razed, worth destroyed,
+  worth lost, largest army. Timeline: an SVG line chart, a line per player in their (sanitized) colour and the local
+  player's thicker, of Score, Army, Resources (gathered + faith) or Kills. The `Chronicle` listens to the ViewState's
+  snapshots and writes a sample at the first one, every `SAMPLE_EVERY` (30) s of game time and once at the game's end,
+  and keeps each player's largest army; all of it is read from the players' snapshot records, so nothing is sent for
+  it and a client charts the same match as the host (a player who joined late has a shorter chart).
+  `tools/shot-chronicle.mjs` stills the four tabs over a made-up 24-minute match.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`

@@ -23,6 +23,7 @@ import { tierName, RESOURCE_ICONS } from '../ui/hud-data.js';
 import { loadingHint, hintParts } from '../ui/hint-data.js';
 import { TabAttention } from '../ui/tab-attention.js';
 import { AlertEngine } from './alerts.js';
+import { Chronicle } from './chronicle.js';
 import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
@@ -206,6 +207,7 @@ export class Game {
     this.bareHud = false;
     this.tab = null; // TabAttention: the flashing title of a tab left in the background
     this.alerts = null; // AlertEngine
+    this.chronicle = null; // Chronicle: the match's numbers over time, for the game-over screen
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.offs = [];
     this.lastAmbient = 0;
@@ -263,8 +265,11 @@ export class Game {
     // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
     this.tab = new TabAttention();
     this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
+    // Score, army, resources and kills every 30 s of game time, for the game-over screen's timeline (src/game/chronicle.js).
+    this.chronicle = new Chronicle({ viewState: this.viewState }).attach();
     this.offs.push(() => {
       this.alerts.dispose();
+      this.chronicle.dispose();
       this.tab.dispose();
     });
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).

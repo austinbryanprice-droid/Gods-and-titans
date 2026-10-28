@@ -95,6 +95,11 @@ export class FakeElement {
     n.parentNode = this;
     return n;
   }
+  replaceChildren(...ns) {
+    for (const c of this.childNodes) c.parentNode = null;
+    this.childNodes = [];
+    this.append(...ns);
+  }
   append(...ns) {
     for (const n of ns) if (n !== null && n !== undefined) this.appendChild(typeof n === 'string' ? new FakeText(n) : n);
   }
@@ -144,6 +149,7 @@ export class FakeElement {
 export function installFakeDom() {
   globalThis.document = {
     createElement: (tag) => new FakeElement(tag),
+    createElementNS: (ns, tag) => new FakeElement(tag),
     createTextNode: (t) => new FakeText(t),
     addEventListener() {},
     removeEventListener() {},
