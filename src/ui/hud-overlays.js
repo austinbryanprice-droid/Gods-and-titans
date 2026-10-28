@@ -12,6 +12,7 @@ import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
+import { MEDALS } from '../data/medals.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -277,7 +278,17 @@ export class Overlays {
       el('div', 'hud-ach-cards', ...cards));
   }
 
-  /** "Career: 12 wins in 20 games (60%) · 9 of 35 achievements" (null for a spectator). */
+  /** The guided first match's medal, with the time the next better one needs (null without a medal). */
+  medalCard(medal) {
+    if (!medal) return null;
+    const better = MEDALS.filter((m) => m.rank > medal.rank).pop();
+    const hint = better ? `Win within ${formatClock(better.within)} for ${better.name.toLowerCase()}.` : 'The best there is.';
+    return el('div', `hud-medal is-${medal.id}`,
+      el('span', 'hud-medal-icon', medal.icon),
+      el('span', 'hud-medal-text', el('b', null, `${medal.name} medal`), el('small', null, hint)));
+  }
+
+  /** "Career: 12 wins in 20 games (60%) · 9 of 39 achievements" (null for a spectator). */
   careerLine() {
     if ((this.game.viewState.myIndex ?? -1) < 0) return null;
     const c = getCareer();
@@ -287,17 +298,17 @@ export class Overlays {
     return el('div', 'hud-go-career', `Career: ${c.wins} win${c.wins === 1 ? '' : 's'} in ${games} (${Math.round(s.winRate * 100)}%) · ${s.unlocked} of ${s.total} achievements`);
   }
 
-  /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked. */
-  showGameOver({ result, winningTeam, unlocked = null, how, wave = 0, record = null }) {
+  /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
+  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const survival = result === 'survival';
-    const title = survival ? `Wave ${wave}` : result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
+    const title = survival ? `Wave ${wave}` : result === 'victory' ? (tutorial ? 'Lesson Complete' : 'Victory') : result === 'defeat' ? 'Defeat' : 'Draw';
     // how: 'sacred' when a side held every sacred site long enough (DESIGN 5.11).
     const sub = survival ? survivalLine(wave)
       : how === 'sacred'
         ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
-        : result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
+        : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
           : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const best = survival && record ? el('div', `hud-go-best${record.isNew ? ' is-new' : ''}`, record.isNew
       ? (record.previous > 0 ? `A new best! Your old best was wave ${record.previous}.` : 'Your first trial: the bar is set.')
@@ -308,6 +319,7 @@ export class Overlays {
       el('div', 'hud-osub', sub),
       best,
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
+      this.medalCard(medal),
       chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
       this.careerLine(),

@@ -1,4 +1,4 @@
-// The AI in the Trial of the Titans (DESIGN 5.13, 10): wave monsters count as the enemy army near
+// The AI in the Trial of the Titans (DESIGN 5.14, 10): wave monsters count as the enemy army near
 // its base, so it turns out to defend, beats the first waves and is never left without a building early.
 import test from 'node:test';
 import assert from 'node:assert/strict';

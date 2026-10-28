@@ -19,7 +19,7 @@ export function emptyCareer() {
     seconds: 0, // game time played, in seconds
     kills: 0, gathered: 0,
     pantheons: {}, // id -> { games, wins }
-    best: { kills: 0, gathered: 0, longest: 0, wave: 0 },
+    best: { kills: 0, gathered: 0, longest: 0, wave: 0, medal: 0 }, // medal: the guided first match's best (1 bronze … 3 gold)
     unlocked: {}, // achievement id -> unix ms when unlocked
     unseen: [], // unlocked since the career screen was last opened
     history: [], // newest first: { r: result, p: pantheon, t: seconds, at: unix ms }
@@ -161,6 +161,20 @@ export function recordMatch(m, now = Date.now()) {
   c.history.unshift({ r: m.result, p: m.pantheon || null, t, at: now });
   c.history.length = Math.min(c.history.length, HISTORY);
   const got = checkAchievements(m, c, now);
+  persist();
+  return got;
+}
+
+/**
+ * The guided first match was won with a medal (rank 1 bronze … 3 gold). It is not counted as a game:
+ * it keeps the best medal and unlocks the achievements about it. Returns the achievements it unlocked.
+ */
+export function recordTutorial(rank, now = Date.now()) {
+  const r = Math.min(3, num(rank));
+  if (!r) return [];
+  const c = getCareer();
+  c.best.medal = Math.max(c.best.medal, r);
+  const got = checkAchievements({ tutorial: true, medal: r, result: null }, c, now);
   persist();
   return got;
 }

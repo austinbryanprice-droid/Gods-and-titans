@@ -1,4 +1,4 @@
-// Trial of the Titans (DESIGN 5.13, src/sim/survival.js): the wave clock, what each wave holds,
+// Trial of the Titans (DESIGN 5.14, src/sim/survival.js): the wave clock, what each wave holds,
 // the director inside World.tick (spawning, marching, rewards) and the end of the trial.
 import { sacredVictoryOn } from '../../src/sim/sacred.js';
 import { test } from 'node:test';

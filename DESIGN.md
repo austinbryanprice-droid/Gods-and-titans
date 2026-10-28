@@ -710,7 +710,18 @@ and floors `faith`. Bounties and plunder are income, not gathering.
   `killValue / 5`, civilization `100` per tier above Village and `25` per finished upgrade.
 - Nothing here changes a rule; the numbers feed the after-game chronicle (section 9) and the alerts.
 
-### 5.13 Trial of the Titans (survival game mode)
+### 5.13 The guided first match (`src/sim/tutorial.js`)
+A GameSetup with `tutorial: true` (built by `tutorialSetup({ name, version })`, started by the title
+screen's Learn to Play, solo, no lobby) is the lesson of 9.2. Fixed: seed `TUTORIAL.seed`, the small map,
+the learner as Greek on team 1 and a Norse AI "Raiders of the North" on team 2 with difficulty `'tutorial'`.
+The World then (`tutorialStart`) gives the learner 600 gold, 300 wood and 100 faith, spawns no creep camps,
+gives the raiders' Town Center 1200 health instead of 2000 and stands three Warriors and an Archer in front
+of it. The `'tutorial'` AI (`src/ai/tutorial-ai.js`) sends its five Worshippers to its mine on its first tick
+and does nothing else; its guards answer attacks like every unit. Every other rule is unchanged, so the
+match stays a pure function of setup and commands. A scripted learner who does each objective as soon as
+it can wins at 5:39 (tests/game/tutorial.test.js).
+
+### 5.14 Trial of the Titans (survival game mode)
 An optional game mode the host picks in the lobby (third button of the Game mode row; one mode at a time, so
 picking it clears a Decade of Peace and the other two buttons clear it): `GameSetup.survival` is `true`. Every
 player and AI plays on team 1 (`buildSetup`, and `World` forces it too), so one player alone may start it and the
@@ -771,7 +782,8 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
   sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
-  survival: true,              // optional, Trial of the Titans (5.13): every player on team 1 against monster waves
+  tutorial: true,              // optional, the guided first match (5.13); local only, never from a lobby
+  survival: true,              // optional, Trial of the Titans (5.14): every player on team 1 against monster waves
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -865,7 +877,7 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
   sites: [{ x, y, o, p?, c?, cn? }], // sacred sites (5.11): holder, capture progress, capturing player, contested
   sacred: null | { tm, end },  // Sacred Victory countdown: the team holding every site, the game time it wins at
-  gameOver: null | { winningTeam, how?, wave? }, // how: 'sacred' for a Sacred Victory; wave: the Trial of the Titans' score (5.13)
+  gameOver: null | { winningTeam, how?, wave? }, // how: 'sacred' for a Sacred Victory; wave: the Trial of the Titans' score (5.14)
   sv,                         // Trial of the Titans only: { w: waves out so far, m: wave monsters alive }
 }
 EntityView = {
@@ -1077,7 +1089,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.13; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.14; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1117,7 +1129,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   vs.on(type | '*', cb) → unsubscribe  // fired for every event in each pushed snapshot; also 'snapshot'
   vs.getEntity(id)
   vs.peaceLeft(); vs.peaceActive(); vs.canHarm(owner) // Decade of Peace (5.10): setup.peaceMinutes vs the snapshot time; may my units hurt this owner now
-  vs.survivalActive(); vs.survival() // Trial of the Titans (5.13): { wave, alive, next, nextBoss } from snapshot.sv and the wave clock, or null
+  vs.survivalActive(); vs.survival() // Trial of the Titans (5.14): { wave, alive, next, nextBoss } from snapshot.sv and the wave clock, or null
   vs.sites; vs.sacred; vs.sacredVictoryOn(); vs.sacredLeft(); vs.sitesHeld(team) // Sacred Sites (5.11): map.sacred until the first snapshot
   ```
   Host local view uses a 50 ms delay; clients use `INTERP_DELAY_MS`.
@@ -1694,7 +1706,7 @@ per-frame budget, so a revealed army appears over a few frames.
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
   Random, team, AI difficulty; presets; map size; game mode (Standard, Decade of Peace with
-  30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.13; the host's pick;
+  30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
@@ -2000,7 +2012,7 @@ Client only: nothing goes over the wire and the sim does not know about it. The 
 localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
 `sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
 and wins per pantheon, records (most kills, most gathered, longest game, best Trial of the Titans wave:
-`recordMatch` takes an optional `wave`, 5.13), the last 12 games, unlocked
+`recordMatch` takes an optional `wave`, 5.14), the last 12 games, unlocked
 achievements with the time, and the ones not yet seen.
 
 - `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
@@ -2015,18 +2027,41 @@ achievements with the time, and the ones not yet seen.
   unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
   draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
   after its first minute (one the host ended, or left in its first minute, is not counted).
-- 37 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+- 39 achievements in six groups: Career (the two lesson medals of 9.2, first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
   (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
   losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
   (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, waves 10 and 20 of the Trial of the Titans, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
-  "Career: W wins in G games (P%) · U of 37 achievements". Title screen: a Career button (a red count of
+  "Career: W wins in G games (P%) · U of 39 achievements". Title screen: a Career button (a red count of
   unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
+- The guided first match (9.2) is not a game of the career: no tracker runs in it. Its victory keeps the best
+  medal (`best.medal`, 1 bronze … 3 gold, `recordTutorial`) and unlocks First Lessons (any medal) and Top of
+  the Class (gold), which with the Trial's two makes 39 achievements; the career screen lists the medal.
+
+### 9.2 Guided first match (src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js)
+Learn to Play (title screen, under Play vs AI; a gold "New? Start here" tag while the career has no game and
+no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the match:
+- `TutorialDirector` (Game, host only) reads the ViewState and the selection twice a second and walks
+  `TUTORIAL_STEPS` in order, each `{ id, icon, title, text(c), done(c), progress?(c), target?(c), guide?(c) }`:
+  choose the Worshippers (a selection with one), three mining (`tk` gold), two chopping, a finished House,
+  a Shrine, two praying, a Temple, a god on the field, a Barracks, four Barracks soldiers alive, and the
+  victory. A step once done stays done, and several finish at once when the player ran ahead.
+- HUD: the objective panel takes the getting-started checklist's corner (no checklist and no gameplay tips
+  in this match): step n of 11, icon, title, the text with `[[Key]]` caps, the progress ("2/3", "Faith 140/200",
+  "Their Town Center: 64%"), a row of step bars, a green glow for a moment when a step is finished. A gold
+  "Here" pin (the team marks' layer, `GuidePointer`) stands over the step's spot (the Worshippers, the start
+  mine, the forest tile nearest home, the Shrine, Temple, Barracks, the raiders' Town Center) and rides the
+  screen edge as an arrow when it is out of view; a click takes the camera there. The command-card buttons
+  the step needs glow (`lightCard`: Build and the building, the four god buttons, Warrior and Archer, Attack).
+  A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
+- The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
+  silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
 ## 10. AI (src/ai/)
 
-`createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
+`createAI(world, playerIndex, difficulty) → { tick() }` (difficulty `'tutorial'` is the sleeping camp of 5.13,
+`src/ai/tutorial-ai.js`; it is never offered in the lobby). Called every sim tick on the host;
 thinks every `AI_THINK_INTERVAL[difficulty]` ticks. Reads world state, acts **only** through
 `world.issueCommand(playerIndex, cmd)`. Behavior: keep training worshippers up to what its
 mines, wood line and prayer slots can use (at most 15/30/34 by difficulty; a mine takes only
@@ -2041,7 +2076,7 @@ big fights); retreat badly hurt gods to base. It combines no Houses into Manors 
 player's wall breaks through it like any soldier (5.5). Its Barracks also trains the pantheon elite soldier (4.10)
 once it is a Town, as the melee or ranged soldier its army is short of. Hard is fair (no resource cheats). Army size stops at the
 profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), so normal and hard fill the
-population cap and easy stays well below it. In the Trial of the Titans (5.13) the wave monsters count as enemy
+population cap and easy stays well below it. In the Trial of the Titans (5.14) the wave monsters count as enemy
 units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
@@ -2313,6 +2348,7 @@ src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
 src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
 src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/career*.js, src/data/achievements.js, src/ui/menu-career.js  career owner (9.1)
+src/sim/tutorial.js, src/ai/tutorial-ai.js, src/game/tutorial.js, src/ui/hud-tutorial.js, src/data/medals.js  guided first match (5.13, 9.2)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)
