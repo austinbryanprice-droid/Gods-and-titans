@@ -15,7 +15,7 @@ import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -178,6 +178,11 @@ export class Hud {
     this.errorEl = el('div', 'hud-error');
     this.banner = el('div', 'hud-banner');
     this.banner.hidden = true;
+    // A computer player's taunt (DESIGN 10.1): one big quote at the top centre, under the banners.
+    this.taunt = el('div', 'hud-taunt');
+    this.taunt.hidden = true;
+    this.taunt.setAttribute('role', 'status');
+    this.taunt.setAttribute('aria-live', 'polite');
     this.chatInput = el('input', 'hud-chat-input');
     this.chatInput.type = 'text';
     this.chatInput.maxLength = 200;
@@ -226,7 +231,7 @@ export class Hud {
     this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
     for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root]) {
@@ -666,6 +671,34 @@ export class Hud {
     this.pushLine(card, CHAT_MS);
   }
 
+  /**
+   * A computer player's line (DESIGN 10.1) as a taunt at the top centre: their pantheon's emblem,
+   * their name in their colour and the words, larger than the feed. A new taunt replaces the one up.
+   */
+  showTaunt(line) {
+    if (!line || typeof line !== 'object') return false;
+    const text = sanitizeChat(line.text);
+    if (!text) return false;
+    const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
+    const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
+    const who = el('span', 'hud-taunt-from', sanitizeName(line.name || (p && p.name), 'Player'));
+    const quote = el('span', 'hud-taunt-text', `“${text}”`);
+    const t = this.taunt;
+    t.replaceChildren(who, quote);
+    t.dataset.icon = (p && PANTHEON_EMBLEMS[p.pantheon]) || '⚔️';
+    t.style.setProperty('--taunt-accent', safeColor(p && p.color, '#ff7a4a'));
+    t.hidden = false;
+    t.classList.remove('is-on');
+    void t.offsetWidth; // restart the slam-in for a taunt that replaces another
+    t.classList.add('is-on');
+    clearTimeout(this.tauntTimer);
+    this.tauntTimer = setTimeout(() => {
+      t.classList.remove('is-on');
+      this.tauntTimer = setTimeout(() => (t.hidden = true), 500);
+    }, tauntDwell(text));
+    return true;
+  }
+
   /** Big centred announcement under the top bar. */
   showBanner(text, kind = 'info') {
     this.banner.textContent = text;
@@ -711,6 +744,7 @@ export class Hud {
   dispose() {
     clearTimeout(this.errorTimer);
     clearTimeout(this.bannerTimer);
+    clearTimeout(this.tauntTimer);
     for (const line of this.msgs.children) clearTimeout(line._timer);
     this.minimap.dispose();
     this.marksLayer.dispose();

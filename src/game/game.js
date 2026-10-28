@@ -303,7 +303,7 @@ export class Game {
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
-    for (const line of session.chatLog || []) if (showChatLine(line)) this.hud.chat(line);
+    for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
     session.start();
 
     // Clients wait for the first full snapshot.
@@ -670,6 +670,11 @@ export class Game {
 
   onChat(line) {
     if (!this.hud || !showChatLine(line)) return;
+    // A computer player's line (DESIGN 10.1) is a taunt at the top centre with a snarl of drums and brass.
+    if (line.voice && !line.system) {
+      if (this.hud.showTaunt(line)) sfx.play('taunt');
+      return;
+    }
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
   }

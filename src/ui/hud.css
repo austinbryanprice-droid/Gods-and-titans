@@ -372,6 +372,73 @@
 .hud-banner.is-danger { color: #ff9a7a; text-shadow: 0 0 18px rgba(255, 70, 40, 0.65), 0 2px 0 #000, 0 0 6px #000; }
 .hud-banner.is-titan { color: #e6c8ff; text-shadow: 0 0 20px rgba(170, 110, 255, 0.7), 0 2px 0 #000, 0 0 6px #000; }
 
+/* A computer player's taunt (Hud.showTaunt, DESIGN 10.1): a big quote at the top centre that slams in */
+.hud-taunt {
+  --taunt-accent: #ff7a4a;
+  position: absolute;
+  top: 6.4em;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(46em, 86vw);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 0.7em;
+  align-items: center;
+  padding: 0.45em 1.3em 0.55em 0.6em;
+  border: 1px solid #000;
+  border-top: 3px solid var(--taunt-accent);
+  border-radius: 6px;
+  color: #fff3dc;
+  text-shadow: 0 2px 0 #000, 0 0 0.6em rgba(0, 0, 0, 0.8);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 90, 40, 0.28), transparent 70%),
+    linear-gradient(180deg, rgba(30, 14, 10, 0.94), rgba(12, 8, 8, 0.9));
+  background:
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--taunt-accent) 34%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(30, 14, 10, 0.94), rgba(12, 8, 8, 0.9));
+  box-shadow: 0 0 0 1px rgba(255, 210, 150, 0.12) inset, 0 6px 22px rgba(0, 0, 0, 0.6), 0 0 26px rgba(255, 70, 30, 0.25);
+  opacity: 0;
+  transition: opacity 0.45s;
+  pointer-events: none;
+  z-index: 3;
+}
+.hud-taunt::before {
+  /* the speaker's pantheon emblem */
+  content: attr(data-icon);
+  content: attr(data-icon) / '';
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+  width: 2.1em;
+  height: 2.1em;
+  font-size: 1.5em;
+  border-radius: 50%;
+  border: 2px solid var(--taunt-accent);
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.65));
+}
+.hud-taunt-from {
+  font: 700 1em/1.2 var(--mw-font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--taunt-accent);
+}
+.hud-taunt-text {
+  font: 700 1.6em/1.25 var(--mw-font-display);
+  overflow-wrap: anywhere;
+}
+.hud-taunt.is-on { opacity: 1; animation: hud-taunt-slam 0.42s cubic-bezier(0.2, 1.4, 0.4, 1); }
+@keyframes hud-taunt-slam {
+  0% { transform: translateX(-50%) scale(1.35); opacity: 0; }
+  55% { transform: translateX(-50%) scale(0.96); opacity: 1; }
+  72% { transform: translateX(calc(-50% - 4px)) scale(1); }
+  86% { transform: translateX(calc(-50% + 3px)) scale(1); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-taunt.is-on { animation: none; }
+}
+
 .hud-mismatch {
   position: absolute;
   top: 2.8em;
