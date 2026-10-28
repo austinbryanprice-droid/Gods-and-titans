@@ -1155,7 +1155,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
-          toggle('narration', 'Narration', browserSpeech() ? 'A voice reads the film\'s captions aloud. It follows the Volume above.' : 'This browser has no speech voice, so the film plays with its captions only.'),
+          toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),
           onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-watch', { type: 'button', onclick: () => onIntro() }, '▶ Watch it now') : null),
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),

@@ -2,7 +2,7 @@
 // film (src/intro/film.js, the real renderer on a set the simulation runs) between letterbox
 // bars with a line of text at a time, then hands over to the title screen. Esc (or Enter,
 // Space, or the Skip button) cuts it short at any moment, even while it is still loading.
-// A voice (src/intro/narrator.js) reads each line aloud as it comes up, unless the player turned that off, and
+// A voice (src/intro/narrator.js, saying the recorded lines of src/intro/voiceover.js) reads each line aloud as it comes up, unless the player turned that off, and
 // the title theme plays under it as a score (src/intro/score.js) that steps back for the voice and swells between.
 //
 // Sound is the player's to start: a browser keeps audio and speech off until a key press or a click. The page
@@ -21,6 +21,7 @@
 import { h } from './menu-dom.js';
 import { FILM_LENGTH, AUDIO_CUES } from '../intro/script.js';
 import { createNarrator } from '../intro/narrator.js';
+import { recordedSpeech } from '../intro/voiceover.js';
 import { createFilmScore } from '../intro/score.js';
 import { sfx } from '../audio/sfx.js';
 
@@ -114,7 +115,7 @@ function buildOverlay(onSkip) {
  * @param {() => void} [o.onHandover] called once, behind the black, when the title screen should show
  * @param {boolean} [o.manual] tools and tests drive the film themselves (intro.advance moves it on, intro.draw paints a frame); no frame loop runs
  * @param {boolean} [o.guard] drop the film on a machine too slow to show it
- * @param {boolean} [o.narrate] read each caption aloud with the browser's speech synthesis (the player's setting); silent where it has none
+ * @param {boolean} [o.narrate] read each caption aloud (the player's setting): the recorded narration (src/intro/voiceover.js), or the browser's speech synthesis where the clips cannot be had; silent where neither can
  * @param {number} [o.volume] the game's volume setting, 0..1: the voice follows it
  * @param {boolean} [o.gate] the player wants sound: when the browser has not allowed it (it waits for a key press or a click), hold the film at its first frame behind a card until one comes, or until the browser allows it. The page passes it; tools and tests, which drive the film themselves, do not
  * @param {() => Promise<{ IntroFilm: Function, Renderer: Function }>} [o.load]
@@ -124,6 +125,20 @@ function buildOverlay(onSkip) {
  * @param {(() => { start: Function, update: Function, speaking: Function, end: Function, waiting?: Function })|null} [o.createScore] makes the score under the film, which plays the music engine (tests pass a stand-in, or null for none)
  * @returns {{ done: Promise<'finished'|'skipped'|'failed'>, ready: Promise<void>, skip: () => void, advance: (dt: number) => void, draw: () => void, film: object|null, root: HTMLElement }}
  */
+/**
+ * The narrator the page uses: the recorded clips through the sound engine, the browser's voice as the fallback.
+ * `?voice=browser` in the address uses the browser's voice alone (to compare, and for the tools that check that path).
+ */
+function filmVoice(o) {
+  let browserOnly = false;
+  try {
+    browserOnly = new URLSearchParams(globalThis.location ? globalThis.location.search : '').get('voice') === 'browser';
+  } catch {
+    // no address to read (tests)
+  }
+  return createNarrator(browserOnly ? o : { ...o, speech: recordedSpeech() });
+}
+
 export function playIntro({
   root = document.getElementById('app'),
   quality = 'medium',
@@ -136,7 +151,7 @@ export function playIntro({
   load = defaultLoad,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   audio = sfx,
-  createVoice = createNarrator,
+  createVoice = filmVoice,
   createScore = createFilmScore,
 } = {}) {
   let state = 'loading'; // loading → playing → leaving → done
