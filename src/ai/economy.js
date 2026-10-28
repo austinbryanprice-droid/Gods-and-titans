@@ -412,12 +412,12 @@ export function manageWorkers(ai, s) {
         toGold.push(u);
         g++;
       }
-    } else if ((want.wood - w >= 2 || (want.wood > w && g > want.gold)) && gold.length && trees.length) {
+    } else if (shiftHelps(want.wood - w, want.gold - g) && gold.length && trees.length) {
       const u = takeGold();
       if (!u) break;
       toWood.push(u);
       w++;
-    } else if ((want.gold - g >= 2 || (want.gold > g && w > want.wood)) && wood.length && ai.pairs.length) {
+    } else if (shiftHelps(want.gold - g, want.wood - w) && wood.length && ai.pairs.length) {
       const u = pickMovable(wood, 'w');
       if (!u) break;
       removeFrom(wood, u);
@@ -430,6 +430,16 @@ export function manageWorkers(ai, s) {
   sendPray(toPray);
   sendGold(toGold);
   sendWood(toWood);
+}
+
+/**
+ * Should a worker move from job B to job A, given how many each still lacks (negative: a surplus)?
+ * Only when A has a gap and B has a surplus, or A's gap is at least two bigger: a move that just
+ * swaps which job is short would be undone at the next think, and the same worker would walk to
+ * and fro between a mine and the trees every half second without ever gathering.
+ */
+export function shiftHelps(needTo, needFrom) {
+  return needTo > 0 && (needFrom < 0 || needTo - needFrom >= 2);
 }
 
 /** A gold worker to reassign: queued at an over-full mine first, never one carrying gold if avoidable. */
