@@ -21,6 +21,17 @@ const END_TEXT = {
 };
 
 /** The line under a finished Trial of the Titans. */
+/** The daily challenge's result (DESIGN 9.3): the score against today's best, and the streak of days. */
+function dailyLine(d) {
+  if (!d) return null;
+  const n = (v) => v.toLocaleString('en-US');
+  const score = d.first ? `Daily challenge: ${n(d.score)} points, today's first try.`
+    : d.isNew ? `Daily challenge: ${n(d.score)} points, a new best today (it was ${n(d.previous)}).`
+      : `Daily challenge: ${n(d.score)} points · today's best ${n(d.best)}.`;
+  const streak = d.streak > 1 ? ` 🔥 ${d.streak} days in a row.` : '';
+  return el('div', `hud-go-best hud-go-daily${d.isNew ? ' is-new' : ''}`, score + streak);
+}
+
 function survivalLine(wave) {
   if (wave <= 0) return 'The Trial of the Titans is over before the first wave even came.';
   if (wave === 1) return 'The Trial of the Titans is over: the first wave broke your city.';
@@ -299,7 +310,7 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
-  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const survival = result === 'survival';
@@ -318,6 +329,7 @@ export class Overlays {
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
       best,
+      dailyLine(daily),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.medalCard(medal),
       chronicleView(vs, winningTeam, this.game.chronicle || null),

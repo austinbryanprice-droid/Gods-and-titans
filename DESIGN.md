@@ -2157,6 +2157,26 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
+### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
+One game against the computer per local calendar day, the same on every device: everything comes from the day's
+key ('YYYY-MM-DD'): the map seed, my pantheon, any AI ally's and the rivals' pantheons (no pantheon twice) and a
+twist. The nine twists come round in a seeded shuffle of nine days, so every twist appears once a cycle:
+- Start changes the sim applies to every city, AI included (`setup.twist`, read by the World through
+  `startOf`; an unknown id is a normal game): Golden Age (three times the gold and wood), Blessed Start
+  (+350 faith), Humble Beginnings (two worshippers, half the gold and wood), Crowded Hearths (ten worshippers).
+- Sides and modes built into the lobby state: A Worthy Foe (one Hard AI), Outnumbered (a Normal and an Easy AI
+  allied against me, medium map), Brothers in Arms (an AI ally against two Normal AIs), Holy Ground
+  (Sacred Victory, 5.11), Trial of the Titans (with an AI ally, 5.14). Other twists face one Normal AI on a small map.
+
+Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
+today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
+loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
+with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in
+localStorage under `mythicwar-daily`: `{ days: { day: { best, plays, won } } }`, the last 60 days. The streak
+is the run of days played up to today, or up to yesterday while today is not played yet.
+
 ## 10. AI (src/ai/)
 
 `createAI(world, playerIndex, difficulty) → { tick() }` (difficulty `'tutorial'` is the sleeping camp of 5.13,
