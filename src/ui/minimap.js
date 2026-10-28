@@ -270,6 +270,24 @@ export class Minimap {
       ctx.fillStyle = this.colorOf(e.o);
       ctx.fillRect(x - s / 2, y - s / 2, s, s);
     }
+    // Relics on the ground or still guarded (DESIGN 5.15): a gold diamond, brighter once free.
+    const rs = Math.max(3, k * 1.6);
+    for (const r of vs.relics || []) {
+      if ((r.s !== 'g' && r.s !== 'k') || !vs.relicKnown(r)) continue;
+      const x = r.x * k;
+      const y = r.y * k;
+      ctx.beginPath();
+      ctx.moveTo(x, y - rs);
+      ctx.lineTo(x + rs, y);
+      ctx.lineTo(x, y + rs);
+      ctx.lineTo(x - rs, y);
+      ctx.closePath();
+      ctx.fillStyle = r.s === 'g' ? '#fff3b0' : '#e0a93a';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(40,20,0,0.9)';
+      ctx.stroke();
+    }
   }
 
   /**

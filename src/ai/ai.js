@@ -14,6 +14,7 @@ import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
+import { runRelics } from './relics.js';
 import { runPowers } from './powers.js';
 import { createTutorialAI } from './tutorial-ai.js';
 import { runSacred } from './sacred.js';
@@ -113,6 +114,7 @@ export class AIPlayer {
     runMilitary(this, s);
     if (this.thinks % 3 === 0) runPowers(this, s);
     lap('military');
+    runRelics(this, s);
     runSacred(this, s);
     manageWorkers(this, s);
     resumeSites(this, s);

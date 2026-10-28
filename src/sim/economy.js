@@ -534,7 +534,18 @@ export function releasePrayerSlot(world, u, o) {
 /** Pray order: { type: 'pray', building, slot, kneel }. Returns true when finished. */
 export function updatePray(world, u, o) {
   const b = world.entities.get(o.building);
-  if (!b || b.dead || !b.constructed || b.owner !== u.owner || b.prayers[o.slot] !== u.id) return true;
+  if (!b || b.dead || !b.constructed || b.owner !== u.owner) return true;
+  if (b.prayers[o.slot] !== u.id) {
+    // A shift-queued prayer reserved its slot when it was queued, and that slot only counts as taken
+    // once the prayer begins: another worshipper may have been sent there since. Take any free one.
+    const slot = reservePrayerSlot(world, b, u);
+    if (slot < 0) {
+      world.error(u.owner, `This ${(b.def && b.def.name) || 'shrine'} is full.`);
+      return true;
+    }
+    o.slot = slot;
+    o.kneel = false;
+  }
   if (!b.praySpots || b.praySpotsVer !== world.map.version) computePrayerSpots(world, b);
   const spot = b.praySpots[o.slot];
   u.target = b.id;

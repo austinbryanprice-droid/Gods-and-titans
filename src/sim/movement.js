@@ -10,6 +10,17 @@ const STUCK_INTERVAL = 16; // ticks between progress checks
 const LOS_RECHECK = 10; // ticks between line-of-sight checks while chasing directly
 const MAX_PUSH = 0.2; // max collision correction per pair per tick
 const FAIL_RETRY_TICKS = 40; // a failed footprint walk is retried at most this often
+const JAM_CHECKS = 6; // progress checks in a row stuck in allied traffic before u squeezes through
+const JAM_PASS_TICKS = 40; // then u walks through allies for this long (2 s)
+
+/**
+ * Is u squeezing through allied traffic right now? Allies stuck in each other in a narrow gap
+ * (a Titan-sized creature and a few soldiers in a one-tile pass, all pushing the same way) can
+ * hold each other there for good, so after a while a jammed unit stops colliding with allies.
+ */
+function squeezing(world, u) {
+  return u.jamT > world.tickCount;
+}
 
 /**
  * Which side (+1 / -1 along the mover's left normal) an obstacle is on.
@@ -422,6 +433,7 @@ function stepUnit(world, u) {
     for (let i = 0; i < tmp.length; i++) {
       const o = tmp[i];
       if (o === u || o.dead || o.ghost || o.air !== u.air) continue;
+      if ((squeezing(world, u) || squeezing(world, o)) && !world.areEnemies(u.owner, o.owner)) continue;
       const ox = u.x - o.x;
       const oy = u.y - o.y;
       const minD = u.radius + o.radius + 0.2;
@@ -474,7 +486,13 @@ function stepUnit(world, u) {
         // Queueing behind allies that are still moving (a narrow gap) is a
         // jam, not a blockage: count it as a fraction of a stuck step.
         const before = mv.stuck;
-        mv.stuck += trafficAhead(world, u) ? 0.25 : 1;
+        const jam = trafficAhead(world, u);
+        mv.stuck += jam ? 0.25 : 1;
+        mv.jams = jam ? (mv.jams || 0) + 1 : 0;
+        if (mv.jams >= JAM_CHECKS) {
+          mv.jams = 0;
+          u.jamT = world.tickCount + JAM_PASS_TICKS;
+        }
         if (mv.stuck >= 4) {
           mv.failed = true;
           arrive(u, mv);
@@ -484,6 +502,7 @@ function stepUnit(world, u) {
       }
     } else {
       mv.stuck = 0;
+      mv.jams = 0;
     }
     mv.checkT = world.tickCount;
     mv.checkX = u.x;
@@ -526,12 +545,13 @@ function resolveCollisions(world) {
         dx /= d;
         dy /= d;
       }
+      const allies = !world.areEnemies(a.owner, b.owner);
+      if (allies && (squeezing(world, a) || squeezing(world, b))) continue;
       const pen = minD - d;
       const aMoving = a.moving;
       const bMoving = b.moving;
       let wa = pushWeight(a);
       let wb = pushWeight(b);
-      const allies = !world.areEnemies(a.owner, b.owner);
       if (allies) {
         if (aMoving && !bMoving) wb *= 4;
         else if (bMoving && !aMoving) wa *= 4;

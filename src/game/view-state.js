@@ -76,6 +76,7 @@ export class ViewState {
     this.renderTime = 0; // interpolated sim time (s) of what update() shows
     this.fields = [];
     this.reveals = [];
+    this.relics = []; // RelicViews (DESIGN 6.3): { i, t, s: 'k'|'g'|'c'|'h', x?, y?, c?, b?, o? }
     // Sacred sites (DESIGN 5.11): the map's places until the first snapshot, then the host's rows
     // { x, y, o, p?, c?, cn? }; sacred is the Sacred Victory countdown { tm, end } or null.
     this.sites = (this.map.sacred || []).map((p) => ({ x: p.x, y: p.y, o: -1 }));
@@ -280,6 +281,56 @@ export class ViewState {
     return this.lastSeen.get(id) || null;
   }
 
+  // ---------------------------------------------------------------- relics (DESIGN 5.15)
+
+  /**
+   * Where a relic is drawn: its spot while guarded or on the ground, its carrier's (interpolated)
+   * position, or its Temple. Null when its holder is not in the view.
+   */
+  relicSpot(r) {
+    if (!r) return null;
+    if (r.s === 'c' || r.s === 'h') {
+      const e = this.entities.get(r.s === 'c' ? r.c : r.b);
+      return e ? { x: e.ix ?? e.x, y: e.iy ?? e.y, holder: e } : null;
+    }
+    return Number.isFinite(r.x) && Number.isFinite(r.y) ? { x: r.x, y: r.y, holder: null } : null;
+  }
+
+  /** Should the local player see this relic? On the ground once its tile is explored; carried or housed when the holder is. */
+  relicKnown(r) {
+    const p = this.relicSpot(r);
+    if (!p) return false;
+    if (p.holder) return this.isEntityVisible(p.holder);
+    return this.revealAll || this.isExplored(Math.floor(p.x), Math.floor(p.y));
+  }
+
+  /** The relic a unit carries, or null. */
+  relicCarriedBy(id) {
+    for (const r of this.relics) if (r.s === 'c' && r.c === id) return r;
+    return null;
+  }
+
+  /** Relics resting in a Temple. */
+  relicsIn(id) {
+    return this.relics.filter((r) => r.s === 'h' && r.b === id);
+  }
+
+  /** A relic on the ground, in sight, within `range` tiles of a point (the nearest), or null: what a right click picks up. */
+  relicNear(x, y, range = 1.2) {
+    let best = null;
+    let bestD = range;
+    for (const r of this.relics) {
+      if (r.s !== 'g' || !Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
+      if (!this.revealAll && !this.isVisibleAt(r.x, r.y)) continue;
+      const d = Math.hypot(r.x - x, r.y - y);
+      if (d <= bestD) {
+        bestD = d;
+        best = r;
+      }
+    }
+    return best;
+  }
+
   sightOf(e) {
     if (typeof e.sight === 'number') return e.sight;
     let s = this.sightCache.get(e.t);
@@ -379,6 +430,7 @@ export class ViewState {
     if (this.me) this.myTeam = this.me.team;
     this.fields = snap.fields || [];
     this.reveals = snap.reveals || [];
+    this.relics = snap.relics || [];
     if (Array.isArray(snap.sites)) this.sites = snap.sites.filter((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
     this.sacred = snap.sacred && Number.isFinite(snap.sacred.end) ? snap.sacred : null;
     this.gameOver = snap.gameOver || null;

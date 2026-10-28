@@ -15,7 +15,7 @@ import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -142,8 +142,12 @@ export class Hud {
     // Your pantheon: hover for its blessings and elite soldier (filled in by showPantheon).
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
+    // Relics (DESIGN 5.15): how many of the map's relics rest in my Temples; hover for their bonuses.
+    this.rRelics = res('is-relic', '💎', 'Relics');
+    this.rRelics.n.hidden = true;
+    this.relicSig = '';
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n, this.rRelics.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -335,6 +339,7 @@ export class Hud {
     }
     setText(this.clock, formatClock(vs.time));
     this.updatePeace();
+    this.updateRelics();
     this.updateWaves();
     this.updateSites();
     const s = game.session;
@@ -409,6 +414,18 @@ export class Hud {
     if (idn) lines.push(idn.playstyle, '', ...idn.blessings.map((b) => `${b.icon} ${b.name}: ${b.description}`));
     if (p.elite) lines.push('', `${p.elite.icon} ${p.elite.name}, a Barracks soldier from Town: ${p.elite.description.replace(/ Requires Town\.$/, '')}`);
     this.rPantheon.n.title = lines.join('\n');
+  }
+
+  /** The relic chip: "2/5" with the bonuses in its tooltip; hidden on a map without relics. */
+  updateRelics() {
+    const c = relicChip(this.vs);
+    setHidden(this.rRelics.n, !c);
+    if (!c) return;
+    const sig = `${c.count}/${c.total}|${c.title}`;
+    if (sig === this.relicSig) return;
+    this.relicSig = sig;
+    setText(this.rRelics.v, `${c.count}/${c.total}`);
+    this.rRelics.n.title = c.title;
   }
 
   /** The Decade of Peace chip: the countdown, one reminder at each PEACE_WARNINGS mark, gone when the peace is over. */
