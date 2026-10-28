@@ -1841,6 +1841,15 @@ per-frame budget, so a revealed army appears over a few frames.
   random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
   AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
   Online games offer neither.
+  **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
+  choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
+  (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the
+  F10 menu: `Ticker.setSpeed` runs that many more or fewer ticks a real second (each tick is still `DT` of game time,
+  so the sim and its determinism are untouched), `ViewState.setRate` plays the snapshots back on local time × rate
+  (re-anchoring the clock; above normal the interpolation delay stays as long in real time), and
+  `GameRenderer.setSpeed` scales the animations' dt but not the camera's. Online games always run at Normal and their
+  F10 menu leaves the row out. The interface size multiplies the HUD's base font size (`--hud-scale` on #hud-root):
+  Small 0.85, Normal 1, Large 1.15, Larger 1.3; every HUD panel is sized in em, so all of it follows.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`

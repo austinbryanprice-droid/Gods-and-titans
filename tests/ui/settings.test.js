@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal' });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -210,4 +210,15 @@ test('narration: the voice is on by default, only booleans accepted, remembered 
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, intro: false }));
   _resetSettingsForTests();
   assert.equal(getSettings().narration, true);
+});
+
+test('gameSpeed and uiScale: normal by default, only known ids accepted, remembered across reloads', () => {
+  assert.equal(getSettings().gameSpeed, 'normal');
+  assert.equal(getSettings().uiScale, 'normal');
+  assert.equal(saveSettings({ gameSpeed: 'ludicrous', uiScale: 2 }).gameSpeed, 'normal');
+  assert.equal(getSettings().uiScale, 'normal');
+  saveSettings({ gameSpeed: 'faster', uiScale: 'large' });
+  _resetSettingsForTests();
+  assert.equal(getSettings().gameSpeed, 'faster');
+  assert.equal(getSettings().uiScale, 'large');
 });

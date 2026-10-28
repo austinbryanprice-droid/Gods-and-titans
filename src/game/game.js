@@ -11,7 +11,7 @@ import { HostSession, ClientSession } from '../net/session.js';
 import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { PEACE_NAME } from '../config.js';
+import { GAME_SPEEDS, PEACE_NAME, UI_SCALES } from '../config.js';
 import { edgeName } from '../sim/survival.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { POWERS, isHarmfulPower } from '../data/powers.js';
@@ -214,6 +214,8 @@ export class Game {
     this.lastFrame = 0;
     this.disposed = false;
     this.paused = false;
+    this.solo = false; // a match against the computer, so the game speed applies (set at start)
+    this.speed = 1; // game seconds per real second (applySpeed)
     this.showAllBarsHeld = false;
     this.overShown = false;
     this.ended = false;
@@ -280,6 +282,7 @@ export class Game {
     }
 
     this.hud = new Hud({ root: this.hudRoot, game: this });
+    this.applyUiScale();
     if (session.mapMismatch) this.hud.setMapMismatch(true);
     this.offs.push(session.onChat((line) => this.onChat(line)));
     if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
@@ -307,6 +310,9 @@ export class Game {
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
     session.start();
+    // Only a match against the computer can run faster or slower: nobody else has to keep up.
+    this.solo = isSolo(session);
+    this.applySpeed();
 
     // Clients wait for the first full snapshot.
     if (!session.isHost && !this.viewState.snapshot) {
@@ -332,6 +338,7 @@ export class Game {
     this.setLoading(false);
     this.resize();
     this.applyShowAllBars();
+    this.applySpeed();
     this.centerOnStart();
     this.input = new InputController({ game: this, canvas: this.canvas, overlayRoot: this.hudRoot });
     this.selection.onChange(() => this.renderer && this.renderer.setSelection(this.selection.ids));
@@ -655,8 +662,28 @@ export class Game {
     this.needsRender = true;
   }
 
+  /**
+   * The game speed setting (DESIGN 9), for a match against the computer only: the ticker runs more or fewer
+   * ticks a second, the view plays back at the same pace, and the renderer's animations follow.
+   */
+  applySpeed() {
+    const m = (this.solo && GAME_SPEEDS[this.settings.gameSpeed]) || 1;
+    this.speed = m;
+    const s = this.session;
+    if (s && s.ticker) s.ticker.setSpeed(m);
+    if (this.viewState) this.viewState.setRate(m);
+    if (this.renderer && typeof this.renderer.setSpeed === 'function') this.renderer.setSpeed(m);
+  }
+
+  /** The interface size setting: a factor on the HUD's base font size (hud.css), which every panel is sized in. */
+  applyUiScale() {
+    if (this.hudRoot && this.hudRoot.style) this.hudRoot.style.setProperty('--hud-scale', String(UI_SCALES[this.settings.uiScale] || 1));
+  }
+
   onSettings(s, changed) {
     this.settings = s;
+    if (changed.includes('gameSpeed')) this.applySpeed();
+    if (changed.includes('uiScale')) this.applyUiScale();
     if (changed.includes('showAllBars')) this.applyShowAllBars();
     if (changed.includes('quality') && this.renderer && typeof this.renderer.setQuality === 'function') {
       this.renderer.setQuality(s.quality);
