@@ -2,6 +2,7 @@
 import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
+import { survivalView } from './survival.js';
 import { siteViews } from './sacred.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -54,6 +55,7 @@ function unitView(u) {
     v.xp = Math.floor(u.xp);
     if (u.rank > 0) v.rk = u.rank;
   }
+  if (u.boost && u.boost.dmg !== 1) v.wd = Math.round(u.boost.dmg * 1000) / 1000; // Trial of the Titans: damage boost for the info panel
   const cd = {};
   for (const k in u.cooldowns) cd[k] = r1(u.cooldowns[k]);
   v.cd = cd;
@@ -128,7 +130,7 @@ export function buildSnapshot(world) {
       stats: { ...p.stats, faith: Math.floor(p.stats.faith + 1e-6), army: army[i] },
     };
   });
-  return {
+  const snap = {
     tick: world.tickCount,
     time: r2(world.time),
     players,
@@ -141,4 +143,6 @@ export function buildSnapshot(world) {
     sacred: world.sacred ? { tm: world.sacred.team, end: world.sacred.end } : null, // Sacred Victory countdown
     gameOver: world.gameOver ? { ...world.gameOver } : null,
   };
+  if (world.survival) snap.sv = survivalView(world); // Trial of the Titans: { w: waves out, m: wave monsters alive }
+  return snap;
 }

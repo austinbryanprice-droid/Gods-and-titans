@@ -31,7 +31,7 @@ import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { POP_MAX, PEACE_NAME } from '../config.js';
+import { POP_MAX, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_BOSS_EVERY } from '../config.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -42,6 +42,8 @@ const ERROR_MS = 2600;
 const BANNER_MS = 4200;
 const MAX_MESSAGES = 6;
 const MAX_MESSAGE_CHARS = 240;
+const SURVIVAL_ICON = '🐉'; // the Trial of the Titans' wave chip and messages
+const WAVE_WARNING = 10; // seconds before a wave when the HUD says it is coming
 const PEACE_ICON = '🕊️'; // the Decade of Peace's card emblem, as on its clock chip
 const MARKS_HINT = 'Team ping: Alt+click or middle-click the map or minimap. The buttons beside the minimap mark where to attack, defend, gather or get help.';
 
@@ -112,6 +114,12 @@ export class Hud {
     this.peaceChip.title = `${PEACE_NAME}: no player can harm another, or build near an enemy Town Center, until this clock runs out. Neutral creatures still fight.`;
     this.peaceChip.hidden = true;
     this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
+    // Trial of the Titans: the wave reached, the monsters still alive and the clock to the next wave.
+    this.waveText = el('span', 'hud-clock');
+    this.waveChip = el('div', 'hud-time hud-wave', el('i', 'hud-res-i', SURVIVAL_ICON), this.waveText);
+    this.waveChip.title = `${SURVIVAL_NAME}: monsters come out of the map's edges on this clock, more and stronger every wave, and a Titan leads every ${SURVIVAL_BOSS_EVERY}th one. Beating a wave pays gold. Hold out as long as you can.`;
+    this.waveChip.hidden = true;
+    this.waveWarned = null; // the last wave whose "coming in 10 s" message is behind us
     // Sacred sites held by my side (and the Sacred Victory countdown when a side holds them all).
     this.siteText = el('span', 'hud-clock');
     this.siteChip = el('div', 'hud-time hud-sites', el('i', 'hud-res-i', SITE_ICON), this.siteText);
@@ -134,7 +142,7 @@ export class Hud {
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.ping, this.rPantheon.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -319,6 +327,7 @@ export class Hud {
     }
     setText(this.clock, formatClock(vs.time));
     this.updatePeace();
+    this.updateWaves();
     this.updateSites();
     const s = game.session;
     const stall = stallText(s);
@@ -336,6 +345,8 @@ export class Hud {
       const lead = leadText(vs);
       if (lead) this.message(lead, 'good', { icon: PANTHEON_EMBLEMS[this.pantheonId] });
       if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good', { icon: PEACE_ICON });
+      const sv = vs.survival();
+      if (sv && sv.wave === 0) this.message(`${SURVIVAL_NAME}: build your defences. The first wave of monsters comes in ${peaceClock(sv.next)}.`, 'good', { icon: SURVIVAL_ICON });
       if (vs.sacredVictoryOn() && vs.time < 60) this.message(sacredStartText(), 'good', { icon: SITE_ICON });
       // Only a match with a teammate has anyone to ping.
       if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info', { icon: '📍' });
@@ -402,6 +413,26 @@ export class Hud {
     const passed = PEACE_WARNINGS.filter((s) => left <= s).length;
     if (this.peaceMarks !== null && passed > this.peaceMarks) this.message(peaceWarning(PEACE_WARNINGS[passed - 1]), 'alert', { icon: PEACE_ICON });
     this.peaceMarks = passed;
+  }
+
+  /** The Trial of the Titans chip: the wave reached and the clock to the next one, and a word 10 s before it comes. */
+  updateWaves() {
+    const sv = this.vs.survival();
+    setHidden(this.waveChip, !sv);
+    if (!sv) return;
+    const clock = peaceClock(sv.next);
+    setText(this.waveText, sv.wave === 0 ? `Wave 1 in ${clock}` : `Wave ${sv.wave} · ${sv.alive} left · next ${clock}`);
+    setClass(this.waveChip, 'is-boss', sv.nextBoss);
+    setClass(this.waveChip, 'is-ending', sv.next <= WAVE_WARNING);
+    const coming = sv.wave + 1;
+    const close = sv.next <= WAVE_WARNING;
+    // A game first seen inside the last seconds before a wave stays quiet about that one.
+    if (this.waveWarned === null) this.waveWarned = close ? coming : coming - 1;
+    if (close && this.waveWarned < coming && !this.vs.gameOver) {
+      this.waveWarned = coming;
+      const secs = Math.ceil(sv.next);
+      this.message(sv.nextBoss ? `Wave ${coming} comes in ${secs} s, and a Titan leads it!` : `Wave ${coming} comes in ${secs} s.`, 'alert', { icon: SURVIVAL_ICON });
+    }
   }
 
   /** The Sacred Sites chip: sites my side holds, and the Sacred Victory countdown while one side holds them all. */

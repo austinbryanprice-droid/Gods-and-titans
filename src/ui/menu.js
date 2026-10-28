@@ -7,7 +7,7 @@
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
-import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SACRED_NAME } from '../config.js';
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY, SACRED_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
@@ -37,6 +37,16 @@ export function showMenu(screen = 'title', opts = {}) {
 /** Hide the menu (the game is taking over the screen). */
 export function hideMenu() {
   if (instance) instance.hide();
+}
+
+/** 'fifth' for 5 (the boss rhythm of the Trial of the Titans), else '5th'. */
+function ordinal(n) {
+  return ({ 2: 'second', 3: 'third', 4: 'fourth', 5: 'fifth', 6: 'sixth', 10: 'tenth' })[n] || `${n}th`;
+}
+
+/** m:ss for whole seconds. */
+function clockText(sec) {
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
 function urlParams() {
@@ -342,7 +352,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     let leaving = false;
     let leaveArmed = false; // host: first Leave / Esc asks, the second one closes the room
     let leaveTimer = 0;
-    const st = () => lobby.state || { slots: [], mapSize: 'small', peace: 0 };
+    const st = () => lobby.state || { slots: [], mapSize: 'small', peace: 0, survival: false };
     const myIndex = () => {
       if (!isHost) return Number.isInteger(lobby.mySlot) ? lobby.mySlot : -1;
       const i = st().slots.findIndex((s) => s && s.kind === 'host');
@@ -416,7 +426,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       const state = st();
       const s = state.slots[i] || { kind: 'closed' };
       const me = myIndex();
-      const sig = JSON.stringify([s, me]);
+      const sig = JSON.stringify([s, me, M.survivalMode(state)]); // the trial shows "Together" in the team column
       if (sig === rowSig[i]) return;
       rowSig[i] = sig;
       const row = rows[i];
@@ -487,7 +497,9 @@ export function createMenu({ root, onStart, onIntro = null }) {
 
       // team
       let team = null;
-      if (filled) {
+      if (filled && M.survivalMode(st())) {
+        team = h('div.mw-team-static', { title: `In the ${SURVIVAL_NAME} every player is on one team.` }, 'Together');
+      } else if (filled) {
         if (canEditTeam(i, s)) {
           team = h('select.mw-select.mw-select--team', {
             'aria-label': `Team for slot ${i + 1}`,
@@ -542,9 +554,17 @@ export function createMenu({ root, onStart, onIntro = null }) {
         toast(err?.message || 'Could not change the game mode.');
       }
     };
+    const setSurvival = () => {
+      try {
+        if (typeof lobby.setSurvival === 'function') lobby.setSurvival(true);
+      } catch (err) {
+        toast(err?.message || 'Could not change the game mode.');
+      }
+    };
     const modeBtns = [
       ['standard', 'Standard', 'Fight from the first minute.', () => setPeace(0)],
       ['peace', PEACE_NAME, `No player can harm another, or build near an enemy Town Center, for the first ${PEACE_LENGTHS.join(', ')} minutes: time to build and mass armies for one great battle.`, () => setPeace(lastPeace)],
+      ['survival', SURVIVAL_NAME, `Survival: every player and AI on one team against ever larger waves of mythical monsters, with a Titan leading every ${ordinal(SURVIVAL_BOSS_EVERY)} wave. Hold out as long as you can.`, setSurvival],
     ].map(([id, label, title, pick]) => h('button.mw-seg', { type: 'button', title, dataset: { mode: id }, onclick: pick }, h('span', label)));
     const peaceBtns = PEACE_LENGTHS.map((m) => h('button.mw-seg', {
       type: 'button',
@@ -558,6 +578,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-peace-label', 'Peace lasts'),
       h('div.mw-segmented', peaceBtns),
       h('div.mw-hint.mw-peace-hint', 'Creatures still fight. A horn sounds when the peace ends.'),
+    );
+    const survivalBest = h('span.mw-survival-best');
+    const survivalRow = h('div.mw-peace-row.mw-survival-row',
+      h('div.mw-hint.mw-peace-hint', `Everyone plays on one team. The first wave comes at ${clockText(SURVIVAL_FIRST_WAVE)}, then one every ${SURVIVAL_INTERVAL} s, and a Titan leads every ${ordinal(SURVIVAL_BOSS_EVERY)} wave. Clearing a wave pays gold. The trial ends when your last building falls.`, ' ', survivalBest),
     );
     const modeStatic = h('div.mw-map-static');
     // Victory: destroy every enemy building, and with Sacred Victory on, holding every sacred site for 8 minutes too.
@@ -586,11 +610,11 @@ export function createMenu({ root, onStart, onIntro = null }) {
       ),
       h('div.mw-opt-group.mw-mode-group',
         h('div.mw-label', 'Game mode'),
-        isHost ? [h('div.mw-segmented', modeBtns), peaceRow] : modeStatic,
+        isHost ? [h('div.mw-segmented', modeBtns), peaceRow, survivalRow] : [modeStatic, survivalRow],
       ),
       h('div.mw-opt-group.mw-victory-group',
         h('div.mw-label', 'Victory'),
-        isHost ? sacredToggle : victoryStatic,
+        isHost ? [sacredToggle, victoryStatic] : victoryStatic,
       ),
     );
 
@@ -718,7 +742,12 @@ export function createMenu({ root, onStart, onIntro = null }) {
 
     function renderFooter() {
       const parts = M.matchupSummary(st());
-      setChildren(matchup, parts.length ? parts.map((p, k) => [
+      if (M.survivalMode(st()) && parts.length) {
+        setChildren(matchup, h('span.mw-team',
+          h('span.mw-team-label', 'Together'),
+          parts.flatMap((p) => p.names.map((n, j) => h('span.mw-team-name', { style: { '--c': p.colors[j] } }, n)))),
+        h('span.mw-vs', 'vs'), h('span.mw-team', h('span.mw-team-label', 'The monster waves')));
+      } else setChildren(matchup, parts.length ? parts.map((p, k) => [
         k ? h('span.mw-vs', 'vs') : null,
         h('span.mw-team',
           h('span.mw-team-label', `Team ${p.team}`),
@@ -739,12 +768,22 @@ export function createMenu({ root, onStart, onIntro = null }) {
       mapStatic.textContent = `${size === 'medium' ? 'Medium' : 'Small'} (${MAP_SIZES[size] || '?'}×${MAP_SIZES[size] || '?'})`;
       const peace = M.peaceMinutes(st());
       if (peace) lastPeace = peace;
-      modeBtns.forEach((b) => b.classList.toggle('is-active', (b.dataset.mode === 'peace') === (peace > 0)));
+      const survival = M.survivalMode(st());
+      const mode = survival ? 'survival' : peace > 0 ? 'peace' : 'standard';
+      modeBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.mode === mode));
       peaceBtns.forEach((b) => b.classList.toggle('is-active', Number(b.dataset.peace) === peace));
       peaceRow.hidden = peace === 0;
+      survivalRow.hidden = !survival;
+      const best = survival ? getCareer().best.wave : 0;
+      survivalBest.textContent = best > 0 ? `Your best: wave ${best}.` : '';
       modeStatic.textContent = M.gameModeLabel(st());
       sacredInput.checked = M.sacredOn(st());
       victoryStatic.textContent = M.victoryLabel(st());
+      if (isHost) {
+        // A trial has no rival team to win against: the Sacred Victory toggle gives way to the trial's goal.
+        sacredToggle.hidden = survival;
+        victoryStatic.hidden = !survival;
+      }
     }
 
     function renderAll() {
