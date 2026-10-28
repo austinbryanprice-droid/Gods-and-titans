@@ -105,6 +105,22 @@ test('a Worshipper picks it up, walks it to the Temple, and the owner gains the 
   assert.deepEqual(snap.relics, [{ i: 0, t: 'golden_fleece', s: 'h', b: temple.id, o: 0 }]);
 });
 
+test('a relic a building is raised over rolls to open ground and can still be picked up', () => {
+  const w = arena();
+  const r = w.relics[0];
+  clearCamp(w, r.camp, null);
+  const tx = Math.floor(r.x) - 1;
+  const ty = Math.floor(r.y) - 1;
+  place(w, 0, 'house', tx, ty);
+  assert.equal(w.map.isPassable(Math.floor(r.x), Math.floor(r.y)), false, 'the house covers it');
+  run(w, 10);
+  assert.equal(w.map.isPassable(Math.floor(r.x), Math.floor(r.y)), true, 'rolled to an open tile');
+  assert.equal(r.state, 'ground');
+  const worker = spawn(w, 0, 'worshipper', r.x - 6, r.y);
+  w.issueCommand(0, relicCmd([worker], r));
+  assert.ok(runUntil(w, () => r.state === 'carried', 40) > 0, 'picked up');
+});
+
 test('a Temple that falls drops its relic beside the ruin and takes the bonus away', () => {
   const w = arena();
   const r = w.relics[0];

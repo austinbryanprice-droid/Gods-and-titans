@@ -740,6 +740,7 @@ Treasures of world myth that give creeping a reward beyond the bounty (WC3 items
 - **Losing it:** a carrier that dies drops it where it fell; a Temple that falls drops what rested in it on its
   south side, and the owner loses the bonus (`ev: 'lose'`, player: the previous holder). A defeated player's
   relics fall with their last Temple.
+  A relic on the ground under a building raised over it rolls to the nearest open tile (checked every 10 ticks).
 - **The ten:** Golden Fleece (Greek, soldiers +10% health), Brísingamen (Norse, +25% Faith at Shrines and
   Temples), Eye of Horus (Egyptian, buildings +2 armor), Pot of Amrita (Hindu, gods regenerate +1.5 hp/s),
   Kusanagi (Japanese, Warriors and Archers +8% damage), Peaches of Immortality (Chinese, soldiers and creatures

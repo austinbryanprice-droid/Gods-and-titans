@@ -216,6 +216,17 @@ export function updateRelics(world) {
         emitRelic(world, r, 'lose', owner);
         refreshHolder(world, owner);
       }
+    } else if (r.state === 'ground' && auto) {
+      // A building raised over it (or a ruin it fell beside) would leave it out of every carrier's
+      // reach: it rolls to the nearest open tile.
+      const map = world.map;
+      if (!map.isPassable(Math.floor(r.x), Math.floor(r.y))) {
+        const p = map.nearestPassable(r.x, r.y, 16, false);
+        if (p) {
+          r.x = p.tx + 0.5;
+          r.y = p.ty + 0.5;
+        }
+      }
     }
   }
 }
