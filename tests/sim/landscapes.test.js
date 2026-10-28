@@ -200,3 +200,28 @@ test('new landscapes always leave room for sacred sites (another layout is tried
     }
   }
 });
+
+test('Trial of the Titans on the new landscapes: no wave monster is stranded in the woods, sea or ridges', async () => {
+  const { createWorld } = await import('../../src/sim/world.js');
+  const { SURVIVAL_FIRST_WAVE } = await import('../../src/config.js');
+  // Medium Great Forest, seed 26: two of the first wave once came out inside the eastern woods and never moved.
+  for (const [landscape, seed] of [['forest', 26], ['islands', 3], ['highlands', 8]]) {
+    const setup = {
+      version: 't', seed, mapSize: 'medium', landscape, survival: true,
+      players: [{ index: 0, name: 'A', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null }],
+    };
+    const w = createWorld(setup);
+    w.tickCount = Math.round((SURVIVAL_FIRST_WAVE - 0.05) * 20);
+    w.time = w.tickCount / 20;
+    w.tick();
+    w.tick();
+    const monsters = w.unitList.filter((u) => u.wave === 1);
+    assert.ok(monsters.length > 0, landscape);
+    const start = monsters.map((u) => [u.x, u.y]);
+    for (let i = 0; i < 20 * 30; i++) w.tick();
+    monsters.forEach((u, i) => {
+      const moved = Math.hypot(u.x - start[i][0], u.y - start[i][1]);
+      assert.ok(u.dead || moved > 5, `${landscape}: monster ${i} moved ${moved.toFixed(1)} tiles`);
+    });
+  }
+});

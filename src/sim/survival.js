@@ -148,7 +148,49 @@ function spawnPoints(world, sv, n) {
   if (far.length < 2) far = scored.sort((a, b) => b.d - a.d).slice(0, 4);
   sv.rng.shuffle(far);
   const k = n >= 15 ? 3 : n >= 5 ? 2 : 1;
-  return far.slice(0, Math.min(k, far.length));
+  return reachablePoints(world, far.slice(0, Math.min(k, far.length)));
+}
+
+/**
+ * Move each spawn point whose nearby ground cannot reach the players (deep woods, a sea or a
+ * ridge on the newer landscapes, DESIGN 6.7) to the nearest ground a Titan can walk from to
+ * their bases, so no monster of a wave is stranded and every wave can be cleared.
+ */
+function reachablePoints(world, points) {
+  const map = world.map;
+  const w = map.width;
+  const h = map.height;
+  const grid = map.pass3; // 3-wide ground: Titans lead waves too
+  const reach = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  let tail = 0;
+  for (const b of world.buildingList) {
+    if (b.dead || b.owner < 0) continue;
+    const s = map.nearestPassable(b.x, b.y, 12, true);
+    if (!s) continue;
+    const i = s.ty * w + s.tx;
+    if (!reach[i]) {
+      reach[i] = 1;
+      queue[tail++] = i;
+    }
+  }
+  if (!tail) return points;
+  for (let head = 0; head < tail; head++) {
+    const i = queue[head];
+    const x = i % w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+      if (j < 0 || j >= w * h || reach[j] || grid[j] !== 1) continue;
+      reach[j] = 1;
+      queue[tail++] = j;
+    }
+  }
+  const ok = (tx, ty) => reach[ty * w + tx] === 1;
+  return points.map((p) => {
+    const near = map.nearestPassable(p.x, p.y, 20, false); // where spawnUnit would put a monster
+    if (near && ok(near.tx, near.ty)) return p;
+    const t = map.spiralNearest(p.x, p.y, w + h, ok);
+    return t ? { ...p, x: t.tx + 0.5, y: t.ty + 0.5 } : p;
+  });
 }
 
 /** The nearest building of a player still in the game (walls are broken through on the way, not hunted). */
