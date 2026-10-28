@@ -2024,6 +2024,12 @@ returns as chat lines from that player with `voice: true`. Only the setup's own 
 that took over from a player who left keeps quiet). It only reads the World. Each player hides
 the lines with the `aiChat` setting ("AI chatter", in Settings → Gameplay and the in-game menu;
 default on): `showChatLine` in `src/game/game.js` filters them, live chat and the replayed log alike.
+A shown line is not a feed card but a taunt at the top centre (`Hud.showTaunt`, `.hud-taunt` in hud.css),
+under the banners: the speaker's pantheon emblem in a ring, their name in their colour, the words in
+quotes at 1.6em (the feed's cards are 1.18em), slamming in with a short shake (none under reduced
+motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. It comes with the
+`taunt` sound (sfx-alerts.js): two war-drum blows under a low brass fifth that bends down into the
+note with a growl, measured at peak -3.6 dB / loudest 400 ms -13.1 dB RMS, next to the war horn's -5.2 / -14.0.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 

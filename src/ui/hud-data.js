@@ -177,6 +177,18 @@ export function messageDwell(text, kind) {
   return kind === 'alert' ? ms + MESSAGE_ALERT_EXTRA_MS : ms;
 }
 
+// An AI's taunt at the top centre (Hud.showTaunt, DESIGN 10.1): long enough to read twice, short enough not to linger.
+const TAUNT_BASE_MS = 4500;
+const TAUNT_MS_PER_CHAR = 55;
+const TAUNT_MIN_MS = 6000;
+const TAUNT_MAX_MS = 9500;
+
+/** How long an AI's taunt stays at the top centre: 6 to 9.5 s by length. */
+export function tauntDwell(text) {
+  const letters = String(text ?? '').length;
+  return Math.min(TAUNT_MAX_MS, Math.max(TAUNT_MIN_MS, TAUNT_BASE_MS + letters * TAUNT_MS_PER_CHAR));
+}
+
 /**
  * The connection warning for a joined (client) session while the host has been silent
  * for STALL_NOTICE_MS (session.stalled / stalledMs), else '' (also for a HostSession,

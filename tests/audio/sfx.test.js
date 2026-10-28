@@ -9,7 +9,7 @@ const DESIGN_NAMES = ['click', 'select', 'move', 'attack_melee', 'attack_ranged'
   'chop', 'mine', 'pray', 'horn', 'ping', 'ping_urgent'];
 
 // src/audio/sfx-alerts.js: the alert, tip and milestone sounds.
-const ALERT_NAMES = ['nudge', 'drums', 'gong', 'research', 'tip', 'milestone'];
+const ALERT_NAMES = ['nudge', 'drums', 'gong', 'research', 'tip', 'milestone', 'taunt'];
 
 function finite(v, what) {
   if (typeof v !== 'number' || !Number.isFinite(v)) throw new TypeError(`${what}: non-finite ${v}`);
