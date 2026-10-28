@@ -147,6 +147,7 @@ export function renderHowToContent() {
       `Sacred sites ${SITE_ICON}, rings of standing stones around a glowing altar, lie between the bases. A Worshipper or Priest standing at one with no enemy near captures it in ${SITE_CAPTURE_TIME} seconds (a rival's site takes ${SITE_NEUTRALIZE_TIME} more to tear down first), and each site you hold gives ${SITE_FAITH} faith a second. Soldiers cannot capture, but any enemy at a site stops a capture. The chip beside the clock counts the sites your side holds. When the host turns on ${SACRED_NAME} in the lobby, a side that holds every site for ${SACRED_HOLD / 60} minutes in a row also wins.`),
     step(7, '🔱', 'Know your pantheon',
       'Every pantheon plays its own way. Each has two blessings that work from the first second, an elite soldier trained at the Barracks, its own look, and its own creatures, gods and Titan. Hover the pantheon chip at the top left of the battlefield, or open Pantheons on the menu, to read yours.'),
+    h('p.mw-tip', h('strong', 'New here? '), 'Learn to Play on the title screen walks you through a whole first match, one objective at a time, against a sleeping camp of raiders, and gives a medal for the time you win in.'),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
   );
   const controls = h('div.mw-howto-controls',

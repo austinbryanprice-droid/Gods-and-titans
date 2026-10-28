@@ -20,6 +20,8 @@ import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
 import { getCareer, markSeen } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
+import { tutorialSetup } from '../sim/tutorial.js';
+import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
@@ -211,6 +213,16 @@ export function createMenu({ root, onStart, onIntro = null }) {
     }
   }
 
+  /** The guided first match (DESIGN 9.2): a fixed solo setup, no lobby. */
+  function startTutorial() {
+    try {
+      sfx.play('horn');
+      onStart({ role: 'host', setup: tutorialSetup({ name: getSettings().name, version: GAME_VERSION }), myIndex: 0, conns: new Map(), lobby: null });
+    } catch (err) {
+      toast(err?.message || 'Could not start the lesson.');
+    }
+  }
+
   async function hostOnline() {
     let cancelled = false;
     const done = busy('Opening a room on the network…', () => (cancelled = true));
@@ -273,7 +285,11 @@ export function createMenu({ root, onStart, onIntro = null }) {
         toast(err?.message || 'Could not start the game.');
       }
     }
-    const newCount = getCareer().unseen.length;
+    const career = getCareer();
+    const newCount = career.unseen.length;
+    // A guided first match; a player who has never finished a game or the lesson is pointed at it.
+    const learnBtn = mainBtn('Learn to Play', career.best.medal ? `A guided first match · your best: ${medalLabel(career.best.medal)}` : 'A guided first match: gather, build, pray, summon and fight', startTutorial, 'mw-learn-btn');
+    if (!career.games && !career.best.medal) learnBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New? Start here'));
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
     const el = h('div.mw-title-screen',
@@ -290,6 +306,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
         playBtn,
         quickBtn,
+        learnBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
