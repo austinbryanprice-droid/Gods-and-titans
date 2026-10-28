@@ -1,4 +1,4 @@
-// Relics (DESIGN 5.12): treasures of world myth that the bigger neutral creep camps guard. A cleared
+// Relics (DESIGN 5.13): treasures of world myth that the bigger neutral creep camps guard. A cleared
 // camp drops its relic; a Worshipper or a god carries it to its owner's Temple, where it gives the
 // owner a lasting bonus for as long as it rests there. Effects use the upgrade vocabulary of
 // data/upgrades.js (computeMods folds in the relics a player holds), so the sim and the HUD read the

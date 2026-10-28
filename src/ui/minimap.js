@@ -270,7 +270,7 @@ export class Minimap {
       ctx.fillStyle = this.colorOf(e.o);
       ctx.fillRect(x - s / 2, y - s / 2, s, s);
     }
-    // Relics on the ground or still guarded (DESIGN 5.12): a gold diamond, brighter once free.
+    // Relics on the ground or still guarded (DESIGN 5.13): a gold diamond, brighter once free.
     const rs = Math.max(3, k * 1.6);
     for (const r of vs.relics || []) {
       if ((r.s !== 'g' && r.s !== 'k') || !vs.relicKnown(r)) continue;

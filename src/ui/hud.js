@@ -123,7 +123,7 @@ export class Hud {
     // Your pantheon: hover for its blessings and elite soldier (filled in by showPantheon).
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
-    // Relics (DESIGN 5.12): how many of the map's relics rest in my Temples; hover for their bonuses.
+    // Relics (DESIGN 5.13): how many of the map's relics rest in my Temples; hover for their bonuses.
     this.rRelics = res('is-relic', '💎', 'Relics');
     this.rRelics.n.hidden = true;
     this.relicSig = '';

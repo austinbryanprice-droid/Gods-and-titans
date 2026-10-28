@@ -538,6 +538,7 @@ export function applyEffect(world, ctx, eff, index) {
         p.gold += eff.gold || 0;
         p.wood += eff.wood || 0;
         p.faith += eff.faith || 0;
+        p.stats.faith += eff.faith || 0;
       }
       break;
     }

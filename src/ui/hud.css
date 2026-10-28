@@ -1190,6 +1190,37 @@
 .hud-st-dot { display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; margin-right: 0.5em; vertical-align: -0.05em; box-shadow: 0 0 0 1px #000; }
 .hud-st-you { color: var(--mw-ink-mute); font-weight: 400; font-size: 0.9em; }
 
+/* After-game chronicle (src/ui/hud-chronicle.js): tabs, awards and the timeline chart. */
+.hud-chronicle { margin-top: 1em; }
+.hud-gameover:has(.hud-chronicle) { width: min(48em, 94vw); max-height: 94vh; overflow-y: auto; }
+.hud-ch-tabs { justify-content: center; }
+.hud-ch-body { min-height: 14em; }
+.hud-stats.is-numbers th:nth-child(2), .hud-stats.is-numbers td:nth-child(2) { text-align: right; }
+.hud-ch-score { color: var(--mw-gold-hi); cursor: help; }
+.hud-ch-awards { display: grid; grid-template-columns: repeat(auto-fill, minmax(12.5em, 1fr)); gap: 0.6em; margin-top: 1.1em; text-align: left; }
+.hud-ch-award { display: flex; align-items: center; gap: 0.6em; padding: 0.5em 0.7em; border: 1px solid var(--mw-line-soft); border-radius: 6px; background: rgba(6, 8, 14, 0.55); animation: hud-ch-in 0.4s ease-out both; }
+.hud-ch-award:nth-child(2) { animation-delay: 0.08s; }
+.hud-ch-award:nth-child(3) { animation-delay: 0.16s; }
+.hud-ch-award:nth-child(4) { animation-delay: 0.24s; }
+.hud-ch-award:nth-child(5) { animation-delay: 0.32s; }
+.hud-ch-award:nth-child(n+6) { animation-delay: 0.4s; }
+.hud-ch-award.is-mine { border-color: var(--mw-gold); box-shadow: 0 0 0.8em rgba(255, 200, 100, 0.25); }
+.hud-ch-award-icon { font-family: var(--mw-emoji); font-size: 1.6em; line-height: 1; }
+.hud-ch-award-text { display: flex; flex-direction: column; min-width: 0; }
+.hud-ch-award-text b { font: 600 0.82em/1.2 var(--mw-font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--mw-gold); }
+.hud-ch-award-who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-ch-award-text small { color: var(--mw-ink-mute); font-size: 0.78em; }
+@keyframes hud-ch-in { from { opacity: 0; transform: translateY(0.4em); } }
+.hud-ch-metrics { margin-top: 1em; }
+.hud-ch-chartbox { margin-top: 0.6em; }
+.hud-ch-chart { display: block; width: 100%; height: auto; }
+.hud-ch-grid { stroke: rgba(196, 146, 72, 0.16); stroke-width: 1; }
+.hud-ch-axis { fill: var(--mw-ink-mute); font: 11px var(--mw-font-ui); }
+.hud-ch-line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: 0.9; }
+.hud-ch-line.is-mine { stroke-width: 3.2; opacity: 1; }
+.hud-ch-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4em 1.2em; margin-top: 0.4em; font-size: 0.85em; color: var(--mw-ink-dim); }
+@media (prefers-reduced-motion: reduce) { .hud-ch-award { animation: none; } }
+
 /* ------------------------------------------------------------ ornate frame (DESIGN 10)
    Carved dark-bronze console, gilded trim and beveled inset panels layered on
    top of the layout above. Purely decorative: no sizes or positions change and

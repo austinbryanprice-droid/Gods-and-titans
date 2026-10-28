@@ -283,7 +283,7 @@ export function modsOf(vs, owner) {
   return m;
 }
 
-// ---- Relics (DESIGN 5.12)
+// ---- Relics (DESIGN 5.13)
 
 /** Relic types resting in a player's Temples (the snapshot's `rl`; [] for none). */
 export function relicsOf(vs, owner) {

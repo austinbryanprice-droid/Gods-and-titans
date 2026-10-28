@@ -1,4 +1,4 @@
-// Relics in the 3D view (DESIGN 5.12): a glowing jewel in a gold ring, tinted by its relic, spinning
+// Relics in the 3D view (DESIGN 5.13): a glowing jewel in a gold ring, tinted by its relic, spinning
 // over the ground under a pale beam of light while it is guarded or lies free (so a camp worth
 // clearing reads from afar), smaller over the head of the Worshipper or god that carries it, and
 // floating over the Temple where it rests. One small group per relic (a map has a handful).

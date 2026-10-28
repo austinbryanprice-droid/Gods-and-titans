@@ -1,4 +1,4 @@
-// Relics (DESIGN 5.12): every creep camp of level RELIC_CAMP_LEVEL or more guards one relic, of a
+// Relics (DESIGN 5.13): every creep camp of level RELIC_CAMP_LEVEL or more guards one relic, of a
 // type drawn from data/relics.js (no type twice on a map). Once the camp's last creature falls the
 // relic lies on the ground; a Worshipper or a god of any player picks it up and carries it to one of
 // its owner's finished Temples, where it rests and gives the owner its bonus (computeMods folds in
