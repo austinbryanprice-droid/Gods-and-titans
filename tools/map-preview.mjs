@@ -228,7 +228,7 @@ for (const landscape of landscapes) for (const size of sizes) {
         ` forest=${pct(TERRAIN.FOREST)}% water=${pct(TERRAIN.WATER)}% ${problems.length ? 'PROBLEMS: ' + problems.slice(0, 4).join('; ') : 'ok'}`,
       );
       console.log(`    ${stats(map)}`);
-      row.push({ map, seed, size, pc });
+      row.push({ map, seed, size, pc, landscape });
     }
     rows.push(row);
   }
@@ -245,10 +245,10 @@ if (sheet) {
   console.log(`wrote ${file}`);
 } else {
   for (const row of rows) {
-    for (const { map, seed, size, pc } of row) {
+    for (const { map, seed, size, pc, landscape } of row) {
       const cv = new Canvas(map.width * scale, map.height * scale);
       drawMap(cv, map, 0, 0, scale);
-      const file = join(outDir, `map-${size}-p${pc}-s${seed}.png`);
+      const file = join(outDir, `map-${landscape}-${size}-p${pc}-s${seed}.png`);
       writeFileSync(file, encodePNG(cv.w, cv.h, cv.px));
       console.log(`wrote ${file}`);
     }

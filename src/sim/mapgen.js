@@ -1577,11 +1577,20 @@ export function generateMap({ seed = 1, mapSize = 'small', playerCount = 2, team
   const plan = startPlan(pc, teams);
   const ls = isLandscape(landscape) ? landscape : 'classic';
   let built = null;
+  let fallback = null; // a new landscape's first valid map without sacred sites, used if no attempt has any
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    built = buildMap(seed, n, pc, attempt, plan, ls);
-    built.map.meta.attempt = attempt;
-    if (validateMap(built.map).length === 0) break;
+    const next = buildMap(seed, n, pc, attempt, plan, ls);
+    next.map.meta.attempt = attempt;
+    built = next;
+    if (validateMap(next.map).length !== 0) continue;
+    // Sea, deep woods and rivers can leave no room for a sacred site: try the next layout so Sacred Victory stays possible.
+    if (ls === 'classic' || next.map.sacred.length > 0) {
+      fallback = null;
+      break;
+    }
+    fallback = fallback || next;
   }
+  if (fallback) built = fallback;
   addRenderData(built.map, built.layout);
   return built.map;
 }

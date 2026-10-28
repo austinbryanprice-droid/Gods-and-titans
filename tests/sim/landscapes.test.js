@@ -185,3 +185,18 @@ test('a landscape map generates fast enough for the lobby (medium, 4 players)', 
     assert.ok(best < 400, `${landscape}: medium map took ${best.toFixed(1)} ms`);
   }
 });
+
+test('new landscapes always leave room for sacred sites (another layout is tried when one has none)', () => {
+  // Small Islands 2v2, seed 10: its first layout had no room for a site.
+  const m = generateMap({ seed: 10, mapSize: 'small', playerCount: 4, teams: [1, 1, 2, 2], landscape: 'islands' });
+  assert.ok(m.sacred.length > 0);
+  assert.deepEqual(validateMap(m), []);
+  for (const landscape of ['islands', 'forest']) {
+    for (const [pc, teams] of [[4, [1, 1, 2, 2]], [3, [1, 1, 2]], [4, null]]) {
+      for (let seed = 0; seed < 12; seed++) {
+        const g = generateMap({ seed: seed * 31 + 5, mapSize: 'small', playerCount: pc, teams, landscape });
+        assert.ok(g.sacred.length > 0, `${landscape} p${pc} seed ${seed}`);
+      }
+    }
+  }
+});
