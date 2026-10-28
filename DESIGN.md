@@ -1615,6 +1615,17 @@ per-frame budget, so a revealed army appears over a few frames.
   markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
   keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
   shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
+  The sun's shadow box (`updateShadowCamera`) is fitted each frame to the view's ground quad as the
+  sun sees it (its extent along the light's right and up axes, plus a margin on the up-sun side for
+  what stands 8 units above the ground), not a square as wide as the view: anything whose shadow
+  falls in the view lies on the same sun ray as the point it darkens, so this covers every caster,
+  and a low sun no longer stretches the box 100+ tiles up-sun (that drew every forest chunk along
+  the strip into the map, more triangles than the visible scene). Its half sizes step by 2 tiles and
+  its center snaps to texels. Forest chunks are culled by their instances' box as well as their
+  bounding sphere (`chunkInFrustum` in props.js; the box grows by `CHUNK_BOX_PAD` for what the
+  shader does to a tree: a spruce's own shape and the wind). Late game at the population cap, Medium, default
+  zoom: shadow-pass triangles 1.0M to 0.6M, whole frame 1.75M to 1.1M, draw calls 373 to 228
+  (`node tools/perf-late.mjs`, which also profiles the real game with `--game`).
   Buildings (`src/render/models/building-*.js`, four layers): `building-core.js` holds the colors,
   surface classes and geometry primitives and the Kit that merges a building's parts into four
   vertex-colored buckets (foundation, body, team, glow); `building-materials.js` the shared materials
@@ -2182,6 +2193,26 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
   A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
+
+### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
+One game against the computer per local calendar day, the same on every device: everything comes from the day's
+key ('YYYY-MM-DD'): the map seed, my pantheon, any AI ally's and the rivals' pantheons (no pantheon twice) and a
+twist. The nine twists come round in a seeded shuffle of nine days, so every twist appears once a cycle:
+- Start changes the sim applies to every city, AI included (`setup.twist`, read by the World through
+  `startOf`; an unknown id is a normal game): Golden Age (three times the gold and wood), Blessed Start
+  (+350 faith), Humble Beginnings (two worshippers, half the gold and wood), Crowded Hearths (ten worshippers).
+- Sides and modes built into the lobby state: A Worthy Foe (one Hard AI), Outnumbered (a Normal and an Easy AI
+  allied against me, medium map), Brothers in Arms (an AI ally against two Normal AIs), Holy Ground
+  (Sacred Victory, 5.11), Trial of the Titans (with an AI ally, 5.14). Other twists face one Normal AI on a small map.
+
+Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
+today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
+loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
+with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in
+localStorage under `mythicwar-daily`: `{ days: { day: { best, plays, won } } }`, the last 60 days. The streak
+is the run of days played up to today, or up to yesterday while today is not played yet.
 
 ## 10. AI (src/ai/)
 
