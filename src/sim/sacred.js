@@ -115,6 +115,7 @@ export function accrueSiteFaith(world) {
     const p = world.players[s.owner];
     p.faithRate += SITE_FAITH;
     p.faith += SITE_FAITH * DT;
+    p.stats.faith += SITE_FAITH * DT;
   }
 }
 

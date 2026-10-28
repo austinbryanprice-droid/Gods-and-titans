@@ -1,4 +1,4 @@
-// Trial of the Titans on the client (DESIGN 5.12, 9): the wave chip in the top bar, the opening line,
+// Trial of the Titans on the client (DESIGN 5.13, 9): the wave chip in the top bar, the opening line,
 // the "coming in 10 s" warning, the end screen, the lobby's mode label and the best-wave record.
 // Fake DOM, a real ViewState fed snapshots of a real World.
 import { test, before, after } from 'node:test';

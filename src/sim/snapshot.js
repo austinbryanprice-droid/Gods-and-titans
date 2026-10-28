@@ -104,6 +104,7 @@ function mineView(world, m) {
 export function buildSnapshot(world) {
   const gods = world.players.map(() => []);
   const titan = world.players.map(() => false);
+  const army = world.players.map(() => 0); // population in fighting units (not worshippers, not summoned)
   const entities = [];
   for (const e of world.entities.values()) {
     if (e.dead) continue;
@@ -111,6 +112,7 @@ export function buildSnapshot(world) {
       if (e.owner >= 0 && !e.summoned) {
         if (e.def.class === 'god') gods[e.owner].push(e.type);
         else if (e.def.class === 'titan') titan[e.owner] = true;
+        if (e.def.class !== 'worker') army[e.owner] += e.def.pop || 0;
       }
       entities.push(unitView(e));
     } else if (e.kind === 'building') entities.push(buildingView(e));
@@ -125,7 +127,7 @@ export function buildSnapshot(world) {
       pop: p.popUsed, popCap: p.popCap, tier: p.tier, defeated: p.defeated,
       gods: gods[i], fallen, titan: titan[i],
       up: p.upList.slice(), ar: p.autoRepair,
-      stats: { ...p.stats },
+      stats: { ...p.stats, faith: Math.floor(p.stats.faith + 1e-6), army: army[i] },
     };
   });
   const snap = {

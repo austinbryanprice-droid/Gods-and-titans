@@ -93,7 +93,7 @@ export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can 
 export const PEACE_NAME = 'Decade of Peace';
 export const PEACE_BUILD_GAP = 20; // while the peace lasts nobody builds within this many empty tiles of an enemy Town Center (kept clear around it; DESIGN 5.10)
 
-// ---- Trial of the Titans (survival game mode, DESIGN 5.12) ----
+// ---- Trial of the Titans (survival game mode, DESIGN 5.13) ----
 export const SURVIVAL_NAME = 'Trial of the Titans';
 export const SURVIVAL_FIRST_WAVE = 120; // game seconds before the first wave comes out of the map's edge
 export const SURVIVAL_INTERVAL = 90; // seconds between waves, whether the last one is beaten or not
