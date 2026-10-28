@@ -4,7 +4,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { Overlays } from '../../src/ui/hud-overlays.js';
 import { Chronicle } from '../../src/game/chronicle.js';
-import { chronicleView } from '../../src/ui/hud-chronicle.js';
+import { chronicleView, niceStep } from '../../src/ui/hud-chronicle.js';
 import { installFakeDom } from './fake-dom.js';
 
 before(installFakeDom);
@@ -82,4 +82,13 @@ test('a hostile colour from the host never reaches the chart', () => {
   const node = chronicleView(vs, 1, chronicleOf(vs));
   node.button('Timeline').click();
   assert.equal(node.all('path')[1].getAttribute('stroke'), '#888888');
+});
+
+test('axis steps are whole numbers, so no two grid labels read the same', () => {
+  for (const max of [1, 2, 3, 7, 9, 10, 23, 99, 640, 5249]) {
+    const step = niceStep(max);
+    assert.ok(Number.isInteger(step) && step >= 1, `${max} -> ${step}`);
+  }
+  assert.equal(niceStep(10), 3, 'a 2.5 step rounds up');
+  assert.equal(niceStep(100), 25);
 });

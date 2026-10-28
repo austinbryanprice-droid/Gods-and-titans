@@ -119,12 +119,12 @@ function militaryTab(vs, winningTeam, peak) {
   ]));
 }
 
-/** Nice round step for an axis reaching max with about four lines. */
-function niceStep(max) {
+/** Nice round step for an axis reaching max with about four lines; whole numbers, since every metric counts. */
+export function niceStep(max) {
   const raw = Math.max(1, max) / 4;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const f = raw / mag;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+  return Math.max(1, Math.ceil((f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag));
 }
 
 /** The line chart for one metric: an SVG with a grid, time and value labels and a line per player. */
