@@ -9,6 +9,7 @@ import { findAbility, isUnlocked, cooldownLeft, resolveCastTarget, executeAbilit
 import { issueHouseUpgrade } from './homes.js';
 import { issueTrade } from './trade.js';
 import { peaceNotice } from './peace.js';
+import { castPower } from './powers.js';
 import { hyp } from './common.js';
 import { isWallType } from '../data/walls.js';
 
@@ -19,7 +20,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses', 'godPower']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -69,6 +70,7 @@ export function normalizeCommand(cmd, map) {
       unit: nameOrId(cmd.unit),
       ability: typeof ability === 'string' && ability.length <= MAX_NAME ? ability : undefined,
       upgrade: typeof upgrade === 'string' && upgrade.length <= MAX_NAME ? upgrade : undefined,
+      power: typeof cmd.power === 'string' && cmd.power.length <= MAX_NAME ? cmd.power : undefined,
       on: cmd.on === true,
       to: Number.isSafeInteger(cmd.to) ? cmd.to : undefined,
       res: typeof cmd.res === 'string' && cmd.res.length <= MAX_NAME ? cmd.res : undefined,
@@ -399,6 +401,9 @@ export function applyCommand(world, player, cmd) {
       break;
     case 'cast':
       castCommand(world, player, cmd);
+      break;
+    case 'godPower':
+      castPower(world, player, cmd.power, cmd.x, cmd.y);
       break;
     case 'surrender':
       world.defeatPlayer(player, true);

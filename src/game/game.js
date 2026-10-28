@@ -13,6 +13,7 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
@@ -854,7 +855,28 @@ export class Game {
       }
       case 'effect': {
         const [name, volume] = effectSound(ev);
-        this.worldSound(name, ev.x, ev.y, volume);
+        // A telegraphed effect (a god power's bolts, a delayed blast) sounds when it lands.
+        if (ev.delay > 0) setTimeout(() => !this.disposed && this.worldSound(name, ev.x, ev.y, volume), ev.delay * 1000);
+        else this.worldSound(name, ev.x, ev.y, volume);
+        break;
+      }
+      case 'godPower': {
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (!pw) break;
+        const harm = isHarmfulPower(pw);
+        if (ev.player === me) {
+          hud.message(`${pw.name}!`, 'good', { icon: pw.icon });
+          sfx.play('summon_god', { volume: 0.6 });
+        } else if (vs.isAlly(ev.player)) {
+          hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
+          if (harm) hud.minimap.ping(ev.x, ev.y, '#ffd84a');
+        } else if (harm) {
+          // An enemy's strike or cataclysm: everyone hears of it, and sees where it fell.
+          if (pw.tier >= 3) hud.showBanner(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'danger');
+          else hud.message(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'alert', { icon: pw.icon });
+          hud.minimap.ping(ev.x, ev.y, '#ff3a2a');
+          if (this.input) this.input.noteAlert(ev.x, ev.y);
+        } else hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
         break;
       }
       default:

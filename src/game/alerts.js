@@ -15,6 +15,7 @@
 // The `alerts` setting picks 'all', 'important' or 'off' for the lines, sounds and pings; the
 // `tabAlerts` setting alone decides about the tab. Nothing here is sent over the wire.
 import { UNITS, UPGRADES, godsFor, titanFor } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { POP_MAX } from '../config.js';
 import { sanitizeName } from '../net/protocol.js';
 import { getSettings } from '../settings.js';
@@ -230,6 +231,14 @@ export class AlertEngine {
           this.emit({ id: 'titan_enemy', level: 'important', attention: `${t ? t.name : 'A Titan'} is being summoned by ${this.playerName(ev.player)}!` });
         }
         break;
+      case 'godPower': {
+        // An enemy's strike or cataclysm calls me back to the tab (the Game writes the line).
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (pw && ev.player !== me && !vs.isAlly(ev.player) && isHarmfulPower(pw)) {
+          this.emit({ id: 'power_enemy', level: 'important', attention: `${this.playerName(ev.player)} unleashes ${pw.name}!` });
+        }
+        break;
+      }
       case 'peaceEnd':
         this.emit({ id: 'peace_end', level: 'important', attention: 'The Decade of Peace is over: war begins!' });
         break;

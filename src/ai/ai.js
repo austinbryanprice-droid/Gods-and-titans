@@ -14,6 +14,7 @@ import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
+import { runPowers } from './powers.js';
 
 const DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
 
@@ -51,7 +52,7 @@ export class AIPlayer {
     this.thinks = 0;
     this.errors = 0;
     this.loggedError = false;
-    this.stats = { casts: 0, thinkMs: 0, thinks: 0 };
+    this.stats = { casts: 0, thinkMs: 0, thinks: 0, powers: 0 };
     this.lastOrder = new Map(); // unit id -> tick of its last AI order
     this.cmdMemo = new Map(); // unit id -> { type, x, y, tick } of its last move-like order
     this._focusAt = 0; // focus-fire rotation through the army
@@ -107,6 +108,7 @@ export class AIPlayer {
     this.updateExpansion(s);
     lap('econ');
     runMilitary(this, s);
+    if (this.thinks % 3 === 0) runPowers(this, s);
     lap('military');
     manageWorkers(this, s);
     resumeSites(this, s);

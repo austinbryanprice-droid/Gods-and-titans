@@ -6,6 +6,7 @@ import { MINE_TIME, CARRY_AMOUNT, CHOP_INTERVAL, DT } from '../config.js';
 import { moveToRect, moveToPoint, stopMove } from './movement.js';
 import { hyp, distPointRect } from './common.js';
 import { NO_MODS, workSpeed, chopSpeed } from '../data/upgrades.js';
+import { boonPct } from './powers.js';
 
 const REACH = 0.5; // edge distance to work at a mine / tree / drop-off
 const SPOT_OFFSET = 0.42; // mining spots stand this far outside the mine's edge
@@ -88,9 +89,11 @@ export function deposit(world, u) {
   }
   const p = world.players[u.owner];
   if (p) {
-    if (u.carry === 'g') p.gold += u.carryAmount;
-    else p.wood += u.carryAmount;
-    p.stats.gathered += u.carryAmount;
+    // A harvest blessing (god power boon) adds to every load brought in while it lasts.
+    const amount = Math.round(u.carryAmount * (1 + boonPct(p, 'gather')));
+    if (u.carry === 'g') p.gold += amount;
+    else p.wood += amount;
+    p.stats.gathered += amount;
   }
   u.carry = 0;
   u.carryAmount = 0;

@@ -93,6 +93,7 @@ export const EVENT_SHAPES = [
   ['rankUp', 'id', 'rank'],
   ['peaceEnd'],
   ['bounty', 'player', 'amount', 'x', 'y', 'res'],
+  ['godPower', 'player', 'power', 'x', 'y'],
 ].map(([type, ...keys]) => ({ type, keys }));
 const SHAPES_BY_TYPE = new Map();
 EVENT_SHAPES.forEach((s, code) => {

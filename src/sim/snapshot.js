@@ -2,6 +2,7 @@
 import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
+import { powerView } from './powers.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -123,6 +124,7 @@ export function buildSnapshot(world) {
       gods: gods[i], fallen, titan: titan[i],
       up: p.upList.slice(), ar: p.autoRepair,
       stats: { ...p.stats },
+      ...powerView(p),
     };
   });
   return {
