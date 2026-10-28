@@ -4,8 +4,9 @@ import { BUILDINGS, GOLD_MINE, BUILD_MENU } from './buildings.js';
 import { UPGRADES } from './upgrades.js';
 import { validatePantheon, validateUnit, validateUpgrade, validateUpgradeLines } from './schema.js';
 import { PANTHEON_LIST, PANTHEONS } from './pantheon-list.js';
+import { POWERS, validatePowers } from './powers.js';
 
-export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS, UPGRADES, PANTHEON_LIST, PANTHEONS };
+export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS, UPGRADES, PANTHEON_LIST, PANTHEONS, POWERS };
 
 /** Every unit type by id: mortals plus each pantheon's gods, titan, creatures, minions and elite soldier. */
 export const UNITS = { ...MORTALS };
@@ -91,5 +92,6 @@ export function validateData() {
     }
     validateUpgradeLines(b, errors);
   }
+  errors.push(...validatePowers(PANTHEON_LIST.map((p) => p.id), unitIds));
   return errors;
 }

@@ -304,6 +304,40 @@ sim reads it through the same pipes as building upgrades.
   here may change a rule for the other players; a new `perk` needs one line in `PERK_STATS`, one sim hook, one
   test and one sentence in its blessing's description. Icons are single Emoji.
 
+### 4.11 God powers (src/data/powers.js, src/sim/powers.js)
+Age of Mythology's god powers: each pantheon has three **one-use** divine powers, one per settlement tier,
+that the player casts from the power bar beside the minimap with no unit casting them. `GOD_POWERS[pantheonId]`
+lists them Village, Town, City; `POWERS` has every one by id (30 in all; `validatePowers`, run by
+`validateData`, holds the rules below).
+- **Village: a blessing** that helps the caster's people and hurts nobody: a harvest (every load of gold and wood
+  brought in counts 50% more for 60 s), a festival (prayer gives twice the faith for 60 s), a healing rain
+  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (300 gold and 150 wood).
+- **Town: a strike** aimed at a spot within about 3–5 tiles: a storm of bolts, a hammerfall, a swarm, a gale, a
+  summoning of crows.
+- **City: a cataclysm** over 7–12 tiles: an earthquake, a winter, a flood, a tsunami, an eclipse, a tempest.
+- **Shape:** `{ id, pantheon, tier, kind: 'blessing'|'strike'|'cataclysm', name, icon, description, target:
+  'none'|'point', effects, vfx: { element, shape }, ai: { use: 'economy'|'heal'|'damage' } }`. Effects are the
+  ability effects of 4.4 that need no caster's body (not blink, dash, chain, line, invulnerable, nor `at: 'self'`),
+  applied by `applyEffect` with a stand-in caster for the player (id 0, `kind: 'power'`, already "dead", so
+  nothing retaliates against it and nothing ranks up), at scale 1. Kills, plunder, sacrifice, god experience and
+  the victims' under-attack alerts are the caster's as with any spell; spell damage to buildings is halved
+  (`SPELL_VS_BUILDING`). Two effects are the powers' own: `boon { stat: 'gather'|'faith', pct, duration }`
+  (`p.powers.boons`; `deposit` multiplies each load by `1 + boonPct(p, 'gather')`, `accrueFaith` the prayer rate
+  by `1 + boonPct(p, 'faith')`) and `barrage { count, amount, radius, spread, every, stun? }` (bolt k lands
+  `0.5 + k × every` s after the cast, the first on the spot and the rest on seeded random spots within `spread`,
+  each a `damage` (and `stun`) of `radius`; the whole barrage lasts at most `BARRAGE_MAX_SECONDS`, 4 s, because the
+  renderer telegraphs an effect at most that far ahead).
+- **Rules** (`castPower` / `powerRefusal`, the `godPower` command): a power is spent when it is cast, never
+  before (a refused one stays). It needs the settlement tier (`Requires Town.` / `Requires City.`); a strike or
+  cataclysm needs a spot the caster's team can see (`teamSees`: the spot's tile lies in an allied unit's or
+  building's `sight` or a reveal, by `tileInSight`, the rule the clients' fog grid stamps, so the HUD and the sim agree;
+  `You must be able to see the target.`) and waits out the Decade of Peace (5.10, `The Decade of Peace
+  holds for another m:ss: no god powers against other players yet.`), while a blessing works during it. Used:
+  `<Name> has already been used.` Powers never hurt the caster's own side. A blessing with no target shines over
+  the caster's first Town Center.
+- **Numbers** are first guesses for Austin to tune after play; change them in `src/data/powers.js` only (the
+  builders `boon`, `healRain` and `barrage` keep the ten pantheons comparable).
+
 ## 5. Rules
 
 ### 5.1 Start
@@ -864,6 +898,7 @@ counted in `world.perf.commandErrors`.
 { type: 'hold',       units }
 { type: 'kill',       units }                                   // the Delete key: own units die, no killer (below)
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
+{ type: 'godPower',   power: powerId, x?, y? }               // cast one of my pantheon's god powers (4.11); x / y for a strike
 { type: 'surrender' }
 ```
 **smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
@@ -909,7 +944,8 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
               rl?: [relic types resting in their Temples] (5.15; omitted when none),
-              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army } }], // 5.12
+              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army }, // 5.12
+              gp, gb? }],               // god powers (4.11): gp bit i = the tier i+1 power is spent; gb = boons running [[stat, pct, seconds left]]
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
@@ -985,6 +1021,7 @@ EntityView = {
 { type: 'wave',    n, count, boss, x, y }                            // Trial of the Titans: wave n came out at (x, y); boss = Titan type or ''
 { type: 'waveCleared', n, gold }                                     // every monster of wave n is dead; each survivor got gold
 { type: 'gameOver', winningTeam }
+{ type: 'godPower', player, power, x, y }                            // a god power was cast (4.11); x, y = its spot (a blessing: the caster's Town Center)
 ```
 
 ### 6.5 Read API (for AI and tests)
@@ -1797,6 +1834,13 @@ per-frame budget, so a revealed army appears over a few frames.
   and keeps each player's largest army; all of it is read from the players' snapshot records, so nothing is sent for
   it and a client charts the same match as the host (a player who joined late has a shorter chart).
   `tools/shot-chronicle.mjs` stills the four tabs over a made-up 24-minute match.
+  **Play Again and Quick Match** (`src/game/rematch.js`): a game hosted here with only AI players besides the local
+  one (`isSoloLaunch`) keeps its lobby state (checked by `sanitizeLobbyState`: one host slot, no other humans, two
+  teams or more) in localStorage (`mythicwar-last-skirmish`). Its game-over screen leads with Play Again, which leaves
+  the match like Return to Menu and starts that lobby anew with a fresh seed (`launchFrom` → `buildSetup`: a new map,
+  random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
+  AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
+  Online games offer neither.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
@@ -1886,6 +1930,18 @@ per-frame budget, so a revealed army appears over a few frames.
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
+- God power bar (`src/ui/hud-powers.js`, `PowerBar`): three round buttons on the left of the minimap, one per power
+  of my pantheon (4.11), Village at the top. Locked (grey) until my settlement reaches the tier, ready (a slow
+  golden glow) once it has, dark once spent; the tooltip names the power, its tier, what it does, its area and why
+  it cannot be used now (`powerState`: tier, spent, or a strike during the Decade of Peace). A running blessing
+  counts its seconds down on its button. Pressing a ready one arms `{ kind: 'target', order: 'power', power }`
+  (`input.armPower`, the marker buttons' plumbing: the button again, Esc or right-click puts it away); the next
+  click on the map or minimap casts it there, and while armed a ring (`.hud-powerring`, projected each frame) shows
+  its area under the cursor, red where I cannot see. A strike aimed into the fog stays armed with "You must be able
+  to see the target." Every cast is announced (`godPower` event, `game.js`): mine as a line and a chime; an ally's as
+  a line and a gold minimap ping; an enemy's strike as an alert line, a red minimap ping and the Space jump, its
+  cataclysm as a banner, and it flashes the tab (`power_enemy`). A telegraphed effect's sound waits for its
+  `delay`, so a barrage cracks bolt by bolt.
 - Team pings and markers (`src/data/marks.js`, `src/game/team-marks.js`, `src/ui/hud-marks.js`; the wire is in 7).
   Five kinds: Ping 📍 (stands 6 s), Attack ⚔️, Defend 🛡️, Help 🆘 (the urgent one: a louder chime) and Gather 🚩
   (12 s each). **Placing**: Alt+click or a middle click on the map or the minimap pings that spot (a unit or
@@ -2125,6 +2181,11 @@ home until the peace ends: the army keeps growing and masses at the rally point.
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
 break a rival's Sacred Victory countdown (5.11).
+God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing once 12 of its worshippers gather
+(easy: more), a festival once 5 pray, a caravan from 1:30, a healing rain where its hurt army is missing 1,200
+health or more within the rain; a strike on the enemy unit whose surroundings (the power's area) hold the most
+enemy health, at least 1,800 (a cataclysm 3,600, where an enemy building counts a quarter of its health), and only
+where its team can see (the sim's own `powerRefusal` decides). Easy's `castThreshold` raises every bar.
 
 ### 10.1 AI voices (src/ai/voice.js, src/ai/voice-lines.js)
 
@@ -2154,6 +2215,12 @@ returns as chat lines from that player with `voice: true`. Only the setup's own 
 that took over from a player who left keeps quiet). It only reads the World. Each player hides
 the lines with the `aiChat` setting ("AI chatter", in Settings → Gameplay and the in-game menu;
 default on): `showChatLine` in `src/game/game.js` filters them, live chat and the replayed log alike.
+A shown line is not a feed card but a taunt at the top centre (`Hud.showTaunt`, `.hud-taunt` in hud.css),
+under the banners: the speaker's pantheon emblem in a ring, their name in their colour, the words in
+quotes at 1.6em (the feed's cards are 1.18em), slamming in with a short shake (none under reduced
+motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. It comes with the
+`taunt` sound (sfx-alerts.js): two war-drum blows under a low brass fifth that bends down into the
+note with a growl, measured at peak -3.6 dB / loudest 400 ms -13.1 dB RMS, next to the war horn's -5.2 / -14.0.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 
@@ -2216,8 +2283,18 @@ address bar, Site settings, Sound, Allow (or `chrome://settings/content/sound`, 
 here by writing that exception into a profile, not by clicking through Chrome's menus. Nobody has heard it with speakers: the
 checks read the audio context's state, the effects the engine schedules and what the voice is asked and answered.
 
-**Narration** (`src/intro/narrator.js`): a voice reads each caption of `CAPTIONS` aloud, with the browser's own speech
-synthesis (`speechSynthesis`; no audio files), as the film's clock reaches the caption's `from` second: the caption's
+**Narration** (`src/intro/narrator.js`, `src/intro/voiceover.js`): a voice reads each caption of `CAPTIONS` aloud as the
+film's clock reaches the caption's `from` second. The lines are recorded: one short clip per caption in
+`assets/narration/` (mono MP3, 64 kbps, -20 LUFS, about 90 KB in all), rendered offline with Kokoro-82M (Apache 2.0),
+voice `bm_george` (a deep British narrator, Austin's pick of three) at speed 0.85, by `tools/narration/render.py`; a
+changed caption needs its clip rendered again (`tests/intro/voiceover.test.js` checks every caption has one).
+`RecordedSpeech` downloads and decodes them on the sound engine's context as the film loads and plays each through the
+engine's master gain (so it follows the volume and the mute) with a 0.12 send to its hall reverb, 0.15 s after the
+hand-over so the score has begun to step back. It has the browser speech synthesis's shape, so the narrator below is the
+same for both: a line whose clip cannot be had (no Web Audio, a failed download or decode, or a clip not there 1.5 s after
+its line came up) goes to the browser's own voice, as before; a suspended context that does not run within 0.4 s is
+reported as a refusal (`not-allowed`), and the click that resumes it says the line. `?voice=browser` uses the browser's
+voice alone. The browser's voice (`speechSynthesis`) says the caption's
 own words, `en-US`, rate 0.9 and pitch 0.9, at the Settings volume (0 is silence), a line at a time (the browser
 queues a line behind one still being said, so they never overlap; no voice is picked by name, since the browser's
 default for English is its best and a list can open on a novelty voice). The overlay's `paint` hands the voice the film's second each frame, so it
@@ -2346,8 +2423,10 @@ tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no
 mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
 changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
 plays, the card and a key press, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
-voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
-screen, Esc cutting it before the dip, the hint and the click, the setting); `--music` plays the film without its renderer
+browser voice (`?voice=browser`) against a stand-in speech synthesis that records its calls (each caption read as it is on the
+screen, Esc cutting it before the dip, the hint and the click, the setting); `--voice` checks the recorded voice in real Chromium (the real clips downloaded,
+decoded and started on a running context, one per caption with it on screen, the browser's voice never asked, a first
+visit's key starting the first line and Esc stopping it); `--music` plays the film without its renderer
 in real time (a stand-in voice that takes time) and reads the page's real Web Audio graph (the stage's gain, an analyser on
 the music's output) through the whole film, a skip in the middle of a line and a first visit before any click (about two
 minutes; `--scenes 2` runs one of the three); `--sound` is a first visit in real Chromium under the browser's own autoplay
@@ -2358,7 +2437,7 @@ film plays with its sound at once); the other scenes run under the browser's own
 launches Chromium with the autoplay switch (about three minutes; `--scenes 2` runs one of the four). `node tools/music-render.mjs --film --out DIR [--speech from-to,…]` renders the
 score offline, with the mix stepping back over those speech windows, for ffmpeg to measure and mix (a stand-in voice from
 ffmpeg's `flite` filter makes a preview). Don't sample stills at 19 or 36 s, the dips' black frames. Tests:
-`tests/intro/{script,stage,film,narrator,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
+`tests/intro/{script,stage,film,narrator,voiceover,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
 film on a strict fake audio context), `tests/render/camera-free.test.js`, `tests/ui/intro.test.js` (the card among them), `tests/audio/sfx.test.js` (the early start and `onReady`), and the engine's
 side in `tests/audio/music-engine.test.js`.
 

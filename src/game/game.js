@@ -14,6 +14,7 @@ import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
 import { edgeName } from '../sim/survival.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
 import { Overlays } from '../ui/hud-overlays.js';
@@ -187,16 +188,18 @@ export class Game {
    * @param {object} [o.session] an already built HostSession / ClientSession (instead of launch)
    * @param {object} [o.settings] getSettings()
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
+   * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.session = session;
     this.settings = settings || getSettings();
     this.onExit = onExit;
+    this.onRematch = onRematch;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -302,7 +305,7 @@ export class Game {
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
-    for (const line of session.chatLog || []) if (showChatLine(line)) this.hud.chat(line);
+    for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
     session.start();
 
     // Clients wait for the first full snapshot.
@@ -669,6 +672,11 @@ export class Game {
 
   onChat(line) {
     if (!this.hud || !showChatLine(line)) return;
+    // A computer player's line (DESIGN 10.1) is a taunt at the top centre with a snarl of drums and brass.
+    if (line.voice && !line.system) {
+      if (this.hud.showTaunt(line)) sfx.play('taunt');
+      return;
+    }
     this.hud.chat(line);
     if (!line.system && line.from !== this.myIndex) sfx.play('select', { volume: 0.6 });
   }
@@ -918,7 +926,28 @@ export class Game {
       }
       case 'effect': {
         const [name, volume] = effectSound(ev);
-        this.worldSound(name, ev.x, ev.y, volume);
+        // A telegraphed effect (a god power's bolts, a delayed blast) sounds when it lands.
+        if (ev.delay > 0) setTimeout(() => !this.disposed && this.worldSound(name, ev.x, ev.y, volume), ev.delay * 1000);
+        else this.worldSound(name, ev.x, ev.y, volume);
+        break;
+      }
+      case 'godPower': {
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (!pw) break;
+        const harm = isHarmfulPower(pw);
+        if (ev.player === me) {
+          hud.message(`${pw.name}!`, 'good', { icon: pw.icon });
+          sfx.play('summon_god', { volume: 0.6 });
+        } else if (vs.isAlly(ev.player)) {
+          hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
+          if (harm) hud.minimap.ping(ev.x, ev.y, '#ffd84a');
+        } else if (harm) {
+          // An enemy's strike or cataclysm: everyone hears of it, and sees where it fell.
+          if (pw.tier >= 3) hud.showBanner(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'danger');
+          else hud.message(`${this.playerName(ev.player)} unleashes ${pw.name}!`, 'alert', { icon: pw.icon });
+          hud.minimap.ping(ev.x, ev.y, '#ff3a2a');
+          if (this.input) this.input.noteAlert(ev.x, ev.y);
+        } else hud.message(`${this.playerName(ev.player)} calls on ${pw.name}.`, 'info', { icon: pw.icon });
         break;
       }
       default:
@@ -1052,6 +1081,20 @@ export class Game {
     this.renderer = null;
     this.input = null;
     if (typeof window !== 'undefined' && window.__game === this) window.__game = null;
+  }
+
+  /** True when the game-over screen may offer Play Again (a game against the computer only). */
+  canRematch() {
+    return typeof this.onRematch === 'function' && !this.disposed;
+  }
+
+  /** Play Again: leave this match (counted like Return to Menu) and start the same lobby anew. */
+  rematch() {
+    if (!this.canRematch()) return;
+    const next = this.onRematch;
+    this.countLeave();
+    this.dispose();
+    next();
   }
 
   /** Leave the match and go back to the title screen. */

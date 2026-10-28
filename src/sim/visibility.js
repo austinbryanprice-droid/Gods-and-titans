@@ -10,6 +10,18 @@
  * @param {Uint8Array} [out] optional reusable output buffer (cleared first)
  * @returns {Uint8Array} visible, 1 where currently visible
  */
+/**
+ * Does a sight circle at (sx, sy) with radius r light tile (tx, ty)? The same rule
+ * computeVisibility stamps, so the sim can ask what a client's fog shows.
+ */
+export function tileInSight(sx, sy, r, tx, ty) {
+  if (!(r > 0)) return false;
+  const dy = ty + 0.5 - sy;
+  if (dy * dy > r * r || ty < Math.floor(sy - r) || ty > Math.floor(sy + r)) return false;
+  const span = Math.sqrt(r * r - dy * dy);
+  return tx >= Math.floor(sx - span) && tx <= Math.floor(sx + span);
+}
+
 export function computeVisibility(width, height, sources, explored, out) {
   const visible = out && out.length === width * height ? out : new Uint8Array(width * height);
   visible.fill(0);

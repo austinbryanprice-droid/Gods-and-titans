@@ -5,6 +5,7 @@ import { getSettings, onSettingsChange } from './settings.js';
 import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
+import { isSoloLaunch, saveSkirmish, launchFrom } from './game/rematch.js';
 
 export { showMenu, hideMenu };
 
@@ -75,6 +76,9 @@ export async function startGame(launch) {
     current = null;
   }
   const notice = showStartNotice();
+  // A game against the computer only: remember its lobby for Quick Match, and offer Play Again at its end.
+  const skirmish = isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
+  if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
     const { Game } = await loadGameModule();
@@ -85,6 +89,7 @@ export async function startGame(launch) {
         if (current === game) current = null;
         backToMenu();
       },
+      onRematch: skirmish ? () => rematch(skirmish) : null,
     });
     current = game;
     await game.ready;
@@ -98,6 +103,19 @@ export async function startGame(launch) {
     }
   } finally {
     clearStartNotice(notice);
+  }
+}
+
+/** Play Again: the same lobby, a fresh seed (a new map, new random pantheons). */
+async function rematch(state) {
+  try {
+    const mod = await import('./net/lobby.js');
+    const launch = launchFrom(mod, state, getSettings().name);
+    if (!launch) throw new Error('that lobby can no longer start');
+    await startGame(launch);
+  } catch (err) {
+    console.error('[main] the rematch failed to start', err);
+    backToMenu();
   }
 }
 

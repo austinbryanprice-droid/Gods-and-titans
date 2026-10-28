@@ -6,7 +6,7 @@
 //   sfx.play(name, { x, y, volume }) positional when x, y are given (tile coords)
 //   sfx.setListener(x, y, scale)     usually the camera target; scale > 1 widens the hearing range (zoomed out)
 //   sfx.setVolume(v) / sfx.mute(bool)
-//   sfx.shared                       { ctx, out, noise } once the context exists: the music engine plays through it too
+//   sfx.shared                       { ctx, out, master, reverb, noise } once the context exists: the music and the film's voice play through it
 //   sfx.onPlay(cb)                   cb(name, gain) after a sound starts (the music dips under big ones)
 // Every call is a safe no-op where WebAudio is missing (Node, old browsers).
 import { ALERT_RECIPES, ALERT_LIMITS, ALERT_LEVEL } from './sfx-alerts.js';
@@ -644,7 +644,7 @@ class SfxEngine {
    * other engines (the music) that play through the same chain; null until a gesture has made the context.
    */
   get shared() {
-    return this.ctx && this.graph ? { ctx: this.ctx, out: this.graph.comp, noise: this.graph.noise } : null;
+    return this.ctx && this.graph ? { ctx: this.ctx, out: this.graph.comp, master: this.graph.master, reverb: this.graph.reverb, noise: this.graph.noise } : null;
   }
 
   /** Call cb(name, gain) each time a sound starts. Returns an unsubscribe function. */

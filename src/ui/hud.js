@@ -3,7 +3,7 @@
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
-//   bottom       minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
+//   bottom       god power buttons + minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
 //   team marks   pins over the battlefield (and arrows at its edge) for the pings and markers of my team
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
 //   tips         the getting-started checklist and now-and-then gameplay tips (top-right); in the guided
@@ -15,7 +15,7 @@ import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { getCommandCard } from './command-card.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, relicChip } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -28,6 +28,7 @@ import { HintsView, HintScheduler } from './hud-hints.js';
 import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
+import { PowerBar } from './hud-powers.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
@@ -181,6 +182,11 @@ export class Hud {
     this.errorEl = el('div', 'hud-error');
     this.banner = el('div', 'hud-banner');
     this.banner.hidden = true;
+    // A computer player's taunt (DESIGN 10.1): one big quote at the top centre, under the banners.
+    this.taunt = el('div', 'hud-taunt');
+    this.taunt.hidden = true;
+    this.taunt.setAttribute('role', 'status');
+    this.taunt.setAttribute('aria-live', 'polite');
     this.chatInput = el('input', 'hud-chat-input');
     this.chatInput.type = 'text';
     this.chatInput.maxLength = 200;
@@ -219,15 +225,17 @@ export class Hud {
     this.tip.hidden = true;
     // The marker buttons stand beside the minimap: pick one, then click the map or the minimap.
     this.markpad = new MarkPalette({ onPick: (kind) => game.input && game.input.armMark(kind) });
+    // The god powers stand on its other side: pick a ready one, then click where it should fall.
+    this.powerbar = new PowerBar({ onPick: (id) => game.input && game.input.armPower(id) });
     this.bottom = el('div', 'hud-bottom hud-panel',
-      el('div', 'hud-bottom-mini', mini, this.markpad.root),
+      el('div', 'hud-bottom-mini', this.powerbar.root, mini, this.markpad.root),
       el('div', 'hud-bottom-info', this.infoRoot),
       el('div', 'hud-bottom-card', this.cardGrid));
 
     this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
     for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root]) {
@@ -386,6 +394,7 @@ export class Hud {
     if (this.guidePointer) this.guidePointer.update(now);
     const m = input && input.mode;
     this.markpad.setArmed(m && m.kind === 'target' && m.order === 'mark' ? m.mark : null);
+    this.powerbar.update(vs, m && m.kind === 'target' && m.order === 'power' ? m.power : null);
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
     if (!this.tutorial) this.hintTimer.update();
@@ -679,6 +688,34 @@ export class Hud {
     this.pushLine(card, CHAT_MS);
   }
 
+  /**
+   * A computer player's line (DESIGN 10.1) as a taunt at the top centre: their pantheon's emblem,
+   * their name in their colour and the words, larger than the feed. A new taunt replaces the one up.
+   */
+  showTaunt(line) {
+    if (!line || typeof line !== 'object') return false;
+    const text = sanitizeChat(line.text);
+    if (!text) return false;
+    const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
+    const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
+    const who = el('span', 'hud-taunt-from', sanitizeName(line.name || (p && p.name), 'Player'));
+    const quote = el('span', 'hud-taunt-text', `“${text}”`);
+    const t = this.taunt;
+    t.replaceChildren(who, quote);
+    t.dataset.icon = (p && PANTHEON_EMBLEMS[p.pantheon]) || '⚔️';
+    t.style.setProperty('--taunt-accent', safeColor(p && p.color, '#ff7a4a'));
+    t.hidden = false;
+    t.classList.remove('is-on');
+    void t.offsetWidth; // restart the slam-in for a taunt that replaces another
+    t.classList.add('is-on');
+    clearTimeout(this.tauntTimer);
+    this.tauntTimer = setTimeout(() => {
+      t.classList.remove('is-on');
+      this.tauntTimer = setTimeout(() => (t.hidden = true), 500);
+    }, tauntDwell(text));
+    return true;
+  }
+
   /** Big centred announcement under the top bar. */
   showBanner(text, kind = 'info') {
     this.banner.textContent = text;
@@ -724,6 +761,7 @@ export class Hud {
   dispose() {
     clearTimeout(this.errorTimer);
     clearTimeout(this.bannerTimer);
+    clearTimeout(this.tauntTimer);
     for (const line of this.msgs.children) clearTimeout(line._timer);
     this.minimap.dispose();
     this.marksLayer.dispose();

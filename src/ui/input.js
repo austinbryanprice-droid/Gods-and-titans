@@ -4,7 +4,7 @@
 // queueing, command-card hotkeys, targeting modes (attack-move, abilities,
 // gather, pray, rally), building placement with the ghost, and the camera
 // (edge scroll, arrows, wheel zoom, middle-drag, minimap, Space, F1–F3), and the team's pings and
-// markers (Alt+click, middle-click, the marker buttons).
+// markers (Alt+click, middle-click, the marker buttons), and the god powers (armed from the power bar).
 import { TERRAIN, MAX_QUEUE, MAX_WALL_SELECTION } from '../config.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { isWallType } from '../data/walls.js';
@@ -18,6 +18,8 @@ import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 import { deletePlan, DELETE_CONFIRM_MS } from './delete-key.js';
 import { peaceNotice } from '../sim/peace.js';
+import { POWERS, powersFor, powerRadius, isHarmfulPower } from '../data/powers.js';
+import { powerState } from './hud-powers.js';
 
 const DRAG_THRESHOLD = 5; // px before a left press becomes a box
 const DOUBLE_MS = 350;
@@ -92,6 +94,11 @@ export class InputController {
     this.wallTip.className = 'hud-walltip';
     this.wallTip.hidden = true;
     (overlayRoot || canvas.parentNode).appendChild(this.wallTip);
+    // Under the cursor while a god power is armed: the area it would cover.
+    this.powerRing = document.createElement('div');
+    this.powerRing.className = 'hud-powerring';
+    this.powerRing.hidden = true;
+    (overlayRoot || canvas.parentNode).appendChild(this.powerRing);
 
     this.offs = [];
     const on = (el, type, fn, opts) => {
@@ -213,6 +220,7 @@ export class InputController {
     this.mode = mode;
     if (mode.kind !== 'place' && this.renderer) this.renderer.hidePlacement();
     this.wallTip.hidden = true;
+    this.powerRing.hidden = true;
     this.placeSig = '';
     if (this.queuedBuilds.length) {
       this.queuedBuilds = [];
@@ -717,6 +725,9 @@ export class InputController {
       case 'cast':
         ok = this.castAt(m, p, target, shift);
         break;
+      case 'power':
+        ok = this.castPowerAt(m.power, p);
+        break;
       case 'mark': {
         // A marker button's click: a unit or building under the cursor is marked where it stands.
         const spot = target ? { x: target.ix ?? target.x, y: target.iy ?? target.y } : p;
@@ -984,6 +995,69 @@ export class InputController {
       }
       this.smartAt(0, 0, shift, { x, y });
     }
+  }
+
+  // ---------------------------------------------------------------- god powers
+
+  /** A power button was pressed: the next click on the map or minimap casts it (the button again, or Esc, puts it away). */
+  armPower(powerId) {
+    if (this.disposed || this.hud.overlays.open || !Object.hasOwn(POWERS, powerId)) return;
+    const vs = this.vs;
+    const slot = powersFor(vs.me && vs.me.pantheon).findIndex((pw) => pw.id === powerId);
+    if (slot < 0) return;
+    const pw = POWERS[powerId];
+    const st = powerState(vs, pw, slot);
+    if (st.state !== 'ready') {
+      this.error(st.reason);
+      return;
+    }
+    sfx.play('click');
+    if (this.mode.kind === 'target' && this.mode.order === 'power' && this.mode.power === powerId) {
+      this.cancelMode();
+      return;
+    }
+    this.setMode({ kind: 'target', order: 'power', power: powerId, target: 'point' });
+    const where = pw.target === 'none' ? 'click anywhere on the map to call on it' : 'click the map or the minimap where it should fall';
+    this.hud.message(`${pw.name}: ${where}. Esc cancels.`, 'info', { icon: pw.icon });
+  }
+
+  /** Cast the armed power at a spot. Returns false (staying armed) when it cannot go there. */
+  castPowerAt(powerId, p) {
+    const pw = POWERS[powerId];
+    if (!pw) return true;
+    if (isHarmfulPower(pw) && !this.vs.isVisibleAt(p.x, p.y)) {
+      this.error('You must be able to see the target.');
+      return false;
+    }
+    const cmd = { type: 'godPower', power: pw.id };
+    if (pw.target === 'point') Object.assign(cmd, { x: p.x, y: p.y });
+    this.command(cmd);
+    if (pw.target === 'point') this.marker(p.x, p.y, isHarmfulPower(pw) ? 'attack' : 'move');
+    return true;
+  }
+
+  /** The armed power's area under the cursor (red where it cannot be cast). */
+  updatePowerRing(r, p) {
+    const ring = this.powerRing;
+    const m = this.mode;
+    const pw = m.kind === 'target' && m.order === 'power' ? POWERS[m.power] : null;
+    const w = pw && pw.target === 'point' && this.overCanvas ? this.ground(p.x, p.y) : null;
+    if (!w) {
+      ring.hidden = true;
+      return;
+    }
+    const rad = Math.max(1, powerRadius(pw));
+    const c = r.worldToScreen(w.x, w.y, 0);
+    const ex = r.worldToScreen(w.x + rad, w.y, 0);
+    const ey = r.worldToScreen(w.x, w.y + rad, 0);
+    const rx = Math.hypot(ex.sx - c.sx, ex.sy - c.sy);
+    const ry = Math.hypot(ey.sx - c.sx, ey.sy - c.sy);
+    ring.style.left = `${c.sx - rx}px`;
+    ring.style.top = `${c.sy - ry}px`;
+    ring.style.width = `${2 * rx}px`;
+    ring.style.height = `${2 * ry}px`;
+    ring.classList.toggle('is-bad', isHarmfulPower(pw) && !this.vs.isVisibleAt(w.x, w.y));
+    ring.hidden = false;
   }
 
   // ---------------------------------------------------------------- team marks
@@ -1471,6 +1545,7 @@ export class InputController {
       r.setHover(null);
     }
     this.updateCursor();
+    this.updatePowerRing(r, p);
 
     // Placement ghost.
     if (this.mode.kind === 'place') {
@@ -1522,6 +1597,7 @@ export class InputController {
     if (this.resizeObs) this.resizeObs.disconnect();
     this.box.remove();
     this.wallTip.remove();
+    this.powerRing.remove();
     this.keys.clear();
   }
 }

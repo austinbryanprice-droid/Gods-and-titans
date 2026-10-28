@@ -16,6 +16,7 @@
 // The `alerts` setting picks 'all', 'important' or 'off' for the lines, sounds and pings; the
 // `tabAlerts` setting alone decides about the tab. Nothing here is sent over the wire.
 import { UNITS, UPGRADES, godsFor, titanFor } from '../data/index.js';
+import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { POP_MAX } from '../config.js';
 import { getRelic } from '../data/relics.js';
 import { sanitizeName } from '../net/protocol.js';
@@ -241,6 +242,14 @@ export class AlertEngine {
           this.emit({ id: 'titan_enemy', level: 'important', attention: `${t ? t.name : 'A Titan'} is being summoned by ${this.playerName(ev.player)}!` });
         }
         break;
+      case 'godPower': {
+        // An enemy's strike or cataclysm calls me back to the tab (the Game writes the line).
+        const pw = Object.hasOwn(POWERS, ev.power) ? POWERS[ev.power] : null;
+        if (pw && ev.player !== me && !vs.isAlly(ev.player) && isHarmfulPower(pw)) {
+          this.emit({ id: 'power_enemy', level: 'important', attention: `${this.playerName(ev.player)} unleashes ${pw.name}!` });
+        }
+        break;
+      }
       case 'wave':
         // The Game writes the banner; a wave led by a Titan is worth the tab flash.
         if (ev.boss) this.emit({ id: 'wave_boss', level: 'important', attention: `Wave ${ev.n}: ${UNITS[ev.boss] ? UNITS[ev.boss].name : 'a Titan'} is coming!` });

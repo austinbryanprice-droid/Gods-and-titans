@@ -3,6 +3,7 @@ import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
 import { relicViews } from './relics.js';
+import { powerView } from './powers.js';
 import { survivalView } from './survival.js';
 import { siteViews } from './sacred.js';
 
@@ -129,6 +130,7 @@ export function buildSnapshot(world) {
       gods: gods[i], fallen, titan: titan[i],
       up: p.upList.slice(), ar: p.autoRepair,
       stats: { ...p.stats, faith: Math.floor(p.stats.faith + 1e-6), army: army[i] },
+      ...powerView(p),
     };
     if (p.relics.length) out.rl = p.relics.slice(); // relic types resting in their Temples
     return out;

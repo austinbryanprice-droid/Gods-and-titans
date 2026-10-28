@@ -19,6 +19,7 @@ import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow,
 import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
 import { getCareer, markSeen } from '../game/career.js';
+import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
@@ -268,6 +269,32 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
     const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    // Quick Match: the last game against the computer again, in one click (src/game/rematch.js). Shown once the lobby
+    // module has read it back; none on a first visit.
+    const quickSub = h('span.mw-btn-sub', '');
+    const quickBtn = h('button.mw-btn.mw-btn--menu.mw-quick-btn', { type: 'button', hidden: true, onclick: () => quickMatch() },
+      h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
+      h('span.mw-btn-label', 'Quick Match'), quickSub,
+      h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
+    let quick = null;
+    loadLobby().then((mod) => {
+      if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
+      quick = loadSkirmish(mod);
+      if (!quick) return;
+      quickSub.textContent = `Again: ${skirmishLabel(quick)}`;
+      quickBtn.hidden = false;
+    }).catch(() => {});
+    async function quickMatch() {
+      if (!quick) return;
+      try {
+        const launch = launchFrom(await loadLobby(), quick, getSettings().name);
+        if (!launch) throw new Error('That game can no longer start. Set it up again with Play vs AI.');
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the game.');
+      }
+    }
     const career = getCareer();
     const newCount = career.unseen.length;
     // A guided first match; a player who has never finished a game or the lesson is pointed at it.
@@ -288,6 +315,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
         playBtn,
+        quickBtn,
         learnBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
@@ -1211,7 +1239,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
-          toggle('narration', 'Narration', browserSpeech() ? 'A voice reads the film\'s captions aloud. It follows the Volume above.' : 'This browser has no speech voice, so the film plays with its captions only.'),
+          toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),
           onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-watch', { type: 'button', onclick: () => onIntro() }, '▶ Watch it now') : null),
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
