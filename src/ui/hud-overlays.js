@@ -305,14 +305,17 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the statistics table and what the match unlocked. */
-  showGameOver({ result, winningTeam, unlocked = null, wave = 0, record = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how, wave = 0, record = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const survival = result === 'survival';
     const title = survival ? `Wave ${wave}` : result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
+    // how: 'sacred' when a side held every sacred site long enough (DESIGN 5.11).
     const sub = survival ? survivalLine(wave)
-      : result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
-      : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
+      : how === 'sacred'
+        ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
+        : result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
+          : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const best = survival && record ? el('div', `hud-go-best${record.isNew ? ' is-new' : ''}`, record.isNew
       ? (record.previous > 0 ? `A new best! Your old best was wave ${record.previous}.` : 'Your first trial: the bar is set.')
       : `Your best: wave ${record.best}.`) : null;

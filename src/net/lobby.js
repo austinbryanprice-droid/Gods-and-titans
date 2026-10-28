@@ -114,6 +114,7 @@ export function sanitizeLobbyState(state) {
     preset: PRESETS.includes(state.preset) ? state.preset : null,
     peace: PEACE_LENGTHS.includes(state.peace) ? state.peace : 0,
     survival: state.survival === true && !PEACE_LENGTHS.includes(state.peace),
+    sacred: state.sacred === true,
     started: state.started === true,
     slots,
   };
@@ -165,6 +166,7 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   const setup = { version, seed, mapSize: state.mapSize, players };
   if (PEACE_LENGTHS.includes(state.peace)) setup.peaceMinutes = state.peace; // Decade of Peace
   else if (survival) setup.survival = true; // Trial of the Titans
+  if (state.sacred === true && !setup.survival) setup.sacredVictory = true; // Sacred Victory (DESIGN 5.11), never in a trial
   if (typeof mapgen.mapHash === 'function') {
     setup.mapHash = mapgen.mapHash(mapgen.generateMap(mapgen.mapOptions(setup)));
   }
@@ -207,6 +209,7 @@ export class LobbyHost {
       preset: null,
       peace: 0,
       survival: false,
+      sacred: false,
       started: false,
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
@@ -458,6 +461,14 @@ export class LobbyHost {
     if (this.started || (this.state.survival === on && !(on && this.state.peace))) return false;
     this.state.survival = on;
     if (on) this.state.peace = 0;
+    this.changed();
+    return true;
+  }
+
+  /** Sacred Victory (DESIGN 5.11): holding every sacred site for 8 minutes also wins the game. */
+  setSacred(on) {
+    if (this.started || typeof on !== 'boolean' || this.state.sacred === on) return false;
+    this.state.sacred = on;
     this.changed();
     return true;
   }

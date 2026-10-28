@@ -1,4 +1,4 @@
-// Trial of the Titans across the lobby and the wire (DESIGN 5.11, 7): the lobby's mode switch,
+// Trial of the Titans across the lobby and the wire (DESIGN 5.12, 7): the lobby's mode switch,
 // the GameSetup it builds (one team, no opponent needed), validateSetup, and the wave events.
 import test from 'node:test';
 import assert from 'node:assert/strict';

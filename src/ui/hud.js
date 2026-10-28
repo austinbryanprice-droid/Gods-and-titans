@@ -1,5 +1,5 @@
 // In-game HUD (DESIGN 9): a Warcraft III–style HTML overlay in #hud-root.
-//   top bar      gold, wood, faith (+rate), population, tier, clock, peace countdown, ping, menu, market
+//   top bar      gold, wood, faith (+rate), population, tier, clock, peace countdown, sacred sites, ping, menu, market
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
@@ -16,6 +16,7 @@ import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
+import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
 import { InfoView } from './hud-info.js';
 import { Overlays } from './hud-overlays.js';
@@ -109,6 +110,10 @@ export class Hud {
     this.waveChip.title = `${SURVIVAL_NAME}: monsters come out of the map's edges on this clock, more and stronger every wave, and a Titan leads every ${SURVIVAL_BOSS_EVERY}th one. Beating a wave pays gold. Hold out as long as you can.`;
     this.waveChip.hidden = true;
     this.waveWarned = null; // the last wave whose "coming in 10 s" message is behind us
+    // Sacred sites held by my side (and the Sacred Victory countdown when a side holds them all).
+    this.siteText = el('span', 'hud-clock');
+    this.siteChip = el('div', 'hud-time hud-sites', el('i', 'hud-res-i', SITE_ICON), this.siteText);
+    this.siteChip.hidden = true;
     this.ping = el('span', 'hud-ping');
     const res = (cls, icon, title) => {
       const v = el('b', 'hud-res-v');
@@ -127,7 +132,7 @@ export class Hud {
     this.rPantheon = res('is-pantheon', '✦', 'Your pantheon');
     this.rPantheon.n.hidden = true;
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.waveChip, this.ping, this.rPantheon.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n),
       el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -311,6 +316,7 @@ export class Hud {
     setText(this.clock, formatClock(vs.time));
     this.updatePeace();
     this.updateWaves();
+    this.updateSites();
     const s = game.session;
     const stall = stallText(s);
     if (s && !s.isHost) {
@@ -329,6 +335,7 @@ export class Hud {
       if (vs.peaceActive()) this.message(peaceStartText(vs.peaceLeft()), 'good', { icon: PEACE_ICON });
       const sv = vs.survival();
       if (sv && sv.wave === 0) this.message(`${SURVIVAL_NAME}: build your defences. The first wave of monsters comes in ${peaceClock(sv.next)}.`, 'good', { icon: SURVIVAL_ICON });
+      if (vs.sacredVictoryOn() && vs.time < 60) this.message(sacredStartText(), 'good', { icon: SITE_ICON });
       // Only a match with a teammate has anyone to ping.
       if (teammateCount(vs) > 0) this.message(MARKS_HINT, 'info', { icon: '📍' });
     }
@@ -409,6 +416,17 @@ export class Hud {
       const secs = Math.ceil(sv.next);
       this.message(sv.nextBoss ? `Wave ${coming} comes in ${secs} s, and a Titan leads it!` : `Wave ${coming} comes in ${secs} s.`, 'alert', { icon: SURVIVAL_ICON });
     }
+  }
+
+  /** The Sacred Sites chip: sites my side holds, and the Sacred Victory countdown while one side holds them all. */
+  updateSites() {
+    const c = siteChip(this.vs);
+    setHidden(this.siteChip, c.hidden);
+    if (c.hidden) return;
+    setText(this.siteText, c.text);
+    setClass(this.siteChip, 'is-ours', c.cls === 'is-ours');
+    setClass(this.siteChip, 'is-theirs', c.cls === 'is-theirs');
+    if (!this.siteChip.title) this.siteChip.title = siteChipTitle(this.vs);
   }
 
   /** Current command card (input.js reads it for hotkeys). */

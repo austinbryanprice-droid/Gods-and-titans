@@ -7,7 +7,7 @@
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
-import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY } from '../config.js';
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY, SACRED_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
@@ -539,6 +539,21 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('div.mw-hint.mw-peace-hint', `Everyone plays on one team. The first wave comes at ${clockText(SURVIVAL_FIRST_WAVE)}, then one every ${SURVIVAL_INTERVAL} s, and a Titan leads every ${ordinal(SURVIVAL_BOSS_EVERY)} wave. Clearing a wave pays gold. The trial ends when your last building falls.`, ' ', survivalBest),
     );
     const modeStatic = h('div.mw-map-static');
+    // Victory: destroy every enemy building, and with Sacred Victory on, holding every sacred site for 8 minutes too.
+    const sacredInput = h('input', {
+      type: 'checkbox',
+      onchange: () => {
+        try {
+          lobby.setSacred(sacredInput.checked);
+        } catch (err) {
+          toast(err?.message || 'Could not change the victory rules.');
+        }
+      },
+    });
+    const sacredToggle = h('label.mw-toggle.mw-sacred-toggle', { title: M.SACRED_HINT }, sacredInput,
+      h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')),
+      h('span.mw-toggle-text', h('span', SACRED_NAME), h('small', M.SACRED_NOTE)));
+    const victoryStatic = h('div.mw-map-static');
     const options = h('div.mw-lobby-options',
       isHost ? h('div.mw-opt-group',
         h('div.mw-label', 'Presets'),
@@ -551,6 +566,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('div.mw-opt-group.mw-mode-group',
         h('div.mw-label', 'Game mode'),
         isHost ? [h('div.mw-segmented', modeBtns), peaceRow, survivalRow] : [modeStatic, survivalRow],
+      ),
+      h('div.mw-opt-group.mw-victory-group',
+        h('div.mw-label', 'Victory'),
+        isHost ? [sacredToggle, victoryStatic] : victoryStatic,
       ),
     );
 
@@ -713,6 +732,13 @@ export function createMenu({ root, onStart, onIntro = null }) {
       const best = survival ? getCareer().best.wave : 0;
       survivalBest.textContent = best > 0 ? `Your best: wave ${best}.` : '';
       modeStatic.textContent = M.gameModeLabel(st());
+      sacredInput.checked = M.sacredOn(st());
+      victoryStatic.textContent = M.victoryLabel(st());
+      if (isHost) {
+        // A trial has no rival team to win against: the Sacred Victory toggle gives way to the trial's goal.
+        sacredToggle.hidden = survival;
+        victoryStatic.hidden = !survival;
+      }
     }
 
     function renderAll() {

@@ -1,5 +1,5 @@
 // Pure helpers for the menu and lobby screens (no DOM, runs in Node tests).
-import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME } from '../config.js';
+import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SACRED_NAME, SACRED_HOLD } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
@@ -381,6 +381,21 @@ export function gameModeLabel(state) {
   if (survivalMode(state)) return `${SURVIVAL_NAME}: everyone together against waves of monsters`;
   const m = peaceMinutes(state);
   return m ? `${PEACE_NAME}: no combat for ${m} minutes` : 'Standard: fight from the first minute';
+}
+
+/** Is Sacred Victory on in the lobby (DESIGN 5.11)? Never in a Trial of the Titans. */
+export function sacredOn(state) {
+  return !!(state && state.sacred === true) && !survivalMode(state);
+}
+
+/** The Sacred Victory toggle's one-line note and its tooltip. */
+export const SACRED_NOTE = `Hold every sacred site for ${SACRED_HOLD / 60} minutes to win`;
+export const SACRED_HINT = `Besides destroying every enemy building, a team that holds every sacred site on the map for ${SACRED_HOLD / 60} minutes in a row wins. Sacred sites give faith in every game.`;
+
+/** The lobby's victory rules in words: what a client sees where the host has a toggle. */
+export function victoryLabel(state) {
+  if (survivalMode(state)) return 'Survive as many waves as you can';
+  return sacredOn(state) ? `Conquest or ${SACRED_NAME} (hold every sacred site for ${SACRED_HOLD / 60} minutes)` : 'Conquest: destroy every enemy building';
 }
 
 /** Label for the lobby header. */

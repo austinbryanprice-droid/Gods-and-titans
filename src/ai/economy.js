@@ -302,6 +302,7 @@ export function manageWorkers(ai, s) {
   const pairOf = new Map(); // gold worker id -> its pair
   for (const u of s.workers) {
     if (ai.militia && ai.militia.has(u.id)) continue;
+    if (ai.pilgrims && ai.pilgrims.has(u.id)) continue; // on its way to a sacred site (ai/sacred.js)
     const j = s.job.get(u.id);
     if (j === 'gold') {
       const o = u.order.type === 'gather' ? u.order : u.order.resume;

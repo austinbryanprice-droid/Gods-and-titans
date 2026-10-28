@@ -86,3 +86,9 @@ test('the Trial of the Titans game mode is explained with its clock and its boss
   assert.match(text, /a hostile Titan leading every 5th wave/);
   assert.match(text, /your score is the wave you reached/);
 });
+
+test('sacred sites and Sacred Victory are explained', () => {
+  assert.match(text, /Sacred sites 🛐/);
+  assert.match(text, /captures it in 15 seconds/);
+  assert.match(text, /holds every site for 8 minutes in a row also wins/);
+});

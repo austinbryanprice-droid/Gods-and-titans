@@ -3,6 +3,7 @@ import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
 import { survivalView } from './survival.js';
+import { siteViews } from './sacred.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -99,12 +100,6 @@ function mineView(world, m) {
   };
 }
 
-function gameOverView(g) {
-  const v = { winningTeam: g.winningTeam };
-  if (Number.isInteger(g.wave)) v.wave = g.wave; // Trial of the Titans: the wave the players reached
-  return v;
-}
-
 /** Build the ViewSnapshot. Does not clear events (World.getSnapshot does). */
 export function buildSnapshot(world) {
   const gods = world.players.map(() => []);
@@ -142,7 +137,9 @@ export function buildSnapshot(world) {
     reveals: world.reveals.map((v) => ({ x: r2(v.x), y: r2(v.y), r: r2(v.r), tm: v.team, rem: r1(v.rem) })),
     events: world.events,
     felled: world.felled,
-    gameOver: world.gameOver ? gameOverView(world.gameOver) : null,
+    sites: siteViews(world), // sacred sites (5.11): { x, y, o, p?, c?, cn? }
+    sacred: world.sacred ? { tm: world.sacred.team, end: world.sacred.end } : null, // Sacred Victory countdown
+    gameOver: world.gameOver ? { ...world.gameOver } : null,
   };
   if (world.survival) snap.sv = survivalView(world); // Trial of the Titans: { w: waves out, m: wave monsters alive }
   return snap;

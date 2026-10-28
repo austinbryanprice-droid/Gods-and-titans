@@ -157,6 +157,7 @@ export function validateSetup(setup, myIndex) {
   if (typeof setup.mapHash === 'string' && setup.mapHash.length <= 64) clean.mapHash = setup.mapHash;
   if (PEACE_LENGTHS.includes(setup.peaceMinutes)) clean.peaceMinutes = setup.peaceMinutes; // Decade of Peace
   else if (setup.survival === true) clean.survival = true; // Trial of the Titans (never together with a peace)
+  if (setup.sacredVictory === true) clean.sacredVictory = true; // Sacred Victory (5.11)
   return { setup: clean, myIndex };
 }
 
@@ -172,7 +173,7 @@ export function isValidSnapshot(snap) {
     if (!isObject(e) || !Number.isFinite(e.id) || typeof e.k !== 'string' || !Number.isFinite(e.x) || !Number.isFinite(e.y)) return false;
   }
   for (const p of snap.players) if (!isObject(p)) return false;
-  for (const key of ['events', 'fields', 'reveals']) {
+  for (const key of ['events', 'fields', 'reveals', 'sites']) {
     const list = snap[key];
     if (list === undefined) continue;
     if (!Array.isArray(list)) return false;

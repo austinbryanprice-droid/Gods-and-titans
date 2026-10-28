@@ -1,5 +1,6 @@
-// Trial of the Titans (DESIGN 5.11, src/sim/survival.js): the wave clock, what each wave holds,
+// Trial of the Titans (DESIGN 5.12, src/sim/survival.js): the wave clock, what each wave holds,
 // the director inside World.tick (spawning, marching, rewards) and the end of the trial.
+import { sacredVictoryOn } from '../../src/sim/sacred.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NEUTRAL, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_MAX_ALIVE } from '../../src/config.js';
@@ -192,4 +193,9 @@ test('a boosted monster carries its damage boost in the snapshot for the info pa
   assert.equal(v.wd, Math.round(waveBoost(6).dmg * 1000) / 1000);
   const plain = views.find((e) => e.k === 'u' && e.o === 0);
   assert.equal('wd' in plain, false);
+});
+
+test('Sacred Victory never runs in a trial, where every player is on one team', () => {
+  assert.equal(sacredVictoryOn({ sacredVictory: true }), true);
+  assert.equal(sacredVictoryOn({ sacredVictory: true, survival: true }), false);
 });

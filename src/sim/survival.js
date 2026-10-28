@@ -1,4 +1,4 @@
-// Trial of the Titans (survival game mode, DESIGN 5.11): every player is on one team
+// Trial of the Titans (survival game mode, DESIGN 5.12): every player is on one team
 // against waves of mythical monsters that come out of the map's edges on a fixed
 // clock, larger and stronger each time, with a hostile Titan leading every fifth
 // wave. The game ends when the players' last building falls; the score is the

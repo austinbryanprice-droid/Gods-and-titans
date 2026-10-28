@@ -1312,6 +1312,9 @@
 .hud-time.hud-peace { color: #d4ecff; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(150, 205, 255, 0.4); cursor: help; }
 .hud-time.hud-peace.is-ending { color: #ffc46a; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 180, 74, 0.7); animation: hud-peace-pulse 1.1s ease-in-out infinite; }
 @keyframes hud-peace-pulse { 50% { opacity: 0.55; } }
+.hud-time.hud-sites { color: #ffe9b0; cursor: help; }
+.hud-time.hud-sites.is-ours { color: #b8f5a0; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(150, 230, 120, 0.6); }
+.hud-time.hud-sites.is-theirs { color: #ff9a7a; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 110, 80, 0.75); animation: hud-peace-pulse 1.1s ease-in-out infinite; }
 .hud-res-v { font-size: 1em; letter-spacing: 0.02em; text-shadow: 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8); }
 .hud-res.is-tier { padding-right: 0.8em; }
 .hud-res.is-pantheon { cursor: help; }

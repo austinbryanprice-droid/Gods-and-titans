@@ -93,7 +93,12 @@ export const EVENT_SHAPES = [
   ['rankUp', 'id', 'rank'],
   ['peaceEnd'],
   ['bounty', 'player', 'amount', 'x', 'y', 'res'],
-  ['wave', 'n', 'count', 'boss', 'x', 'y'], // Trial of the Titans (DESIGN 5.11)
+  ['siteCaptured', 'site', 'player'],
+  ['siteLost', 'site', 'player'],
+  ['sacredHold', 'team', 'end'],
+  ['sacredBroken', 'team'],
+  ['gameOver', 'winningTeam', 'how'],
+  ['wave', 'n', 'count', 'boss', 'x', 'y'], // Trial of the Titans (DESIGN 5.12)
   ['waveCleared', 'n', 'gold'],
 ].map(([type, ...keys]) => ({ type, keys }));
 const SHAPES_BY_TYPE = new Map();
