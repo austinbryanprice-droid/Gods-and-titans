@@ -1691,6 +1691,13 @@ per-frame budget, so a revealed army appears over a few frames.
   and keeps each player's largest army; all of it is read from the players' snapshot records, so nothing is sent for
   it and a client charts the same match as the host (a player who joined late has a shorter chart).
   `tools/shot-chronicle.mjs` stills the four tabs over a made-up 24-minute match.
+  **Play Again and Quick Match** (`src/game/rematch.js`): a game hosted here with only AI players besides the local
+  one (`isSoloLaunch`) keeps its lobby state (checked by `sanitizeLobbyState`: one host slot, no other humans, two
+  teams or more) in localStorage (`mythicwar-last-skirmish`). Its game-over screen leads with Play Again, which leaves
+  the match like Return to Menu and starts that lobby anew with a fresh seed (`launchFrom` → `buildSetup`: a new map,
+  random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
+  AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
+  Online games offer neither.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`

@@ -299,9 +299,15 @@ export class Overlays {
       this.unlockCards(unlocked),
       this.careerLine(),
       el('div', 'hud-obtns',
-        btn('Return to Menu', 'mw-btn--primary', () => this.game.quitToMenu()),
+        this.canRematch() ? btn('Play Again', 'mw-btn--primary', () => this.game.rematch()) : null,
+        btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
         btn('Keep Watching', 'mw-btn--ghost', () => this.hide())));
     this.show('gameover', node, () => this.hide());
+  }
+
+  /** Play Again is offered for a game against the computer only (Game.canRematch). */
+  canRematch() {
+    return typeof this.game.canRematch === 'function' && this.game.canRematch();
   }
 
   /** The local player lost but the game goes on (allies or other players still fighting). */

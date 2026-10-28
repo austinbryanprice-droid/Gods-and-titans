@@ -19,6 +19,7 @@ import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow,
 import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
 import { getCareer, markSeen } from '../game/career.js';
+import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
@@ -246,6 +247,32 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
     const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    // Quick Match: the last game against the computer again, in one click (src/game/rematch.js). Shown once the lobby
+    // module has read it back; none on a first visit.
+    const quickSub = h('span.mw-btn-sub', '');
+    const quickBtn = h('button.mw-btn.mw-btn--menu.mw-quick-btn', { type: 'button', hidden: true, onclick: () => quickMatch() },
+      h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
+      h('span.mw-btn-label', 'Quick Match'), quickSub,
+      h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
+    let quick = null;
+    loadLobby().then((mod) => {
+      if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
+      quick = loadSkirmish(mod);
+      if (!quick) return;
+      quickSub.textContent = `Again: ${skirmishLabel(quick)}`;
+      quickBtn.hidden = false;
+    }).catch(() => {});
+    async function quickMatch() {
+      if (!quick) return;
+      try {
+        const launch = launchFrom(await loadLobby(), quick, getSettings().name);
+        if (!launch) throw new Error('That game can no longer start. Set it up again with Play vs AI.');
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the game.');
+      }
+    }
     const newCount = getCareer().unseen.length;
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
@@ -262,6 +289,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
         playBtn,
+        quickBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
