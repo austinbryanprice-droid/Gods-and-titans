@@ -2233,8 +2233,18 @@ address bar, Site settings, Sound, Allow (or `chrome://settings/content/sound`, 
 here by writing that exception into a profile, not by clicking through Chrome's menus. Nobody has heard it with speakers: the
 checks read the audio context's state, the effects the engine schedules and what the voice is asked and answered.
 
-**Narration** (`src/intro/narrator.js`): a voice reads each caption of `CAPTIONS` aloud, with the browser's own speech
-synthesis (`speechSynthesis`; no audio files), as the film's clock reaches the caption's `from` second: the caption's
+**Narration** (`src/intro/narrator.js`, `src/intro/voiceover.js`): a voice reads each caption of `CAPTIONS` aloud as the
+film's clock reaches the caption's `from` second. The lines are recorded: one short clip per caption in
+`assets/narration/` (mono MP3, 64 kbps, -20 LUFS, about 90 KB in all), rendered offline with Kokoro-82M (Apache 2.0),
+voice `bm_george` (a deep British narrator, Austin's pick of three) at speed 0.85, by `tools/narration/render.py`; a
+changed caption needs its clip rendered again (`tests/intro/voiceover.test.js` checks every caption has one).
+`RecordedSpeech` downloads and decodes them on the sound engine's context as the film loads and plays each through the
+engine's master gain (so it follows the volume and the mute) with a 0.12 send to its hall reverb, 0.15 s after the
+hand-over so the score has begun to step back. It has the browser speech synthesis's shape, so the narrator below is the
+same for both: a line whose clip cannot be had (no Web Audio, a failed download or decode, or a clip not there 1.5 s after
+its line came up) goes to the browser's own voice, as before; a suspended context that does not run within 0.4 s is
+reported as a refusal (`not-allowed`), and the click that resumes it says the line. `?voice=browser` uses the browser's
+voice alone. The browser's voice (`speechSynthesis`) says the caption's
 own words, `en-US`, rate 0.9 and pitch 0.9, at the Settings volume (0 is silence), a line at a time (the browser
 queues a line behind one still being said, so they never overlap; no voice is picked by name, since the browser's
 default for English is its best and a list can open on a novelty voice). The overlay's `paint` hands the voice the film's second each frame, so it
@@ -2363,8 +2373,10 @@ tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no
 mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
 changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
 plays, the card and a key press, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
-voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
-screen, Esc cutting it before the dip, the hint and the click, the setting); `--music` plays the film without its renderer
+browser voice (`?voice=browser`) against a stand-in speech synthesis that records its calls (each caption read as it is on the
+screen, Esc cutting it before the dip, the hint and the click, the setting); `--voice` checks the recorded voice in real Chromium (the real clips downloaded,
+decoded and started on a running context, one per caption with it on screen, the browser's voice never asked, a first
+visit's key starting the first line and Esc stopping it); `--music` plays the film without its renderer
 in real time (a stand-in voice that takes time) and reads the page's real Web Audio graph (the stage's gain, an analyser on
 the music's output) through the whole film, a skip in the middle of a line and a first visit before any click (about two
 minutes; `--scenes 2` runs one of the three); `--sound` is a first visit in real Chromium under the browser's own autoplay
@@ -2375,7 +2387,7 @@ film plays with its sound at once); the other scenes run under the browser's own
 launches Chromium with the autoplay switch (about three minutes; `--scenes 2` runs one of the four). `node tools/music-render.mjs --film --out DIR [--speech from-to,…]` renders the
 score offline, with the mix stepping back over those speech windows, for ffmpeg to measure and mix (a stand-in voice from
 ffmpeg's `flite` filter makes a preview). Don't sample stills at 19 or 36 s, the dips' black frames. Tests:
-`tests/intro/{script,stage,film,narrator,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
+`tests/intro/{script,stage,film,narrator,voiceover,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
 film on a strict fake audio context), `tests/render/camera-free.test.js`, `tests/ui/intro.test.js` (the card among them), `tests/audio/sfx.test.js` (the early start and `onReady`), and the engine's
 side in `tests/audio/music-engine.test.js`.
 
