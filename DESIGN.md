@@ -1786,10 +1786,18 @@ per-frame budget, so a revealed army appears over a few frames.
   Names: click, select, move, attack_melee, attack_ranged, hit, death, build, building_complete,
   train, summon_god, summon_titan, lightning, fire, magic, heal, error, victory, defeat,
   tier_up, chop, mine, pray, horn, ping, ping_urgent.
+  The `AudioContext` is made, and asked to run, as the page loads (`sfx.init`, from `initAudio`). A browser that allows
+  sound with no input (a site set to "Sound: Allow" in its site settings, Chrome's `--autoplay-policy=no-user-gesture-required`,
+  a page reached by a click on a link of the site) runs it at once, and everything is heard from the
+  first moment. The others keep it suspended until the first key press, click or tap (`pointerdown`, `pointerup`,
+  `mousedown`, `click`, `keydown`, `touchend`, and the tab coming back to view), which resume it; mouse movement,
+  scrolling, Esc and a modifier key alone are no input to the browsers, and nothing a page can do changes that.
+  `sfx.ready` says whether a sound would be heard now, `sfx.onReady(cb)` calls back once it would (at once if it
+  would be now), `sfx.supported` whether the browser has WebAudio at all.
 - Music (`src/audio/music.js`, `music-composer.js`, `music-theory.js`, `music-themes.js`, `music-voices.js`, the hub
   `src/audio/audio.js`, and `src/game/music-director.js`): background music for the title screen and for matches,
   composed and synthesized live with WebAudio (no audio files). It shares the sound effects' `AudioContext` and master
-  limiter (`sfx.shared`), so the browser's "audio starts on a click" unlock happens once for both, and it steps back
+  limiter (`sfx.shared`), so the browser's audio unlock (above) happens once for both, and it steps back
   under the stingers in `DUCKS` (`summon_god`, `summon_titan`, `victory`, `defeat`, `tier_up`, `horn`; heard through
   `sfx.onPlay`). `initAudio(settings)` and `syncAudio(settings, changed)` (`main.js`) start both engines and carry the
   settings over; `playTitleMusic()` is what each menu screen calls (a no-op while it already plays);
@@ -1894,7 +1902,8 @@ two hosts clashing, Kronos and Surtr stepping out of their gates, and ten gods, 
 in a line as the sun goes down. It is drawn live, by the real renderer on a world the real simulation runs, so it
 needs no video file, follows the quality tier and shows the game as it is. Esc, Enter, Space or the Skip button
 end it at any moment, even while it loads (a quick dip to black, then the title); the title screen under it never
-sees those keys, so a second Enter cannot press Play.
+sees those keys, so a second Enter cannot press Play. (On the card that waits for a key, below, Enter and Space begin
+the film like any other key, and Esc and the Skip button skip it.)
 
 **When it plays** (`introWanted`, `src/ui/intro.js`): once per page load, only at the start (never after a match).
 The `intro` setting (`src/settings.js`, default true; Settings, "Intro film") turns it off for good, and Settings
@@ -1905,8 +1914,28 @@ never plays it. A film that cannot start, or whose frame throws, is dropped (`'f
 5 fps over 24 frames (after the first 3.5 film seconds, where shaders compile) the film is skipped (`'skipped'`).
 The menu is hidden while it plays and shown again behind the black when it ends; the game's own code is fetched
 (`warmUp`) after it, so the film has the machine to itself, and the film's renderer is freed before the title
-shows. Its sounds are cues in the game's synthesized set (`sfx`), silent on a first visit until a click or key
-lets the browser start audio.
+shows. Its sounds are cues in the game's synthesized set (`sfx`).
+
+**Sound on a first visit.** A browser keeps audio and speech off until the page has had a key press, a click or a tap (an
+`AudioContext` stays `suspended`, `speechSynthesis.speak` is refused with `not-allowed`); a page cannot ask its way past
+that, so there is no sound at page load by default, in any browser. The page does everything short of it: `sfx.init` makes
+the context and asks it to run at load (9), so a browser that allows sound with no input (the site set to "Sound: Allow",
+Chrome's autoplay switch, a visit reached by a click on a link of the site) plays the film with
+its sound from the first frame, with no card at all. Where the browser says no and the player wants sound (`gate`, from
+`watchIntro` in `main.js`: the volume above 0, or the music not muted and above 0), the film is held at its first frame
+behind a card, "Press any key or click to begin" ("Tap to begin" on a touch screen), which the film loads behind, class
+`is-gated` on the overlay. Any key but Esc and the modifiers (`beginsFilm`: a lone Shift, Ctrl, Alt, Meta, a function key
+or a browser shortcut is no key press to the browsers), a click or a tap begins it, in the very event that unlocks the
+audio (`beginFilm` also calls `sfx.unlock()`), so the score, the voice and the effects are there from the first second
+and not at some click part-way through. The card also ends by itself if the browser allows sound after all (`sfx.onReady`: a
+context that starts a moment late), and a skip ends it (`finish` releases the wait). A player with the sound off (volume 0,
+and the music muted or at 0) is never held, and neither is a page with no WebAudio. Measured in Chromium (`--sound`, below):
+Tab, letter keys, Enter, Space, the arrows, a click and a tap unlock the audio; mouse movement, scrolling, a lone Shift
+and Esc do not; a reload after a click is locked again; a click on a link to a page of the same site leaves that page
+unlocked. The one-time way to hear it with no input at all is the browser's own setting: in Chrome, the site information in the
+address bar, Site settings, Sound, Allow (or `chrome://settings/content/sound`, "Allowed to play sound", add the site); verified
+here by writing that exception into a profile, not by clicking through Chrome's menus. Nobody has heard it with speakers: the
+checks read the audio context's state, the effects the engine schedules and what the voice is asked and answered.
 
 **Narration** (`src/intro/narrator.js`): a voice reads each caption of `CAPTIONS` aloud, with the browser's own speech
 synthesis (`speechSynthesis`; no audio files), as the film's clock reaches the caption's `from` second: the caption's
@@ -1918,11 +1947,13 @@ follows the picture, and a caption that came and went between two frames is not 
 score, below), with `speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
 under the intro toggle) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
 film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
-throws is ignored. Chrome will not speak until the page has had a click or a key (the rule that keeps the film's
-sounds quiet on a first visit): the refused `speak` fires an `error` event (`not-allowed`), which puts up a "Click for
-sound" hint at the top left (class `needs-click` on the overlay, up while either the voice or the score below is waiting
-for a click); a click anywhere on the film then says the caption on screen (if it has 1.2 s left) and takes the hint
-down, and the later lines speak by themselves. "Watch it now" always speaks, for the player has just clicked.
+throws is ignored. Chrome will not speak until the page has had a key press, a click or a tap, unless the site is set
+to Sound: Allow (the rule behind the card above, which is why the film normally begins with the voice allowed): a refused `speak`
+fires an `error` event (`not-allowed`), which puts up a "Click for sound" hint at the top left (class `needs-click` on
+the overlay, up while either the voice or the score below is waiting for a click), for the cases the card does not cover
+(a browser that lets Web Audio run but not the voice); a click anywhere on the film then says the caption on screen (if it
+has 1.2 s left) and takes the hint down, and the later lines speak by themselves. "Watch it now" always speaks, for the
+player has just clicked.
 `createNarrator({ speech, volume, captions, onBlocked, onSpeaking })` takes the speech synthesis as a parameter (tests
 pass a stand-in). `onSpeaking(true)` is called as a line is handed to the browser, a moment before it is heard, and
 `onSpeaking(false)` when none is left: at the browser's `end` or `error` event, or when the line's time has run out,
@@ -1961,8 +1992,9 @@ swell it again.
 It obeys the settings: the Music slider and mute are the engine's own, so the film plays on without a score (and with no hint)
 while music is muted or at 0; "Intro film" and "Narration" decide whether there is a film and a voice (with no narration the
 score simply stays at its lift). Every call is guarded: a failing engine costs a warning and a silent film. On a first visit
-the browser starts no audio before a click or key (the sound engine's rule), so the film is silent until then and shows the
-"Click for sound" hint (`state().waiting`); the first click starts the score at the film's moment, under the voice if one is
+the card (above) holds the film until the browser allows audio, so the score begins with the film's first frame. Should the audio
+still be off once the film is playing (a film begun some other way, or a context the browser suspended again), the film is silent
+and shows the "Click for sound" hint (`state().waiting`); the first click starts the score at the film's moment, under the voice if one is
 being said, and on the section the story is in: the score's `joinAt()` answers the film's second and `barLevel` (the story's
 intensity for the middle of each bar), so the engine composes the bars before the click without a sound and a click at 31 s
 comes in on the titans' battle, not on the dawn. (The sections' tunes after the second are the seed's chance, as in a match:
@@ -2027,30 +2059,41 @@ below, begins with the film's first frame as the loading card lifts, follows eac
 was left) builds an overlay (z 30, over the menu) of a black card with the title and a pulse while the code loads (`import()`ed only
 when the film plays, so it costs nothing for players who skip it), the film's canvas, a vignette, letterbox bars
 that close over the film (the caption sits in the bottom bar), the Skip button and a black fade layer. It states
-`loading → playing → leaving → done`; `leave` dips to black (320 ms, unless the film ran to its own end), frees the film, calls
+`loading → playing → leaving → done` (a film held at the card stays in `loading`, with its first frame already drawn, until the input comes); `leave` dips to black (320 ms, unless the film ran to its own end), frees the film, calls
 `onHandover` once (the title appears underneath) and lifts the black over 900 ms. `manual: true` is for tools and
 tests (`advance(dt)` moves the film and the overlay, `draw()` paints a frame, no frame loop runs).
 
 **Looking at it**: `node tools/shot-intro.mjs --at 2,16,26,38 --sheet` renders stills (the film runs in manual
 mode, so software GL is enough; `--pose x,y,dist,pitch,yaw,lift,fov` puts the camera where you say, `--hour H`
 changes the sky, `--quality`, `--size`), and `--flow` checks the page flow in a browser (menu hidden while it
-plays, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
+plays, the card and a key press, Esc to the title, the skips for an automated browser, `?join=` and `?intro=0`); `--narration` checks the
 voice in a browser against a stand-in speech synthesis that records its calls (each caption read as it is on the
 screen, Esc cutting it before the dip, the hint and the click, the setting); `--music` plays the film without its renderer
 in real time (a stand-in voice that takes time) and reads the page's real Web Audio graph (the stage's gain, an analyser on
 the music's output) through the whole film, a skip in the middle of a line and a first visit before any click (about two
-minutes; `--scenes 2` runs one of the three). `node tools/music-render.mjs --film --out DIR [--speech from-to,…]` renders the
+minutes; `--scenes 2` runs one of the three); `--sound` is a first visit in real Chromium under the browser's own autoplay
+policy (the card holds the film, mouse movement, scrolling and Shift do not begin it and leave the audio off, a key or a click
+begins it with the context running, the horn is scheduled, the voice is not refused, Esc at the card skips), with the policy
+switched off (`--autoplay-policy=no-user-gesture-required`) and in a profile with the site set to Sound: Allow (no card, the
+film plays with its sound at once); the other scenes run under the browser's own policy too, the tool no longer
+launches Chromium with the autoplay switch (about three minutes; `--scenes 2` runs one of the four). `node tools/music-render.mjs --film --out DIR [--speech from-to,…]` renders the
 score offline, with the mix stepping back over those speech windows, for ffmpeg to measure and mix (a stand-in voice from
 ffmpeg's `flite` filter makes a preview). Don't sample stills at 19 or 36 s, the dips' black frames. Tests:
 `tests/intro/{script,stage,film,narrator,score}.test.js` (`score.test.js` runs the real engine and narrator over the whole
-film on a strict fake audio context), `tests/render/camera-free.test.js`, `tests/ui/intro.test.js`, and the engine's
+film on a strict fake audio context), `tests/render/camera-free.test.js`, `tests/ui/intro.test.js` (the card among them), `tests/audio/sfx.test.js` (the early start and `onReady`), and the engine's
 side in `tests/audio/music-engine.test.js`.
 
 Traps met while making it: the summon pillar of a god or titan (about 8 tiles tall, 1.75 s) washes out a close
 frame, so the finale starts wide; `summon_god` plays at most once a second; an idle or held god auto-acquires
 enemies, which is why the finale removes the Norse first; in software GL the page submits frames much faster than
 they are drawn, so freeing the renderer waits for the backlog (half a minute in headless Chromium, nothing on a
-GPU), which `--flow` allows for.
+GPU), which `--flow` allows for. Playwright's own `evaluate`, `waitFor*` and screenshot calls count as a user gesture to
+Chromium, so after any of them an event that only asks the audio to resume (a lone Shift, say) works, which it does not for
+a real visitor: `--sound` reads the page through raw protocol calls with no gesture until the input under test, and every
+check before the input depends on that. The tool also no longer launches Chromium with
+`--autoplay-policy=no-user-gesture-required` (only `--sound`'s own third scene does): with it no first visit was ever seen,
+which is how a silent film got past every earlier check. A first visit prints Chrome's "The AudioContext was not allowed to
+start" warning in the console: that is the browser saying what it does, not an error.
 
 ## 12. Repository layout & ownership
 
@@ -2071,6 +2114,6 @@ src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)
-tools/shot-intro.mjs              stills of the intro film and its page flow (11.1)
+tools/shot-intro.mjs              stills of the intro film, its page flow, voice, score and first-visit sound (11.1)
 notes/                             decisions.md, interface-requests.md (append-only)
 ```

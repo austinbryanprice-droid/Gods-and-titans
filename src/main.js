@@ -130,7 +130,10 @@ function watchIntro(screen, guard = true) {
   };
   try {
     const s = getSettings();
-    const intro = playIntro({ root: document.getElementById('app'), quality: s.quality, guard, narrate: s.narration, volume: s.volume, onHandover: handover });
+    // A browser keeps sound off until a key press or a click, unless the player has allowed it for the site. When the
+    // player wants to hear the film and the browser has not allowed it, the film waits for that input behind a card.
+    const wantsSound = s.volume > 0 || (!s.musicMuted && s.musicVolume > 0);
+    const intro = playIntro({ root: document.getElementById('app'), quality: s.quality, guard, narrate: s.narration, volume: s.volume, gate: wantsSound, onHandover: handover });
     return intro.done;
   } catch (err) {
     console.error('[main] the intro film could not start', err);
@@ -149,7 +152,7 @@ function prefersReducedMotion() {
 
 function boot() {
   const settings = getSettings();
-  initAudio(settings); // the sound effects and the music: one audio context, armed to start on the first click
+  initAudio(settings); // the sound effects and the music: one audio context, started now where the browser allows it and otherwise at the first key press or click
   onSettingsChange(syncAudio);
   menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onIntro: () => watchIntro('settings', false) });
   const msg = document.getElementById('boot-message');

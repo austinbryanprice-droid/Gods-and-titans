@@ -5,8 +5,14 @@
 // A voice (src/intro/narrator.js) reads each line aloud as it comes up, unless the player turned that off, and
 // the title theme plays under it as a score (src/intro/score.js) that steps back for the voice and swells between.
 //
+// Sound is the player's to start: a browser keeps audio and speech off until a key press or a click. The page
+// asks for it at load (src/audio/sfx.js `init`), and a browser that allows it (a site set to "Sound: Allow") plays the
+// film with its sound from the first frame. Where it does not, and the player wants sound (`gate`), the film waits at
+// its first frame behind a card, "Press any key or click to begin", and starts with that input, so the score, the voice
+// and the effects are there from the first second instead of coming in late at some click.
+//
 //   if (introWanted({ enabled: settings.intro, search: location.search, ... })) {
-//     const intro = playIntro({ root, quality, narrate: settings.narration, volume: settings.volume, onHandover: () => showMenu('title') });
+//     const intro = playIntro({ root, quality, narrate: settings.narration, volume: settings.volume, gate: true, onHandover: () => showMenu('title') });
 //     await intro.done;                                  // 'finished' | 'skipped' | 'failed'
 //   }
 //
@@ -19,6 +25,10 @@ import { createFilmScore } from '../intro/score.js';
 import { sfx } from '../audio/sfx.js';
 
 const SKIP_KEYS = new Set(['Escape', 'Enter', ' ']);
+// What is not "any key" on the card that waits for one: Esc skips the film, a modifier alone is no key press to the
+// browsers (they do not unlock audio for it), and a browser shortcut (Ctrl+R, F5) is not the player starting the film.
+const NOT_A_KEY = /^(Escape|Shift|Control|Alt|AltGraph|Meta|OS|CapsLock|NumLock|ScrollLock|Fn|FnLock|Hyper|Super|Dead|Process|Unidentified|F\d{1,2})$/;
+const beginsFilm = (e) => !NOT_A_KEY.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey;
 const DIP_MS = 320; // a skip dips to black this fast
 const REVEAL_MS = 900; // the black lifts off the title screen this slowly
 const SLOW_FRAME = 0.2; // seconds: a film that averages worse than this (5 fps) is dropped
@@ -64,6 +74,15 @@ function nextPaint() {
   });
 }
 
+/** True on a screen you touch (there is no key to press, and the card says tap). */
+function touchScreen() {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
+}
+
 function buildOverlay(onSkip) {
   const canvas = h('canvas.mw-intro-canvas', { 'aria-hidden': 'true' });
   const caption = h('p.mw-intro-caption', { 'aria-live': 'polite' });
@@ -71,7 +90,12 @@ function buildOverlay(onSkip) {
   // shown while the browser will not play sound (the score) or speak (the voice) until the page has had a click (any click on the film does it)
   const hint = h('p.mw-intro-hint', { 'aria-hidden': 'true' }, 'Click for sound');
   const fade = h('div.mw-intro-fade', { 'aria-hidden': 'true' });
-  const loading = h('div.mw-intro-loading', { role: 'status' }, h('span.mw-intro-mark', 'Mythic War'), h('span.mw-intro-pulse', { 'aria-hidden': 'true' }));
+  // the card that holds the film at its first frame while the browser will not allow sound (class is-gated): any key or a click begins it
+  const touch = touchScreen();
+  const begin = h('button.mw-intro-begin.mw-silent', { type: 'button' },
+    h('span.mw-intro-begin-do', touch ? 'Tap to begin' : 'Press any key or click to begin'),
+    h('span.mw-intro-begin-note', touch ? 'The film has sound' : 'The film has sound · Esc skips it'));
+  const loading = h('div.mw-intro-loading', { role: 'status' }, h('span.mw-intro-mark', 'Mythic War'), h('span.mw-intro-pulse', { 'aria-hidden': 'true' }), begin);
   const root = h('section.mw-intro', { 'aria-label': 'Intro film' },
     canvas,
     h('div.mw-intro-vignette', { 'aria-hidden': 'true' }),
@@ -92,9 +116,10 @@ function buildOverlay(onSkip) {
  * @param {boolean} [o.guard] drop the film on a machine too slow to show it
  * @param {boolean} [o.narrate] read each caption aloud with the browser's speech synthesis (the player's setting); silent where it has none
  * @param {number} [o.volume] the game's volume setting, 0..1: the voice follows it
+ * @param {boolean} [o.gate] the player wants sound: when the browser has not allowed it (it waits for a key press or a click), hold the film at its first frame behind a card until one comes, or until the browser allows it. The page passes it; tools and tests, which drive the film themselves, do not
  * @param {() => Promise<{ IntroFilm: Function, Renderer: Function }>} [o.load]
  * @param {(ms: number) => Promise<void>} [o.wait]
- * @param {{ play: Function }} [o.audio]
+ * @param {{ play: Function, ready?: boolean, supported?: boolean, unlock?: Function, onReady?: (cb: () => void) => (() => void) }} [o.audio] the sound engine (the gate reads `ready` and `supported`, starts it with `unlock` and waits on `onReady`; a stand-in without them never gates)
  * @param {(o: { volume: number, onBlocked: (blocked: boolean) => void, onSpeaking: (speaking: boolean) => void }) => { update: Function, retry: Function, stop: Function }} [o.createVoice] makes the narrator (tests pass a stand-in)
  * @param {(() => { start: Function, update: Function, speaking: Function, end: Function, waiting?: Function })|null} [o.createScore] makes the score under the film, which plays the music engine (tests pass a stand-in, or null for none)
  * @returns {{ done: Promise<'finished'|'skipped'|'failed'>, ready: Promise<void>, skip: () => void, advance: (dt: number) => void, draw: () => void, film: object|null, root: HTMLElement }}
@@ -107,6 +132,7 @@ export function playIntro({
   guard = true,
   narrate = true,
   volume = 1,
+  gate = false,
   load = defaultLoad,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   audio = sfx,
@@ -121,6 +147,37 @@ export function playIntro({
   const ui = buildOverlay(() => finish('skipped'));
   root.appendChild(ui.root);
   const done = new Promise((resolve) => (finished = resolve));
+
+  // The gate. `held` is true from the start while the player wants sound and the browser has not allowed it (the page
+  // tried at load; a browser that says yes has the context running by now, and a stand-in without `ready` never waits).
+  // The card tells the player what it takes, a key press or a click, and the film begins with that input, or at once
+  // if the browser allows sound after all (`onReady`: a context that starts a moment late). The film loads behind the
+  // card meanwhile, so it starts the instant the input comes.
+  let held = gate && audio.supported !== false && audio.ready === false;
+  let letBegin = () => {};
+  const begun = new Promise((resolve) => (letBegin = resolve));
+  let unwatch = () => {};
+  function release() {
+    if (!held) return;
+    held = false;
+    unwatch();
+    ui.root.classList.remove('is-gated');
+    letBegin();
+  }
+  /** The player pressed a key or clicked: the input the browser wants. Start its audio (it may already have, at the event) and the film. */
+  function beginFilm() {
+    if (!held) return;
+    try {
+      if (audio.unlock) audio.unlock();
+    } catch {
+      // the film goes on without sound; the hint says so
+    }
+    release();
+  }
+  if (held) {
+    ui.root.classList.add('is-gated');
+    if (audio.onReady) unwatch = audio.onReady(release) || unwatch;
+  }
 
   // The score: the title theme, conducted by the film's clock (paint). It begins with the film's first frame, not the
   // loading card: its sections fall on the film's beats, so the piece's clock must start where the film's does, however
@@ -141,11 +198,21 @@ export function playIntro({
       onSpeaking: (on) => score && score.speaking(on),
     })
     : null;
-  ui.root.addEventListener('click', () => voice && voice.retry());
+  ui.root.addEventListener('click', () => {
+    beginFilm(); // a click on the card (anywhere on the film) is the one the browser wants
+    if (voice) voice.retry();
+  });
 
   // The menu underneath never sees a key that skips the film (nor one held down, or pressed again
-  // while the black lifts): a second Enter must not press the title screen's Play.
+  // while the black lifts): a second Enter must not press the title screen's Play. On the card that
+  // waits for a key every key but Esc begins the film (Enter and Space included, for the card says any key), and Esc skips it.
   const onKey = (e) => {
+    if (held && beginsFilm(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) beginFilm();
+      return;
+    }
     if (!SKIP_KEYS.has(e.key)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -256,6 +323,10 @@ export function playIntro({
       paint(film.view);
       await nextPaint();
       if (state !== 'loading') return;
+      if (held) {
+        await begun; // held at the first frame behind the card until a key press, a click, or the browser allowing sound (or a skip, which ends the wait too)
+        if (state !== 'loading') return;
+      }
       state = 'playing';
       ui.root.classList.add('is-playing');
       if (score) score.start();
@@ -273,6 +344,7 @@ export function playIntro({
     const wasPlaying = state === 'playing';
     state = 'leaving';
     outcome = reason;
+    release(); // a film still held at its card ends the wait, so `ready` settles
     // The score and the voice go first, before the dip to black: a film cut short fades its music out inside the dip
     // (the title's own comes in after it); one that ran to its end, or never began to show, leaves its music playing.
     // The score is told first, so the cut-off voice's last word does not make it swell again.

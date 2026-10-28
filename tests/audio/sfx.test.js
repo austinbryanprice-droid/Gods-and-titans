@@ -271,6 +271,112 @@ test('the audio unlock stays armed for the life of the page: a context suspended
   }
 });
 
+/**
+ * Run `fn(handlers, engine)` in a page-like world: `window` records its listeners and `AudioContext` is `AC`. The engine is
+ * a fresh copy of the module each time, so every test starts with no context and nothing armed.
+ */
+let browsers = 0;
+async function inBrowser(AC, fn) {
+  const handlers = new Map();
+  const saved = { window: globalThis.window, AudioContext: globalThis.AudioContext };
+  globalThis.window = { addEventListener: (type, cb) => handlers.set(type, cb) };
+  globalThis.AudioContext = AC;
+  try {
+    const s = (await import(`../../src/audio/sfx.js?browser${browsers++}`)).sfx;
+    await fn(handlers, s);
+  } finally {
+    globalThis.window = saved.window;
+    globalThis.AudioContext = saved.AudioContext;
+    if (saved.window === undefined) delete globalThis.window;
+    if (saved.AudioContext === undefined) delete globalThis.AudioContext;
+  }
+}
+
+/** A context the browser has not allowed to run: suspended, resume() unanswered, until the test says `allowed` (a key press or a click). */
+class RefusingContext extends FakeAudioContext {
+  constructor() {
+    super();
+    this.state = 'suspended';
+    this.resumed = 0;
+    this.allowed = false;
+    this.listeners = [];
+    this.answers = [];
+  }
+  addEventListener(type, fn) {
+    if (type === 'statechange') this.listeners.push(fn);
+  }
+  resume() {
+    this.resumed++;
+    if (this.allowed) {
+      this.start();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.answers.push(resolve));
+  }
+  /** The browser lets it run: the state changes, the listeners hear it and the waiting resume() calls are answered. */
+  start() {
+    this.state = 'running';
+    for (const fn of this.listeners) fn();
+    for (const answer of this.answers.splice(0)) answer();
+  }
+}
+
+test('init makes the context at once and asks it to run: a browser that allows sound with no input is heard from the first moment', async () => {
+  class AllowedContext extends FakeAudioContext {} // starts running, as Chrome does for a site set to "Sound: Allow"
+  await inBrowser(AllowedContext, (handlers, s) => {
+    assert.equal(s.supported, true);
+    assert.equal(s.ctx, null, 'nothing before init');
+    s.init({ volume: 0.7 });
+    assert.ok(s.ctx, 'the context is there with no input at all');
+    assert.equal(s.ready, true, 'and running');
+    assert.equal(s.play('click'), true, 'a sound plays');
+    let heard = 0;
+    s.onReady(() => heard++);
+    assert.equal(heard, 1, 'a ready engine answers onReady at once');
+  });
+});
+
+test('a browser that refuses leaves it suspended until a key press or a click, and onReady hears the moment it runs, once', async () => {
+  await inBrowser(RefusingContext, (handlers, s) => {
+    s.init();
+    assert.equal(s.ctx.resumed, 1, 'it was asked to run at load');
+    assert.equal(s.ready, false, 'and the browser said no by leaving it suspended');
+    assert.equal(s.play('click'), false, 'so a sound waits for the player');
+    let heard = 0;
+    const cancelled = s.onReady(() => assert.fail('cancelled'));
+    cancelled();
+    s.onReady(() => heard++);
+    assert.deepEqual([...handlers.keys()].sort(), ['click', 'keydown', 'mousedown', 'pointerdown', 'pointerup', 'touchend'], 'it listens for the inputs the browsers count (a key press, a click, a tap), and for nothing else (a mouse move, a scroll or a focus change counts for none of them)');
+    assert.equal(heard, 0, 'still waiting');
+    s.ctx.allowed = true; // the first key press
+    handlers.get('keydown')();
+    assert.equal(s.ready, true);
+    assert.equal(heard, 1, 'the wait is over');
+    handlers.get('click')();
+    s.ctx.state = 'suspended';
+    s.ctx.start();
+    assert.equal(heard, 1, 'and it is told once');
+    assert.equal(s.play('click'), true);
+  });
+});
+
+test('a context the browser starts by itself a moment after it was made is heard too', async () => {
+  await inBrowser(RefusingContext, (handlers, s) => {
+    s.init();
+    let heard = 0;
+    s.onReady(() => heard++);
+    s.ctx.start(); // no input: a browser that allows sound but starts the context a moment late
+    assert.equal(heard, 1);
+    assert.equal(s.ready, true);
+  });
+});
+
+test('the engine says whether the browser has WebAudio at all', async () => {
+  const mod = await import('../../src/audio/sfx.js?nosupport');
+  assert.equal(mod.sfx.supported, false, 'no AudioContext in Node');
+  assert.doesNotThrow(() => mod.sfx.onReady(() => {}), 'and a wait on it is harmless');
+});
+
 test('volume and mute drive the master gain', () => {
   sfx.setVolume(0.5);
   assert.equal(sfx.volume, 0.5);

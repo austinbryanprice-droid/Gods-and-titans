@@ -1,5 +1,8 @@
 // Sound effects synthesized with WebAudio (no audio files). DESIGN 9.
-//   sfx.init()                       arm the AudioContext unlock on the first user gesture
+//   sfx.init()                       make the AudioContext now and try to start it (a browser that allows sound without
+//                                    a click runs it at once), and arm the unlock for the first key press or click
+//   sfx.ready / sfx.supported        a sound would be heard right now / this browser has WebAudio at all
+//   sfx.onReady(cb)                  cb() once a sound would be heard (at once if it would now); returns a cancel function
 //   sfx.play(name, { x, y, volume }) positional when x, y are given (tile coords)
 //   sfx.setListener(x, y, scale)     usually the camera target; scale > 1 widens the hearing range (zoomed out)
 //   sfx.setVolume(v) / sfx.mute(bool)
@@ -511,6 +514,11 @@ function audioContextClass() {
   return globalThis.AudioContext || globalThis.webkitAudioContext || null;
 }
 
+// The inputs that count as "the user has interacted with the page" for the browsers' autoplay rules: a click, a tap or
+// a key press (Chrome, Firefox and Safari alike). A mouse move, a scroll, a focus change, a modifier key alone and Esc
+// do not (measured in Chromium), so there is nothing earlier to listen for.
+const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'click', 'keydown', 'touchend'];
+
 class SfxEngine {
   constructor() {
     this.ctx = null;
@@ -525,10 +533,15 @@ class SfxEngine {
     this.armed = false;
     this.unlockHandler = null;
     this.playHooks = [];
+    this.readyHooks = [];
   }
 
   /**
-   * Arm the AudioContext unlock on the first user gesture. Idempotent.
+   * Start the audio as early as the browser allows, and arm the unlock for the first key press or click. Idempotent.
+   * The context is made at once and asked to run: a browser that allows sound without any input (a site set to "Sound:
+   * Allow", the autoplay switch, a page reached by a click on a link of this site) runs it,
+   * and everything that plays from then on, the intro film included, is heard from its first moment. A browser that
+   * does not leaves it suspended, and the first key press or click resumes it (see `unlock`).
    * @param {{ context?: AudioContext|object, volume?: number }} [opts] context injects one (tests)
    */
   init(opts = {}) {
@@ -544,22 +557,22 @@ class SfxEngine {
     // nothing while the context is running.
     const handler = () => this.unlock();
     this.unlockHandler = handler;
-    for (const ev of ['pointerdown', 'keydown', 'touchend', 'mousedown']) window.addEventListener(ev, handler, true);
+    for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, handler, true);
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden && this.ctx) this.unlock();
       });
     }
-    // Browsers that already saw a gesture (e.g. module loaded late) can start right away.
-    try {
-      if (navigator.userActivation && navigator.userActivation.hasBeenActive) this.unlock();
-    } catch {
-      // ignore
-    }
+    this.unlock(); // the attempt without any input (the browser says no by leaving the context suspended)
     return this;
   }
 
-  /** Create or resume the AudioContext (call from a user gesture). */
+  /** Whether this browser has WebAudio at all (without it nothing can be heard, whatever the player does). */
+  get supported() {
+    return !!audioContextClass();
+  }
+
+  /** Create or resume the AudioContext. Allowed without input only where the browser says so; a key press or a click always is. */
   unlock() {
     try {
       if (!this.ctx) {
@@ -568,7 +581,10 @@ class SfxEngine {
         this._attach(new AC({ latencyHint: 'interactive' }));
       }
       const st = this.ctx.state;
-      if (st !== 'running' && st !== 'closed' && this.ctx.resume) this.ctx.resume().catch(() => {});
+      if (st !== 'running' && st !== 'closed' && this.ctx.resume) {
+        const resumed = this.ctx.resume();
+        if (resumed && typeof resumed.then === 'function') resumed.then(() => this._settled(), () => {});
+      }
     } catch (err) {
       console.warn('[sfx] audio unavailable', err);
     }
@@ -579,6 +595,36 @@ class SfxEngine {
     this.graph = buildGraph(ctx);
     this.kit = kit(ctx, this.graph.noise);
     this._applyVolume();
+    // a context that starts a moment after it was made (or at the first input) says so
+    if (typeof ctx.addEventListener === 'function') ctx.addEventListener('statechange', () => this._settled());
+  }
+
+  /** The context's state changed (or a resume came back): tell whoever waits for a sound to be audible. */
+  _settled() {
+    if (!this.ready || !this.readyHooks.length) return;
+    for (const cb of this.readyHooks.splice(0)) {
+      try {
+        cb();
+      } catch (err) {
+        console.warn('[sfx] a ready hook failed', err);
+      }
+    }
+  }
+
+  /**
+   * Call cb() once a sound would be heard (the context runs): at once if it would be now. For what has to wait for the
+   * browser to allow audio, such as the intro film's opening card. Returns a function that cancels the wait.
+   */
+  onReady(cb) {
+    if (this.ready) {
+      cb();
+      return () => {};
+    }
+    this.readyHooks.push(cb);
+    return () => {
+      const i = this.readyHooks.indexOf(cb);
+      if (i >= 0) this.readyHooks.splice(i, 1);
+    };
   }
 
   _applyVolume() {
