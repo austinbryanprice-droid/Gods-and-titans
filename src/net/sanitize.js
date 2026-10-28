@@ -55,7 +55,7 @@ const COMMANDS = {
   move: { units: U, x: ['x', true], y: ['y', true], queue: Q },
   attackMove: { units: U, x: ['x', true], y: ['y', true], queue: Q },
   attack: { units: U, target: ['id', true], queue: Q },
-  smart: { units: U, x: XO, y: YO, target: TGT, tx: ['tx', false], ty: ['ty', false], queue: Q },
+  smart: { units: U, x: XO, y: YO, target: TGT, tx: ['tx', false], ty: ['ty', false], relic: ['index', false], queue: Q },
   gather: { units: U, target: TGT, tx: ['tx', false], ty: ['ty', false], x: XO, y: YO, queue: Q },
   pray: { units: U, target: ['id', true], queue: Q },
   returnCargo: { units: U, queue: Q },
@@ -176,7 +176,7 @@ export function isValidSnapshot(snap) {
     if (!isObject(e) || !Number.isFinite(e.id) || typeof e.k !== 'string' || !Number.isFinite(e.x) || !Number.isFinite(e.y)) return false;
   }
   for (const p of snap.players) if (!isObject(p)) return false;
-  for (const key of ['events', 'fields', 'reveals', 'sites']) {
+  for (const key of ['events', 'fields', 'reveals', 'sites', 'relics']) {
     const list = snap[key];
     if (list === undefined) continue;
     if (!Array.isArray(list)) return false;

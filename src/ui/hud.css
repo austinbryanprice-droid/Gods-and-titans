@@ -1161,6 +1161,7 @@
 }
 .hi-chip.is-stun, .hi-chip.is-debuff, .hi-chip.is-dot, .hi-chip.is-slow { border-color: rgba(255, 110, 80, 0.7); }
 .hi-chip.is-buff, .hi-chip.is-shield, .hi-chip.is-invuln { border-color: rgba(130, 220, 140, 0.7); }
+.hi-chip.is-relic { border-color: rgba(255, 214, 110, 0.85); box-shadow: 0 0 6px rgba(255, 200, 80, 0.45); cursor: help; }
 .hi-progress { display: flex; flex-direction: column; gap: 0.25em; }
 .hi-progress-label { font: 600 0.82em/1 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold); }
 
@@ -1481,6 +1482,8 @@
 .hud-res.is-pantheon { cursor: help; }
 .hud-res.is-pantheon .hud-res-v { font: 600 0.9em/1 var(--mw-font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mw-gold-hi, #ffe39a); }
 @media (max-width: 1100px) { .hud-res.is-pantheon .hud-res-v { display: none; } .hud-res.is-pantheon { padding-right: 0.25em; } }
+.hud-res.is-relic { cursor: help; }
+.hud-res.is-relic .hud-res-v { color: var(--mw-gold-hi, #ffe39a); }
 
 /* ---- side buttons */
 .hud-god, .hud-idle {

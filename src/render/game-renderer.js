@@ -32,6 +32,7 @@ import { FireLayer } from './fires.js';
 import { SacredSiteLayer } from './sacred-sites.js';
 import { FadeMaterials, UnitFader, FADE_SECONDS, FADE_LEVELS } from './unit-fade.js';
 import { StatusLayer } from './status-markers.js';
+import { RelicLayer } from './relics.js';
 import { PostFX, RESIZE_SETTLE_MS, DEFAULT_LOOK } from './post.js';
 import { createEnvironment, setCloudShadows, applyAtmosphere, setLampSpots, LAMP_SPOTS, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 import { Atmosphere } from './atmosphere.js';
@@ -278,6 +279,7 @@ export class GameRenderer {
     }
 
     this.vfx = new VFXSystem(scene, (x, y) => this.groundAt(x, y), { quality: Q.vfx });
+    this.relicLayer = new RelicLayer(scene, (x, y) => heightAt(this.map, x, y));
 
     this.blobs = new BlobLayer(this.groundFxRoot);
     this.rings = new RingLayer(this.overlayRoot);
@@ -1245,6 +1247,7 @@ export class GameRenderer {
     this.syncUnits(dt);
     this.animateDying(dt);
     this.animateBuildings(dt);
+    this.relicLayer.update(vs, this.time, this.units, this.buildings);
     this.flushPendingHits();
 
     this.fow.update(dt);
@@ -2344,6 +2347,7 @@ export class GameRenderer {
     for (const m of this.mines.values()) m.model.dispose();
     this.mines.clear();
     this.farUnits.dispose();
+    this.relicLayer.dispose();
     this.sacredSites.dispose();
     this.placement.dispose();
     this.blobs.dispose();

@@ -26,6 +26,7 @@ import { researchHostOf } from './houses.js';
 import { PANTHEONS } from './pantheon-list.js';
 import { PERK_STATS } from './schema.js';
 import { REVIVE_COST_MULT } from '../config.js';
+import { getRelic } from './relics.js';
 
 /** Every upgrade by id, each with the `building` that researches it. */
 export const UPGRADES = {};
@@ -94,17 +95,22 @@ export function blessingsOf(pantheonId) {
 }
 
 /**
- * Combined effects of a pantheon's blessings and a list of owned upgrade ids
- * (unknown ids are ignored).
+ * Combined effects of a pantheon's blessings, a list of owned upgrade ids and the relics resting in
+ * the player's Temples (data/relics.js; unknown ids are ignored).
  * @param {string[]} ids
  * @param {string|null} [pantheonId]
+ * @param {string[]} [relics]
  */
-export function computeMods(ids, pantheonId = null) {
+export function computeMods(ids, pantheonId = null, relics = null) {
   const mods = { buildings: {}, units: [], carry: { g: 0, w: 0 }, chop: 0, work: 0, godLevel: 0, perks: { ...NO_PERKS } };
   for (const bl of blessingsOf(pantheonId)) for (const e of bl.effects) addEffect(mods, e);
   for (const id of ids || []) {
     const up = getUpgrade(id);
     if (up) for (const e of up.effects) addEffect(mods, e);
+  }
+  for (const id of relics || []) {
+    const r = getRelic(id);
+    if (r) for (const e of r.effects) addEffect(mods, e);
   }
   return mods;
 }
