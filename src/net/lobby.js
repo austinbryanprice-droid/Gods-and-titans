@@ -8,6 +8,7 @@ import { MAX_PLAYERS, PLAYER_COLORS, PEACE_LENGTHS } from '../config.js';
 import { PANTHEONS, PANTHEON_LIST } from '../data/index.js';
 import { RNG, hashSeed } from '../sim/rng.js';
 import * as mapgen from '../sim/mapgen.js';
+import { LANDSCAPE_CHOICES, resolveLandscape } from '../data/landscapes.js';
 import {
   MSG, REASONS, JOIN_TIMEOUT_MS, GAME_TIMEOUT_MS, MAX_NAME_LENGTH, RateLimiter,
   sanitizeName, sanitizeChat, sanitizeReason, versionMismatchReason, normalizeRoomCode,
@@ -111,6 +112,7 @@ export function sanitizeLobbyState(state) {
     roomCode: typeof state.roomCode === 'string' ? normalizeRoomCode(state.roomCode) : null,
     version: typeof state.version === 'string' ? state.version.slice(0, 32) : '',
     mapSize: MAP_SIZE_NAMES.includes(state.mapSize) ? state.mapSize : 'small',
+    landscape: LANDSCAPE_CHOICES.includes(state.landscape) ? state.landscape : 'classic',
     preset: PRESETS.includes(state.preset) ? state.preset : null,
     peace: PEACE_LENGTHS.includes(state.peace) ? state.peace : 0,
     survival: state.survival === true && !PEACE_LENGTHS.includes(state.peace),
@@ -164,6 +166,8 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
     };
   });
   const setup = { version, seed, mapSize: state.mapSize, players };
+  const landscape = resolveLandscape(state.landscape, seed); // Random is drawn here, from the seed
+  if (landscape !== 'classic') setup.landscape = landscape; // the Wildlands keep the setup as it always was
   if (PEACE_LENGTHS.includes(state.peace)) setup.peaceMinutes = state.peace; // Decade of Peace
   else if (survival) setup.survival = true; // Trial of the Titans
   if (state.sacred === true && !setup.survival) setup.sacredVictory = true; // Sacred Victory (DESIGN 5.11), never in a trial
@@ -206,6 +210,7 @@ export class LobbyHost {
       roomCode: this.roomCode,
       version,
       mapSize: 'small',
+      landscape: 'classic',
       preset: null,
       peace: 0,
       survival: false,
@@ -441,6 +446,14 @@ export class LobbyHost {
   setMapSize(size) {
     if (this.started || !MAP_SIZE_NAMES.includes(size) || this.state.mapSize === size) return false;
     this.state.mapSize = size;
+    this.changed();
+    return true;
+  }
+
+  /** The landscape of the map (src/data/landscapes.js), or 'random'. */
+  setLandscape(id) {
+    if (this.started || !LANDSCAPE_CHOICES.includes(id) || this.state.landscape === id) return false;
+    this.state.landscape = id;
     this.changed();
     return true;
   }

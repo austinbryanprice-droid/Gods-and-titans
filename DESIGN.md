@@ -814,6 +814,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 ```js
 {
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
+  landscape: 'highlands' | 'rivers' | 'islands' | 'forest', // optional (6.7): absent = the classic Wildlands; never 'random' (the host draws it)
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
   sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
   tutorial: true,              // optional, the guided first match (5.13); local only, never from a lobby
@@ -1006,7 +1007,23 @@ tx, ty, size, amount`.
 → `Uint8Array visible` (1 = visible). Circles, no line-of-sight blocking. Used client-side.
 
 ### 6.7 Map data (`src/sim/mapgen.js`)
-`generateMap({ seed, mapSize, playerCount, teams })` → pure deterministic function (same input → identical output in every browser and in Node).
+`generateMap({ seed, mapSize, playerCount, teams, landscape })` → pure deterministic function (same input → identical output in every browser and in Node).
+**Landscapes** (`src/data/landscapes.js`, picked in the lobby): every landscape keeps the same
+fair base layout (starts, start mines, wood line behind each base, expansions, camps, sacred
+sites); only the ground between the bases changes, drawn from noise fields averaged over the
+symmetry orbits so every start sees the same ground. `classic` (shown as **Wildlands**, the
+default and the original generator, byte-for-byte unchanged), `highlands` (two-tile rock ridges
+along two contour lines of a smooth field, open moors with less forest, rock raised higher in the
+cosmetic heights; lanes and the connectivity pass cut the passes), `rivers` (three- to four-tile
+rivers along one contour line, no side lakes; where a lane crosses, its carve leaves a sandy ford),
+`islands` (sea everywhere except an island under each base, expansion, camp and the center plus a
+few noise islets; the lanes become sandy land bridges) and `forest` (Great Forest: about 60% of the
+free ground is woods and the lanes are narrower). Ridges and rivers thin out near bases,
+expansions and camps. The lobby may also hold `'random'`, which `buildSetup` resolves from the
+seed (`resolveLandscape`) so the GameSetup always names a concrete landscape; the classic one is
+left out of the setup. When the usual sacred-site spots are taken on a new landscape the search
+widens over the rest of the map. `meta.landscape` names it. Preview: `node tools/map-preview.mjs
+--landscapes highlands,islands --sheet`; in 3D: `tools/render-harness.html?landscape=islands`.
 `mapOptions(setup)` builds these options from a GameSetup (`teams` = each player's team); host,
 clients, World and the lobby's `mapHash` all use it, so teammates are grouped identically everywhere.
 **Start positions** (`startPlan(playerCount, teams)`): 1–2 players and free-for-all use the
@@ -1126,7 +1143,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.14; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, landscape (a landscape id from 6.7 or 'random'; `LobbyHost.setLandscape`), peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.14; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1742,7 +1759,7 @@ per-frame budget, so a revealed army appears over a few frames.
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
-  Random, team, AI difficulty; presets; map size; game mode (Standard, Decade of Peace with
+  Random, team, AI difficulty; presets; map size; landscape (Wildlands, Highlands, Rivers, Islands, Great Forest or Random, 6.7, as chips with a one-line note; clients see it as text); game mode (Standard, Decade of Peace with
   30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link

@@ -5,6 +5,7 @@
 // is passed in, since it builds and checks the setups.
 
 import { SURVIVAL_NAME } from '../config.js';
+import { landscapeInfo } from '../data/landscapes.js';
 
 export const LAST_SKIRMISH_KEY = 'mythicwar-last-skirmish';
 
@@ -89,6 +90,7 @@ export function skirmishLabel(state) {
   const levels = [...new Set(active.filter((s) => s.kind === 'ai').map((s) => s.difficulty))];
   const ai = levels.map((d) => d[0].toUpperCase() + d.slice(1)).join(' / ');
   const parts = [sides, `${ai} AI`, `${state.mapSize} map`];
+  if (state.landscape && state.landscape !== 'classic') parts.push(landscapeInfo(state.landscape).name);
   if (state.peace) parts.push(`Decade of Peace ${state.peace} min`);
   if (state.sacred) parts.push('Sacred Victory');
   return parts.join(' · ');

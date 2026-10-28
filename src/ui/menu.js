@@ -9,6 +9,7 @@
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
 import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY, SACRED_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
+import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
 import { sfx } from '../audio/sfx.js';
@@ -545,6 +546,24 @@ export function createMenu({ root, onStart, onIntro = null }) {
       },
     }, h('span', id === 'small' ? 'Small' : 'Medium'), h('small', `${n}×${n}`)));
     const mapStatic = h('div.mw-map-static');
+    // Landscape (DESIGN 6.7): the ground between the bases, or Random (drawn when the game starts).
+    const landBtns = LANDSCAPE_CHOICES.map((id) => {
+      const info = landscapeInfo(id);
+      return h('button.mw-chip-btn', {
+        type: 'button',
+        title: info.blurb,
+        dataset: { landscape: id },
+        onclick: () => {
+          try {
+            if (typeof lobby.setLandscape === 'function') lobby.setLandscape(id);
+          } catch (err) {
+            toast(err?.message || 'Could not change the landscape.');
+          }
+        },
+      }, `${info.icon} ${info.name}`);
+    });
+    const landNote = h('div.mw-hint.mw-landscape-note');
+    const landStatic = h('div.mw-map-static');
     // Game mode: a standard game, or the Decade of Peace with the host's pick of 30 / 45 / 60 minutes.
     let lastPeace = PEACE_LENGTHS[0]; // the length the mode comes back with when it is switched on again
     const setPeace = (minutes) => {
@@ -607,6 +626,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('div.mw-opt-group',
         h('div.mw-label', 'Map'),
         isHost ? h('div.mw-segmented', mapBtns) : mapStatic,
+      ),
+      h('div.mw-opt-group.mw-landscape-group',
+        h('div.mw-label', 'Landscape'),
+        isHost ? [h('div.mw-chip-row', landBtns), landNote] : landStatic,
       ),
       h('div.mw-opt-group.mw-mode-group',
         h('div.mw-label', 'Game mode'),
@@ -766,6 +789,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
       mapBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.size === size));
       presetBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.preset === st().preset));
       mapStatic.textContent = `${size === 'medium' ? 'Medium' : 'Small'} (${MAP_SIZES[size] || '?'}×${MAP_SIZES[size] || '?'})`;
+      const land = M.landscapeChoice(st());
+      landBtns.forEach((b) => b.classList.toggle('is-active', b.dataset.landscape === land));
+      landNote.textContent = landscapeInfo(land).blurb;
+      landStatic.textContent = M.landscapeLabel(st());
       const peace = M.peaceMinutes(st());
       if (peace) lastPeace = peace;
       const survival = M.survivalMode(st());

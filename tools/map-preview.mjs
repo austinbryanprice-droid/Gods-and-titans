@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Render generated maps to PNG for visual checks.
 //
-//   node tools/map-preview.mjs --seeds 1,2,3 --sizes small,medium --players 2,4 [--out DIR] [--scale 4] [--sheet] [--no-decor] [--heights]
+//   node tools/map-preview.mjs --seeds 1,2,3 --sizes small,medium --players 2,4 [--landscapes classic,islands] [--teams 1,1,2,2]
+//     [--out DIR] [--scale 4] [--sheet] [--no-decor] [--heights]
 //
 // One PNG per (seed, size, players) combination, or with --sheet a single
 // contact sheet (one row per size/player combination). Terrain is shaded by
@@ -29,6 +30,7 @@ const list = (s) => String(s).split(',').map((v) => v.trim()).filter(Boolean);
 const seeds = list(opt('seeds', '1,2,3')).map((s) => (/^-?\d+$/.test(s) ? Number(s) : s));
 const sizes = list(opt('sizes', 'small,medium'));
 const players = list(opt('players', '2,3,4')).map(Number);
+const landscapes = list(opt('landscapes', 'classic'));
 const outDir = opt('out', join(tmpdir(), 'mythicwar-map-previews'));
 const scale = Number(opt('scale', '4'));
 const sheet = flag('sheet');
@@ -207,20 +209,21 @@ function stats(map) {
 }
 
 mkdirSync(outDir, { recursive: true });
+const teams = opt('teams', null) ? list(opt('teams')).map(Number) : null;
 const rows = [];
-for (const size of sizes) {
+for (const landscape of landscapes) for (const size of sizes) {
   for (const pc of players) {
     const row = [];
     for (const seed of seeds) {
       const t0 = performance.now();
-      const map = generateMap({ seed, mapSize: size, playerCount: pc });
+      const map = generateMap({ seed, mapSize: size, playerCount: pc, landscape, teams: teams && teams.length === pc ? teams : null });
       const ms = performance.now() - t0;
       const problems = validateMap(map);
       const counts = {};
       for (const t of map.terrain) counts[t] = (counts[t] || 0) + 1;
       const pct = (code) => ((100 * (counts[code] || 0)) / map.terrain.length).toFixed(0);
       console.log(
-        `${size} p${pc} seed=${seed} ${ms.toFixed(1)}ms hash=${mapHash(map)} sym=${map.meta.symmetry} center=${map.meta.center}` +
+        `${landscape} ${size} p${pc} seed=${seed} ${ms.toFixed(1)}ms hash=${mapHash(map)} sym=${map.meta.symmetry} center=${map.meta.center}` +
         ` lakes=${map.meta.lakes} mines=${map.mines.length} camps=${map.camps.length} decor=${map.decor.length}` +
         ` forest=${pct(TERRAIN.FOREST)}% water=${pct(TERRAIN.WATER)}% ${problems.length ? 'PROBLEMS: ' + problems.slice(0, 4).join('; ') : 'ok'}`,
       );
@@ -237,7 +240,7 @@ if (sheet) {
   const cols = seeds.length;
   const cv = new Canvas(cols * (cell + pad) + pad, rows.length * (cell + pad) + pad);
   rows.forEach((row, r) => row.forEach(({ map }, c) => drawMap(cv, map, pad + c * (cell + pad), pad + r * (cell + pad), scale)));
-  const file = join(outDir, `sheet-${sizes.join('_')}-p${players.join('_')}.png`);
+  const file = join(outDir, `sheet-${landscapes.join('_')}-${sizes.join('_')}-p${players.join('_')}.png`);
   writeFileSync(file, encodePNG(cv.w, cv.h, cv.px));
   console.log(`wrote ${file}`);
 } else {
