@@ -5,6 +5,7 @@ import { activeMiners } from './economy.js';
 import { relicViews } from './relics.js';
 import { powerView } from './powers.js';
 import { survivalView } from './survival.js';
+import { campaignView } from './campaign.js';
 import { siteViews } from './sacred.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -150,5 +151,6 @@ export function buildSnapshot(world) {
     gameOver: world.gameOver ? { ...world.gameOver } : null,
   };
   if (world.survival) snap.sv = survivalView(world); // Trial of the Titans: { w: waves out, m: wave monsters alive }
+  if (world.campaign) snap.cp = campaignView(world); // a campaign mission: its objectives, sites held, the pointer
   return snap;
 }

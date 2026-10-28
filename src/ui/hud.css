@@ -1872,6 +1872,15 @@
 .hud-medal.is-silver { border-color: rgba(210, 220, 235, 0.5); background: linear-gradient(180deg, rgba(210, 220, 235, 0.14), rgba(210, 220, 235, 0.03)); }
 .hud-medal.is-bronze { border-color: rgba(205, 140, 80, 0.5); background: linear-gradient(180deg, rgba(205, 140, 80, 0.15), rgba(205, 140, 80, 0.03)); }
 
+/* ------------------------------------------------------------ campaign objectives (hud-campaign.js) */
+
+.hud-mission .hud-guide-step { margin-bottom: 0.45em; }
+.hud-mission-progress { margin-left: 0.5em; font: 700 0.92em/1 var(--mw-font-ui); color: var(--mw-gold-hi); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hud-tips-step.is-optional { font-style: italic; }
+.hud-tips-step.is-protect .hud-tips-check { border-style: dashed; }
+.hud-tips-step.is-failed { color: #ff9a88; }
+.hud-tips-step.is-failed .hud-tips-check { border-color: #e0614c; background: rgba(200, 60, 40, 0.3); color: #ffd0c6; }
+
 /* ------------------------------------------------------------ replays (DESIGN 9.5) */
 
 /* A replay is watched: the command card, the marker and power buttons go. */

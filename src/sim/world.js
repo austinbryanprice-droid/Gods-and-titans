@@ -31,6 +31,7 @@ import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
 import { newPowerState, updatePowers, boonPct } from './powers.js';
 import { createSurvival, updateSurvival, survivalOn } from './survival.js';
 import { isTutorial, tutorialStart } from './tutorial.js';
+import { campaignOn, missionOf, campaignStart, createCampaign, updateCampaign, campaignVictory } from './campaign.js';
 import { startOf } from '../data/twists.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
@@ -83,6 +84,8 @@ export class World {
     this.peace = this.peaceEnd > 0;
     // Trial of the Titans: every player on one team against waves of monsters (survival.js); null in other games.
     this.survival = createSurvival(this);
+    // A campaign mission (5.16): its scripted events and objectives (campaign.js); null in other games.
+    this.campaign = createCampaign(this);
     // Sacred Sites (5.11): the map's holy ground, and the Sacred Victory countdown ({ team, end } while a team holds them all).
     this.sites = createSites(mapData.sacred);
     this.sacredVictory = sacredVictoryOn(setup) && this.sites.length > 0;
@@ -136,7 +139,10 @@ export class World {
     });
     // The guided first match (5.13) has no creep camps, a head start for the learner and a guarded enemy camp.
     if (isTutorial(setup)) tutorialStart(this);
-    else spawnCreeps(this, mapData.camps || []);
+    else if (campaignOn(setup)) {
+      if (missionOf(setup).creeps !== false) spawnCreeps(this, mapData.camps || []);
+      campaignStart(this);
+    } else spawnCreeps(this, mapData.camps || []);
     setupRelics(this);
     this.recomputePop();
     for (let i = 0; i < this.players.length; i++) this.recomputeTier(i, true);
@@ -742,6 +748,7 @@ export class World {
 
   checkVictory() {
     if (this.gameOver) return;
+    if (this.campaign) return campaignVictory(this); // a mission ends by its objectives, or when either side is beaten
     if (this.survival) {
       // Trial of the Titans: nobody wins; the trial ends when the last player falls, and the score is the wave reached.
       if (this.players.some((p) => !p.defeated)) return;
@@ -782,6 +789,7 @@ export class World {
     }
 
     if (this.survival) updateSurvival(this);
+    if (this.campaign) updateCampaign(this);
     if (this.tickCount % 10 === 0) updateAuras(this);
     const units = this.unitList;
     for (let i = 0; i < units.length; i++) {

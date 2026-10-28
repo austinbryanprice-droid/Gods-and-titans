@@ -14,6 +14,7 @@ import { peaceSeconds } from '../sim/peace.js';
 import { sacredVictoryOn } from '../sim/sacred.js';
 import { PANTHEONS } from '../data/index.js';
 import { twistOf } from '../data/twists.js';
+import { MISSION_BY_ID } from '../data/campaign.js';
 import { TICK_RATE } from '../config.js';
 
 export const REPLAY_FORMAT = 1;
@@ -210,6 +211,8 @@ export function sanitizeReplay(rec) {
   if (!v) return null;
   const setup = v.setup;
   if (twistOf(rec.setup)) setup.twist = rec.setup.twist; // the daily challenge's twist changes the start (a solo game: no client checks it)
+  // A campaign mission's start board, script and objectives (DESIGN 5.16) come from its id.
+  if (typeof rec.setup.campaign === 'string' && Object.prototype.hasOwnProperty.call(MISSION_BY_ID, rec.setup.campaign)) setup.campaign = rec.setup.campaign;
   const n = setup.players.length;
   const ticks = rec.ticks;
   if (!Number.isSafeInteger(ticks) || ticks < 1 || ticks > 24 * 3600 * TICK_RATE) return null;

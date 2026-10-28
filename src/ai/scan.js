@@ -144,9 +144,10 @@ export function scanWorld(world, me) {
     } else if (u.summoned) {
       s.minions.push(u);
     } else {
-      s.army.push(u);
+      // A campaign raid (src/sim/campaign.js) keeps its scripted march: counted, but never given orders.
+      if (!u.cMarch) s.army.push(u);
       s.armyPop += u.def.pop || 0;
-      if (u.def.class === 'god') s.gods.push(u);
+      if (u.def.class === 'god' && !u.cMarch) s.gods.push(u);
       else if (u.def.class === 'titan') s.titan = u;
     }
     if (!u.summoned) s.alive.set(u.type, (s.alive.get(u.type) || 0) + 1);

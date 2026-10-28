@@ -27,6 +27,10 @@ import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
 import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
 import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
+import { campaignSetup } from '../sim/campaign.js';
+import { campaignScreen as buildCampaignScreen } from './menu-campaign.js';
+import { CAMPAIGN, MISSIONS } from '../data/campaign.js';
+import { wonCount } from '../game/campaign-progress.js';
 import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
@@ -239,6 +243,16 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     }
   }
 
+  /** A campaign mission (DESIGN 5.16): a fixed solo setup from its data, no lobby. */
+  function startMission(id) {
+    try {
+      sfx.play('horn');
+      onStart({ role: 'host', setup: campaignSetup(id, { name: getSettings().name, version: GAME_VERSION }), myIndex: 0, conns: new Map(), lobby: null });
+    } catch (err) {
+      toast(err?.message || 'Could not start the mission.');
+    }
+  }
+
   async function hostOnline() {
     let cancelled = false;
     const done = busy('Opening a room on the network…', () => (cancelled = true));
@@ -262,6 +276,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     join: joinScreen,
     howto: howToScreen,
     career: careerScreen,
+    campaign: (opts) => buildCampaignScreen({ go, onBegin: startMission, mission: opts.mission || null }),
     settings: settingsScreen,
     load: loadScreen,
   };
@@ -349,6 +364,8 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     // A guided first match; a player who has never finished a game or the lesson is pointed at it.
     const learnBtn = mainBtn('Learn to Play', career.best.medal ? `A guided first match · your best: ${medalLabel(career.best.medal)}` : 'A guided first match: gather, build, pray, summon and fight', startTutorial, 'mw-learn-btn');
     if (!career.games && !career.best.medal) learnBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New? Start here'));
+    const won = wonCount();
+    const campaignBtn = mainBtn('Campaign', `${CAMPAIGN.chapter}: ${CAMPAIGN.title} · ${won ? `${won} of ${MISSIONS.length} missions won` : `${MISSIONS.length} story missions for the Greeks`}`, () => go('campaign'), 'mw-campaign-btn');
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
     const el = h('div.mw-title-screen',
@@ -368,6 +385,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         quickBtn,
         dailyBtn,
         learnBtn,
+        campaignBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',

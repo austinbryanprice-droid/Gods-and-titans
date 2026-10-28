@@ -40,6 +40,10 @@ import { isTutorial } from '../sim/tutorial.js';
 import { recordDaily, dailyChallenge } from './daily.js';
 import { scoreOf } from '../data/score.js';
 import { medalFor } from '../data/medals.js';
+import { missionOf } from '../sim/campaign.js';
+import { nextMission } from '../data/campaign.js';
+import { CampaignVoice } from './campaign-voice.js';
+import { recordMission } from './campaign-progress.js';
 import { ReplayRecorder } from './replay.js';
 import { saveReplay } from './replay-store.js';
 import { ReplaySession } from './replay-session.js';
@@ -199,6 +203,7 @@ export class Game {
    * @param {object} [o.settings] getSettings()
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
    * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
+   * @param {(id: string) => void} [o.onNextMission] a campaign mission won: open the next one's briefing (main.js)
    * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
    * @param {(record: object, opts?: object) => void} [o.onReplay] watch a replay (main.js tears this Game down and
    *   builds the replay's): the game-over screen's Watch Replay, and a replay going back in time
@@ -207,7 +212,7 @@ export class Game {
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onNextMission = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.replay = replay && replay.record ? replay : null;
     this.onReplay = onReplay;
@@ -218,6 +223,7 @@ export class Game {
     this.settings = settings || getSettings();
     this.onExit = onExit;
     this.onRematch = onRematch;
+    this.onNextMission = onNextMission;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -248,6 +254,8 @@ export class Game {
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
     this.dailyCounted = false; // a daily challenge's score is kept once (countDaily)
     this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
+    this.mission = null; // the campaign mission this match plays (src/data/campaign.js), its objectives run in the sim
+    this.voice = null; // CampaignVoice: the mission's narrator
     this.saver = null; // MatchSaver: Save Game, Save & Quit and the autosave of a solo match (src/game/game-saves.js)
     this.offs = [];
     this.lastAmbient = 0;
@@ -319,6 +327,13 @@ export class Game {
       this.tutorial = new TutorialDirector({ viewState: this.viewState, getSelection: () => this.selection.ids, onStep: (next, i, done) => this.onTutorialStep(next, done) });
     }
 
+    // A campaign mission (DESIGN 5.16): the sim runs its objectives; the HUD shows them and the narrator says its lines.
+    this.mission = missionOf(session.setup);
+    if (this.mission) {
+      this.voice = new CampaignVoice({ mission: this.mission, parts: ['victory', 'events'] });
+      this.offs.push(() => this.voice.stop());
+    }
+
     this.hud = new Hud({ root: this.hudRoot, game: this });
     this.applyUiScale();
     if (this.replay) {
@@ -357,8 +372,9 @@ export class Game {
       this.offs.push(() => this.recorder.detach());
     }
     // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
-    // The guided first match is not a game of the career: its medal is kept instead (checkEnd).
-    if (!this.tutorial && !this.replay) {
+    // The guided first match is not a game of the career: its medal is kept instead (checkEnd); nor is a
+    // campaign mission, whose wins and best times the campaign keeps (src/game/campaign-progress.js).
+    if (!this.tutorial && !this.mission && !this.replay) {
       this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
       this.offs.push(() => this.career.dispose());
     }
@@ -367,7 +383,8 @@ export class Game {
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
-    if (session.isHost && !this.tutorial && !this.replay) {
+    // A campaign mission is not saved: carrying one on would lose its chapter screen, Retry and Next Mission.
+    if (session.isHost && !this.tutorial && !this.replay && !this.mission) {
       this.saver = new MatchSaver(this, { resume: resumed });
       if (resumed) this.saver.restore(resumed);
     }
@@ -837,12 +854,19 @@ export class Game {
       if (medal) unlocked = recordTutorial(medal.rank);
       const daily = this.launch && this.launch.daily ? this.countDaily(result === 'victory') : null;
       if (this.recorder) this.keepReplay(result, wt);
+      // A campaign mission: a win is kept (and opens the next one), and the narrator says how the story goes on.
+      const mission = this.mission ? { m: this.mission, record: null, next: null } : null;
+      if (mission && result === 'victory') {
+        mission.record = recordMission(this.mission.id, vs.time);
+        mission.next = nextMission(this.mission.id);
+        if (this.voice) setTimeout(() => !this.disposed && this.voice.say(this.mission.victory), 1600);
+      }
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record, daily });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record, daily, mission });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -850,6 +874,43 @@ export class Game {
       sfx.play('defeat');
       this.hud.overlays.showDefeated();
     }
+  }
+
+  /** A campaign mission's scripted line: on the screen (a raid or a giant as a banner), and said by the narrator. */
+  onCampaignSay(ev) {
+    const e = this.mission && this.mission.events[ev.e];
+    if (!e || !e.say) return;
+    const hud = this.hud;
+    const threat = e.spawn && e.spawn.owner !== this.myIndex;
+    if (threat) {
+      hud.showBanner(e.say, 'danger');
+      sfx.play('horn', { volume: 0.7 });
+    } else hud.message(e.say, 'info', { icon: '📜' });
+    if (this.voice) this.voice.say(e.say);
+  }
+
+  /** A campaign objective was finished, failed, or shown for the first time. */
+  onObjective(ev) {
+    const o = this.mission && this.mission.objectives[ev.i];
+    if (!o) return;
+    const hud = this.hud;
+    if (ev.s === 1) {
+      hud.message(`${o.optional ? 'Bonus objective' : 'Objective'} complete: ${o.text}.`, 'good', { icon: '✅' });
+      sfx.play('tier_up', { volume: 0.55 });
+    } else if (ev.s === 2) {
+      hud.message(`Objective failed: ${o.text}.`, 'alert', { icon: '❌' });
+    } else {
+      hud.message(`New objective: ${o.text}.`, 'info', { icon: o.icon || '📜' });
+    }
+  }
+
+  /** Next Mission on the game-over screen: leave this match and open the next mission's briefing. */
+  nextMission() {
+    const next = this.mission ? nextMission(this.mission.id) : null;
+    if (!next || typeof this.onNextMission !== 'function' || this.disposed) return;
+    const go = this.onNextMission;
+    this.dispose();
+    go(next.id);
   }
 
   /** A step of the guided first match was finished: say so, chime, and ping the next objective on the minimap. */
@@ -973,6 +1034,12 @@ export class Game {
       }
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system', { icon: '🏳️' });
+        break;
+      case 'campaignSay':
+        this.onCampaignSay(ev);
+        break;
+      case 'objective':
+        this.onObjective(ev);
         break;
       case 'wave': {
         // Trial of the Titans: a wave comes out of the map's edge.

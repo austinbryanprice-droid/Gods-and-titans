@@ -27,7 +27,7 @@ function loadGameModule() {
 }
 
 /** Tear down the running game (if any) and show the title screen (or another menu screen). */
-function backToMenu(screen = 'title') {
+function backToMenu(screen = 'title', opts = {}) {
   if (current) {
     const g = current;
     current = null;
@@ -36,7 +36,7 @@ function backToMenu(screen = 'title') {
   clearStartNotice();
   const root = document.getElementById('game-root');
   if (root) root.hidden = true;
-  showMenu(screen);
+  showMenu(screen, opts);
 }
 
 /** Full-screen "loading" notice between Start and the first frame (the HUD draws over it). */
@@ -83,6 +83,8 @@ export async function startGame(launch) {
   // The daily challenge (DESIGN 9.4) is not a lobby to remember: Play Again tries the same day's challenge again.
   const daily = launch && launch.daily ? launch.daily : null;
   const skirmish = !daily && isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
+  // A campaign mission (DESIGN 5.16): Retry starts it again, Next Mission and leaving go to the chapter screen.
+  const mission = launch && launch.setup && typeof launch.setup.campaign === 'string' ? launch.setup.campaign : null;
   if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
@@ -92,9 +94,13 @@ export async function startGame(launch) {
       settings: getSettings(),
       onExit: () => {
         if (current === game) current = null;
-        backToMenu();
+        backToMenu(mission ? 'campaign' : 'title', mission ? { mission } : {});
       },
-      onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : null,
+      onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : mission ? () => startGame({ ...launch, conns: new Map() }) : null,
+      onNextMission: mission ? (id) => {
+        if (current === game) current = null;
+        backToMenu('campaign', { mission: id, brief: true });
+      } : null,
       onReplay: (record, opts) => startReplay(record, opts),
     });
     current = game;
