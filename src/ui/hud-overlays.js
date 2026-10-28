@@ -1,6 +1,7 @@
 // Full-screen HUD overlays: "Waiting for the host…", the in-game menu (F10:
 // resume, options, surrender, quit), the confirm dialog, the defeat / victory
-// screen with the per-player statistics table, and "the host has left".
+// screen with the per-player statistics table, the achievements the match unlocked and a
+// line on the player's career, and "the host has left".
 import { getSettings, saveSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PANTHEONS } from '../data/index.js';
@@ -10,6 +11,7 @@ import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
+import { getCareer, careerSummary } from '../game/career.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -140,6 +142,7 @@ export class Overlays {
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
+    const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
     const tabAlerts = choiceRow('When this tab is in the background', TAB_ALERT_OPTIONS, s.tabAlerts, async (v) => {
       const got = await chooseTabAlerts(v); // 'notify' asks the browser for permission first
@@ -210,6 +213,7 @@ export class Overlays {
         edge.row,
         tips.row,
         hints.row,
+        aiChat.row,
         alerts.row,
         tabAlerts.row,
         el('label', 'hud-vol', el('span', null, 'Sound effects'), vol, volText),
@@ -272,8 +276,29 @@ export class Overlays {
     return el('table', 'hud-stats', el('thead', null, head), el('tbody', null, ...rows));
   }
 
-  /** Victory / defeat / draw screen with the statistics table. */
-  showGameOver({ result, winningTeam, how }) {
+  /** The achievements this match unlocked, as cards (null when there are none). */
+  unlockCards(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    const cards = list.map((a) => el('div', 'hud-ach-card',
+      el('span', 'hud-ach-icon', a.icon || '✦'),
+      el('span', 'hud-ach-text', el('b', null, a.name), el('small', null, a.desc || ''))));
+    return el('div', 'hud-ach',
+      el('div', 'mw-label hud-ach-head', list.length === 1 ? 'Achievement unlocked' : `${list.length} achievements unlocked`),
+      el('div', 'hud-ach-cards', ...cards));
+  }
+
+  /** "Career: 12 wins in 20 games (60%) · 9 of 35 achievements" (null for a spectator). */
+  careerLine() {
+    if ((this.game.viewState.myIndex ?? -1) < 0) return null;
+    const c = getCareer();
+    if (!c.games) return null;
+    const s = careerSummary(c);
+    const games = `${c.games} game${c.games === 1 ? '' : 's'}`;
+    return el('div', 'hud-go-career', `Career: ${c.wins} win${c.wins === 1 ? '' : 's'} in ${games} (${Math.round(s.winRate * 100)}%) · ${s.unlocked} of ${s.total} achievements`);
+  }
+
+  /** Victory / defeat / draw screen with the statistics table and what the match unlocked. */
+  showGameOver({ result, winningTeam, unlocked = null, how }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const title = result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
@@ -288,6 +313,8 @@ export class Overlays {
       el('div', 'hud-osub', sub),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.statsTable(vs, winningTeam),
+      this.unlockCards(unlocked),
+      this.careerLine(),
       el('div', 'hud-obtns',
         btn('Return to Menu', 'mw-btn--primary', () => this.game.quitToMenu()),
         btn('Keep Watching', 'mw-btn--ghost', () => this.hide())));

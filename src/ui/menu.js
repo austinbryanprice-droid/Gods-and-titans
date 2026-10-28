@@ -17,6 +17,8 @@ import { h, setChildren, copyText } from './menu-dom.js';
 import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
+import { renderCareerContent } from './menu-career.js';
+import { getCareer, markSeen } from '../game/career.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
@@ -230,6 +232,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     lobby: lobbyScreen,
     join: joinScreen,
     howto: howToScreen,
+    career: careerScreen,
     settings: settingsScreen,
   };
 
@@ -243,6 +246,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
     const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    const newCount = getCareer().unseen.length;
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
     const el = h('div.mw-title-screen',
@@ -262,6 +266,8 @@ export function createMenu({ root, onStart, onIntro = null }) {
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
+          h('button.mw-btn.mw-btn--small.mw-career-btn', { type: 'button', onclick: () => go('career') }, 'Career',
+            newCount ? h('span.mw-new-badge', { title: `${newCount} new achievement${newCount === 1 ? '' : 's'}` }, String(newCount)) : null),
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('settings') }, 'Settings'),
         ),
       ),
@@ -966,6 +972,23 @@ export function createMenu({ root, onStart, onIntro = null }) {
     return { el, focus: backBtn, onEscape: () => go('title') };
   }
 
+  // ---------------------------------------------------------- career
+
+  function careerScreen() {
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const c = getCareer();
+    const unseen = new Set(c.unseen);
+    markSeen(); // the "New" badges show this time only
+    const el = h('div.mw-center-screen.mw-wide-screen',
+      h('section.mw-panel.mw-howto-panel.mw-career-panel',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', `Career of ${getSettings().name}`), h('span.mw-head-spacer')),
+        h('div.mw-scroll', renderCareerContent(c, unseen),
+          h('p.mw-hint', 'Your career is kept in this browser on this device. A game counts once it ends, or when you leave it after its first minute.')),
+      ),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
+  }
+
   // ---------------------------------------------------------- settings
 
   function settingsScreen() {
@@ -1139,6 +1162,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),
           toggle('tipsDismissed', 'Getting-started tips', 'Show the new-player checklist in your next game.', true),
           toggle('hints', 'Gameplay tips', 'A short tip now and then during a match.'),
+          toggle('aiChat', 'AI chatter', 'Computer players greet you, taunt you and beg for mercy in chat, each in the voice of its pantheon.'),
         ),
         h('div.mw-field', h('span.mw-label', 'Alerts'), h('div.mw-segmented', aBtns), aNote),
         h('div.mw-field', h('span.mw-label', 'When this tab is in the background'), h('div.mw-segmented', wBtns), wNote),
