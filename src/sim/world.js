@@ -68,6 +68,7 @@ export class World {
     this.fields = [];
     this.reveals = [];
     this.cmdQueue = [];
+    this.onCommand = null; // (tick, player, command) for every command accepted: the replay recorder (src/game/replay.js)
     this.hash = new SpatialHash(this.map.width, this.map.height, 2);
     this.paths = new PathService(this.map);
     this.maxRadius = 0.5;
@@ -493,7 +494,6 @@ export class World {
 
   // ------------------------------------------------------------- commands
 
-  /** Queue a command; it is applied at the start of the next tick. */
   /**
    * Queue a command for the next tick. Untrusted input: anything that is not a
    * well-formed command is dropped (never throws); see normalizeCommand.
@@ -505,6 +505,7 @@ export class World {
     if (!clean) return;
     this.cmdCounts[playerIndex]++;
     this.cmdQueue.push([playerIndex, clean]);
+    if (this.onCommand) this.onCommand(this.tickCount, playerIndex, clean);
   }
 
   setOrder(u, o, queue = false) {

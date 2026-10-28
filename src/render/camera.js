@@ -33,6 +33,11 @@ const NEAR_PER_TILE = 0.04; // near plane growth a tile of distance beyond the d
 const FAR_MIN = 400;
 const FAR_PER_TILE = 3.2; // a wide window sees ground up to about 2.2 times the distance
 
+// The free camera's tilt keeps the pitch between these (degrees below the horizon): low enough to look
+// across the battlefield, never so steep that the view's bottom edge passes the vertical.
+const MIN_PITCH = 22;
+const MAX_PITCH = 68;
+
 const _ndc = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _org = new THREE.Vector3();
@@ -70,6 +75,9 @@ export class CameraController {
     this.viewportHeight = 1;
     /** The framing set by setFree (the intro film), or null while the player's controls frame the view. */
     this.free = null;
+    /** The free camera of a replay (DESIGN 9.5): turned round the target (radians, 0 = looking north) and tilted (degrees on the pitch). */
+    this.yaw = 0;
+    this.tilt = 0;
     this.apply();
   }
 
@@ -89,6 +97,12 @@ export class CameraController {
    */
   get pitch() {
     if (this.free) return this.free.pitch * DEG;
+    const base = this.basePitch();
+    return this.tilt ? Math.max(MIN_PITCH, Math.min(MAX_PITCH, base / DEG + this.tilt)) * DEG : base;
+  }
+
+  /** The zoom's own pitch (radians), before a replay's tilt. */
+  basePitch() {
     const { pitchNear, pitchMid, pitchFar, minDistance, midDistance, maxDistance } = this.opts;
     const d = this.distance;
     if (d <= midDistance) {
@@ -111,10 +125,40 @@ export class CameraController {
     return this.goalDistance / this.opts.defaultDistance;
   }
 
-  /** Move the view by exactly (dx, dy) tiles (eased). */
+  /** Move the view by exactly (dx, dy) tiles (eased): screen right and down, which turn with the yaw. */
   pan(dx, dy) {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    this.setGoal(this.goal.x + dx, this.goal.y + dy);
+    const [wx, wy] = this.toGround(dx, dy);
+    this.setGoal(this.goal.x + wx, this.goal.y + wy);
+  }
+
+  /** A step screen-right dx and screen-down dy as a step on the map, for the camera's yaw. */
+  toGround(dx, dy) {
+    if (!this.yaw) return [dx, dy];
+    const c = Math.cos(this.yaw);
+    const s = Math.sin(this.yaw);
+    return [dx * c + dy * s, dy * c - dx * s];
+  }
+
+  /** Turn the view round its target (a replay's free camera), by degrees. */
+  rotate(deg) {
+    if (!Number.isFinite(deg)) return;
+    let y = this.yaw + deg * DEG;
+    y = Math.atan2(Math.sin(y), Math.cos(y));
+    this.yaw = Math.abs(y) < 1e-9 ? 0 : y;
+  }
+
+  /** Tilt the view up or down from the zoom's own pitch (a replay's free camera), by degrees. */
+  tiltBy(deg) {
+    if (!Number.isFinite(deg)) return;
+    const base = this.basePitch() / DEG;
+    this.tilt = Math.max(MIN_PITCH - base, Math.min(MAX_PITCH - base, this.tilt + deg));
+  }
+
+  /** Back to the player's view: looking north at the zoom's own pitch. */
+  resetAngle() {
+    this.yaw = 0;
+    this.tilt = 0;
   }
 
   /**
@@ -134,9 +178,8 @@ export class CameraController {
   panPixels(dxPx, dyPx) {
     const h = Math.max(1, this.viewportHeight);
     const worldPerPx = (2 * this.distance * Math.tan((this.opts.fov * DEG) / 2)) / h;
-    const gx = this.goal.x - dxPx * worldPerPx;
-    const gy = this.goal.y - (dyPx * worldPerPx) / Math.sin(this.pitch);
-    this.setGoal(gx, gy);
+    const [wx, wy] = this.toGround(-dxPx * worldPerPx, -(dyPx * worldPerPx) / Math.sin(this.pitch));
+    this.setGoal(this.goal.x + wx, this.goal.y + wy);
     this.target.x = this.goal.x;
     this.target.y = this.goal.y;
   }
@@ -255,7 +298,7 @@ export class CameraController {
     const cam = this.camera;
     this.updateClipPlanes();
     const p = this.pitch;
-    const yaw = this.free ? (this.free.yaw || 0) * DEG : 0;
+    const yaw = this.free ? (this.free.yaw || 0) * DEG : this.yaw;
     const tx = this.target.x + this.shakeX;
     const tz = this.target.y + this.shakeY;
     const ty = this.groundY + (this.free ? this.free.lift || 0 : 0);

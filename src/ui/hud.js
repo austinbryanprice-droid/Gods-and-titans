@@ -78,6 +78,8 @@ export class Hud {
     root.textContent = '';
     root.classList.add('hud');
     const game = this.game;
+    // A replay (DESIGN 9.5) is watched: no command card, marker or power buttons, tips or hints.
+    root.classList.toggle('is-replay', !!game.replay);
 
     // Team pings and markers: pins over the battlefield, under every panel (so added first).
     this.teamMarks = game.marks || new TeamMarks();
@@ -275,9 +277,9 @@ export class Hud {
     this.tutorial = game.tutorial ? new TutorialView(root, { director: game.tutorial }) : null;
     // New players get the "getting started" checklist until they close or finish it.
     this.tips = null;
-    if (!getSettings().tipsDismissed && !this.tutorial) this.showTips();
+    if (!getSettings().tipsDismissed && !this.tutorial && !game.replay) this.showTips();
     this.offs.push(onSettingsChange((st, changed) => {
-      if (!changed.includes('tipsDismissed') || this.tutorial) return;
+      if (!changed.includes('tipsDismissed') || this.tutorial || game.replay) return;
       if (st.tipsDismissed) this.hideTips();
       else this.showTips();
     }));
@@ -397,7 +399,7 @@ export class Hud {
     this.powerbar.update(vs, m && m.kind === 'target' && m.order === 'power' ? m.power : null);
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
-    if (!this.tutorial) this.hintTimer.update();
+    if (!this.tutorial && !game.replay) this.hintTimer.update();
     this.hints.update();
   }
 
