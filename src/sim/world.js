@@ -27,6 +27,9 @@ import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js'
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
 import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
+import { newPowerState, updatePowers, boonPct } from './powers.js';
+import { createSurvival, updateSurvival, survivalOn } from './survival.js';
+import { isTutorial, tutorialStart } from './tutorial.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
 
@@ -74,6 +77,8 @@ export class World {
     // Decade of Peace: until peaceEnd (game seconds) players cannot harm each other (see canHarm).
     this.peaceEnd = peaceSeconds(setup);
     this.peace = this.peaceEnd > 0;
+    // Trial of the Titans: every player on one team against waves of monsters (survival.js); null in other games.
+    this.survival = createSurvival(this);
     // Sacred Sites (5.11): the map's holy ground, and the Sacred Victory countdown ({ team, end } while a team holds them all).
     this.sites = createSites(mapData.sacred);
     this.sacredVictory = sacredVictoryOn(setup) && this.sites.length > 0;
@@ -87,7 +92,7 @@ export class World {
       return {
         index: i,
         name: sp.name || `Player ${i + 1}`,
-        team: sp.team ?? i + 1,
+        team: survivalOn(setup) ? 1 : sp.team ?? i + 1, // the Trial of the Titans is played together
         pantheon,
         color: sp.color || PLAYER_COLORS[i % PLAYER_COLORS.length],
         kind: sp.kind || 'human',
@@ -105,6 +110,7 @@ export class World {
         upList: [], // the same ids in the order they finished (snapshot)
         mods: computeMods([], pantheon), // their pantheon's blessings and upgrades combined (data/upgrades.js computeMods)
         autoRepair: false, // idle worshippers mend nearby damaged buildings
+        powers: newPowerState(), // god powers spent and boons running (sim/powers.js)
         lastAlert: -Infinity,
         stats: newStats(),
       };
@@ -120,7 +126,9 @@ export class World {
       const mine = this.mineList[i] || null;
       this.placeStartWorkers(i, tc, mine);
     });
-    spawnCreeps(this, mapData.camps || []);
+    // The guided first match (5.13) has no creep camps, a head start for the learner and a guarded enemy camp.
+    if (isTutorial(setup)) tutorialStart(this);
+    else spawnCreeps(this, mapData.camps || []);
     this.recomputePop();
     for (let i = 0; i < this.players.length; i++) this.recomputeTier(i, true);
     this.hash.rebuild(this.unitList);
@@ -242,7 +250,8 @@ export class World {
       dmgMult: 1, armorNow: def.armor, speedNow: def.speed, atkSpeedMult: 1, lifesteal, regen, shield: 0,
       stunned: false, invuln: false, slowPct: 0,
       dead: false, constructed: true, buildProgress: 1, queue: null, size: 0, amount: 0,
-      lastGather: null, camp: null, jamT: 0,
+      lastGather: null, camp: null, jamT: 0, // jamT: tick until which the unit squeezes through allies (movement.js)
+      boost: opts.boost || null, // Trial of the Titans: a wave monster's { hp, dmg } multipliers
       // Engagement bookkeeping (combat.js / surround.js): current target id, ticks approaching it,
       // ticks blocked, last progress check, the melee attack spot, and attackers claiming spots on us.
       engId: 0, engT: 0, blockedT: 0, engD: 0, engCk: 0, atk: null, claimers: null,
@@ -270,12 +279,13 @@ export class World {
     const m = unitMods(p ? p.mods : NO_MODS, def);
     const lv = def.class === 'god' ? u.level - 1 : 0;
     const rk = rankBonus(u.rank);
-    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp) * (1 + rk.hp);
-    const newMax = hpMult === 1 ? def.hp : Math.round(def.hp * hpMult);
+    const boost = u.boost;
+    const hpMult = (1 + GOD_LEVEL_HP * lv) * (1 + m.hp) * (1 + rk.hp) * (boost ? boost.hp : 1);
+    const newMax = hpMult === 1 ? def.hp : Math.max(1, Math.round(def.hp * hpMult));
     if (full) u.hp = newMax;
     else u.hp = Math.max(1, Math.min(newMax, u.hp + (newMax - u.maxHp)));
     u.maxHp = newMax;
-    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) * (1 + rk.damage) : 0;
+    u.baseDamage = def.attack ? def.attack.damage * (1 + GOD_LEVEL_DAMAGE * lv) * (1 + m.damage) * (1 + rk.damage) * (boost ? boost.dmg : 1) : 0;
     u.baseArmor = def.armor + GOD_LEVEL_ARMOR * lv + m.armor + rk.armor;
     u.baseRegen = u.regen0 + m.regen;
     u.baseSpeed = def.speed * (1 + m.speed);
@@ -714,7 +724,16 @@ export class World {
   }
 
   checkVictory() {
-    if (this.gameOver || !this.multiTeam) return;
+    if (this.gameOver) return;
+    if (this.survival) {
+      // Trial of the Titans: nobody wins; the trial ends when the last player falls, and the score is the wave reached.
+      if (this.players.some((p) => !p.defeated)) return;
+      this.winningTeam = null;
+      this.gameOver = { winningTeam: null, wave: this.survival.wave };
+      this.emit({ type: 'gameOver', winningTeam: null });
+      return;
+    }
+    if (!this.multiTeam) return;
     const teams = new Set();
     for (const p of this.players) if (!p.defeated) teams.add(p.team);
     if (teams.size > 1) return;
@@ -745,6 +764,7 @@ export class World {
       }
     }
 
+    if (this.survival) updateSurvival(this);
     if (this.tickCount % 10 === 0) updateAuras(this);
     const units = this.unitList;
     for (let i = 0; i < units.length; i++) {
@@ -787,6 +807,7 @@ export class World {
     updateProjectiles(this);
     updateDelayed(this);
     updateFields(this);
+    updatePowers(this);
 
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
@@ -816,7 +837,7 @@ export class World {
       b.prayingCount = n;
       const p = this.players[b.owner];
       if (p && n > 0) {
-        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith);
+        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith) * (1 + boonPct(p, 'faith'));
         p.faithRate += rate;
         p.faith += rate * DT;
         p.stats.faith += rate * DT;

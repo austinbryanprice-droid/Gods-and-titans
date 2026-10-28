@@ -1,7 +1,8 @@
-// The intro film's voice (DESIGN 11.1): the browser's own speech synthesis reads each caption aloud as
-// it comes up, so the film says what its text says. No recorded audio, nothing to download. Where the
-// browser has no speech synthesis, or will not speak until the page has had a click (the rule that
-// keeps the film's sound effects quiet on a first visit), the film plays on with its captions alone.
+// The intro film's voice (DESIGN 11.1): each caption is said aloud as it comes up, so the film says what its
+// text says. On the page the lines are recorded clips (src/intro/voiceover.js, which takes the place of the
+// browser's speech synthesis below and hands a line to it only when its clip cannot be had); `speech` defaults
+// to the browser's own. Where nothing can speak, or the browser will not until the page has had a click (the
+// rule that keeps the film's sound effects quiet on a first visit), the film plays on with its captions alone.
 //
 //   const voice = createNarrator({ volume: settings.volume, onBlocked: (blocked) => showHint(blocked), onSpeaking: (on) => score.speaking(on) });
 //   voice.update(t);   // once a frame, with the film's second: each caption is spoken as its time comes

@@ -111,6 +111,9 @@ export class FakeElement {
   get children() {
     return this.childNodes.filter((c) => c.nodeType === 1);
   }
+  get firstChild() {
+    return this.childNodes[0] || null;
+  }
   set textContent(v) {
     this.childNodes = v === '' ? [] : [new FakeText(v)];
   }

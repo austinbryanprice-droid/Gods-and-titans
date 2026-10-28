@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { validateData, PANTHEON_LIST, UNITS, BUILDINGS } from '../../src/data/index.js';
+import { validateData, PANTHEON_LIST, UNITS, BUILDINGS, POWERS } from '../../src/data/index.js';
 
 test('all game data is valid', () => {
   const errors = validateData();
@@ -31,6 +31,7 @@ test('data icons stay within Emoji 11 so older systems draw them', () => {
     for (const p of u.passives || []) if (p.icon) icons.push([u.id, p.icon]);
   }
   for (const b of Object.values(BUILDINGS)) icons.push([b.id, b.icon]);
+  for (const pw of Object.values(POWERS)) icons.push([pw.id, pw.icon]);
   for (const [id, icon] of icons) assert.ok(!NEWER_EMOJI.test(icon), `${id} icon ${icon} needs Emoji 12 or newer`);
 });
 

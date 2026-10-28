@@ -161,12 +161,12 @@ export class CareerTracker {
    * Count the match once, with its result. Returns everything unlocked in this match (during it
    * and by the result), or null for a spectator, a match already counted or an unknown result.
    */
-  finish(result) {
+  finish(result, extra = null) {
     if (this.recorded || this.me < 0) return null;
     this.observe();
     if (!this.m.pantheon) this.readSides();
     this.recorded = true;
-    const got = this.career.recordMatch({ ...this.m, result }) || [];
+    const got = this.career.recordMatch({ ...this.m, ...(extra || {}), result }) || []; // extra: { wave } for the Trial of the Titans
     this.unlockedHere.push(...got);
     return this.unlockedHere.slice();
   }

@@ -6,6 +6,7 @@
 import { MAX_PLAYERS, PLAYER_COLORS, TRADE_RESOURCES, TRADE_MAX, PEACE_LENGTHS, MAX_QUEUE } from '../config.js';
 import { UNITS, BUILDINGS, ABILITIES, PANTHEONS, UPGRADES } from '../data/index.js';
 import { MARKS } from '../data/marks.js';
+import { POWERS } from '../data/powers.js';
 import { sanitizeName } from './protocol.js';
 
 const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
@@ -39,6 +40,7 @@ const FIELD = {
   buildingType: (v) => (hasOwn(BUILDINGS, v) ? v : undefined),
   ability: (v) => (hasOwn(ABILITIES, v) ? v : undefined),
   upgrade: (v) => (hasOwn(UPGRADES, v) ? v : undefined),
+  power: (v) => (hasOwn(POWERS, v) ? v : undefined),
   resource: (v) => (TRADE_RESOURCES.includes(v) ? v : undefined),
   amount: (v) => (Number.isSafeInteger(v) && v > 0 && v <= TRADE_MAX ? v : undefined),
 };
@@ -75,6 +77,7 @@ const COMMANDS = {
   autoRepair: { on: ['bool', false] },
   trade: { to: ['index', true], res: ['resource', true], amount: ['amount', true] },
   autocast: { units: U, ability: ['ability', false], on: ['bool', false] },
+  godPower: { power: ['power', true], x: XO, y: YO },
 };
 export const COMMAND_TYPES = Object.keys(COMMANDS);
 export const COMMAND_SPECS = COMMANDS; // read-only: fingerprinted into the protocol version (wire-version.js)
@@ -156,6 +159,7 @@ export function validateSetup(setup, myIndex) {
   const clean = { version: typeof setup.version === 'string' ? setup.version.slice(0, 32) : '', seed, mapSize, players };
   if (typeof setup.mapHash === 'string' && setup.mapHash.length <= 64) clean.mapHash = setup.mapHash;
   if (PEACE_LENGTHS.includes(setup.peaceMinutes)) clean.peaceMinutes = setup.peaceMinutes; // Decade of Peace
+  else if (setup.survival === true) clean.survival = true; // Trial of the Titans (never together with a peace)
   if (setup.sacredVictory === true) clean.sacredVictory = true; // Sacred Victory (5.11)
   return { setup: clean, myIndex };
 }
