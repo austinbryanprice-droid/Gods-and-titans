@@ -6,7 +6,8 @@
 // stalled match neither nags nor forgets.
 //
 //   warnings ('important'): enemies sighted near the base, an ally under attack, the Decade of
-//     Peace about to end (the gong; the HUD writes the line), plus the tab flash for the alerts
+//     Peace about to end (the gong; the HUD writes the line), a sacred site lost or taken by a
+//     rival, a side holding every sacred site (Sacred Victory), plus the tab flash for the alerts
 //     the Game already voices (under attack, an enemy Titan, the war starting, a god or Titan
 //     ready, a defeat)
 //   reminders ('all'): Worshippers left idle, the population cap, a god or the Titan you can
@@ -21,6 +22,9 @@ import { getSettings } from '../settings.js';
 import { trainCheck } from '../ui/command-card.js';
 import { PEACE_WARNINGS, peaceWarning } from '../ui/hud-data.js';
 import { safeColor } from '../ui/hud-dom.js';
+import { SITE_ICON, SACRED_WARNINGS, sacredWhen } from '../ui/hud-sites.js';
+import { peaceClock } from '../sim/peace.js';
+import { SITE_FAITH, SACRED_NAME } from '../config.js';
 
 const SCAN_EVERY = 0.5; // seconds of game time between two surveys
 const SOUND_GAP = 2; // seconds between two alert sounds, unless the new one matters more
@@ -51,7 +55,7 @@ const THREAT_CLASSES = new Set(['infantry', 'ranged', 'support', 'siege', 'creat
 const LEVEL_RANK = { off: 0, important: 1, all: 2 };
 
 /** Who matters more when two sounds want the same moment. */
-const PRIORITY = { enemies_near: 90, ally_attacked: 80, peace_mark: 70, god_ready: 40, titan_ready: 40, idle_workers: 30, pop_capped: 25, army_idle: 22, research: 20, milestone: 10 };
+const PRIORITY = { enemies_near: 90, sacred: 85, ally_attacked: 80, peace_mark: 70, site_lost: 60, site_taken: 50, god_ready: 40, titan_ready: 40, idle_workers: 30, pop_capped: 25, army_idle: 22, research: 20, milestone: 10 };
 
 /** Milestones: the player's counts, the steps worth a cheer and the emblem of the card. */
 const MILESTONES = [
@@ -123,6 +127,7 @@ export class AlertEngine {
     this.clearSince = null;
     this.allyAlert = new Map(); // ally index → game time of the last alert
     this.peaceMarks = null; // how many PEACE_WARNINGS the clock had passed when last looked at
+    this.sacredMarks = null; // how many SACRED_WARNINGS the running Sacred Victory clock had passed
     this.lastSound = { t: -Infinity, priority: 0 };
     this.idleWorkers = new Nag(0, IDLE_WORKER_REPEAT);
     this.idleSince = new Map(); // Worshipper id → game time it was first seen idle
@@ -242,6 +247,14 @@ export class AlertEngine {
       case 'tierUp':
         if (ev.player === me) this.emit({ id: 'tier_up', level: 'important', attention: 'Your settlement has grown!' });
         break;
+      case 'siteCaptured':
+      case 'siteLost':
+        this.site(ev);
+        break;
+      case 'sacredHold':
+      case 'sacredBroken':
+        this.sacredChange(ev);
+        break;
       case 'researched':
         if (ev.player === me) {
           const up = Object.hasOwn(UPGRADES, ev.up) ? UPGRADES[ev.up] : null;
@@ -251,6 +264,77 @@ export class AlertEngine {
       default:
         break;
     }
+  }
+
+  /** Names of the players of a team, for "X holds every sacred site". */
+  teamName(team) {
+    const vs = this.vs;
+    const names = (vs.players || []).filter((p) => p.team === team).map((p) => this.playerName(p.i));
+    return names.length ? names.join(' and ') : 'The enemy';
+  }
+
+  /** A sacred site changed hands: ev.player took it (siteCaptured) or lost it (siteLost). */
+  site(ev) {
+    const vs = this.vs;
+    const site = vs.sites[ev.site];
+    const where = site ? { x: site.x, y: site.y } : null;
+    const p = vs.players[ev.player];
+    const color = safeColor(p && p.color, '#ffe9b0');
+    const name = this.playerName(ev.player);
+    const mine = ev.player === vs.myIndex;
+    const friend = mine || vs.isAlly(ev.player);
+    if (ev.type === 'siteCaptured') {
+      if (mine) this.emit({ id: 'site_taken', level: 'all', kind: 'good', icon: SITE_ICON, text: `You hold a sacred site: +${SITE_FAITH} faith each second.`, sound: 'milestone', volume: 0.7, ping: where && { ...where, color } });
+      else if (friend) this.emit({ id: 'site_taken', level: 'all', kind: 'good', icon: SITE_ICON, text: `${name} holds a sacred site.`, ping: where && { ...where, color } });
+      else this.emit({ id: 'site_taken', level: 'important', kind: 'alert', icon: SITE_ICON, text: `${name} has taken a sacred site.  [[Space]]`, sound: 'nudge', ping: where && { ...where, color }, jump: where });
+      return;
+    }
+    if (friend) {
+      this.emit({
+        id: 'site_lost', level: 'important', kind: 'alert', icon: SITE_ICON,
+        text: mine ? 'You have lost a sacred site!  [[Space]]' : `${name} has lost a sacred site.  [[Space]]`,
+        sound: mine ? 'drums' : 'nudge', ping: where && { ...where, color: '#ffae2e' }, jump: where,
+        attention: mine ? 'You have lost a sacred site!' : null,
+      });
+    } else this.emit({ id: 'site_lost', level: 'all', kind: 'good', icon: SITE_ICON, text: `${name} has lost a sacred site.`, ping: where && { ...where, color: '#ffe9b0' } });
+  }
+
+  /** Sacred Victory: a side now holds every site (the clock starts) or has lost one (it stops). */
+  sacredChange(ev) {
+    const vs = this.vs;
+    const ours = ev.team === vs.myTeam;
+    this.sacredMarks = null;
+    if (ev.type === 'sacredHold') {
+      const left = Number.isFinite(ev.end) ? Math.max(0, ev.end - vs.time) : 0;
+      const text = ours
+        ? `Your side holds every sacred site! Keep them for ${peaceClock(left)} to win.`
+        : `${this.teamName(ev.team)} ${vs.players.filter((p) => p.team === ev.team).length > 1 ? 'hold' : 'holds'} every sacred site! Take one back within ${peaceClock(left)} or lose.`;
+      this.emit({ id: 'sacred', level: 'important', kind: ours ? 'good' : 'alert', icon: SITE_ICON, text, sound: 'gong', attention: ours ? `${SACRED_NAME} is near!` : 'The enemy holds every sacred site!' });
+      return;
+    }
+    this.emit({
+      id: 'sacred', level: 'important', kind: ours ? 'alert' : 'good', icon: SITE_ICON,
+      text: ours ? `Your hold on the sacred sites is broken: the ${SACRED_NAME} clock has stopped.` : `The enemy's hold on the sacred sites is broken!`,
+      sound: ours ? 'drums' : 'milestone', volume: 0.8,
+    });
+  }
+
+  /** The Sacred Victory clock: one line and a gong at each SACRED_WARNINGS mark. */
+  sacredClock() {
+    const vs = this.vs;
+    if (!vs.sacred) {
+      this.sacredMarks = null;
+      return;
+    }
+    const left = vs.sacredLeft();
+    const passed = SACRED_WARNINGS.filter((sec) => left <= sec).length;
+    if (this.sacredMarks !== null && passed > this.sacredMarks) {
+      const when = sacredWhen(SACRED_WARNINGS[passed - 1]);
+      const ours = vs.sacred.tm === vs.myTeam;
+      const text = ours ? `${SACRED_NAME} in ${when}. Hold the sacred sites!` : `The enemy wins by ${SACRED_NAME} in ${when}! Retake a sacred site.`;
+      this.emit({ id: 'sacred', level: 'important', kind: ours ? 'good' : 'alert', icon: SITE_ICON, text, sound: 'gong', volume: 0.7 + 0.15 * passed, attention: text });
+    }
+    this.sacredMarks = passed;
   }
 
   /** An ally's things were hit: a softer drum, a ping in the ally's colour, and Space unless an alert of my own is fresher. */
@@ -330,6 +414,7 @@ export class AlertEngine {
     }
     this.nearBase(t, s, false);
     this.peace(t);
+    this.sacredClock();
     this.idle(t, s);
     this.population(t, me, s);
     this.summonable(t, s);

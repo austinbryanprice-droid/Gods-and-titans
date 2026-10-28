@@ -298,12 +298,15 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen with the statistics table and what the match unlocked. */
-  showGameOver({ result, winningTeam, unlocked = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const title = result === 'victory' ? 'Victory' : result === 'defeat' ? 'Defeat' : 'Draw';
-    const sub = result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
-      : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
+    // how: 'sacred' when a side held every sacred site long enough (DESIGN 5.11).
+    const sub = how === 'sacred'
+      ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
+      : result === 'victory' ? 'The gods smile upon your people. Your pantheon reigns supreme.'
+        : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const node = el('div', `mw-panel hud-opanel hud-gameover is-${result}`,
       el('div', 'hud-go-crest', result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),
