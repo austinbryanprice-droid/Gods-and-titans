@@ -136,10 +136,12 @@ export class HostSession extends SessionBase {
    * @param {boolean} [o.useWorker] allow the background-proof worker metronome
    * @param {number} [o.viewDelayMs] local interpolation delay
    * @param {number} [o.connTimeoutMs] silence after which a client counts as gone (GAME_TIMEOUT_MS)
+   * @param {boolean} [o.resumed] createWorld hands back a loaded game (DESIGN 9.4): the trees felled before the
+   *   save come down at once, and events left over from the saved tick are dropped
    */
   constructor({
     setup, myIndex = 0, conns = new Map(), createWorld, createAI = null, createVoices = null, autoTick = true, useWorker = true, viewDelayMs = HOST_VIEW_DELAY_MS,
-    connTimeoutMs = GAME_TIMEOUT_MS,
+    connTimeoutMs = GAME_TIMEOUT_MS, resumed = false,
   }) {
     super(setup, myIndex);
     this.connTimeoutMs = connTimeoutMs;
@@ -171,6 +173,11 @@ export class HostSession extends SessionBase {
     this.snapshotsSent = 0;
     this.lastSnap = null;
     this.netStats = { encodes: 0, encodeMs: 0, encodeMaxMs: 0, skipped: 0 };
+    if (resumed) {
+      this.world.events = [];
+      this.world.felled = [];
+      this.felledAll = (this.world.felledAll || []).slice();
+    }
     this.takeSnapshot();
     for (const [index, conn] of conns || []) this.attach(index, conn);
     this.ticker = new Ticker({ onTick: () => this.tickOnce(), onBatch: () => this.afterTicks(), useWorker });
@@ -387,7 +394,8 @@ export class HostSession extends SessionBase {
     }
     this.ticksSinceSnap = 0;
     if (this.voices && this.lastSnap) this.speak(snap.events);
-    this.viewState.pushSnapshot(snap, now());
+    // The first snapshot of a loaded game brings down the trees felled before the save.
+    this.viewState.pushSnapshot(snap, now(), !this.lastSnap && this.felledAll.length ? { felledAll: this.felledAll } : null);
     if (this.lastSnap) this.broadcastSnapshot(snap);
     // felledAll in a `full` lists trees felled before that snapshot; its own felled come with it.
     if (snap.felled) for (const f of snap.felled) this.felledAll.push(f);

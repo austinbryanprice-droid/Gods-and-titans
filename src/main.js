@@ -6,6 +6,7 @@ import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
 import { isSoloLaunch, saveSkirmish, launchFrom } from './game/rematch.js';
+import { readSave, saveInfo } from './game/save-store.js';
 import { dailyLaunch } from './game/daily.js';
 
 export { showMenu, hideMenu };
@@ -122,6 +123,24 @@ async function rematch(state) {
   }
 }
 
+/**
+ * Continue / Load Game (DESIGN 9.4): read a saved game and start it. Rejects (the menu shows the
+ * message) when the slot cannot be read; a save that cannot be rebuilt fails on the game's start screen.
+ */
+async function loadGame(slot) {
+  let save;
+  try {
+    save = await readSave(slot);
+  } catch (err) {
+    console.error('[main] the saved game could not be read', err);
+    throw new Error('The saved game could not be read.');
+  }
+  if (!save || !save.setup) throw new Error('That saved game is gone.');
+  const info = saveInfo(slot) || {};
+  const extra = save.extra || {};
+  await startGame({ role: 'host', setup: save.setup, myIndex: Number.isInteger(extra.myIndex) ? extra.myIndex : 0, conns: new Map(), lobby: null, skirmish: info.skirmish || null, daily: info.daily || null, resume: save });
+}
+
 /** Play Again on a daily challenge: the same day's game (same map and sides) once more; the best score is kept. */
 async function retryDaily(day) {
   try {
@@ -186,7 +205,7 @@ function boot() {
   const settings = getSettings();
   initAudio(settings); // the sound effects and the music: one audio context, started now where the browser allows it and otherwise at the first key press or click
   onSettingsChange(syncAudio);
-  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onIntro: () => watchIntro('settings', false) });
+  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onLoad: loadGame, onIntro: () => watchIntro('settings', false) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
   const webgl2 = hasWebGL2();
