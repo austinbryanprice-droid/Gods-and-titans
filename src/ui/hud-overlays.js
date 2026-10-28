@@ -20,6 +20,13 @@ const END_TEXT = {
   'game-over': 'The host has closed the game.',
 };
 
+/** The line under a finished Trial of the Titans. */
+function survivalLine(wave) {
+  if (wave <= 0) return 'The Trial of the Titans is over before the first wave even came.';
+  if (wave === 1) return 'The Trial of the Titans is over: the first wave broke your city.';
+  return `The Trial of the Titans is over: your people held out to wave ${wave}.`;
+}
+
 function btn(text, cls, onClick) {
   const b = el('button', `mw-btn hud-obtn ${cls || ''}`, text);
   b.type = 'button';
@@ -281,7 +288,7 @@ export class Overlays {
       el('span', 'hud-medal-text', el('b', null, `${medal.name} medal`), el('small', null, hint)));
   }
 
-  /** "Career: 12 wins in 20 games (60%) · 9 of 35 achievements" (null for a spectator). */
+  /** "Career: 12 wins in 20 games (60%) · 9 of 39 achievements" (null for a spectator). */
   careerLine() {
     if ((this.game.viewState.myIndex ?? -1) < 0) return null;
     const c = getCareer();
@@ -291,20 +298,26 @@ export class Overlays {
     return el('div', 'hud-go-career', `Career: ${c.wins} win${c.wins === 1 ? '' : 's'} in ${games} (${Math.round(s.winRate * 100)}%) · ${s.unlocked} of ${s.total} achievements`);
   }
 
-  /** Victory / defeat / draw screen with the chronicle and what the match unlocked (and the lesson's medal). */
-  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false }) {
+  /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
+  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
-    const title = result === 'victory' ? (tutorial ? 'Lesson Complete' : 'Victory') : result === 'defeat' ? 'Defeat' : 'Draw';
+    const survival = result === 'survival';
+    const title = survival ? `Wave ${wave}` : result === 'victory' ? (tutorial ? 'Lesson Complete' : 'Victory') : result === 'defeat' ? 'Defeat' : 'Draw';
     // how: 'sacred' when a side held every sacred site long enough (DESIGN 5.11).
-    const sub = how === 'sacred'
-      ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
-      : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
-        : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
-    const node = el('div', `mw-panel hud-opanel hud-gameover is-${result}`,
-      el('div', 'hud-go-crest', result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
+    const sub = survival ? survivalLine(wave)
+      : how === 'sacred'
+        ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
+        : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
+          : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
+    const best = survival && record ? el('div', `hud-go-best${record.isNew ? ' is-new' : ''}`, record.isNew
+      ? (record.previous > 0 ? `A new best! Your old best was wave ${record.previous}.` : 'Your first trial: the bar is set.')
+      : `Your best: wave ${record.best}.`) : null;
+    const node = el('div', `mw-panel hud-opanel hud-gameover is-${survival ? 'defeat is-survival' : result}`,
+      el('div', 'hud-go-crest', survival ? '🐉' : result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
+      best,
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.medalCard(medal),
       chronicleView(vs, winningTeam, this.game.chronicle || null),

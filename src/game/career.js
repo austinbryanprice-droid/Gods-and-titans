@@ -7,7 +7,7 @@ import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID } from '../data/achievements.js';
 
 const STORAGE_KEY = 'mythicwar-career';
 const HISTORY = 12; // the last games shown on the career screen
-const RESULTS = ['victory', 'defeat', 'draw'];
+const RESULTS = ['victory', 'defeat', 'draw', 'survival']; // survival: a finished Trial of the Titans (no win, no loss)
 
 let current = null;
 const listeners = new Set();
@@ -145,7 +145,7 @@ export function recordMatch(m, now = Date.now()) {
   c.games++;
   if (m.result === 'victory') c.wins++;
   else if (m.result === 'defeat') c.losses++;
-  else c.draws++;
+  else if (m.result === 'draw') c.draws++;
   c.seconds += t;
   c.kills += num(m.kills);
   c.gathered += num(m.gathered);
