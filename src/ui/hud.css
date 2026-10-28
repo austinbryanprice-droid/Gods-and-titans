@@ -640,6 +640,69 @@
 .hud-markbtn:hover { box-shadow: inset 0 0 0 1px #ffe39a, 0 0 0.6em rgba(227, 184, 79, 0.35); background: linear-gradient(180deg, #353b57, #1a1e35); }
 .hud-markbtn.is-armed { background: linear-gradient(180deg, #3d4466, #1d2240); box-shadow: inset 0 0 0 2px var(--k, #ffe39a), 0 0 0.9em var(--k, #ffe39a); }
 
+/* ------------------------------------------------------------ god powers
+   Three buttons on the left of the minimap (hud-powers.js), and the ring that shows a power's area
+   under the cursor while one is armed (input.js). */
+
+.hud-powerpad {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  margin-right: 0.8em;
+}
+.hud-powerbtn {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 2.7em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #000;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #5a4520, #22180a 70%);
+  box-shadow: inset 0 0 0 1px rgba(233, 196, 106, 0.55), 0 0.15em 0.4em rgba(0, 0, 0, 0.5);
+  font-family: var(--mw-emoji);
+  font-size: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+}
+.hud-powerbtn-ico { transition: filter 0.2s, opacity 0.2s; }
+.hud-powerbtn.is-ready { box-shadow: inset 0 0 0 1px #ffe39a, 0 0 0.7em rgba(255, 214, 110, 0.55); animation: hud-power-glow 2.4s ease-in-out infinite; }
+.hud-powerbtn.is-ready:hover { background: radial-gradient(circle at 50% 35%, #7a5d28, #2c200e 70%); }
+.hud-powerbtn.is-locked .hud-powerbtn-ico, .hud-powerbtn.is-peace .hud-powerbtn-ico { filter: grayscale(1); opacity: 0.45; }
+.hud-powerbtn.is-used { background: #120d07; box-shadow: inset 0 0 0 1px rgba(120, 100, 70, 0.4); cursor: default; }
+.hud-powerbtn.is-used .hud-powerbtn-ico { filter: grayscale(1) brightness(0.5); opacity: 0.35; }
+.hud-powerbtn.is-armed { animation: none; background: radial-gradient(circle at 50% 35%, #b88a2c, #3d2a0e 70%); box-shadow: inset 0 0 0 2px #fff0b8, 0 0 1em rgba(255, 220, 120, 0.9); }
+.hud-powerbtn-time {
+  position: absolute;
+  right: -0.35em;
+  bottom: -0.2em;
+  padding: 0 0.25em;
+  border-radius: 0.6em;
+  background: rgba(10, 30, 12, 0.92);
+  color: #b8ffae;
+  font: 700 0.55em/1.4 var(--mw-font-ui);
+}
+.hud-powerbtn-time:empty { display: none; }
+@keyframes hud-power-glow {
+  0%, 100% { box-shadow: inset 0 0 0 1px #ffe39a, 0 0 0.45em rgba(255, 214, 110, 0.35); }
+  50% { box-shadow: inset 0 0 0 1px #ffe39a, 0 0 0.95em rgba(255, 214, 110, 0.75); }
+}
+.hud-powerring {
+  position: absolute;
+  z-index: 1;
+  border: 2px solid rgba(255, 214, 110, 0.9);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(255, 214, 110, 0.04), rgba(255, 214, 110, 0.16));
+  box-shadow: 0 0 0.8em rgba(255, 200, 90, 0.5), inset 0 0 1.2em rgba(255, 200, 90, 0.25);
+  pointer-events: none;
+}
+.hud-powerring.is-bad { border-color: rgba(255, 110, 80, 0.9); background: rgba(255, 90, 60, 0.08); box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .hud-powerbtn.is-ready { animation: none; } }
+
 .hud-marks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .hud-mark {
   position: absolute;

@@ -326,6 +326,19 @@ test('delayed effects telegraph first and fire after the delay', () => {
   vfx.dispose();
 });
 
+test("a meteor's fall lasts its whole delay (a god power's late bolts), warning ring and all", () => {
+  const { vfx } = make();
+  vfx.setFocus(5, 5);
+  vfx.spawnEffect({ el: 'fire', shape: 'meteor', x: 5, y: 5, r: 2, delay: 3.6 });
+  step(vfx, 3.3);
+  assert.equal(vfx.stats().decals, 1, 'the warning ring is still down before impact');
+  step(vfx, 0.5);
+  assert.ok(vfx.stats().decals > 1, 'landed by the delay (the blast lays its scorch rings)');
+  step(vfx, 8);
+  assertIdle(vfx, 'long meteor');
+  vfx.dispose();
+});
+
 test('follow keeps shields on a moving unit and survives the unit vanishing', () => {
   const { vfx } = make();
   const unit = { x: 3, y: 3, alive: true };

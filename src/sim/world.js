@@ -27,6 +27,7 @@ import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js'
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
 import { PEACE_ANCHOR, peaceBlocksFootprint, peaceSeconds } from './peace.js';
+import { newPowerState, updatePowers, boonPct } from './powers.js';
 import { createSurvival, updateSurvival, survivalOn } from './survival.js';
 import { isTutorial, tutorialStart } from './tutorial.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
@@ -109,6 +110,7 @@ export class World {
         upList: [], // the same ids in the order they finished (snapshot)
         mods: computeMods([], pantheon), // their pantheon's blessings and upgrades combined (data/upgrades.js computeMods)
         autoRepair: false, // idle worshippers mend nearby damaged buildings
+        powers: newPowerState(), // god powers spent and boons running (sim/powers.js)
         lastAlert: -Infinity,
         stats: newStats(),
       };
@@ -805,6 +807,7 @@ export class World {
     updateProjectiles(this);
     updateDelayed(this);
     updateFields(this);
+    updatePowers(this);
 
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
@@ -834,7 +837,7 @@ export class World {
       b.prayingCount = n;
       const p = this.players[b.owner];
       if (p && n > 0) {
-        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith);
+        const rate = n * b.def.faithRate * (1 + buildingMods(p.mods, b.type).faith) * (1 + boonPct(p, 'faith'));
         p.faithRate += rate;
         p.faith += rate * DT;
         p.stats.faith += rate * DT;

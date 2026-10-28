@@ -3,7 +3,7 @@
 //   market       team trade panel under the top bar (only with a living teammate)
 //   top-left     god portraits (F1–F3)
 //   bottom-left  idle worshipper button and the worshipper task counts
-//   bottom       minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
+//   bottom       god power buttons + minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
 //   team marks   pins over the battlefield (and arrows at its edge) for the pings and markers of my team
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
 //   tips         the getting-started checklist and now-and-then gameplay tips (top-right); in the guided
@@ -28,6 +28,7 @@ import { HintsView, HintScheduler } from './hud-hints.js';
 import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
+import { PowerBar } from './hud-powers.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
@@ -215,8 +216,10 @@ export class Hud {
     this.tip.hidden = true;
     // The marker buttons stand beside the minimap: pick one, then click the map or the minimap.
     this.markpad = new MarkPalette({ onPick: (kind) => game.input && game.input.armMark(kind) });
+    // The god powers stand on its other side: pick a ready one, then click where it should fall.
+    this.powerbar = new PowerBar({ onPick: (id) => game.input && game.input.armPower(id) });
     this.bottom = el('div', 'hud-bottom hud-panel',
-      el('div', 'hud-bottom-mini', mini, this.markpad.root),
+      el('div', 'hud-bottom-mini', this.powerbar.root, mini, this.markpad.root),
       el('div', 'hud-bottom-info', this.infoRoot),
       el('div', 'hud-bottom-card', this.cardGrid));
 
@@ -381,6 +384,7 @@ export class Hud {
     if (this.guidePointer) this.guidePointer.update(now);
     const m = input && input.mode;
     this.markpad.setArmed(m && m.kind === 'target' && m.order === 'mark' ? m.mark : null);
+    this.powerbar.update(vs, m && m.kind === 'target' && m.order === 'power' ? m.power : null);
     this.markpad.setTeammates(teammateCount(vs));
     if (this.tips) this.tips.update(now);
     if (!this.tutorial) this.hintTimer.update();

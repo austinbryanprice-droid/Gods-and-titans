@@ -2,6 +2,7 @@
 import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
+import { powerView } from './powers.js';
 import { survivalView } from './survival.js';
 import { siteViews } from './sacred.js';
 
@@ -128,6 +129,7 @@ export function buildSnapshot(world) {
       gods: gods[i], fallen, titan: titan[i],
       up: p.upList.slice(), ar: p.autoRepair,
       stats: { ...p.stats, faith: Math.floor(p.stats.faith + 1e-6), army: army[i] },
+      ...powerView(p),
     };
   });
   const snap = {

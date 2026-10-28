@@ -304,6 +304,40 @@ sim reads it through the same pipes as building upgrades.
   here may change a rule for the other players; a new `perk` needs one line in `PERK_STATS`, one sim hook, one
   test and one sentence in its blessing's description. Icons are single Emoji.
 
+### 4.11 God powers (src/data/powers.js, src/sim/powers.js)
+Age of Mythology's god powers: each pantheon has three **one-use** divine powers, one per settlement tier,
+that the player casts from the power bar beside the minimap with no unit casting them. `GOD_POWERS[pantheonId]`
+lists them Village, Town, City; `POWERS` has every one by id (30 in all; `validatePowers`, run by
+`validateData`, holds the rules below).
+- **Village: a blessing** that helps the caster's people and hurts nobody: a harvest (every load of gold and wood
+  brought in counts 50% more for 60 s), a festival (prayer gives twice the faith for 60 s), a healing rain
+  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (300 gold and 150 wood).
+- **Town: a strike** aimed at a spot within about 3–5 tiles: a storm of bolts, a hammerfall, a swarm, a gale, a
+  summoning of crows.
+- **City: a cataclysm** over 7–12 tiles: an earthquake, a winter, a flood, a tsunami, an eclipse, a tempest.
+- **Shape:** `{ id, pantheon, tier, kind: 'blessing'|'strike'|'cataclysm', name, icon, description, target:
+  'none'|'point', effects, vfx: { element, shape }, ai: { use: 'economy'|'heal'|'damage' } }`. Effects are the
+  ability effects of 4.4 that need no caster's body (not blink, dash, chain, line, invulnerable, nor `at: 'self'`),
+  applied by `applyEffect` with a stand-in caster for the player (id 0, `kind: 'power'`, already "dead", so
+  nothing retaliates against it and nothing ranks up), at scale 1. Kills, plunder, sacrifice, god experience and
+  the victims' under-attack alerts are the caster's as with any spell; spell damage to buildings is halved
+  (`SPELL_VS_BUILDING`). Two effects are the powers' own: `boon { stat: 'gather'|'faith', pct, duration }`
+  (`p.powers.boons`; `deposit` multiplies each load by `1 + boonPct(p, 'gather')`, `accrueFaith` the prayer rate
+  by `1 + boonPct(p, 'faith')`) and `barrage { count, amount, radius, spread, every, stun? }` (bolt k lands
+  `0.5 + k × every` s after the cast, the first on the spot and the rest on seeded random spots within `spread`,
+  each a `damage` (and `stun`) of `radius`; the whole barrage lasts at most `BARRAGE_MAX_SECONDS`, 4 s, because the
+  renderer telegraphs an effect at most that far ahead).
+- **Rules** (`castPower` / `powerRefusal`, the `godPower` command): a power is spent when it is cast, never
+  before (a refused one stays). It needs the settlement tier (`Requires Town.` / `Requires City.`); a strike or
+  cataclysm needs a spot the caster's team can see (`teamSees`: the spot's tile lies in an allied unit's or
+  building's `sight` or a reveal, by `tileInSight`, the rule the clients' fog grid stamps, so the HUD and the sim agree;
+  `You must be able to see the target.`) and waits out the Decade of Peace (5.10, `The Decade of Peace
+  holds for another m:ss: no god powers against other players yet.`), while a blessing works during it. Used:
+  `<Name> has already been used.` Powers never hurt the caster's own side. A blessing with no target shines over
+  the caster's first Town Center.
+- **Numbers** are first guesses for Austin to tune after play; change them in `src/data/powers.js` only (the
+  builders `boon`, `healRain` and `barrage` keep the ten pantheons comparable).
+
 ## 5. Rules
 
 ### 5.1 Start
@@ -826,6 +860,7 @@ counted in `world.perf.commandErrors`.
 { type: 'hold',       units }
 { type: 'kill',       units }                                   // the Delete key: own units die, no killer (below)
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
+{ type: 'godPower',   power: powerId, x?, y? }               // cast one of my pantheon's god powers (4.11); x / y for a strike
 { type: 'surrender' }
 ```
 **smart** resolution per unit: enemy target → attack; worker + gold mine → gather; worker +
@@ -869,7 +904,8 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
-              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army } }], // 5.12
+              stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army }, // 5.12
+              gp, gb? }],               // god powers (4.11): gp bit i = the tier i+1 power is spent; gb = boons running [[stat, pct, seconds left]]
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
@@ -942,6 +978,7 @@ EntityView = {
 { type: 'wave',    n, count, boss, x, y }                            // Trial of the Titans: wave n came out at (x, y); boss = Titan type or ''
 { type: 'waveCleared', n, gold }                                     // every monster of wave n is dead; each survivor got gold
 { type: 'gameOver', winningTeam }
+{ type: 'godPower', player, power, x, y }                            // a god power was cast (4.11); x, y = its spot (a blessing: the caster's Town Center)
 ```
 
 ### 6.5 Read API (for AI and tests)
@@ -1843,6 +1880,18 @@ per-frame budget, so a revealed army appears over a few frames.
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
+- God power bar (`src/ui/hud-powers.js`, `PowerBar`): three round buttons on the left of the minimap, one per power
+  of my pantheon (4.11), Village at the top. Locked (grey) until my settlement reaches the tier, ready (a slow
+  golden glow) once it has, dark once spent; the tooltip names the power, its tier, what it does, its area and why
+  it cannot be used now (`powerState`: tier, spent, or a strike during the Decade of Peace). A running blessing
+  counts its seconds down on its button. Pressing a ready one arms `{ kind: 'target', order: 'power', power }`
+  (`input.armPower`, the marker buttons' plumbing: the button again, Esc or right-click puts it away); the next
+  click on the map or minimap casts it there, and while armed a ring (`.hud-powerring`, projected each frame) shows
+  its area under the cursor, red where I cannot see. A strike aimed into the fog stays armed with "You must be able
+  to see the target." Every cast is announced (`godPower` event, `game.js`): mine as a line and a chime; an ally's as
+  a line and a gold minimap ping; an enemy's strike as an alert line, a red minimap ping and the Space jump, its
+  cataclysm as a banner, and it flashes the tab (`power_enemy`). A telegraphed effect's sound waits for its
+  `delay`, so a barrage cracks bolt by bolt.
 - Team pings and markers (`src/data/marks.js`, `src/game/team-marks.js`, `src/ui/hud-marks.js`; the wire is in 7).
   Five kinds: Ping 📍 (stands 6 s), Attack ⚔️, Defend 🛡️, Help 🆘 (the urgent one: a louder chime) and Gather 🚩
   (12 s each). **Placing**: Alt+click or a middle click on the map or the minimap pings that spot (a unit or
@@ -2082,6 +2131,11 @@ home until the peace ends: the army keeps growing and masses at the rally point.
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
 break a rival's Sacred Victory countdown (5.11).
+God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing once 12 of its worshippers gather
+(easy: more), a festival once 5 pray, a caravan from 1:30, a healing rain where its hurt army is missing 1,200
+health or more within the rain; a strike on the enemy unit whose surroundings (the power's area) hold the most
+enemy health, at least 1,800 (a cataclysm 3,600, where an enemy building counts a quarter of its health), and only
+where its team can see (the sim's own `powerRefusal` decides). Easy's `castThreshold` raises every bar.
 
 ### 10.1 AI voices (src/ai/voice.js, src/ai/voice-lines.js)
 
