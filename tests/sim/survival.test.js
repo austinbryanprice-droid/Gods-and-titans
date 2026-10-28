@@ -162,3 +162,34 @@ test('never more than the cap of wave monsters alive at once', () => {
   assert.ok(w.survival.monsters.length <= SURVIVAL_MAX_ALIVE);
   assert.ok(w.survival.monsters.length > SURVIVAL_MAX_ALIVE / 2);
 });
+
+test('a wave the cap leaves empty is never paid as beaten', () => {
+  const w = makeWorld({ players: 2, survival: true, map: { width: 96, height: 96 } });
+  jumpTo(w, waveTime(30));
+  w.tick();
+  const full = w.survival.monsters.length;
+  // Fill the cap so the next wave has no room.
+  const extra = SURVIVAL_MAX_ALIVE - full;
+  for (let i = 0; i < extra; i++) {
+    const u = w.spawnUnit(NEUTRAL, w.survival.monsters[0].type, 48, 48, { silent: true });
+    u.wave = 30;
+    w.survival.monsters.push(u);
+  }
+  w.getSnapshot();
+  jumpTo(w, waveTime(31));
+  for (let i = 0; i < 25; i++) w.tick();
+  const evs = w.getSnapshot().events;
+  assert.equal(evs.find((e) => e.type === 'wave').count, 0);
+  assert.equal(evs.filter((e) => e.type === 'waveCleared').length, 0, 'no gold for an empty wave');
+});
+
+test('a boosted monster carries its damage boost in the snapshot for the info panel', () => {
+  const w = makeWorld({ players: 1, survival: true, map: { width: 64, height: 64 } });
+  jumpTo(w, waveTime(6));
+  w.tick();
+  const views = w.getSnapshot().entities;
+  const v = views.find((e) => e.id === w.unitList.find((u) => u.wave === 6).id);
+  assert.equal(v.wd, Math.round(waveBoost(6).dmg * 1000) / 1000);
+  const plain = views.find((e) => e.k === 'u' && e.o === 0);
+  assert.equal('wd' in plain, false);
+});

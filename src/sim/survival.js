@@ -197,7 +197,8 @@ function spawnWave(world, sv, n) {
     spawned.push(u);
   }
   sv.monsters.push(...spawned);
-  sv.alive.set(n, spawned.length);
+  // A wave the cap left empty is never "beaten": no reward for it.
+  if (spawned.length) sv.alive.set(n, spawned.length);
   // Each group marches on the players' nearest building.
   for (const p of points) {
     const group = spawned.filter((u) => hyp(u.x - p.x, u.y - p.y) < 12);

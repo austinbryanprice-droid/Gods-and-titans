@@ -54,6 +54,7 @@ function unitView(u) {
     v.xp = Math.floor(u.xp);
     if (u.rank > 0) v.rk = u.rank;
   }
+  if (u.boost && u.boost.dmg !== 1) v.wd = Math.round(u.boost.dmg * 1000) / 1000; // Trial of the Titans: damage boost for the info panel
   const cd = {};
   for (const k in u.cooldowns) cd[k] = r1(u.cooldowns[k]);
   v.cd = cd;
