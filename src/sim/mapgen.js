@@ -19,7 +19,7 @@
 // between its two bases. A team of three takes three neighbouring corners.
 
 import { RNG, hashSeed } from './rng.js';
-import { MAP_SIZES, TERRAIN, TREE_WOOD, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT } from '../config.js';
+import { MAP_SIZES, TERRAIN, TREE_WOOD, GOLD_MINE_AMOUNT, EXPANSION_MINE_AMOUNT, SITE_CLEAR } from '../config.js';
 import { BUILDINGS, GOLD_MINE } from '../data/buildings.js';
 
 const { GRASS, DIRT, WATER, FOREST, ROCK, SAND } = TERRAIN;
@@ -1083,6 +1083,8 @@ function buildMap(seed, n, pc, attempt, plan) {
   const wood = new Uint16Array(N);
   for (let i = 0; i < N; i++) if (T[i] === FOREST) wood[i] = TREE_WOOD;
 
+  const sacred = placeSacredSites(n, sym, T, foot, L, startsOut, allMines, camps, dEdge);
+
   const map = {
     width: n,
     height: n,
@@ -1093,11 +1095,118 @@ function buildMap(seed, n, pc, attempt, plan) {
     starts: startsOut,
     mines: minesOut,
     camps,
+    sacred,
     decor: [],
     meta: { symmetry: order, layout: plan.mode, center: L.center.kind, lakes: L.lakes.length + (L.center.kind === 'lake' ? 1 : 0), river: !!L.river },
   };
   const layout = { bases: L.bases, expansions: L.expansions, center: L.center, road, sc };
   return { map, layout };
+}
+
+/** Closest a sacred site comes to a start's Town Center footprint (then a gold mine's center, a creep camp, another site). */
+export const SITE_MIN_START_DIST = 16;
+const SITE_MIN_MINE_DIST = 7;
+const SITE_CAMP_DISTS = [12, 9]; // from a creep camp: 12 when it fits (creeps wake 5 tiles from their spot and stand up to ~3 out), else 9
+const SITE_MIN_GAP = 12; // between two sites
+
+/**
+ * Sacred sites (DESIGN 5.11): neutral holy ground for every player to fight over, placed as whole
+ * symmetry orbits so no start is nearer to more of them than another. A site at the map center
+ * when the middle is open ground, then one orbit of sites that sit as far from every start as from
+ * its rivals (between the two corners of a duel, between two neighbouring corners in a 3 or 4
+ * player game, on the side edges between the teams of a team game), then stand-in orbits until the
+ * map has 3 (4 on a four-fold map). Each site needs a disc of radius SITE_CLEAR of open,
+ * footprint-free ground reachable from the starts, away from starts, mines, creep camps and the
+ * other sites; the search walks outward from each target and keeps the first tile whose every
+ * image qualifies, so a crowded spot just moves a few tiles.
+ * Deterministic (integer and IEEE-exact math only): every browser places the same sites.
+ * @returns {{x:number,y:number}[]} site centers in tile coordinates
+ */
+function placeSacredSites(n, sym, T, foot, L, starts, allMines, camps, dEdge) {
+  const half = n / 2;
+  const { ks } = sym;
+  // Reachable ground: the component of the first start's front tile.
+  const { label } = labelComponents(n, walkMask(T, foot));
+  const s0 = starts[0];
+  const main = s0 ? label[frontTile(n, s0.x + TC_SIZE / 2, s0.y + TC_SIZE / 2, FRONT_DIST)] : -1;
+  const sites = [];
+  const r = SITE_CLEAR;
+  const R = Math.ceil(r);
+  const clear = (x, y) => {
+    for (let ty = Math.floor(y - R) - 1; ty <= Math.floor(y + R); ty++) {
+      for (let tx = Math.floor(x - R) - 1; tx <= Math.floor(x + R); tx++) {
+        const dx = tx + 0.5 - x;
+        const dy = ty + 0.5 - y;
+        if (dx * dx + dy * dy > r * r) continue;
+        if (tx < 0 || ty < 0 || tx >= n || ty >= n) return false;
+        const i = ty * n + tx;
+        if (!isOpen(T[i]) || foot[i] || label[i] !== main) return false;
+      }
+    }
+    return true;
+  };
+  const ok = (x, y, others, campDist = SITE_CAMP_DISTS[0]) => {
+    if (dEdge(Math.floor(x), Math.floor(y)) < R + 4) return false;
+    for (const s of starts) if (rectDist(x, y, s.x, s.y, TC_SIZE) < SITE_MIN_START_DIST) return false;
+    for (const [mx, my] of allMines) if (dist(x, y, mx + MINE_SIZE / 2, my + MINE_SIZE / 2) < SITE_MIN_MINE_DIST) return false;
+    for (const c of camps) if (dist(x, y, c.x, c.y) < campDist) return false;
+    for (const o of others) if (dist(x, y, o.x, o.y) < SITE_MIN_GAP) return false;
+    return clear(x, y);
+  };
+  // One orbit around canonical target (fx, fy) (fractions of the map), searched up to `reach` tiles away;
+  // a spot clear of the creep camps by the wider distance wins over a nearer one that is not.
+  const orbit = (fx, fy, reach) => {
+    const cx = Math.floor(fx * n);
+    const cy = Math.floor(fy * n);
+    const cands = [];
+    for (let dy = -reach; dy <= reach; dy++) {
+      for (let dx = -reach; dx <= reach; dx++) {
+        const d2 = dx * dx + dy * dy;
+        if (d2 <= reach * reach) cands.push([d2, dy, dx]);
+      }
+    }
+    cands.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    for (const campDist of SITE_CAMP_DISTS) {
+      for (const [, dy, dx] of cands) {
+        const imgs = ks.map((k) => sym.point(k, cx + dx + 0.5, cy + dy + 0.5));
+        const placed = [];
+        let good = true;
+        for (const [x, y] of imgs) {
+          if (!ok(x, y, [...sites, ...placed], campDist)) {
+            good = false;
+            break;
+          }
+          placed.push({ x, y });
+        }
+        if (good) {
+          sites.push(...placed);
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  const four = sym.order === 4;
+  const teams = L.bases.length > 0 && L.bases.some((b) => b.ci === 1);
+  // The center: one site on the fixed point when the middle is open.
+  const middle = L.center.kind !== 'lake' && L.center.kind !== 'camp' && ok(half, half, []);
+  if (middle) sites.push({ x: half, y: half });
+  // Orbits in order of preference until the map has its sites: the first is the contested one, the
+  // later ones stand in when lakes, forest or creep camps leave no room (a lake or camp in the middle
+  // also takes the center's place).
+  let plan;
+  if (four) plan = [[0.5, 0.3, 20], [0.36, 0.36, 16], [0.5, 0.2, 16]]; // between each pair of neighbouring corners
+  else if (teams) plan = [[0.2, 0.5, 20], [0.38, 0.5, 14], [0.5, 0.3, 14]]; // on the side edges, between the two teams
+  else {
+    // A pair as far from one corner as from the other, or, when a river runs along that diagonal, one on each corner's flank.
+    plan = [L.center.kind === 'river' ? [0.5, 0.25, 20] : [0.66, 0.34, 20], [0.38, 0.38, 14], [0.5, 0.25, 14], [0.25, 0.5, 14]];
+  }
+  const want = four ? 4 : 3;
+  for (const [fx, fy, reach] of plan) {
+    if (sites.length >= want) break;
+    orbit(fx, fy, reach);
+  }
+  return sites;
 }
 
 /**
@@ -1400,6 +1509,7 @@ function buildHeights(map, layout, rng) {
   for (const e of layout.expansions) sites.push({ x: e.ex, y: e.ey, r0: 6, r1: 10 });
   for (const c of map.camps) sites.push({ x: c.x, y: c.y, r0: 2.5, r1: 5 });
   if (layout.center.kind === 'camp') sites.push({ x: n / 2, y: n / 2, r0: 6, r1: 10 });
+  for (const s of map.sacred || []) sites.push({ x: s.x, y: s.y, r0: 3.5, r1: 6 });
   const wsum = new Float32Array(V * V);
   const tsum = new Float32Array(V * V);
   for (const s of sites) {
@@ -1486,6 +1596,7 @@ function buildDecor(map, layout, rng) {
   for (const s of map.starts) mark(s.x + 2, s.y + 2, 11.5);
   for (const m of map.mines) mark(m.tx + 1.5, m.ty + 1.5, 4.2);
   for (const c of map.camps) mark(c.x, c.y, 2.4);
+  for (const s of map.sacred || []) mark(s.x, s.y, 3.6);
   const near = (x, y, code) => {
     for (let oy = -1; oy <= 1; oy++) {
       for (let ox = -1; ox <= 1; ox++) {

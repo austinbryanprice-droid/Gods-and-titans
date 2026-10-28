@@ -680,7 +680,7 @@ export class Game {
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, how: vs.gameOver.how });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();

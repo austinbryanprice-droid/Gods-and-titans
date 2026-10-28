@@ -673,6 +673,8 @@ kbd {
 .mw-peace-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em 0.9em; margin-top: 0.7em; }
 .mw-peace-label { color: var(--mw-ink-dim); font-size: 0.9em; }
 .mw-peace-hint { flex-basis: 100%; margin: 0; }
+.mw-victory-group { flex-basis: 18em; }
+.mw-sacred-toggle { padding: 0.2em 0; }
 
 /* room code + chat */
 .mw-room { text-align: center; }

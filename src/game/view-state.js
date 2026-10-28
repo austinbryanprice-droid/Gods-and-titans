@@ -7,6 +7,7 @@
 import { INTERP_DELAY_MS, TERRAIN } from '../config.js';
 import { computeVisibility } from '../sim/visibility.js';
 import { peaceSeconds } from '../sim/peace.js';
+import { sacredVictoryOn } from '../sim/sacred.js';
 import { UNITS, BUILDINGS, GOLD_MINE } from '../data/index.js';
 
 const HISTORY = 8; // position samples kept per unit
@@ -74,6 +75,10 @@ export class ViewState {
     this.renderTime = 0; // interpolated sim time (s) of what update() shows
     this.fields = [];
     this.reveals = [];
+    // Sacred sites (DESIGN 5.11): the map's places until the first snapshot, then the host's rows
+    // { x, y, o, p?, c?, cn? }; sacred is the Sacred Victory countdown { tm, end } or null.
+    this.sites = (this.map.sacred || []).map((p) => ({ x: p.x, y: p.y, o: -1 }));
+    this.sacred = null;
     this.gameOver = null;
     this.snapshot = null;
     this.felledAll = [];
@@ -160,6 +165,25 @@ export class ViewState {
     if (owner === undefined || owner === null) return false;
     if (owner < 0) return true;
     return this.isEnemy(owner) && !this.peaceActive();
+  }
+
+  // ---------------------------------------------------------------- Sacred Sites
+
+  /** Is Sacred Victory on in this game? */
+  sacredVictoryOn() {
+    return sacredVictoryOn(this.setup) && this.sites.length > 0;
+  }
+
+  /** Seconds left on the Sacred Victory countdown at the latest snapshot (0 when nobody holds every site). */
+  sacredLeft() {
+    return this.sacred ? Math.max(0, this.sacred.end - this.time) : 0;
+  }
+
+  /** How many sacred sites a team holds. */
+  sitesHeld(team) {
+    let n = 0;
+    for (const s of this.sites) if (s.o >= 0 && this.teamOf(s.o) === team) n++;
+    return n;
   }
 
   // ---------------------------------------------------------------- fog of war
@@ -335,6 +359,8 @@ export class ViewState {
     if (this.me) this.myTeam = this.me.team;
     this.fields = snap.fields || [];
     this.reveals = snap.reveals || [];
+    if (Array.isArray(snap.sites)) this.sites = snap.sites.filter((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
+    this.sacred = snap.sacred && Number.isFinite(snap.sacred.end) ? snap.sacred : null;
     this.gameOver = snap.gameOver || null;
     this.revealAll = this.myIndex < 0 || !!this.gameOver || !!(this.me && this.me.defeated);
     this.snapshotCount++;

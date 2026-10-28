@@ -6,7 +6,7 @@ import { UNITS, MORTALS } from '../../src/data/index.js';
 
 /**
  * Build a synthetic MapData (DESIGN 6.7).
- * opts: { width, height, forest: [rects], water: [rects], rock: [rects], starts, mines, camps }
+ * opts: { width, height, forest: [rects], water: [rects], rock: [rects], starts, mines, camps, sacred }
  * rect = { x, y, w, h } in tiles.
  */
 export function makeMap(opts = {}) {
@@ -40,6 +40,7 @@ export function makeMap(opts = {}) {
     starts,
     mines,
     camps: opts.camps ?? [],
+    sacred: opts.sacred ?? [],
     decor: [],
   };
 }
@@ -67,10 +68,11 @@ export function makeSetup(n = 2, opts = {}) {
     })),
   };
   if (opts.peaceMinutes) setup.peaceMinutes = opts.peaceMinutes; // Decade of Peace
+  if (opts.sacredVictory) setup.sacredVictory = true; // Sacred Victory (5.11)
   return setup;
 }
 
-/** A World on a synthetic map. opts: { players, teams, map: makeMap opts, seed, peaceMinutes } */
+/** A World on a synthetic map. opts: { players, teams, map: makeMap opts (sacred: site points), seed, peaceMinutes, sacredVictory } */
 export function makeWorld(opts = {}) {
   const n = opts.players ?? 2;
   const mapOpts = { ...(opts.map || {}) };

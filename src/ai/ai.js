@@ -14,6 +14,7 @@ import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
+import { runSacred } from './sacred.js';
 
 const DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
 
@@ -42,6 +43,7 @@ export class AIPlayer {
     this.mil = newMilitary();
     this.godRetreat = new Set();
     this.militia = new Set();
+    this.pilgrims = new Map(); // worker id -> { site, since }: Worshippers sent to capture a sacred site
     this.pairs = [];
     this.drops = [];
     this.woodSpot = null;
@@ -108,6 +110,7 @@ export class AIPlayer {
     lap('econ');
     runMilitary(this, s);
     lap('military');
+    runSacred(this, s);
     manageWorkers(this, s);
     resumeSites(this, s);
     lap('workers');

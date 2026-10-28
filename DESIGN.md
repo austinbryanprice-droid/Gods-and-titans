@@ -558,7 +558,8 @@ from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid).
 ### 5.8 Victory
 A player is **defeated** when they own no buildings (finished or not; wall segments do not count).
 Their remaining units die and so do their wall segments (an ally could never open them). A team wins when every player not on that team is defeated (neutral excluded).
-`surrender` defeats the issuing player. Then `gameOver: { winningTeam }`.
+`surrender` defeats the issuing player. Then `gameOver: { winningTeam }`. With Sacred Victory on (5.11) a
+team that holds every sacred site for `SACRED_HOLD` seconds also wins: `gameOver: { winningTeam, how: 'sacred' }`.
 
 ### 5.9 Soldier ranks
 Mortal soldiers (every unit the Barracks trains: Warrior, Archer, Priest, Battering Ram and the pantheon's
@@ -655,6 +656,47 @@ for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the 
   mine sizes are not scaled for the mode. With no mines left the war is fought off that bank
   (one side was down to about 60 gold ten minutes in).
 
+### 5.11 Sacred Sites (and Sacred Victory)
+Neutral holy ground for every player to fight over, after Age of Empires IV's sacred sites. Every generated map
+has 3 to 5 (`mapData.sacred`, 6.7); they exist in every game. Rules in `src/sim/sacred.js`, numbers in config.js.
+- **Capture:** a Worshipper or Priest (`canCapture`: class `worker` or the Priest; not summoned) within
+  `SITE_RADIUS` (3) tiles of a site's center captures it while no unit of a rival team stands there: a neutral
+  site in `SITE_CAPTURE_TIME` (15 s); a rival's site is first torn down in `SITE_NEUTRALIZE_TIME` (10 s, `siteLost`)
+  and then captured (`siteCaptured`). Units of two hostile teams at a site (any unit, soldiers too) freeze it
+  (`contested`). Soldiers alone do not capture, but they hold their side's half-done capture; with nobody there
+  a half-done capture fades at the capture rate. Teammates share a capture (the site goes to the first player of
+  the team still there); a capture of another team's first has to fade. More capturers are not faster. A defeated
+  holder lets go of its sites. During a Decade of Peace sites can be taken (standing is not harming).
+- **Faith:** the holder gains `SITE_FAITH` (1) faith a second per site, shown in its faith rate (a full Shrine of 5
+  praying Worshippers is 2.5).
+- **Keep-out:** no building, wall or tower within `SITE_KEEP` (3) tiles of a site's center (`siteBlocksFootprint`,
+  shared by `placementError` and the client's ghost): `Too close to a sacred site.`
+- **Sacred Victory** (lobby toggle, `GameSetup.sacredVictory: true`): when every site is held by players of one
+  team a countdown of `SACRED_HOLD` (480 s) starts (`world.sacred = { team, end }`, event `sacredHold`); losing any
+  site stops it (`sacredBroken`); reaching `end` wins (`gameOver.how = 'sacred'`). No countdown runs while a
+  Decade of Peace holds (guards that cannot be fought would make it unbreakable); it starts when the peace ends.
+- **Placement** (`placeSacredSites` in mapgen, deterministic part): whole symmetry orbits, so every start is as
+  near to the sites as every other: a site on the center when the middle is open ground (not a lake or camp), then
+  an orbit between the starts (duel: two equidistant from both corners, or one on each corner's flank on a river
+  map; 3–4 players: one between each pair of neighbouring corners; team layout: one on each side edge, between
+  the teams), and stand-in orbits until there are 3 (4 on four-fold maps). Each needs open, footprint-free,
+  reachable ground within `SITE_CLEAR` (3) tiles, at least `SITE_MIN_START_DIST` (16) from a start's Town Center,
+  7 from a gold mine, 12 from a creep camp (9 if nothing fits) and 12 from another site; the search walks outward
+  from the target and keeps the first tile whose every image qualifies.
+- **Net:** snapshot `sites: [{ x, y, o, p?, c?, cn? }]` (holder, progress 0..1 rounded to 0.01, capturing player,
+  contested) and `sacred: null | { tm, end }`; everyone sees every site's state (public, as in AoE IV). Events
+  `siteCaptured { site, player }`, `siteLost { site, player }` (the former holder), `sacredHold { team, end }`,
+  `sacredBroken { team }` are packed.
+- **AI** (`src/ai/sacred.js`): from `pilgrimsFrom` (easy 6:00, normal 2:30, hard 1:40) up to `pilgrims` (1 / 2 / 3,
+  +1 with Sacred Victory) gold or wood Worshippers walk to sites their team does not hold, the nearest first;
+  normal and hard also take a rival's site when no rival soldier is within 8 tiles. A site with living creeps within
+  9 tiles of the walk there is skipped, and one where a pilgrim died or gave up (90 s) waits 120 s. A pilgrim goes
+  back to work once its team holds the site. When a rival team runs a Sacred Victory countdown the army leaves
+  home (military mode `site`) for the nearest of their sites, with a pilgrim escorted in.
+- **Client:** the 🛐 chip beside the clock (`src/ui/hud-sites.js`: sites held / total, and the countdown, green
+  when it is your side's, red and pulsing when a rival's), alerts (9), the minimap diamond, the 3D site (8), the
+  red ghost, How to Play, two tips, and the game-over line for a Sacred Victory.
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -670,6 +712,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 {
   version: '0.1.0', seed: 12345, mapSize: 'small' | 'medium',
   peaceMinutes: 30 | 45 | 60,  // optional, Decade of Peace (5.10): absent = a normal game
+  sacredVictory: true,         // optional, Sacred Victory (5.11): absent = only conquest wins
   players: [ // dense, index = position in this array = start position index
     { index: 0, name: 'Austin', team: 1, pantheon: 'greek', color: '#d63a3a', kind: 'human', difficulty: null },
     { index: 1, name: 'AI (Normal)', team: 2, pantheon: 'norse', color: '#3a78d6', kind: 'ai', difficulty: 'normal' },
@@ -761,7 +804,9 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
-  gameOver: null | { winningTeam },
+  sites: [{ x, y, o, p?, c?, cn? }], // sacred sites (5.11): holder, capture progress, capturing player, contested
+  sacred: null | { tm, end },  // Sacred Victory countdown: the team holding every site, the game time it wins at
+  gameOver: null | { winningTeam, how? }, // how: 'sacred' for a Sacred Victory
 }
 EntityView = {
   id, k,          // 'u' unit | 'b' building | 'm' gold mine
@@ -818,6 +863,10 @@ EntityView = {
 { type: 'titanSummoning', player, t }                                // broadcast drama
 { type: 'playerDefeated', player }
 { type: 'peaceEnd' }                                                 // the Decade of Peace is over (once)
+{ type: 'siteCaptured', site, player }                               // sacred site index taken (5.11)
+{ type: 'siteLost', site, player }                                   // the holder lost it (torn down or defeated)
+{ type: 'sacredHold', team, end }                                    // Sacred Victory countdown starts
+{ type: 'sacredBroken', team }                                       // ... and stops
 { type: 'gameOver', winningTeam }
 ```
 
@@ -831,7 +880,7 @@ EntityView = {
 (owner indices), `world.canPlaceBuilding(i, typeId, tx, ty)`,
 `world.placementError(i, typeId, tx, ty)` → the refusal text (5.3: `"Can't build there."`, `"Trees in the way."`,
 `"Another building is in the way."`, `"A gold mine is in the way."`, `"Something is in the way."`,
-`"The Decade of Peace holds for another m:ss: no building near an enemy Town Center yet."`,
+`"The Decade of Peace holds for another m:ss: no building near an enemy Town Center yet."`, `"Too close to a sacred site."`,
 `"Too close to a gold mine."`) `| null`, `world.peaceBuildBlocks(i, tx, ty, size)` (5.10: is that
 footprint within `PEACE_BUILD_GAP` of an enemy Town Center while the peace holds),
 `world.findPlacement(i, typeId, nearX, nearY, maxR)` → `{tx, ty} | null`,
@@ -868,6 +917,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   starts: [{ x, y }],              // town center footprint top-left per player (playerCount entries)
   mines: [{ tx, ty, amount }],     // 3×3 footprint top-left; first `playerCount` are the start mines (same order as starts)
   camps: [{ x, y, level }],        // neutral creep camps (level 1–3)
+  sacred: [{ x, y }],              // sacred site centers (5.11), whole symmetry orbits
   decor: [{ x, y, kind, rot, scale }], // render-only: 'rock'|'bush'|'flowers'|'ruin'|'stump'|'grass'
 }
 ```
@@ -965,7 +1015,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   client.state; client.mySlot; client.onChange(cb); client.setMine({ pantheon, team, color });
   client.onStart(cb({ setup, myIndex, conn })); client.onKicked(cb(reason)); client.onChat(cb); client.sendChat(text);
   ```
-  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
+  LobbyState: `{ roomCode, mapSize, peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
@@ -1005,6 +1055,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
   vs.on(type | '*', cb) → unsubscribe  // fired for every event in each pushed snapshot; also 'snapshot'
   vs.getEntity(id)
   vs.peaceLeft(); vs.peaceActive(); vs.canHarm(owner) // Decade of Peace (5.10): setup.peaceMinutes vs the snapshot time; may my units hurt this owner now
+  vs.sites; vs.sacred; vs.sacredVictoryOn(); vs.sacredLeft(); vs.sitesHeld(team) // Sacred Sites (5.11): map.sacred until the first snapshot
   ```
   Host local view uses a 50 ms delay; clients use `INTERP_DELAY_MS`.
 
@@ -1569,13 +1620,19 @@ per-frame budget, so a revealed army appears over a few frames.
   diagonal hatching and a brighter pulsing line only where the zone ends (not along the map's edge),
   drawn in the overlay scene under the footprint grid, visible exactly while a building or wall ghost
   is, rebuilt only when the Town Centers change.
+  Sacred sites (5.11): `SacredSiteLayer` (`src/render/sacred-sites.js`) draws each site from `map.sacred`: a paved
+  circle with seven standing stones, a stepped altar and a floating crystal (about 520 triangles, the stone shared by
+  every site), the crystal, runes and ring pale gold when neutral and in the holder's colour when held (with a faint
+  light beam), and a ground arc at the capture radius filling with `p` in the capturer's colour (flickering while
+  contested). Decor and ground cover keep off the paving, and mapgen's render part flattens the ground under it.
 
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
   Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
-  30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
+  30 / 45 / 60 min buttons, the host's pick; clients see it as text), victory (a Sacred Victory toggle, 5.11;
+  clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
@@ -1591,6 +1648,12 @@ per-frame budget, so a revealed army appears over a few frames.
   amount with +50 / +100 / +250 / +500, Max and Clear, a line saying what arrives after the
   market's cut, and Send (disabled with the reason while the trade would be refused). Received
   and sent shipments show as messages.
+  Sacred Sites (5.11): a 🛐 chip next to the clock shows the sites your side holds out of all of them and, while a
+  side holds every one with Sacred Victory on, the countdown (green for yours, red and pulsing for a rival's). Alerts
+  (`src/game/alerts.js`): your capture (a chime, all), a teammate's (all), a rival taking one or you or a teammate
+  losing one (important, Space jumps there), a side holding every site and that hold broken (a gong), and a line
+  with a gong at 2:00, 1:00 and 0:30 left on the countdown. The minimap draws each site as a diamond in the
+  holder's colour. One line as a Sacred Victory game opens.
   Decade of Peace (5.10): a 🕊️ countdown chip sits next to the game clock (tooltip explains it,
   it turns amber and pulses for the last minute and is gone when the peace ends); one line as the
   game opens, a reminder at 5:00, 1:00 and 0:10 (not for marks already passed when the HUD
@@ -1874,7 +1937,8 @@ profile's `armyCap`, a share of `POP_MAX` (easy 40 %, normal 80 %, hard 93 %), s
 population cap and easy stays well below it. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
-`canPlaceBuilding`, so it simply takes another spot.
+`canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
+break a rival's Sacred Victory countdown (5.11).
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 
