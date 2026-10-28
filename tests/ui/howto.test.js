@@ -79,3 +79,9 @@ test('team pings and markers are explained: the gestures, the buttons and who se
   assert.match(text, /Beside the minimap: Ping, Attack, Defend, Help and Gather/);
   assert.match(text, /Only your teammates/);
 });
+
+test('sacred sites and Sacred Victory are explained', () => {
+  assert.match(text, /Sacred sites 🛐/);
+  assert.match(text, /captures it in 15 seconds/);
+  assert.match(text, /holds every site for 8 minutes in a row also wins/);
+});

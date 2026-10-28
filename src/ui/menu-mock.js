@@ -64,6 +64,7 @@ function buildSetup(state, mySlotIndex) {
   });
   const setup = { version: GAME_VERSION, seed, mapSize: state.mapSize, players };
   if (state.peace) setup.peaceMinutes = state.peace;
+  if (state.sacred) setup.sacredVictory = true;
   return { setup, myIndex };
 }
 
@@ -83,6 +84,7 @@ export class LobbyHost extends Emitter {
       roomCode: this.roomCode,
       mapSize: 'small',
       peace: 0,
+      sacred: false,
       slots: [
         slot('host', { name, pantheon: 'greek', team: 1, color: 0 }),
         online ? slot('open', { team: 1, color: 1 }) : slot('ai', { name: aiName('normal'), team: 2, color: 1 }),
@@ -165,6 +167,11 @@ export class LobbyHost extends Emitter {
     this.emitChange();
   }
 
+  setSacred(on) {
+    this.state.sacred = !!on;
+    this.emitChange();
+  }
+
   startProblem() {
     const filled = this.state.slots.filter((s) => ['host', 'human', 'ai'].includes(s.kind));
     const teams = new Set(filled.map((s) => s.team));
@@ -213,6 +220,7 @@ export class LobbyClient extends Emitter {
       roomCode,
       mapSize: 'medium',
       peace: 45,
+      sacred: true,
       slots: [
         slot('host', { name: 'Hestia_42', pantheon: 'egyptian', team: 1, color: 3 }),
         slot('human', { name, pantheon: 'random', team: 1, color: 1, peerId: 'me' }),

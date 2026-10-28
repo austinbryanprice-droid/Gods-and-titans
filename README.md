@@ -25,6 +25,8 @@ Houses can grow, too: in a Town, select four Houses that stand together in a squ
 
 The host can pick the **Decade of Peace** game mode in the lobby: for the first 30, 45 or 60 minutes no player can harm another and nobody can build near an enemy Town Center, so everyone can build up and mass armies for one great battle (neutral creatures still fight).
 
+Every map has three to five **sacred sites**, rings of standing stones around a glowing altar placed fairly between the bases. A Worshipper or Priest standing at one with no enemy near captures it in 15 seconds, and each site you hold gives a steady trickle of faith. Turn on **Sacred Victory** in the lobby and a side that holds every site for 8 minutes in a row also wins, so a turtling opponent has to come out and fight.
+
 The game keeps an eye out for you. War drums and a minimap ping say when enemies come near your base or an ally is attacked, a gong marks the end of the Decade of Peace, and gentler reminders mention idle Worshippers, a full population, a god you can afford and an army standing about. If you are in another tab, the tab title flashes (or a desktop notification appears, if you allow it). A short gameplay tip shows up every couple of minutes. What the game tells you (those alerts, the gold and wood you have gathered, a god answering your call, chat) appears bottom left as stone cards with an emblem and a coloured edge, easy to read at any zoom and left up for 10 to 16 seconds; a message that repeats counts up (×2, ×3) instead of piling up. Settings and the F10 menu turn the alerts down or off, switch the tips off and pick what a background tab does.
 
 ## Controls

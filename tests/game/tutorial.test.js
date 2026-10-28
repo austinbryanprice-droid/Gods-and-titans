@@ -1,4 +1,4 @@
-// The guided first match (DESIGN 5.11, 9.2): its setup and board, the sleeping raiders, and a
+// The guided first match (DESIGN 5.12, 9.2): its setup and board, the sleeping raiders, and a
 // scripted learner who follows every objective in order through a real HostSession and wins.
 import test from 'node:test';
 import assert from 'node:assert/strict';

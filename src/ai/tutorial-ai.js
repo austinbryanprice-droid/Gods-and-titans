@@ -1,4 +1,4 @@
-// The raiders of the guided first match (DESIGN 5.11, difficulty 'tutorial'): a camp that sleeps.
+// The raiders of the guided first match (DESIGN 5.12, difficulty 'tutorial'): a camp that sleeps.
 // Its Worshippers go to their gold mine once, so the camp looks lived in; it builds, trains and
 // attacks nothing. Its guards fight back on their own (every unit answers an attack in range).
 import { GOLD_MINE } from '../data/index.js';

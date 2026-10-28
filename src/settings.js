@@ -35,11 +35,11 @@ function cleanName(name) {
  * `hints` whether a gameplay tip appears now and then, `tabAlerts` what a background tab does
  * when the game needs the player ('off', 'title', 'notify'). `intro` plays the intro film
  * when the game opens (src/ui/intro.js) and `narration` has a voice read its captions aloud
- * (src/intro/narrator.js). `volume` is the sound effects; `musicVolume` (0..1) and `musicMuted`
+ * (src/intro/narrator.js). `aiChat` shows the computer players' in-character chat lines (src/ai/voice.js). `volume` is the sound effects; `musicVolume` (0..1) and `musicMuted`
  * are the background music's own (src/audio/music.js).
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, musicVolume: 0.5, musicMuted: false };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -58,6 +58,7 @@ function sanitize(raw, base) {
   if (TAB_ALERTS.includes(raw.tabAlerts)) out.tabAlerts = raw.tabAlerts;
   if (typeof raw.intro === 'boolean') out.intro = raw.intro;
   if (typeof raw.narration === 'boolean') out.narration = raw.narration;
+  if (typeof raw.aiChat === 'boolean') out.aiChat = raw.aiChat;
   if (typeof raw.musicVolume === 'number' && Number.isFinite(raw.musicVolume)) out.musicVolume = Math.min(1, Math.max(0, raw.musicVolume));
   if (typeof raw.musicMuted === 'boolean') out.musicMuted = raw.musicMuted;
   return out;
@@ -101,7 +102,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, musicVolume: number, musicMuted: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean }}
  */
 export function getSettings() {
   return load();
