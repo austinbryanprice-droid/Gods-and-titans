@@ -1,7 +1,8 @@
 // Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
 // as an HTML overlay in #menu-root over an animated night-sky backdrop.
 //
-//   const menu = createMenu({ root, onStart, onIntro })   // onStart(launch) when a lobby starts; onIntro() replays the intro film
+//   const menu = createMenu({ root, onStart, onIntro, onLoad, onReplay })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
+//                                                                           // onLoad(slot) carries on a saved game (DESIGN 9.4); onReplay(id | record) watches a replay (9.5)
 //   showMenu(screen = 'title')  /  hideMenu()
 //
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
@@ -11,6 +12,7 @@ import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, optionNote } from './speed-options.js';
 import { sfx } from '../audio/sfx.js';
 import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
 import { h, setChildren, copyText } from './menu-dom.js';
@@ -18,8 +20,11 @@ import { createMenuBackdrop } from './menu-fx.js';
 import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow, blessingRow, styleLine } from './menu-pantheons.js';
 import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
+import { renderReplays } from './menu-replays.js';
 import { getCareer, markSeen } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
+import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
+import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { campaignSetup } from '../sim/campaign.js';
 import { campaignScreen as buildCampaignScreen } from './menu-campaign.js';
@@ -96,9 +101,9 @@ function closeLobby(lobby) {
 
 /**
  * Build the menu inside `root`.
- * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void }} opts
+ * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void, onLoad?: (slot: string) => Promise<void> }} opts
  */
-export function createMenu({ root, onStart, onIntro = null }) {
+export function createMenu({ root, onStart, onIntro = null, onLoad = null, onReplay = null }) {
   const params = urlParams();
   const useMock = params.get('mockLobby') === '1';
   const tOverride = params.get('transport');
@@ -272,7 +277,27 @@ export function createMenu({ root, onStart, onIntro = null }) {
     career: careerScreen,
     campaign: (opts) => buildCampaignScreen({ go, onBegin: startMission, mission: opts.mission || null }),
     settings: settingsScreen,
+    load: loadScreen,
   };
+
+  /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
+  async function loadSlot(slot) {
+    if (!onLoad) return;
+    const done = busy('Loading the saved game…');
+    try {
+      sfx.play('horn');
+      await onLoad(slot);
+    } catch (err) {
+      toast(err?.message || 'The saved game could not be loaded.');
+    } finally {
+      done();
+    }
+  }
+
+  /** "Greek vs Norse (Hard) · small map · 23:10 · 5 min ago" for a save's info. */
+  function saveLine(info) {
+    return `${info.label || 'Saved game'} · ${clockText(Math.floor(info.time || 0))} · ${savedAgo(info.savedAt)}`;
+  }
 
   function titleScreen() {
     const counts = {
@@ -291,6 +316,9 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
       h('span.mw-btn-label', 'Quick Match'), quickSub,
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
+    // Continue: the newest saved game (the autosave or a slot), in one click. Load Game lists them all.
+    const saves = onLoad ? listSaves() : [];
+    const continueBtn = saves.length ? mainBtn('Continue', saveLine(saves[0]), () => loadSlot(saves[0].slot), 'mw-continue-btn') : null;
     let quick = null;
     loadLobby().then((mod) => {
       if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
@@ -308,6 +336,26 @@ export function createMenu({ root, onStart, onIntro = null }) {
         onStart(launch);
       } catch (err) {
         toast(err?.message || 'Could not start the game.');
+      }
+    }
+    // The daily challenge (src/game/daily.js, DESIGN 9.3): the same seeded game for everyone today, today's best and the streak.
+    const daily = dailyStatus();
+    const dailySub = [`Today: ${dailyLabel(daily.challenge)}`];
+    if (daily.today) dailySub.push(`best ${daily.today.best.toLocaleString('en-US')}`);
+    const dailyBtn = mainBtn('Daily Challenge', dailySub.join(' · '), playDaily, 'mw-daily-btn');
+    dailyBtn.title = `${daily.challenge.twist.name}: ${daily.challenge.twist.desc}`;
+    if (daily.streak > 0) {
+      dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge.mw-streak-badge', {
+        title: daily.playedToday ? `${daily.streak} day${daily.streak === 1 ? '' : 's'} in a row` : `Play today to keep your ${daily.streak}-day streak`,
+      }, daily.playedToday ? `🔥 ${daily.streak}` : `🔥 ${daily.streak} · keep it`));
+    } else if (!daily.playedToday) dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New today'));
+    async function playDaily() {
+      try {
+        const launch = dailyLaunch(await import('../net/lobby.js'), daily.challenge.day, getSettings().name); // the real lobby: it builds the setup
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the daily challenge.');
       }
     }
     const career = getCareer();
@@ -331,13 +379,16 @@ export function createMenu({ root, onStart, onIntro = null }) {
       ),
       h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
+        continueBtn,
         playBtn,
         quickBtn,
+        dailyBtn,
         learnBtn,
         campaignBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
         h('div.mw-nav-row',
+          saves.length ? h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('load') }, 'Load Game') : null,
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
           h('button.mw-btn.mw-btn--small.mw-career-btn', { type: 'button', onclick: () => go('career') }, 'Career',
             newCount ? h('span.mw-new-badge', { title: `${newCount} new achievement${newCount === 1 ? '' : 's'}` }, String(newCount)) : null),
@@ -350,7 +401,40 @@ export function createMenu({ root, onStart, onIntro = null }) {
         h('span.mw-foot-item', `v${GAME_VERSION}`),
       ),
     );
-    return { el, focus: playBtn, cleanup: off };
+    return { el, focus: continueBtn || playBtn, cleanup: off };
+  }
+
+  // ---------------------------------------------------------- load game
+
+  function loadScreen() {
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
+    const list = h('div.mw-save-list');
+    function render() {
+      const saves = listSaves();
+      if (!saves.length) {
+        setChildren(list, h('p.mw-hint', 'No saved games yet. Save a game against the computer from the in-game menu (F10).'));
+        return;
+      }
+      setChildren(list, saves.map((info) => h('div.mw-save-row',
+        h('div.mw-save-text',
+          h('b', info.slot === AUTO_SLOT ? 'Autosave' : `Slot ${info.slot}`),
+          h('span', saveLine(info))),
+        h('button.mw-btn.mw-btn--primary.mw-btn--small', { type: 'button', onclick: () => loadSlot(info.slot) }, 'Load'),
+        h('button.mw-btn.mw-btn--ghost.mw-btn--small', { type: 'button', title: 'Delete this saved game', onclick: async () => {
+          if (typeof confirm === 'function' && !confirm(`Delete ${info.slot === AUTO_SLOT ? 'the autosave' : `slot ${info.slot}`}?`)) return;
+          await deleteSave(info.slot);
+          render();
+        } }, 'Delete'),
+      )));
+    }
+    render();
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-load-panel',
+        h('header.mw-panel-head', backBtn, h('h2.mw-h2', 'Load Game'), h('span.mw-head-spacer')),
+        list,
+        h('p.mw-hint', 'Saved games are kept in this browser on this device. A game is autosaved every three minutes of game time; Save & Quit in the game menu keeps it for Continue.')),
+    );
+    return { el, focus: backBtn, onEscape: () => go('title') };
   }
 
   // ---------------------------------------------------------- lobby
@@ -1084,7 +1168,7 @@ export function createMenu({ root, onStart, onIntro = null }) {
     const el = h('div.mw-center-screen.mw-wide-screen',
       h('section.mw-panel.mw-howto-panel.mw-career-panel',
         h('header.mw-panel-head', backBtn, h('h2.mw-h2', `Career of ${getSettings().name}`), h('span.mw-head-spacer')),
-        h('div.mw-scroll', renderCareerContent(c, unseen),
+        h('div.mw-scroll', renderCareerContent(c, unseen, onReplay ? renderReplays({ onWatch: (what) => onReplay(what), toast }) : null),
           h('p.mw-hint', 'Your career is kept in this browser on this device. A game counts once it ends, or when you leave it after its first minute.')),
       ),
     );
@@ -1213,6 +1297,22 @@ export function createMenu({ root, onStart, onIntro = null }) {
     };
     renderT();
 
+    // Game speed (matches against the computer) and the size of the in-game interface.
+    const segField = (key, options) => {
+      const note = h('div.mw-field-note');
+      const btns = options.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { v: id }, onclick: () => {
+        saveSettings({ [key]: id });
+        render();
+      } }, label));
+      const render = () => {
+        const v = getSettings()[key];
+        btns.forEach((b) => b.classList.toggle('is-active', b.dataset.v === v));
+        note.textContent = optionNote(options, v);
+      };
+      render();
+      return [h('div.mw-segmented', btns), note];
+    };
+
     // Alerts (src/game/alerts.js) and what a background tab does about them (src/ui/tab-attention.js).
     const aNote = h('div.mw-field-note');
     const aBtns = ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { a: id }, onclick: () => {
@@ -1255,6 +1355,8 @@ export function createMenu({ root, onStart, onIntro = null }) {
           h('span.mw-field-note', 'Every pantheon has its own score: calm while you build, louder in a fight. The Decade of Peace stays calm until the war horn.')),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
+        h('div.mw-field', h('span.mw-label', 'Game speed'), ...segField('gameSpeed', GAME_SPEED_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Interface size'), ...segField('uiScale', UI_SCALE_OPTIONS)),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
           toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),

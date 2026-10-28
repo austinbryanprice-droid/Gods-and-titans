@@ -32,6 +32,7 @@ import { newPowerState, updatePowers, boonPct } from './powers.js';
 import { createSurvival, updateSurvival, survivalOn } from './survival.js';
 import { isTutorial, tutorialStart } from './tutorial.js';
 import { campaignOn, missionOf, campaignStart, createCampaign, updateCampaign, campaignVictory } from './campaign.js';
+import { startOf } from '../data/twists.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
 
@@ -68,6 +69,7 @@ export class World {
     this.fields = [];
     this.reveals = [];
     this.cmdQueue = [];
+    this.onCommand = null; // (tick, player, command) for every command accepted: the replay recorder (src/game/replay.js)
     this.hash = new SpatialHash(this.map.width, this.map.height, 2);
     this.paths = new PathService(this.map);
     this.maxRadius = 0.5;
@@ -91,6 +93,8 @@ export class World {
     this.perf = { lastTickMs: 0, commandErrors: 0, lastCommandError: '' };
 
     const pickRng = this.rng.fork('pantheons');
+    // The daily challenge's twist (data/twists.js) may change everyone's start.
+    this.start = startOf(setup, START_RESOURCES, START_WORKERS);
     this.players = setup.players.map((sp, i) => {
       let pantheon = sp.pantheon;
       if (typeof pantheon !== 'string' || !Object.hasOwn(PANTHEONS, pantheon)) pantheon = pickRng.pick(PANTHEON_LIST).id;
@@ -102,9 +106,9 @@ export class World {
         color: sp.color || PLAYER_COLORS[i % PLAYER_COLORS.length],
         kind: sp.kind || 'human',
         difficulty: sp.difficulty ?? null,
-        gold: START_RESOURCES.gold,
-        wood: START_RESOURCES.wood,
-        faith: START_RESOURCES.faith,
+        gold: this.start.gold,
+        wood: this.start.wood,
+        faith: this.start.faith,
         faithRate: 0,
         tier: 1,
         popUsed: 0,
@@ -158,7 +162,7 @@ export class World {
       }
     }
     spots.sort((a, b) => a.d - b.d || a.y - b.y || a.x - b.x);
-    for (let k = 0; k < START_WORKERS; k++) {
+    for (let k = 0; k < this.start.workers; k++) {
       const s = spots[k] || spots[k % Math.max(1, spots.length)] || { x: tc.x, y: tc.ty + tc.size + 0.5 };
       this.spawnUnit(player, 'worshipper', s.x, s.y, { facing: Math.atan2(ty - s.y, tx - s.x), silent: true });
     }
@@ -496,7 +500,6 @@ export class World {
 
   // ------------------------------------------------------------- commands
 
-  /** Queue a command; it is applied at the start of the next tick. */
   /**
    * Queue a command for the next tick. Untrusted input: anything that is not a
    * well-formed command is dropped (never throws); see normalizeCommand.
@@ -508,6 +511,7 @@ export class World {
     if (!clean) return;
     this.cmdCounts[playerIndex]++;
     this.cmdQueue.push([playerIndex, clean]);
+    if (this.onCommand) this.onCommand(this.tickCount, playerIndex, clean);
   }
 
   setOrder(u, o, queue = false) {

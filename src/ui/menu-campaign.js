@@ -1,4 +1,4 @@
-// The campaign's chapter screen (DESIGN 9.3, 5.16): the five missions of Chapter I down the left (locked, open, won
+// The campaign's chapter screen (DESIGN 9.6, 5.16): the five missions of Chapter I down the left (locked, open, won
 // with the best time), and the chosen one's briefing on the right, read aloud by the narrator, with its objectives
 // and a Begin button. A mission opens once the one before it is won (src/game/campaign-progress.js).
 //

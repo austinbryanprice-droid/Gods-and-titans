@@ -840,7 +840,7 @@ Treasures of world myth that give creeping a reward beyond the bounty (WC3 items
 
 ### 5.16 Campaign missions (`src/data/campaign.js`, `src/sim/campaign.js`)
 A GameSetup with `campaign: '<mission id>'` (built by `campaignSetup(id, { name, version })`, started from the
-chapter screen of 9.3, solo, no lobby) plays one mission of Chapter I, "The Long Winter": five missions for the
+chapter screen of 9.6, solo, no lobby) plays one mission of Chapter I, "The Long Winter": five missions for the
 Greeks against Norse raiders, in order. The hero is always player 0; the mission's data fixes the seed, map size,
 the computer players (name, pantheon, team, difficulty; `'tutorial'` is the sleeping camp of 5.13), whether creep
 camps are spawned, and each side's start (`start[i]`: purse, a Town Center health in place of 2000, finished
@@ -1628,6 +1628,17 @@ per-frame budget, so a revealed army appears over a few frames.
   markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
   keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
   shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
+  The sun's shadow box (`updateShadowCamera`) is fitted each frame to the view's ground quad as the
+  sun sees it (its extent along the light's right and up axes, plus a margin on the up-sun side for
+  what stands 8 units above the ground), not a square as wide as the view: anything whose shadow
+  falls in the view lies on the same sun ray as the point it darkens, so this covers every caster,
+  and a low sun no longer stretches the box 100+ tiles up-sun (that drew every forest chunk along
+  the strip into the map, more triangles than the visible scene). Its half sizes step by 2 tiles and
+  its center snaps to texels. Forest chunks are culled by their instances' box as well as their
+  bounding sphere (`chunkInFrustum` in props.js; the box grows by `CHUNK_BOX_PAD` for what the
+  shader does to a tree: a spruce's own shape and the wind). Late game at the population cap, Medium, default
+  zoom: shadow-pass triangles 1.0M to 0.6M, whole frame 1.75M to 1.1M, draw calls 373 to 228
+  (`node tools/perf-late.mjs`, which also profiles the real game with `--game`).
   Buildings (`src/render/models/building-*.js`, four layers): `building-core.js` holds the colors,
   surface classes and geometry primitives and the Kit that merges a building's parts into four
   vertex-colored buckets (foundation, body, team, glow); `building-materials.js` the shared materials
@@ -1871,6 +1882,15 @@ per-frame budget, so a revealed army appears over a few frames.
   random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
   AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
   Online games offer neither.
+  **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
+  choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
+  (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the
+  F10 menu: `Ticker.setSpeed` runs that many more or fewer ticks a real second (each tick is still `DT` of game time,
+  so the sim and its determinism are untouched), `ViewState.setRate` plays the snapshots back on local time × rate
+  (re-anchoring the clock; above normal the interpolation delay stays as long in real time), and
+  `GameRenderer.setSpeed` scales the animations' dt but not the camera's. Online games always run at Normal and their
+  F10 menu leaves the row out. The interface size multiplies the HUD's base font size (`--hud-scale` on #hud-root):
+  Small 0.85, Normal 1, Large 1.15, Larger 1.3; every HUD panel is sized in em, so all of it follows.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
@@ -2187,12 +2207,98 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
-### 9.3 Campaign (src/ui/menu-campaign.js, src/ui/hud-campaign.js, src/game/campaign-progress.js, src/game/campaign-voice.js)
+### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
+One game against the computer per local calendar day, the same on every device: everything comes from the day's
+key ('YYYY-MM-DD'): the map seed, my pantheon, any AI ally's and the rivals' pantheons (no pantheon twice) and a
+twist. The nine twists come round in a seeded shuffle of nine days, so every twist appears once a cycle:
+- Start changes the sim applies to every city, AI included (`setup.twist`, read by the World through
+  `startOf`; an unknown id is a normal game): Golden Age (three times the gold and wood), Blessed Start
+  (+350 faith), Humble Beginnings (two worshippers, half the gold and wood), Crowded Hearths (ten worshippers).
+- Sides and modes built into the lobby state: A Worthy Foe (one Hard AI), Outnumbered (a Normal and an Easy AI
+  allied against me, medium map), Brothers in Arms (an AI ally against two Normal AIs), Holy Ground
+  (Sacred Victory, 5.11), Trial of the Titans (with an AI ally, 5.14). Other twists face one Normal AI on a small map.
+
+Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
+today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
+loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
+with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in
+localStorage under `mythicwar-daily`: `{ days: { day: { best, plays, won } } }`, the last 60 days. The streak
+is the run of days played up to today, or up to yesterday while today is not played yet.
+
+### 9.4 Saved games (src/game/save-game.js, src/game/save-store.js, src/game/game-saves.js, src/sim/save-graph.js)
+A match against the computer (one human, the rest AI; not the guided first match) can be saved and carried on.
+- In the match: the F10 menu has **Save Game** (three slots, each showing its match, game time and when it was
+  saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
+  without counting the match in the career: it counts when it ends after being carried on). The game is also
+  autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
+  ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept.
+- Title screen: **Continue** (above Play vs AI) loads the newest save, autosave or slot; **Load Game** (small
+  button, shown once a save exists) lists them all with Load and Delete.
+- What is saved: the whole World (entities, map state, pathfinding queue, projectiles, statuses, powers, relics,
+  sites, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
+  `packGraph` (sim/save-graph.js): object identity and cycles, Maps, Sets, typed arrays, NaN, ±Infinity and -0
+  survive; class instances come back on their prototypes (`CLASSES` in save-game.js; the pathfinder's scratch
+  buffers are rebuilt, not saved); unit and building data, config and the generated map are stored by name and
+  looked up again (the map is generated again from the setup's seed). A function in the state throws with its
+  path, so a test catches new state that cannot be saved. Also kept: the fog explored, enemy buildings and mines
+  as last seen, the camera, control groups, the chronicle's samples and the career tracker's tally.
+- Determinism: the loaded game plays the same ticks exactly as the saved one would have (the packed state of both,
+  compared after 90 more seconds of AI-vs-AI play, is identical: tests/game/save-game.test.js, also for the Trial of
+  the Titans, the Decade of Peace and Sacred Victory). A loaded game's `HostSession` (`resumed: true`) drops the
+  saved tick's leftover events and brings the felled trees down in its first snapshot.
+- Storage: on this device only. The state (about 400 KB of JSON at minute 8 of a small map, gzipped with
+  `CompressionStream` to a few tens of KB) goes to IndexedDB `mythicwar-saves`; the slot list goes to
+  localStorage `mythicwar-saves`. `SAVE_FORMAT` is checked on load; a save from an older build of the game loads
+  as long as the state it holds still fits the code (a save that no longer does fails on the start screen).
+
+### 9.5 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
+The sim is deterministic (same setup and the same commands on the same ticks give the same game), so a
+replay is not a video: it is the GameSetup, every command the World accepted with its tick, the chat with
+its ticks, and checksums.
+- Recording (host only: a client has no World): `ReplayRecorder` sets `World.onCommand`, which
+  `issueCommand` calls for each command it queues, from every player (the AIs and an AI that took over
+  from a player who left too), as the compact form of `normalizeCommand`'s copy (empty fields dropped;
+  normalizing it again gives the same command). On each host snapshot, at most every 10 s of game time,
+  it keeps `worldChecksum` (the tick, every player's resources, every living unit's id, place and health,
+  every building's health), and one on the last tick. The guided first match is not recorded, nor is a game
+  carried on from a save (9.4: a replay starts from the setup, and that game's start is not kept).
+- Kept: at the game-over screen (with the result) or on leaving (result null, "Left early"), when the game
+  ran 30 s or more. `saveReplay` stores it in IndexedDB (`mythicwar-replays`: a `meta` list row and the
+  `data`, gzip-compressed by CompressionStream; a 2-player 15-minute game is about 26 KB, a 4-player
+  22-minute one about 100 KB), keeping the newest 12. Storage that is off keeps nothing, silently.
+  A record: `{ format: 1, id, version (PROTOCOL_VERSION), date, setup, pov, ticks, result, winningTeam,
+  mode, players, truncated, cmds: [[tick, player, cmd]], chat: [[tick, from, text, voice?, system?]],
+  sums: [[tick, hash]] }`. Loading (and opening a file, untrusted) goes through `sanitizeReplay`:
+  the setup through `validateSetup`, the commands in tick order through `normalizeCommand`.
+- Playback: a Game built with `replay` runs a `ReplaySession` (the HostSession surface) whose World gets
+  the recorded commands on their ticks: no AIs, no orders taken, no alerts, chronicle, career or recording.
+  Speeds ½×, 1×, 2×, 4×, 8× (the ticker runs that fast, a snapshot every speed/2 ticks); the ViewState's
+  `clock` is a `PlaybackClock` running at the same speed and stopping while paused, so units move smoothly
+  at every speed. A jump ahead runs the ticks in 24 ms slices (events dropped, the trees felled on the way
+  fall at once with `felledAll`). Going back starts a new Game at that tick (a World cannot run backwards,
+  nor can the trees regrow), keeping speed, eyes and camera. A checksum that does not match marks the
+  moment the replay parted from the recorded game (a replay from an earlier build, whose rules have
+  changed): the timeline gets a red mark and the bar says so; one from another build says it may differ.
+- Eyes: everyone (`myIndex` -1, no fog) or one player (`ViewState.setViewer`: their fog of war and top bar;
+  the map counts as explored, as no memory of it was kept). The free camera turns round its target and
+  tilts (`CameraController.rotate`, `tiltBy`, `resetAngle`: pan and edge scroll turn with it; the pitch
+  stays 22° to 68°).
+- The bar (above the bottom panel; the command card and the marker and power buttons are hidden): ⏮, play /
+  pause (↻ at the end), +30 s, the speeds, the timeline (click: go there), the eyes, turn ⟲ ⟳, tilt ⤒ ⤓,
+  the normal view ⌖, Leave. Keys: Space play / pause, [ and ] speed, J +30 s, V next eyes, Q / E turn,
+  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free).
+- Where: the game-over screen's Watch Replay (this match from its start), and the Career screen's Replays:
+  each kept game with its sides, result, date, mode and length, Watch, Save (a `.mwreplay` file, the packed
+  record) and Delete, and Open a replay file.
+
+### 9.6 Campaign (src/ui/menu-campaign.js, src/ui/hud-campaign.js, src/game/campaign-progress.js, src/game/campaign-voice.js)
 Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won") opens the
 chapter screen: the five missions down the left (locked with a padlock until the one before is won, a tick and
 the best time once won) and the chosen one's briefing on the right (where, who you face and who stands with
 you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in localStorage
-`mythicwar-campaign` (`{ won: { id: { best, at } } }`); missions are not games of the career.
+`mythicwar-campaign` (`{ won: { id: { best, at } } }`); missions are not games of the career, nor saved (9.4); a mission is kept as a replay (9.5), whose panel and narrator follow the mission.
 - The narrator: every briefing, every event's line and every victory text is a recorded clip in
   assets/narration/campaign (Kokoro "George", as the intro film: `tools/narration/render.py --lines`, with the
   list from `tools/narration/campaign-lines.mjs`), named `<mission>-<part>-<hash of the words>.mp3`, so new

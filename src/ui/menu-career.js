@@ -1,5 +1,6 @@
 // The Career screen (DESIGN 9.1): the profile kept on this device (games, wins, win rate,
-// favourite pantheon, records, wins per pantheon, the last games) and the achievements
+// favourite pantheon, records, wins per pantheon, the last games), the replays kept here
+// (src/ui/menu-replays.js) and the achievements
 // gallery, grouped, with the locked ones dimmed and a progress bar where one counts.
 import { h } from './menu-dom.js';
 import { pantheonEmblem } from './menu-pantheons.js';
@@ -88,14 +89,16 @@ function gallery(c, unseen) {
  * The screen's body for a career `c`; `unseen` (ids unlocked since the screen was last open)
  * get a "New" badge.
  */
-export function renderCareerContent(c, unseen = new Set()) {
+export function renderCareerContent(c, unseen = new Set(), replays = null) {
   return [
     profile(c),
     h('h3.mw-label', 'Wins by pantheon'),
     pantheonGrid(c),
     h('h3.mw-label', 'Last games'),
     history(c),
+    replays ? h('h3.mw-label', 'Replays') : null,
+    replays,
     h('h2.mw-h2.mw-car-ach-title', 'Achievements'),
     ...gallery(c, unseen),
-  ];
+  ].filter(Boolean);
 }

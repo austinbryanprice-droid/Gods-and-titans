@@ -9,11 +9,13 @@ import { el } from './hud-dom.js';
 import { chronicleView } from './hud-chronicle.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS } from './speed-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
 import { MEDALS } from '../data/medals.js';
 import { CAMPAIGN } from '../data/campaign.js';
+import { SLOTS, saveInfo, savedAgo } from '../game/save-store.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -22,6 +24,17 @@ const END_TEXT = {
 };
 
 /** The line under a finished Trial of the Titans. */
+/** The daily challenge's result (DESIGN 9.3): the score against today's best, and the streak of days. */
+function dailyLine(d) {
+  if (!d) return null;
+  const n = (v) => v.toLocaleString('en-US');
+  const score = d.first ? `Daily challenge: ${n(d.score)} points, today's first try.`
+    : d.isNew ? `Daily challenge: ${n(d.score)} points, a new best today (it was ${n(d.previous)}).`
+      : `Daily challenge: ${n(d.score)} points · today's best ${n(d.best)}.`;
+  const streak = d.streak > 1 ? ` 🔥 ${d.streak} days in a row.` : '';
+  return el('div', `hud-go-best hud-go-daily${d.isNew ? ' is-new' : ''}`, score + streak);
+}
+
 function survivalLine(wave) {
   if (wave <= 0) return 'The Trial of the Titans is over before the first wave even came.';
   if (wave === 1) return 'The Trial of the Titans is over: the first wave broke your city.';
@@ -150,6 +163,9 @@ export class Overlays {
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
+    // Game speed only in a match against the computer: an online game runs at one pace for everyone.
+    const speed = game.solo ? choiceRow('Game speed', GAME_SPEED_OPTIONS, s.gameSpeed, (v) => saveSettings({ gameSpeed: v })) : null;
+    const uiScale = choiceRow('Interface size', UI_SCALE_OPTIONS, s.uiScale, (v) => saveSettings({ uiScale: v }));
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
     const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
@@ -191,7 +207,11 @@ export class Overlays {
 
     const resume = btn('Resume', 'mw-btn--primary', () => this.closeMenu());
     const buttons = [resume];
-    if (!over && !defeated) {
+    // A solo match against the computer can be saved and carried on later (DESIGN 9.4).
+    const savable = typeof game.canSave === 'function' && game.canSave();
+    if (savable) buttons.push(btn('Save Game', '', () => this.openSaves()));
+    const replay = !!game.replay;
+    if (!over && !defeated && !replay) {
       buttons.push(btn('Surrender', 'mw-btn--ghost is-danger', () => this.confirm(
         'Surrender?', 'Your buildings will crumble and you will be defeated.', 'Surrender',
         () => {
@@ -203,21 +223,36 @@ export class Overlays {
       )));
     }
     let quitHint = 'Return to the main menu.';
-    if (!over) {
+    if (replay) quitHint = 'Leave the replay.';
+    else if (!over) {
       if (this.hostingOthers()) quitHint = 'The game ends for every player.';
       else if (game.session && !game.session.isHost) quitHint = 'An AI will take over your army.';
-      else quitHint = 'The battle will be lost.';
+      else quitHint = savable ? 'The battle will be lost. Save & Quit keeps it for Continue on the title screen.' : 'The battle will be lost.';
     }
-    buttons.push(btn('Quit to Menu', 'mw-btn--ghost', () => {
-      if (over) return game.quitToMenu();
+    if (savable) {
+      buttons.push(btn('Save & Quit', 'mw-btn--ghost', (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = 'Saving…';
+        game.saveAndQuit().catch((err) => {
+          b.disabled = false;
+          b.textContent = 'Save & Quit';
+          if (game.hud) game.hud.message(`Could not save: ${err && err.message ? err.message : err}`, 'error');
+        });
+      }));
+    }
+    buttons.push(btn(replay ? 'Leave Replay' : 'Quit to Menu', 'mw-btn--ghost', () => {
+      if (over || replay) return game.quitToMenu();
       this.confirm('Quit to Menu?', quitHint, 'Quit', () => game.quitToMenu(), () => this.openMenu());
     }));
 
-    const node = this.panel('Game Menu', paused ? 'The game is paused.' : `Game time ${formatClock(vs.time)}`,
+    const node = this.panel(replay ? 'Replay Menu' : 'Game Menu', paused ? (replay ? 'The replay is paused.' : 'The game is paused.') : `Game time ${formatClock(vs.time)}`,
       el('div', 'hud-obtns is-col', ...buttons),
       el('div', 'hud-options',
         el('div', 'mw-label', 'Options'),
+        speed && speed.row,
         sky.row,
+        uiScale.row,
         bars.row,
         edge.row,
         tips.row,
@@ -236,6 +271,49 @@ export class Overlays {
     return wrap;
   }
 
+  /**
+   * The Save Game panel: the three slots with what each holds; a click saves there (over what was in it).
+   * Back (or Esc) returns to the game menu; the game stays paused throughout.
+   */
+  openSaves() {
+    const game = this.game;
+    const status = el('div', 'hud-ohint hud-save-status', 'Pick a slot. Saved games stay in this browser on this device.');
+    status.setAttribute('role', 'status');
+    const slotText = (slot) => {
+      const info = saveInfo(slot);
+      if (!info) return [el('b', null, `Slot ${slot}`), el('small', null, 'Empty')];
+      return [el('b', null, `Slot ${slot} · ${formatClock(info.time || 0)}`), el('small', null, `${info.label || 'Saved game'} · ${savedAgo(info.savedAt)}`)];
+    };
+    const rows = SLOTS.map((slot) => {
+      const b = el('button', 'mw-btn hud-obtn hud-save-slot', ...slotText(slot));
+      b.type = 'button';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.play('click');
+        rows.forEach((r) => (r.disabled = true));
+        status.textContent = 'Saving…';
+        game.saveGame(slot).then(() => {
+          b.replaceChildren(...slotText(slot));
+          status.textContent = `Saved to slot ${slot}.`;
+          sfx.play('select');
+        }, (err) => {
+          status.textContent = `Could not save: ${err && err.message ? err.message : err}`;
+          sfx.play('error');
+        }).finally(() => rows.forEach((r) => (r.disabled = false)));
+      });
+      return b;
+    });
+    const back = btn('Back', 'mw-btn--ghost', () => this.openMenu());
+    const node = this.panel('Save Game', null, el('div', 'hud-obtns is-col hud-save-slots', ...rows), status, el('div', 'hud-obtns', back));
+    if (this.current) {
+      // Swap panels without running the menu's onHide (keeps the pause).
+      this.current.el.remove();
+      this.current = null;
+    }
+    this.show('saves', node, () => this.openMenu());
+    setTimeout(() => rows[0].focus({ preventScroll: true }), 0);
+  }
+
   /** True on a host with other players connected: the game runs here, so leaving ends it for them. */
   hostingOthers() {
     const s = this.game.session;
@@ -243,14 +321,14 @@ export class Overlays {
   }
 
   closeMenu() {
-    if (this.name === 'menu' || this.name === 'confirm') {
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves') {
       this.hide();
       this.game.setPaused(false);
     }
   }
 
   toggleMenu() {
-    if (this.name === 'menu' || this.name === 'confirm') this.closeMenu();
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves') this.closeMenu();
     else this.openMenu();
   }
 
@@ -300,7 +378,7 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
-  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, mission = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null, mission = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const survival = result === 'survival';
@@ -322,6 +400,7 @@ export class Overlays {
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
       best,
+      dailyLine(daily),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.medalCard(medal),
       this.missionLine(mission),
@@ -332,20 +411,23 @@ export class Overlays {
     this.show('gameover', node, () => this.hide());
   }
 
-  /** Play Again (or a mission's Next Mission and Retry), Return to Menu and Keep Watching. */
+  /** Play Again (or a mission's Next Mission and Retry), Watch Replay, Return to Menu and Keep Watching. */
   gameOverButtons(mission) {
     const watch = btn('Keep Watching', 'mw-btn--ghost', () => this.hide());
+    const replay = this.canWatchReplay() ? btn('Watch Replay', 'mw-btn--ghost', () => this.game.watchReplay()) : null;
     if (mission) {
       const next = mission.next && typeof this.game.nextMission === 'function' && typeof this.game.onNextMission === 'function';
       return [
         next ? btn('Next Mission', 'mw-btn--primary', () => this.game.nextMission()) : null,
         this.canRematch() ? btn(mission.record ? 'Play It Again' : 'Retry Mission', next ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.rematch()) : null,
+        replay,
         btn('Campaign', 'mw-btn--ghost', () => this.game.quitToMenu()),
         watch,
       ];
     }
     return [
       this.canRematch() ? btn('Play Again', 'mw-btn--primary', () => this.game.rematch()) : null,
+      replay,
       btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
       watch,
     ];
@@ -359,6 +441,11 @@ export class Overlays {
       : r.first ? (mission.next ? `The next mission is open: ${mission.next.title}.` : `Mission won in ${formatClock(r.best)}.`)
         : r.best < r.previous ? `A new best time! ${formatClock(r.best)} (was ${formatClock(r.previous)}).` : `Your best time: ${formatClock(r.best)}.`;
     return el('div', `hud-go-best${r.first || r.best < r.previous ? ' is-new' : ''}`, text);
+  }
+
+  /** Watch Replay: the host kept this match (Game.canWatchReplay). */
+  canWatchReplay() {
+    return typeof this.game.canWatchReplay === 'function' && this.game.canWatchReplay();
   }
 
   /** Play Again is offered for a game against the computer only (Game.canRematch). */

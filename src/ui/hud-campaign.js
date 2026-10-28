@@ -1,4 +1,4 @@
-// A campaign mission on the HUD (DESIGN 9.3, 5.16): the objective panel in the top-right corner (where the
+// A campaign mission on the HUD (DESIGN 9.6, 5.16): the objective panel in the top-right corner (where the
 // lesson's panel sits), one row per objective the mission has shown, ticked, crossed out or counting, and a pin
 // over the current objective's spot (the lesson's GuidePointer, fed by the sim's `cp.at`).
 import { el, setClass, setHidden, setText } from './hud-dom.js';
