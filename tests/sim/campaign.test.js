@@ -179,3 +179,19 @@ test('a protected building lost on the same second as the last enemy still fails
   const i = MISSION_BY_ID.pass.objectives.findIndex((o) => o.id === 'oracle');
   assert.equal(w.campaign.state[i], FAILED);
 });
+
+test('the enemy AI leaves a scripted raid on its march at the hero', () => {
+  const s = campaignSetup('longhouses', {});
+  const w = createWorld(s);
+  const ais = s.players.map((p, i) => (i === 0 ? null : createAI(w, i, p.difficulty))).filter(Boolean);
+  run(w, 421, ais);
+  const raid = tagged(w, 'huscarls');
+  assert.equal(raid.length, 6);
+  run(w, 5, ais);
+  const home = w.buildingList.find((b) => b.cTag === 'home');
+  for (const u of raid.filter((x) => !x.dead)) {
+    const o = u.order;
+    assert.ok(o && o.type === 'attackMove', `${u.type} still marching`);
+    assert.ok(Math.hypot(o.x - home.x, o.y - home.y) < 15, `${u.type} heads for the hero's base`);
+  }
+});
