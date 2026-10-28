@@ -38,6 +38,8 @@ import { isTutorial } from '../sim/tutorial.js';
 import { recordDaily, dailyChallenge } from './daily.js';
 import { scoreOf } from '../data/score.js';
 import { medalFor } from '../data/medals.js';
+import { MatchSaver, loadSaveGame } from './game-saves.js';
+import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -232,6 +234,7 @@ export class Game {
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
     this.dailyCounted = false; // a daily challenge's score is kept once (countDaily)
     this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
+    this.saver = null; // MatchSaver: Save Game, Save & Quit and the autosave of a solo match (src/game/game-saves.js)
     this.offs = [];
     this.lastAmbient = 0;
     this.lastBreach = -BREACH_MESSAGE_MS;
@@ -261,12 +264,15 @@ export class Game {
     this.setLoading(true);
     // Only a launch that runs the match here needs the AI module (a client's host runs the AIs).
     const needsAI = !createAI && !this.session && !(this.launch && this.launch.role === 'client');
-    const [loadedAI, RendererClass] = await Promise.all([
+    const resume = (!this.session && this.launch && this.launch.resume) || null; // a saved game to carry on (DESIGN 9.4)
+    const [loadedAI, RendererClass, saveGame] = await Promise.all([
       createAI ? Promise.resolve({ createAI, createVoices }) : needsAI ? loadAI() : Promise.resolve({ createAI: idleAI, createVoices: null }),
       Renderer ? Promise.resolve(Renderer) : import('../render/game-renderer.js').then((m) => m.GameRenderer),
+      resume ? loadSaveGame() : null,
     ]);
     if (this.disposed) return;
     const aiFailed = needsAI && !loadedAI;
+    let resumed = null; // the loaded save's extras
     const aiFactory = (loadedAI && loadedAI.createAI) || idleAI;
     const voiceFactory = (loadedAI && loadedAI.createVoices) || null;
 
@@ -274,7 +280,16 @@ export class Game {
       const l = this.launch;
       if (!l || !l.setup) throw new Error('Game needs a launch or a session.');
       if (l.role === 'client') this.session = new ClientSession({ setup: l.setup, myIndex: l.myIndex, conn: l.conn });
-      else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
+      else if (resume) {
+        // The world and the computer players' minds come from the save; a missing mind starts afresh.
+        const loaded = saveGame.unpackMatch(resume);
+        resumed = loaded.extra;
+        this.session = new HostSession({
+          setup: loaded.world.setup, myIndex: l.myIndex ?? 0, conns: new Map(), resumed: true, createVoices: voiceFactory,
+          createWorld: () => loaded.world,
+          createAI: (world, index, difficulty) => loaded.ais.get(index) || aiFactory(world, index, difficulty),
+        });
+      } else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
     }
     const session = this.session;
     this.viewState = session.viewState;
@@ -312,8 +327,12 @@ export class Game {
     this.offs.push(() => this.director.dispose());
     this.offs.push(onSettingsChange((s, changed) => this.onSettings(s, changed)));
     for (const line of session.chatLog || []) if (showChatLine(line) && !line.voice) this.hud.chat(line);
+    if (session.isHost && !this.tutorial) {
+      this.saver = new MatchSaver(this, { resume: resumed });
+      if (resumed) this.saver.restore(resumed);
+    }
     // The daily challenge (DESIGN 9.3): its twist, said once at the start.
-    if (this.launch && this.launch.daily) {
+    if (this.launch && this.launch.daily && !resumed) {
       const tw = dailyChallenge(this.launch.daily).twist;
       this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
     }
@@ -347,7 +366,8 @@ export class Game {
     this.resize();
     this.applyShowAllBars();
     this.applySpeed();
-    this.centerOnStart();
+    if (!(this.saver && this.saver.restoreCamera())) this.centerOnStart();
+    if (resumed) this.hud.message('Saved game loaded.', 'system', { icon: '💾' });
     this.input = new InputController({ game: this, canvas: this.canvas, overlayRoot: this.hudRoot });
     this.selection.onChange(() => this.renderer && this.renderer.setSelection(this.selection.ids));
 
@@ -553,6 +573,7 @@ export class Game {
     }
     try {
       this.checkEnd();
+      if (this.saver) this.saver.tick();
     } catch (err) {
       this.frameFault(err);
     }
@@ -753,6 +774,7 @@ export class Game {
       const wave = survival ? (Number.isInteger(vs.gameOver.wave) ? vs.gameOver.wave : (vs.survival() || {}).wave || 0) : 0;
       const previous = survival ? getCareer().best.wave : 0;
       if (this.input) this.input.cancelMode();
+      if (this.saver) this.saver.onGameOver();
       let unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
       const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
       // The guided first match: a victory earns a medal by its game time, kept with the career.
@@ -1149,6 +1171,29 @@ export class Game {
     this.countLeave();
     this.dispose();
     next();
+  }
+
+  /** Can the match be saved now (F10 menu)? A solo match against the computer that is still being played. */
+  canSave() {
+    return !!(this.saver && this.saver.canSave());
+  }
+
+  /** Save to a slot ('1'..'3', or the autosave). Resolves with the slot's info; rejects with a message to show. */
+  saveGame(slot) {
+    if (!this.saver) return Promise.reject(new Error('This game cannot be saved.'));
+    return this.saver.save(slot);
+  }
+
+  /**
+   * Save & Quit: keep the match in the autosave slot (Continue on the title screen) and leave. The
+   * match is not counted in the career yet: it counts when it ends, after it is carried on.
+   */
+  async saveAndQuit() {
+    if (this.disposed) return;
+    await this.saveGame(AUTO_SLOT);
+    if (this.disposed) return;
+    this.dispose();
+    if (this.onExit) this.onExit();
   }
 
   /** Leave the match and go back to the title screen. */
