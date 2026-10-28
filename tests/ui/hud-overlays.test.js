@@ -70,3 +70,22 @@ test('the defeat text only promises allies when an ally is still in the game', (
   root.button('Keep Watching').click();
   assert.equal(ov.open, false);
 });
+
+test('the game-over screen shows the achievements the match unlocked and a line on the career', async () => {
+  const { resetCareer } = await import('../../src/game/career.js');
+  resetCareer({ games: 4, wins: 3, losses: 1, unlocked: { first_victory: 1 } });
+  const { ov, root, game } = setup({ host: true, clients: 0 });
+  game.viewState.time = 600;
+  ov.statsTable = () => null; // (the table has its own checks; the fake DOM has no firstChild)
+  ov.showGameOver({ result: 'victory', winningTeam: 1, unlocked: [{ id: 'titan_unleashed', name: 'Titan Unleashed', icon: '🌋', desc: 'Summon a Titan.' }, { id: 'warlord', name: 'Warlord', icon: '⚔️', desc: 'Win 10 games.' }] });
+  assert.equal(ov.name, 'gameover');
+  assert.match(root.textContent, /2 achievements unlocked/);
+  assert.match(root.textContent, /Titan Unleashed/);
+  assert.match(root.textContent, /Career: 3 wins in 4 games \(75%\) · 1 of \d+ achievements/);
+  // Nothing unlocked: no cards.
+  const second = setup({ host: true, clients: 0 });
+  second.ov.statsTable = () => null;
+  second.ov.showGameOver({ result: 'defeat', winningTeam: 2, unlocked: [] });
+  assert.doesNotMatch(second.root.textContent, /unlocked/);
+  resetCareer({});
+});

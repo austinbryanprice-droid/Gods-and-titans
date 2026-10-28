@@ -411,3 +411,6 @@ export function createAI(world, playerIndex, difficulty = 'normal') {
     },
   };
 }
+
+// The AIs' chat lines (DESIGN 10.1), loaded with them by the game controller.
+export { createVoices } from './voice.js';

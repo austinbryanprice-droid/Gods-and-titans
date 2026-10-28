@@ -458,7 +458,7 @@ kbd {
 .mw-orn.is-r { right: 1.2em; }
 .mw-btn--menu:hover:not(:disabled) .mw-orn, .mw-btn--menu:focus-visible .mw-orn { opacity: 0.9; transform: translateY(-50%) scale(1); }
 .mw-btn--menu.mw-btn--primary .mw-orn { color: #6b4210; }
-.mw-nav-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75em; margin-top: 0.15em; }
+.mw-nav-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75em; margin-top: 0.15em; }
 .mw-nav-row .mw-btn { padding: 0.65em 0.8em; font-size: 0.85em; }
 .mw-title-foot {
   grid-row: 4;
@@ -1138,6 +1138,46 @@ kbd {
   padding: 1.3em 1.6em 0.6em;
 }
 .mw-howto-panel .mw-panel-head { margin-bottom: 0.8em; }
+.mw-career-btn { position: relative; }
+.mw-new-badge { position: absolute; top: -0.55em; right: -0.45em; min-width: 1.6em; padding: 0.15em 0.4em; border-radius: 1em; background: #d8452c; color: #fff; font: 700 0.75em/1.2 var(--mw-font-display); letter-spacing: 0; box-shadow: 0 0 10px rgba(255, 90, 50, 0.6); }
+
+/* Career screen (src/ui/menu-career.js) */
+.mw-career-panel .mw-scroll > .mw-label { margin: 1.4em 0 0.6em; }
+.mw-car-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5em, 1fr)); gap: 0.6em; }
+.mw-car-stat { display: flex; flex-direction: column; gap: 0.15em; padding: 0.7em 0.9em; border: 1px solid var(--mw-line); border-radius: 6px; background: rgba(0, 0, 0, 0.22); }
+.mw-car-stat-value { font: 600 1.35em/1.15 var(--mw-font-display); color: var(--mw-ink); }
+.mw-car-stat-label { font-size: 0.72em; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mw-gold); }
+.mw-car-stat-note { font-size: 0.75em; color: var(--mw-ink-mute); }
+.mw-car-pantheons { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5em, 1fr)); gap: 0.5em; }
+.mw-car-pan { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 0.55em; align-items: center; padding: 0.5em 0.7em; border: 1px solid rgba(196, 146, 72, 0.2); border-radius: 6px; background: rgba(0, 0, 0, 0.18); opacity: 0.6; }
+.mw-car-pan.is-played { opacity: 0.85; }
+.mw-car-pan.is-won { opacity: 1; border-color: rgba(255, 210, 58, 0.5); box-shadow: inset 0 0 12px rgba(255, 200, 60, 0.12); }
+.mw-car-pan-emblem { grid-row: span 2; font-size: 1.5em; }
+.mw-car-pan-name { font-size: 0.85em; color: var(--mw-ink); }
+.mw-car-pan-record { font-size: 0.75em; color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
+.mw-car-history { display: flex; flex-wrap: wrap; gap: 0.45em; margin: 0; padding: 0; list-style: none; }
+.mw-car-game { display: flex; align-items: center; gap: 0.35em; padding: 0.35em 0.6em; border-radius: 5px; border: 1px solid rgba(196, 146, 72, 0.25); background: rgba(0, 0, 0, 0.2); font-size: 0.85em; }
+.mw-car-game.is-victory { border-color: rgba(255, 210, 58, 0.55); }
+.mw-car-game.is-defeat { opacity: 0.75; }
+.mw-car-game-time { color: var(--mw-ink-mute); font-size: 0.85em; }
+.mw-car-ach-title { margin: 1.6em 0 0.2em; }
+.mw-ach-group > .mw-label { margin: 1.1em 0 0.55em; }
+.mw-ach-count { color: var(--mw-ink-mute); letter-spacing: 0.1em; }
+.mw-ach-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(17em, 1fr)); gap: 0.55em; margin: 0; padding: 0; list-style: none; }
+.mw-ach { display: flex; gap: 0.7em; align-items: flex-start; padding: 0.6em 0.75em; border-radius: 6px; border: 1px solid rgba(196, 146, 72, 0.18); background: rgba(0, 0, 0, 0.2); }
+.mw-ach-icon { font-size: 1.7em; line-height: 1; width: 1.3em; text-align: center; }
+.mw-ach-text { display: flex; flex-direction: column; gap: 0.2em; min-width: 0; flex: 1; }
+.mw-ach-name { display: flex; align-items: center; gap: 0.5em; font: 600 0.92em/1.2 var(--mw-font-display); color: var(--mw-ink); letter-spacing: 0.03em; }
+.mw-ach-desc { font-size: 0.8em; line-height: 1.35; color: var(--mw-ink-mute); }
+.mw-ach.is-locked .mw-ach-icon { filter: grayscale(1) brightness(0.6); opacity: 0.55; }
+.mw-ach.is-locked .mw-ach-name { color: var(--mw-ink-mute); }
+.mw-ach.is-unlocked { border-color: rgba(255, 210, 58, 0.45); background: linear-gradient(180deg, rgba(255, 210, 58, 0.1), rgba(0, 0, 0, 0.2)); }
+.mw-ach.is-unlocked .mw-ach-name { color: var(--mw-gold); }
+.mw-ach.is-new { box-shadow: 0 0 16px rgba(255, 200, 60, 0.35); }
+.mw-ach-badge { padding: 0.1em 0.45em; border-radius: 1em; background: #d8452c; color: #fff; font-size: 0.7em; letter-spacing: 0.06em; text-transform: uppercase; }
+.mw-ach-bar { position: relative; display: flex; align-items: center; gap: 0.5em; margin-top: 0.15em; }
+.mw-ach-bar i { flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--mw-gold) var(--p, 0%), rgba(255, 255, 255, 0.1) var(--p, 0%)); }
+.mw-ach-bar small { font-size: 0.72em; color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
 .mw-scroll { overflow-y: auto; padding: 0 0.4em 1em 0; margin-right: -0.4em; scrollbar-color: var(--mw-bronze-lo) transparent; }
 .mw-howto { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 1.6em 2.4em; }
 .mw-lead { margin: 0 0 1.2em; font: 1.08em/1.55 var(--mw-font-body); color: var(--mw-ink); }

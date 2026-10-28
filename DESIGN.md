@@ -937,7 +937,7 @@ neighbouring corners in order (top-left, top-right, bottom-right) and the lone p
     only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`,
     `mark {kind, x, y}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
-    `delta {d}`, `chat {from, text}`, `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
+    `delta {d}`, `chat {from, name, text, system, voice?}` (`voice: true` marks a computer player's line, 10.1), `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
     teammates only), `kick {reason}`, `end {reason}`
 - **Team marks** (pings and markers, 9): a mark is a signal, not world state, so it never rides in a
   snapshot (snapshots go to everyone). The kinds are the table `MARKS` in `src/data/marks.js`. The sender's
@@ -1586,7 +1586,7 @@ per-frame budget, so a revealed army appears over a few frames.
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
-  Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
+  Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
   Random, team, AI difficulty; presets; map size; game mode (Standard or Decade of Peace with
   30 / 45 / 60 min buttons, the host's pick; clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
@@ -1880,6 +1880,36 @@ per-frame budget, so a revealed army appears over a few frames.
   sources sounding at once and of nodes made per second, the two things that load tracks, inside limits above
   today's. `tools/music-lab.html` plays any theme at any intensity.
 
+### 9.1 Career and achievements (src/game/career.js, src/game/career-tracker.js, src/data/achievements.js, src/ui/menu-career.js)
+
+Client only: nothing goes over the wire and the sim does not know about it. The career lives in
+localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
+`sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
+and wins per pantheon, records (most kills, most gathered, longest game, best survival wave once a
+survival mode exists: `recordMatch` takes an optional `wave`), the last 12 games, unlocked
+achievements with the time, and the ones not yet seen.
+
+- `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
+  events and snapshots: gods and Titans summoned (`spawn`), enemy Titans falling and own non-wall
+  buildings lost (`death`), `tierUp`, `levelUp`, `rankUp`, and once a game second the player record
+  (gods on the field, kills, gathered) and own entities (best god level and rank, a finished Manor or
+  stone wall). The sides come from the setup: own pantheon, team size, enemies with kind and AI difficulty,
+  and whether the Decade of Peace is on.
+- An achievement is `{ id, group, name, icon, desc, test(m, c), progress?(c) }`: `m` the match's facts,
+  `c` the career with the match counted. Mid-match the tracker checks with `m.result` null, so the ones
+  that need no result (Summon a Titan, a Champion, a Manor...) unlock at once: a feed line "Achievement
+  unlocked: …" with a chime. The match is counted once, at the game-over screen (victory, defeat or
+  draw), or when the player leaves earlier: a loss if already defeated, or for a running match left
+  after its first minute (one the host ended, or left in its first minute, is not counted).
+- 35 achievements in six groups: Career (first win, 10 games, 10 and 25 wins, every pantheon), Pantheons
+  (a win with each), Gods and Titans, Battle (Champion, 100 kills, a win under 15 min, a win without
+  losing a building, outnumbered), City (City Palace, 10,000 gathered, Manor, stone wall), Challenges
+  (Normal/Hard AI, a human enemy, an ally, the Decade of Peace, an hour-long game).
+- Game-over screen: under the statistics, a card per achievement the match unlocked and a line
+  "Career: W wins in G games (P%) · U of 35 achievements". Title screen: a Career button (a red count of
+  unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
+  the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
+
 ## 10. AI (src/ai/)
 
 `createAI(world, playerIndex, difficulty) → { tick() }`. Called every sim tick on the host;
@@ -1901,6 +1931,35 @@ population cap and easy stays well below it. In a Decade of Peace (5.10) no wave
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
 `canPlaceBuilding`, so it simply takes another spot.
+
+### 10.1 AI voices (src/ai/voice.js, src/ai/voice-lines.js)
+
+Computer players talk, the way AoE II's AIs do: a short in-character chat line at the moments that
+matter, each pantheon in its own voice (Olympian hubris, Norse sagas and mead, Egyptian eternity, karma
+and the wheel, the kami's honour, the Mandate of Heaven, the hungry Fifth Sun, the wild Celtic woods,
+Sumerian scribes and clay tablets, West African drums and ancestors). The moments (`VOICE_TRIGGERS`):
+a greeting a few seconds in (70 % of AIs, staggered), first contact with another player (an enemy
+player's unit within 14 tiles of one of its units or buildings, scanned every 2 game seconds; the
+line names that player), the first blow a player strikes against it (the `underAttack` event, with
+the nearest enemy player's unit as the attacker; wild creatures do not count), the end of a Decade
+of Peace (one AI), a god's first arrival (a revived god comes back quietly), a Titan being summoned,
+a god falling, being nearly beaten (its buildings down to 35 % of the most it had, at least 5, or no
+Town Center left; once), its defeat, and victory (one AI of the winning team). `{unit}` and `{enemy}`
+in a line are the god or Titan and the other player's name; every pantheon has at least two lines
+per moment, walked in a shuffled order.
+
+Rate limits (`VOICE`, game seconds, so a paused game stays quiet): an ordinary line waits 45 s after
+the same AI's last line and 15 s after any AI's, and 150 s after that AI's last line of the same
+kind; a Titan and "nearly beaten" skip those but stay 2 s apart; defeat and victory always go out.
+A line that cannot go out is dropped, not queued; one AI says at most 24 lines a match. A whole
+normal 1v1 comes to roughly one line a minute.
+
+It runs on the host beside the AIs: `HostSession` (option `createVoices`, which the game controller
+loads from `src/ai/ai.js` with `createAI`) feeds it each snapshot's events and broadcasts what it
+returns as chat lines from that player with `voice: true`. Only the setup's own AI slots speak (an AI
+that took over from a player who left keeps quiet). It only reads the World. Each player hides
+the lines with the `aiChat` setting ("AI chatter", in Settings → Gameplay and the in-game menu;
+default on): `showChatLine` in `src/game/game.js` filters them, live chat and the replayed log alike.
 
 ## 11. Game controller (src/game/game.js, src/main.js)
 
@@ -2137,6 +2196,7 @@ src/ui/hud.js, hud.css, input.js, command-card.js, minimap.js  HUD owner
 src/ui/menu.js, src/settings.js, src/audio/sfx.js  menu/audio owner
 src/audio/music*.js, src/audio/audio.js, src/game/music-director.js  music owner (tools/music-lab.html, tools/music-render.mjs)
 src/intro/*.js, src/ui/intro.js, intro.css  intro film owner (11.1)
+src/game/career*.js, src/data/achievements.js, src/ui/menu-career.js  career owner (9.1)
 src/game/game.js, src/main.js      integration owner
 tests/**                           each owner writes tests for its modules
 tools/gallery-units.html, tools/gallery-buildings.html, tools/gallery-vfx.html   visual check pages (one per model/VFX owner)
