@@ -88,7 +88,8 @@ export class ViewState {
     this.snapshotCount = 0;
     this.listeners = new Map();
     this.hist = new Map(); // unit id → { t, x, y, f: Float64Array(HISTORY), n, head }
-    this.clockOffset = null; // local ms − sim ms of the newest snapshot (minimum-latency estimate)
+    this.rate = 1; // game seconds per real second (setRate)
+    this.clockOffset = null; // local ms × rate − sim ms of the newest snapshot (minimum-latency estimate)
     this.windowMin = Infinity; // smallest local ms − sim ms in the current CLOCK_WINDOW snapshots
     this.windowCount = 0;
     this.lastPushMs = 0;
@@ -377,7 +378,7 @@ export class ViewState {
     // A late snapshot (jitter) barely moves it; when every snapshot of the last second came
     // late (the sim paused or stalled, latency went up), it moves to the smallest of them.
     const simMs = (snap.time || 0) * 1000;
-    const target = now - simMs;
+    const target = now * this.rate - simMs;
     if (this.clockOffset === null || Math.abs(target - this.clockOffset) > 1000 || target < this.clockOffset) this.clockOffset = target;
     else this.clockOffset += Math.min(target - this.clockOffset, 2);
     this.windowMin = Math.min(this.windowMin, target);
@@ -396,9 +397,10 @@ export class ViewState {
         v = { ix: e.x, iy: e.y, if: e.f || 0 };
         this.entities.set(e.id, v);
       }
-      if (src.get(e.id) !== e) {
+      const prev = src.get(e.id);
+      if (prev !== e) {
         // (Decoded snapshots share unchanged entity objects, which skip this copy.)
-        for (const k in v) if (!(k in e) && !KEEP_KEYS.has(k)) delete v[k];
+        if (prev) for (const k in prev) if (!(k in e)) delete v[k];
         Object.assign(v, e);
         src.set(e.id, e);
       }
@@ -444,6 +446,17 @@ export class ViewState {
     for (const ev of synthetic) this.fire(ev);
     for (const ev of events) this.fire(ev);
     this.emit('snapshot', snap);
+  }
+
+  /**
+   * Play back at `r` game seconds per real second (the game speed of a single-player match).
+   * The clock runs on scaled local time, so it re-anchors on the next snapshot.
+   */
+  setRate(r) {
+    const rate = Number.isFinite(r) && r > 0 ? r : 1;
+    if (rate === this.rate) return;
+    this.rate = rate;
+    this.resetClock();
   }
 
   /** Re-anchor the playback clock on the next snapshot (after a pause: sim time stood still). */
@@ -569,7 +582,9 @@ export class ViewState {
    */
   update(now = nowMs()) {
     if (this.clockOffset === null) return;
-    const rt = now - this.clockOffset - this.interpDelayMs;
+    // Faster than normal, the delay stays as long in real time (so twice the game time at double speed):
+    // the snapshots' jitter in real ms counts that much more in game time.
+    const rt = now * this.rate - this.clockOffset - this.interpDelayMs * Math.max(1, this.rate);
     this.renderTime = Math.max(0, Math.min(this.time, rt / 1000));
     for (const [id, h] of this.hist) {
       const v = this.entities.get(id);

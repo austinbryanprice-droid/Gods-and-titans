@@ -11,7 +11,7 @@ import { HostSession, ClientSession } from '../net/session.js';
 import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
-import { PEACE_NAME } from '../config.js';
+import { GAME_SPEEDS, PEACE_NAME, UI_SCALES } from '../config.js';
 import { edgeName } from '../sim/survival.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { POWERS, isHarmfulPower } from '../data/powers.js';
@@ -35,6 +35,8 @@ import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
 import { TutorialDirector } from './tutorial.js';
 import { isTutorial } from '../sim/tutorial.js';
+import { recordDaily, dailyChallenge } from './daily.js';
+import { scoreOf } from '../data/score.js';
 import { medalFor } from '../data/medals.js';
 import { MatchSaver, loadSaveGame } from './game-saves.js';
 import { AUTO_SLOT } from './save-store.js';
@@ -216,6 +218,8 @@ export class Game {
     this.lastFrame = 0;
     this.disposed = false;
     this.paused = false;
+    this.solo = false; // a match against the computer, so the game speed applies (set at start)
+    this.speed = 1; // game seconds per real second (applySpeed)
     this.showAllBarsHeld = false;
     this.overShown = false;
     this.ended = false;
@@ -228,6 +232,7 @@ export class Game {
     this.chronicle = null; // Chronicle: the match's numbers over time, for the game-over screen
     this.director = null; // MusicDirector: the match's tension, as the music's intensity
     this.career = null; // CareerTracker: this match's facts for the career and the achievements
+    this.dailyCounted = false; // a daily challenge's score is kept once (countDaily)
     this.tutorial = null; // TutorialDirector: the objectives of the guided first match (src/game/tutorial.js)
     this.saver = null; // MatchSaver: Save Game, Save & Quit and the autosave of a solo match (src/game/game-saves.js)
     this.offs = [];
@@ -295,6 +300,7 @@ export class Game {
     }
 
     this.hud = new Hud({ root: this.hudRoot, game: this });
+    this.applyUiScale();
     if (session.mapMismatch) this.hud.setMapMismatch(true);
     this.offs.push(session.onChat((line) => this.onChat(line)));
     if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
@@ -325,7 +331,15 @@ export class Game {
       this.saver = new MatchSaver(this, { resume: resumed });
       if (resumed) this.saver.restore(resumed);
     }
+    // The daily challenge (DESIGN 9.3): its twist, said once at the start.
+    if (this.launch && this.launch.daily && !resumed) {
+      const tw = dailyChallenge(this.launch.daily).twist;
+      this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
+    }
     session.start();
+    // Only a match against the computer can run faster or slower: nobody else has to keep up.
+    this.solo = isSolo(session);
+    this.applySpeed();
 
     // Clients wait for the first full snapshot.
     if (!session.isHost && !this.viewState.snapshot) {
@@ -351,6 +365,7 @@ export class Game {
     this.setLoading(false);
     this.resize();
     this.applyShowAllBars();
+    this.applySpeed();
     if (!(this.saver && this.saver.restoreCamera())) this.centerOnStart();
     if (resumed) this.hud.message('Saved game loaded.', 'system', { icon: '💾' });
     this.input = new InputController({ game: this, canvas: this.canvas, overlayRoot: this.hudRoot });
@@ -676,8 +691,28 @@ export class Game {
     this.needsRender = true;
   }
 
+  /**
+   * The game speed setting (DESIGN 9), for a match against the computer only: the ticker runs more or fewer
+   * ticks a second, the view plays back at the same pace, and the renderer's animations follow.
+   */
+  applySpeed() {
+    const m = (this.solo && GAME_SPEEDS[this.settings.gameSpeed]) || 1;
+    this.speed = m;
+    const s = this.session;
+    if (s && s.ticker) s.ticker.setSpeed(m);
+    if (this.viewState) this.viewState.setRate(m);
+    if (this.renderer && typeof this.renderer.setSpeed === 'function') this.renderer.setSpeed(m);
+  }
+
+  /** The interface size setting: a factor on the HUD's base font size (hud.css), which every panel is sized in. */
+  applyUiScale() {
+    if (this.hudRoot && this.hudRoot.style) this.hudRoot.style.setProperty('--hud-scale', String(UI_SCALES[this.settings.uiScale] || 1));
+  }
+
   onSettings(s, changed) {
     this.settings = s;
+    if (changed.includes('gameSpeed')) this.applySpeed();
+    if (changed.includes('uiScale')) this.applyUiScale();
     if (changed.includes('showAllBars')) this.applyShowAllBars();
     if (changed.includes('quality') && this.renderer && typeof this.renderer.setQuality === 'function') {
       this.renderer.setQuality(s.quality);
@@ -745,12 +780,13 @@ export class Game {
       // The guided first match: a victory earns a medal by its game time, kept with the career.
       const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
       if (medal) unlocked = recordTutorial(medal.rank);
+      const daily = this.launch && this.launch.daily ? this.countDaily(result === 'victory') : null;
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record, daily });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -1002,6 +1038,24 @@ export class Game {
       } catch (err) {
         console.warn('[game] career record failed', err);
       }
+      this.countDaily(false);
+    }
+  }
+
+  /**
+   * A daily challenge (DESIGN 9.3) counts once, like the career: its chronicle score as a try at today's
+   * best, and the day for the streak. Returns what the game-over screen shows, or null for another game.
+   */
+  countDaily(won) {
+    const vs = this.viewState;
+    const day = this.launch && this.launch.daily;
+    if (!day || this.dailyCounted || !vs || vs.myIndex < 0) return null;
+    this.dailyCounted = true;
+    try {
+      return recordDaily(day, scoreOf(vs.players[vs.myIndex]).total, won);
+    } catch (err) {
+      console.warn('[game] daily record failed', err);
+      return null;
     }
   }
 

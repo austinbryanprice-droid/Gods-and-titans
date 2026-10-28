@@ -12,6 +12,7 @@ import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, optionNote } from './speed-options.js';
 import { sfx } from '../audio/sfx.js';
 import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
 import { h, setChildren, copyText } from './menu-dom.js';
@@ -22,6 +23,7 @@ import { renderCareerContent } from './menu-career.js';
 import { getCareer, markSeen } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
 import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
+import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
@@ -320,6 +322,26 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null }) {
         toast(err?.message || 'Could not start the game.');
       }
     }
+    // The daily challenge (src/game/daily.js, DESIGN 9.3): the same seeded game for everyone today, today's best and the streak.
+    const daily = dailyStatus();
+    const dailySub = [`Today: ${dailyLabel(daily.challenge)}`];
+    if (daily.today) dailySub.push(`best ${daily.today.best.toLocaleString('en-US')}`);
+    const dailyBtn = mainBtn('Daily Challenge', dailySub.join(' · '), playDaily, 'mw-daily-btn');
+    dailyBtn.title = `${daily.challenge.twist.name}: ${daily.challenge.twist.desc}`;
+    if (daily.streak > 0) {
+      dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge.mw-streak-badge', {
+        title: daily.playedToday ? `${daily.streak} day${daily.streak === 1 ? '' : 's'} in a row` : `Play today to keep your ${daily.streak}-day streak`,
+      }, daily.playedToday ? `🔥 ${daily.streak}` : `🔥 ${daily.streak} · keep it`));
+    } else if (!daily.playedToday) dailyBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New today'));
+    async function playDaily() {
+      try {
+        const launch = dailyLaunch(await import('../net/lobby.js'), daily.challenge.day, getSettings().name); // the real lobby: it builds the setup
+        sfx.play('horn');
+        onStart(launch);
+      } catch (err) {
+        toast(err?.message || 'Could not start the daily challenge.');
+      }
+    }
     const career = getCareer();
     const newCount = career.unseen.length;
     // A guided first match; a player who has never finished a game or the lesson is pointed at it.
@@ -342,6 +364,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null }) {
         continueBtn,
         playBtn,
         quickBtn,
+        dailyBtn,
         learnBtn,
         mainBtn('Host Online Game', 'Invite friends with a room code', hostOnline),
         mainBtn('Join Online Game', 'Enter a friend\'s room code', () => go('join')),
@@ -1255,6 +1278,22 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null }) {
     };
     renderT();
 
+    // Game speed (matches against the computer) and the size of the in-game interface.
+    const segField = (key, options) => {
+      const note = h('div.mw-field-note');
+      const btns = options.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { v: id }, onclick: () => {
+        saveSettings({ [key]: id });
+        render();
+      } }, label));
+      const render = () => {
+        const v = getSettings()[key];
+        btns.forEach((b) => b.classList.toggle('is-active', b.dataset.v === v));
+        note.textContent = optionNote(options, v);
+      };
+      render();
+      return [h('div.mw-segmented', btns), note];
+    };
+
     // Alerts (src/game/alerts.js) and what a background tab does about them (src/ui/tab-attention.js).
     const aNote = h('div.mw-field-note');
     const aBtns = ALERT_OPTIONS.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { a: id }, onclick: () => {
@@ -1297,6 +1336,8 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null }) {
           h('span.mw-field-note', 'Every pantheon has its own score: calm while you build, louder in a fight. The Decade of Peace stays calm until the war horn.')),
         h('div.mw-field', h('span.mw-label', 'Graphics quality'), h('div.mw-segmented', qBtns), qDesc),
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
+        h('div.mw-field', h('span.mw-label', 'Game speed'), ...segField('gameSpeed', GAME_SPEED_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Interface size'), ...segField('uiScale', UI_SCALE_OPTIONS)),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
           toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),

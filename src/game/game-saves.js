@@ -121,6 +121,7 @@ export class MatchSaver {
         pantheon: world.players[g.myIndex] ? world.players[g.myIndex].pantheon : null,
         skirmish: (g.launch && (g.launch.skirmish || (g.launch.lobby && g.launch.lobby.state))) || null, // for Play Again after a load
         version: save.version,
+        daily: (g.launch && g.launch.daily) || null, // a daily challenge (DESIGN 9.3) still counts once carried on
       };
       return this.store.writeSave(slot, save, info);
     })();

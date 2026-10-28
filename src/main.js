@@ -7,6 +7,7 @@ import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
 import { isSoloLaunch, saveSkirmish, launchFrom } from './game/rematch.js';
 import { readSave, saveInfo } from './game/save-store.js';
+import { dailyLaunch } from './game/daily.js';
 
 export { showMenu, hideMenu };
 
@@ -78,7 +79,9 @@ export async function startGame(launch) {
   }
   const notice = showStartNotice();
   // A game against the computer only: remember its lobby for Quick Match, and offer Play Again at its end.
-  const skirmish = isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
+  // The daily challenge (DESIGN 9.3) is not a lobby to remember: Play Again tries the same day's challenge again.
+  const daily = launch && launch.daily ? launch.daily : null;
+  const skirmish = !daily && isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
   if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
@@ -90,7 +93,7 @@ export async function startGame(launch) {
         if (current === game) current = null;
         backToMenu();
       },
-      onRematch: skirmish ? () => rematch(skirmish) : null,
+      onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : null,
     });
     current = game;
     await game.ready;
@@ -135,7 +138,18 @@ async function loadGame(slot) {
   if (!save || !save.setup) throw new Error('That saved game is gone.');
   const info = saveInfo(slot) || {};
   const extra = save.extra || {};
-  await startGame({ role: 'host', setup: save.setup, myIndex: Number.isInteger(extra.myIndex) ? extra.myIndex : 0, conns: new Map(), lobby: null, skirmish: info.skirmish || null, resume: save });
+  await startGame({ role: 'host', setup: save.setup, myIndex: Number.isInteger(extra.myIndex) ? extra.myIndex : 0, conns: new Map(), lobby: null, skirmish: info.skirmish || null, daily: info.daily || null, resume: save });
+}
+
+/** Play Again on a daily challenge: the same day's game (same map and sides) once more; the best score is kept. */
+async function retryDaily(day) {
+  try {
+    const mod = await import('./net/lobby.js');
+    await startGame(dailyLaunch(mod, day, getSettings().name));
+  } catch (err) {
+    console.error('[main] the daily challenge failed to start', err);
+    backToMenu();
+  }
 }
 
 /** True when this browser can make a WebGL 2 context (the renderer needs one). The probe context is released at once. */
