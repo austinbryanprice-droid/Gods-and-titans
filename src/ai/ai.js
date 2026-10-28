@@ -14,6 +14,7 @@ import { runMilitary, newMilitary } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
+import { createTutorialAI } from './tutorial-ai.js';
 import { runSacred } from './sacred.js';
 
 const DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
@@ -402,10 +403,11 @@ export class AIPlayer {
  * Create an AI controller for one player.
  * @param {object} world the authoritative World
  * @param {number} playerIndex
- * @param {'easy'|'normal'|'hard'} [difficulty]
- * @returns {{ tick(): void, ai: AIPlayer }}
+ * @param {'easy'|'normal'|'hard'|'tutorial'} [difficulty] ('tutorial': the sleeping camp of the guided first match)
+ * @returns {{ tick(): void, ai?: AIPlayer }}
  */
 export function createAI(world, playerIndex, difficulty = 'normal') {
+  if (difficulty === 'tutorial') return createTutorialAI(world, playerIndex);
   const ai = new AIPlayer(world, playerIndex, difficulty);
   return {
     ai,
