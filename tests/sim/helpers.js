@@ -68,6 +68,7 @@ export function makeSetup(n = 2, opts = {}) {
     })),
   };
   if (opts.peaceMinutes) setup.peaceMinutes = opts.peaceMinutes; // Decade of Peace
+  if (opts.survival) setup.survival = true; // Trial of the Titans
   if (opts.sacredVictory) setup.sacredVictory = true; // Sacred Victory (5.11)
   return setup;
 }

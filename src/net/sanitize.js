@@ -159,6 +159,7 @@ export function validateSetup(setup, myIndex) {
   const clean = { version: typeof setup.version === 'string' ? setup.version.slice(0, 32) : '', seed, mapSize, players };
   if (typeof setup.mapHash === 'string' && setup.mapHash.length <= 64) clean.mapHash = setup.mapHash;
   if (PEACE_LENGTHS.includes(setup.peaceMinutes)) clean.peaceMinutes = setup.peaceMinutes; // Decade of Peace
+  else if (setup.survival === true) clean.survival = true; // Trial of the Titans (never together with a peace)
   if (setup.sacredVictory === true) clean.sacredVictory = true; // Sacred Victory (5.11)
   return { setup: clean, myIndex };
 }

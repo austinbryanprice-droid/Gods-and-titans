@@ -12,6 +12,7 @@ import { createWorld } from '../sim/world.js';
 import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { PEACE_NAME } from '../config.js';
+import { edgeName } from '../sim/survival.js';
 import { UNITS, BUILDINGS } from '../data/index.js';
 import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
@@ -30,6 +31,7 @@ import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
 import { CareerTracker } from './career-tracker.js';
+import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
 import { TutorialDirector } from './tutorial.js';
 import { isTutorial } from '../sim/tutorial.js';
@@ -703,9 +705,14 @@ export class Game {
     if (vs.gameOver && !this.overShown) {
       this.overShown = true;
       const wt = vs.gameOver.winningTeam;
-      const result = wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      const survival = typeof vs.survivalActive === 'function' && vs.survivalActive();
+      const result = survival ? 'survival' : wt === null || wt === undefined ? 'draw' : wt === vs.myTeam ? 'victory' : 'defeat';
+      // Trial of the Titans: the score is the wave reached; the career keeps the best (best.wave) for players who took part.
+      const wave = survival ? (Number.isInteger(vs.gameOver.wave) ? vs.gameOver.wave : (vs.survival() || {}).wave || 0) : 0;
+      const previous = survival ? getCareer().best.wave : 0;
       if (this.input) this.input.cancelMode();
-      let unlocked = this.career ? this.career.finish(result) : null;
+      let unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
+      const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
       // The guided first match: a victory earns a medal by its game time, kept with the career.
       const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
       if (medal) unlocked = recordTutorial(medal.rank);
@@ -714,7 +721,7 @@ export class Game {
       else if (!this.defeatSounded) sfx.play('defeat');
       // Give the last explosions a moment before the screen.
       setTimeout(() => {
-        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial });
+        if (!this.disposed) this.hud.overlays.showGameOver({ result, winningTeam: wt, unlocked, how: vs.gameOver.how, medal, tutorial: !!this.tutorial, wave, record });
       }, 1200);
     } else if (!vs.gameOver && vs.me && vs.me.defeated && !this.hud.overlays.defeatShown) {
       if (this.input) this.input.cancelMode();
@@ -846,6 +853,27 @@ export class Game {
       case 'playerDefeated':
         if (ev.player !== me) hud.message(`${this.playerName(ev.player)} has been defeated.`, 'system', { icon: '🏳️' });
         break;
+      case 'wave': {
+        // Trial of the Titans: a wave comes out of the map's edge.
+        const from = edgeName(vs.width, vs.height, ev.x, ev.y);
+        const boss = ev.boss ? UNITS[ev.boss] : null;
+        if (boss) {
+          hud.showBanner(`Wave ${ev.n}: ${boss.name} comes from the ${from}!`, 'titan');
+          sfx.play('summon_titan', { volume: 0.8 });
+        } else {
+          hud.showBanner(`Wave ${ev.n}: ${ev.count} monsters come from the ${from}!`, 'danger');
+          sfx.play('horn', { volume: 0.7 });
+        }
+        hud.minimap.ping(ev.x, ev.y, boss ? '#ffc840' : '#ff3a2a');
+        if (this.input) this.input.noteAlert(ev.x, ev.y);
+        break;
+      }
+      case 'waveCleared':
+        if (vs.me && !vs.me.defeated) {
+          hud.message(`Wave ${ev.n} is beaten! The gods reward you with ${ev.gold} gold.`, 'good', { icon: '🐉' });
+          sfx.play('tier_up', { volume: 0.6 });
+        }
+        break;
       case 'peaceEnd':
         hud.showBanner(`The ${PEACE_NAME} is over: war begins!`, 'danger');
         sfx.play('horn');
@@ -938,7 +966,10 @@ export class Game {
     const defeated = !!(vs.me && vs.me.defeated);
     if (defeated || (!this.ended && (vs.time || 0) >= 60)) {
       try {
-        this.career.finish('defeat');
+        // A Trial of the Titans left early counts as a trial that reached its current wave, not a loss.
+        const sv = typeof vs.survival === 'function' ? vs.survival() : null;
+        if (sv) this.career.finish('survival', { wave: sv.wave });
+        else this.career.finish('defeat');
       } catch (err) {
         console.warn('[game] career record failed', err);
       }

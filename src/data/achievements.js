@@ -106,6 +106,10 @@ export const ACHIEVEMENTS = [
     test: (m) => won(m) && m.teamSize >= 2 },
   { id: 'decade_of_peace', group: 'challenge', name: 'Peace, Then War', icon: '🕊️', desc: 'Win a Decade of Peace game.',
     test: (m) => won(m) && m.peace },
+  { id: 'hold_the_line', group: 'challenge', name: 'Hold the Line', icon: '🐉', desc: 'Reach wave 10 in the Trial of the Titans.',
+    test: (m, c) => c.best.wave >= 10, progress: (c) => count(c.best.wave, 10) },
+  { id: 'titans_bane', group: 'challenge', name: "Titans' Bane", icon: '🗿', desc: 'Reach wave 20 in the Trial of the Titans.',
+    test: (m, c) => c.best.wave >= 20, progress: (c) => count(c.best.wave, 20) },
   { id: 'the_long_war', group: 'challenge', name: 'The Long War', icon: '⏳', desc: 'Play one game for an hour of game time.',
     test: (m) => m.time >= 60 * 60 },
 ];

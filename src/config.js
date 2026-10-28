@@ -93,6 +93,12 @@ export const PEACE_LENGTHS = [30, 45, 60]; // minutes of game time the host can 
 export const PEACE_NAME = 'Decade of Peace';
 export const PEACE_BUILD_GAP = 20; // while the peace lasts nobody builds within this many empty tiles of an enemy Town Center (kept clear around it; DESIGN 5.10)
 
+// ---- Trial of the Titans (survival game mode, DESIGN 5.14) ----
+export const SURVIVAL_NAME = 'Trial of the Titans';
+export const SURVIVAL_FIRST_WAVE = 120; // game seconds before the first wave comes out of the map's edge
+export const SURVIVAL_INTERVAL = 90; // seconds between waves, whether the last one is beaten or not
+export const SURVIVAL_BOSS_EVERY = 5; // every fifth wave a hostile Titan leads it
+export const SURVIVAL_MAX_ALIVE = 120; // wave monsters alive at once at most (a wave that would pass it comes smaller)
 // ---- Sacred Sites (DESIGN 5.11) ----
 export const SITE_CLEAR = 3; // mapgen: open ground within this radius of a site's center
 export const SITE_RADIUS = 3; // a Worshipper or Priest within this many tiles of the center can capture it

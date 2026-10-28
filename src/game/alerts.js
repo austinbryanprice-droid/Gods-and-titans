@@ -209,6 +209,11 @@ export class AlertEngine {
     if (ev.type === 'gameOver') {
       if (vs.myIndex < 0) return;
       const wt = ev.winningTeam;
+      if (vs.survivalActive && vs.survivalActive()) {
+        const sv = vs.survival();
+        this.emit({ id: 'game_over', level: 'important', attention: `The trial is over: you held out to wave ${sv ? sv.wave : 0}.` });
+        return;
+      }
       const won = wt !== null && wt !== undefined && wt === vs.myTeam;
       this.emit({ id: 'game_over', level: 'important', attention: wt === null || wt === undefined ? 'The battle is over: a draw.' : won ? 'Victory! The battle is won.' : 'Defeat. The battle is lost.' });
       return;
@@ -244,6 +249,10 @@ export class AlertEngine {
         }
         break;
       }
+      case 'wave':
+        // The Game writes the banner; a wave led by a Titan is worth the tab flash.
+        if (ev.boss) this.emit({ id: 'wave_boss', level: 'important', attention: `Wave ${ev.n}: ${UNITS[ev.boss] ? UNITS[ev.boss].name : 'a Titan'} is coming!` });
+        break;
       case 'peaceEnd':
         this.emit({ id: 'peace_end', level: 'important', attention: 'The Decade of Peace is over: war begins!' });
         break;
