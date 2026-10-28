@@ -9,7 +9,7 @@ import { patchFowObject } from './fog.js';
 const BEAM_HEIGHT = 6;
 const GROUND_LIFT = 0.65; // the jewel's height over the ground while it lies there
 const HEAD_GAP = 0.45; // over a carrier's head
-const TEMPLE_GAP = 0.5; // over a Temple's roof
+const TEMPLE_GAP = 0.9; // over a Temple's roof
 
 let shared = null;
 function sharedParts() {
