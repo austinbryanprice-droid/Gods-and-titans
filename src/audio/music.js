@@ -1,11 +1,12 @@
 // Background music, synthesized live with WebAudio (no audio files). It shares the page's one
 // AudioContext and master limiter with the sound effects (sfx.js), so the browser's "start audio
-// on a click" unlock happens once, for both.
+// on a key press or a click" unlock happens once, for both.
 //
 //   music.init({ volume, muted })   once at boot; safe to call again
 //   music.play(themeId, { seed, joinAt })
 //                                   'menu' or a pantheon id; crossfades from what is playing. It starts
-//                                   as soon as the browser allows audio (after the first click or key press);
+//                                   as soon as the browser allows audio (at once where it allows that with no input,
+//                                   otherwise after the first key press or click);
 //                                   `joinAt` says where in the piece that is, for a score that has been going on
 //                                   without sound (the intro film: see Run.skip)
 //   music.stop(fadeSeconds)         fade out and keep quiet until the next play()
@@ -472,7 +473,7 @@ export class MusicEngine {
       stage: this.stageGain,
       playing: !!(this.run && !this.run.fading && this.ready),
       ready: this.ready,
-      // a theme is wanted, nothing mutes it and the browser has not allowed audio yet (the first click will)
+      // a theme is wanted, nothing mutes it and the browser has not allowed audio yet (the first key press or click will)
       waiting: !!(this.want && !this.muted && this.volume > 0 && !this.ready && (sfx.armed || this.ctx)),
       muted: this.muted,
       volume: this.volume,

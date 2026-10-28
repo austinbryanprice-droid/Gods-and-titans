@@ -8,6 +8,7 @@
 //   node tools/shot-intro.mjs --flow       # the page flow: the film plays on its own clock, Esc skips it
 //   node tools/shot-intro.mjs --narration  # the voice: each caption read as it comes up, Esc cuts it, a click unlocks it
 //   node tools/shot-intro.mjs --music      # the score, on the page's real audio graph, in real time (about three minutes; --scenes 2 runs one of the four)
+//   node tools/shot-intro.mjs --sound      # a first visit as a browser gives it: the card that waits for a key, and the film with its sound where the browser allows it (about three minutes; --scenes 2 runs one of the four)
 //
 // The film runs in manual mode (src/ui/intro.js playIntro({ manual: true })): the tool moves it on in
 // 0.05 s steps and draws only the seconds asked for, so software GL (a few seconds a frame) is
@@ -15,11 +16,13 @@
 // unless one already answers there. Prints page errors; exits non-zero when a check fails.
 // (--narration cannot hear anything: a stand-in speech synthesis records what the page asks of it.
 // --music cannot either: it reads the real Web Audio graph instead, the mix stage's gain and the level of the
-// music's output through an analyser, while a film without a renderer runs in real time with a stand-in voice.)
+// music's output through an analyser, while a film without a renderer runs in real time with a stand-in voice.
+// --sound reads the same graph on the real page, under the browser's autoplay policies: the default (a first visit),
+// the policy switched off, and a site set to "Sound: Allow" in a profile.)
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +42,7 @@ const hour = opt('hour', '') ? Number(opt('hour', '')) : null;
 const times = opt('at', '1,3,6,8,10,12,14,16,18,21,24,26,28,31,33,35,38,41').split(',').map(Number).filter((t) => t >= 0).sort((a, b) => a - b);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const base = `http://localhost:${port}/index.html`;
-const LAUNCH_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'];
+const LAUNCH_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']; // the browser's own autoplay policy: sound only after a key press or a click, as for a first visit
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function serverUp() {
@@ -179,8 +182,13 @@ async function flow(browser, errors) {
     await page.waitForSelector('.mw-intro');
     const menuHidden = await page.evaluate(() => document.getElementById('menu-root').hidden);
     ok('intro: the menu is hidden while the film loads', menuHidden);
+    // a first visit: the browser keeps sound off until a key press or a click, so the film waits at its card for one
+    await page.waitForSelector('.mw-intro.is-gated', { timeout: 30000 });
+    await page.waitForTimeout(1500);
+    ok('intro: held at the card, not playing', !(await page.$('.mw-intro.is-playing')));
+    await page.keyboard.press('a');
     await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
-    ok('intro: the film is playing', true);
+    ok('intro: a key press begins the film', true);
     await page.screenshot({ path: join(out, 'flow-playing.png') });
     const before = await page.evaluate(() => document.getElementById('menu-root').hidden);
     ok('intro: the menu stays hidden during the film', before);
@@ -282,6 +290,7 @@ async function narration(browser, errors) {
   watchErrors(page, errors);
   await page.goto(`${base}?intro=0`);
   await page.waitForSelector('.mw-title-screen');
+  await page.mouse.click(5, 5); // the player's first input: from here the browser lets the page sound (on the page itself the card's key press does it), so only the voice's own refusals bring the hint up
   await page.addStyleTag({ content: '.mw-intro-loading { display: none !important; }' }); // the card fades by the clock; these runs have none
   const film = () => page.evaluate(async () => {
     const { playIntro } = await import('/src/ui/intro.js');
@@ -359,6 +368,8 @@ async function narration(browser, errors) {
     await reset();
     await page.evaluate((narrate) => localStorage.setItem('mythicwar-settings', JSON.stringify({ quality: 'low', narration: narrate })), on);
     await page.goto(`${base}?intro=1`);
+    await page.waitForSelector('.mw-intro.is-gated', { timeout: 30000 }); // a first visit: the film waits for a key press or a click
+    await page.keyboard.press('a');
     await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
     await page.waitForFunction(() => document.querySelector('.mw-intro-caption').textContent !== '', null, { timeout: 120000 }); // past 1.4 s of film
     await page.waitForTimeout(500);
@@ -620,7 +631,7 @@ async function score(browser, errors, only = [1, 2, 3]) {
     const hinted = () => page.evaluate(() => document.querySelector('.mw-intro').classList.contains('needs-click'));
     ok('before any click the hint is up', await hinted());
     const cold = await page.evaluate(() => window.__trace.slice(-3));
-    ok('and there is no audio context at all', cold.length > 0 && cold.every((r) => r.ctxState === null));
+    ok('and the audio context the page made at load is still suspended: the browser has not allowed it', cold.length > 0 && cold.every((r) => r.ctxState === 'suspended'), cold.map((r) => r.ctxState).join(', '));
     const clickedAt = await page.evaluate(() => performance.now());
     await page.mouse.click(320, 180);
     await page.waitForFunction(() => document.querySelector('.mw-intro') && !document.querySelector('.mw-intro').classList.contains('needs-click'), null, { timeout: 10000 });
@@ -660,6 +671,234 @@ async function score(browser, errors, only = [1, 2, 3]) {
   return results;
 }
 
+// ---------------------------------------------------------------- the sound of a first visit
+
+/**
+ * Runs in the page before its own scripts: writes down, with the time, what the page asks of the browser's audio and
+ * voice (the audio context made and each state it takes, each line the voice is asked to speak and how the browser
+ * answers, each effect the sound engine schedules), and whether the card that waits for a key ever showed.
+ */
+function installSoundLog() {
+  const log = [];
+  window.__log = log;
+  const note = (what, extra = {}) => log.push({ at: Math.round(performance.now()), what, ...extra });
+  const Native = window.AudioContext;
+  window.AudioContext = class extends Native {
+    constructor(...a) {
+      super(...a);
+      note('context', { state: this.state });
+      this.addEventListener('statechange', () => note('state', { state: this.state }));
+    }
+  };
+  const speak = speechSynthesis.speak.bind(speechSynthesis);
+  speechSynthesis.speak = (u) => {
+    note('speak', { text: u.text });
+    u.addEventListener('error', (e) => note('speak error', { error: e.error }));
+    u.addEventListener('start', () => note('speak start'));
+    return speak(u);
+  };
+  import('/src/audio/sfx.js').then(({ sfx }) => sfx.onPlay((name) => note('sfx', { name }))).catch(() => {});
+  new MutationObserver(() => {
+    const root = document.querySelector('.mw-intro');
+    if (root && root.classList.contains('is-gated')) window.__gated = true;
+  }).observe(document, { subtree: true, attributes: true, childList: true });
+  try {
+    if (!localStorage.getItem('mythicwar-settings')) localStorage.setItem('mythicwar-settings', JSON.stringify({ quality: 'low' })); // low, for the sake of software GL
+  } catch {
+    // a frame with no storage keeps the defaults
+  }
+}
+
+/** Runs in the page: what the overlay and the audio are doing now (a function of its own, for the tool to send either way). */
+async function readSound() {
+  const { sfx } = await import('/src/audio/sfx.js');
+  const { music } = await import('/src/audio/music.js');
+  const root = document.querySelector('.mw-intro');
+  const begin = root && root.querySelector('.mw-intro-begin');
+  const st = music.state();
+  return {
+    shown: !!root,
+    gated: !!root && root.classList.contains('is-gated'),
+    playing: !!root && root.classList.contains('is-playing'),
+    hint: !!root && root.classList.contains('needs-click'),
+    title: !!document.querySelector('.mw-title-screen'),
+    prompt: begin ? Number(getComputedStyle(begin).opacity) : null,
+    ctx: sfx.ctx ? sfx.ctx.state : null,
+    music: st.playing ? 'playing' : st.waiting ? 'waiting' : 'off',
+    everGated: !!window.__gated,
+    log: window.__log.slice(),
+  };
+}
+
+/**
+ * A first visit as each kind of browser gives it: the sound the page can have from nothing but the page load, a key
+ * press or a click. Real Chromium, the real page and its real audio graph (nothing is heard here: the tool reads the
+ * context's state, the effects the engine schedules and what the voice is asked and answered).
+ *   1. the browser's own policy: the card holds the film, mouse movement, scrolling and Shift do not start it, a key does
+ *   2. the same policy: a click starts it too, and Esc at the card skips the film for the title screen
+ *   3. the policy off (--autoplay-policy=no-user-gesture-required): no card, the film plays with its sound at once
+ *   4. a site set to "Sound: Allow" (a profile's content settings): the same
+ * Until the input under test, the page is read through the protocol without a user gesture (`look`): Playwright's own
+ * evaluate, wait and screenshot calls count as a gesture to Chromium, which would unlock the very audio being watched.
+ */
+async function sound(browser, errors, only = [1, 2, 3, 4]) {
+  const { results, ok } = reporter();
+  mkdirSync(out, { recursive: true });
+  const viewport = { width: 960, height: 540 };
+  const sfxOf = (log) => log.filter((r) => r.what === 'sfx').map((r) => r.name);
+  const spoken = (log) => log.filter((r) => r.what === 'speak');
+  const refused = (log) => log.filter((r) => r.what === 'speak error' && r.error === 'not-allowed');
+  const named = (log) => log.map((r) => (r.what === 'context' ? `made ${r.state}` : r.what === 'state' ? `went ${r.state}` : r.what === 'sfx' ? `sfx ${r.name}` : r.what === 'speak error' ? `speak error ${r.error}` : r.what)).join(', ');
+  const done = (page) => page.waitForFunction(() => window.__log.some((r) => r.what === 'sfx') && window.__log.some((r) => r.what === 'speak'), null, { timeout: 120000 });
+  /** A page with the film asked for (?intro=1) in a context of the kind under test, and `look` to read it with no gesture. */
+  const visit = async (ctx) => {
+    await ctx.addInitScript(installSoundLog);
+    const page = await ctx.newPage();
+    watchErrors(page, errors);
+    const cdp = await ctx.newCDPSession(page);
+    const read = async (expression) => {
+      const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: false });
+      if (r.exceptionDetails) throw new Error(`reading the page: ${r.exceptionDetails.exception ? r.exceptionDetails.exception.description : r.exceptionDetails.text}`);
+      return r.result.value;
+    };
+    const look = {
+      read,
+      snapshot: () => read(`(${readSound})()`),
+      /** Wait (polling, with no gesture) until the snapshot satisfies `test`. */
+      async until(test, timeout = 180000) {
+        const t0 = Date.now();
+        for (;;) {
+          const s = await look.snapshot();
+          if (test(s)) return s;
+          if (Date.now() - t0 > timeout) throw new Error(`timed out waiting: ${JSON.stringify({ ...s, log: named(s.log) })}`);
+          await wait(150);
+        }
+      },
+      async shot(name) {
+        const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(join(out, name), Buffer.from(data, 'base64'));
+      },
+    };
+    await page.goto(`${base}?intro=1`);
+    await look.until((s) => s.shown, 30000);
+    return { page, look };
+  };
+  /** What a browser that lets the page sound with no input at all must show: the film plays by itself, with everything on. */
+  const allowed = async (label, page) => {
+    await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
+    await done(page);
+    await page.waitForTimeout(800);
+    const s = await page.evaluate(readSound);
+    const made = s.log.find((r) => r.what === 'context');
+    ok(`${label}: the film plays on its own, with no key press and no click`, s.playing && !s.gated);
+    ok(`${label}: the card never showed`, !s.everGated);
+    ok(`${label}: the audio context was running the moment the page made it`, !!made && made.state === 'running' && s.ctx === 'running', made ? `made ${made.state}, now ${s.ctx}` : 'no context');
+    ok(`${label}: the opening horn sounds`, sfxOf(s.log)[0] === 'horn', named(s.log));
+    ok(`${label}: the voice reads the first line and the browser does not refuse it`, spoken(s.log).length >= 1 && refused(s.log).length === 0, named(s.log));
+    ok(`${label}: the score is playing, and no hint asks for a click`, s.music === 'playing' && !s.hint, `music ${s.music}`);
+  };
+  const gone = (page) => page.waitForSelector('.mw-intro', { state: 'detached', timeout: 180000 }); // (software GL: the renderer is freed after the backlog of frames)
+  console.log('sound:');
+
+  // 1. the browser's own policy, a first visit: the card, and a key press
+  if (only.includes(1)) {
+    const ctx = await browser.newContext({ viewport });
+    const { page, look } = await visit(ctx);
+    await look.until((s) => s.gated, 30000);
+    await wait(2500); // the film loads behind the card meanwhile
+    const held = await look.snapshot();
+    ok('the film is held at its card: not playing, and the prompt shows', held.gated && !held.playing && held.prompt > 0.9, `prompt opacity ${held.prompt}`);
+    await look.shot('sound-card.png');
+    const made = held.log.find((r) => r.what === 'context');
+    ok('the audio context was made at load, and the browser keeps it suspended', !!made && made.state === 'suspended' && held.ctx === 'suspended', made ? `made ${made.state}, now ${held.ctx}` : 'no context');
+    ok('nothing has sounded: no effect, no voice, no score', sfxOf(held.log).length === 0 && spoken(held.log).length === 0 && held.music === 'off', named(held.log));
+    // none of these is an input the browser counts, and none starts the film
+    await page.mouse.move(120, 90);
+    await page.mouse.move(400, 300);
+    await page.mouse.wheel(0, 240);
+    await page.keyboard.press('Shift');
+    await wait(800);
+    const idle = await look.snapshot();
+    ok('mouse movement, scrolling and Shift alone leave it as it was: held at the card, the audio still off', idle.gated && !idle.playing && idle.ctx === 'suspended', `context ${idle.ctx}`);
+    await page.keyboard.press('a');
+    await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
+    const begun = await page.evaluate(readSound);
+    ok('a key press begins the film, and the browser lets the audio run', begun.playing && !begun.gated && begun.ctx === 'running', `context ${begun.ctx}`);
+    await done(page);
+    await page.waitForTimeout(800);
+    const heard = await page.evaluate(readSound);
+    ok('the opening horn sounds', sfxOf(heard.log)[0] === 'horn', named(heard.log));
+    ok('the voice reads the first line and the browser does not refuse it', spoken(heard.log).length >= 1 && refused(heard.log).length === 0, named(heard.log));
+    ok('the score is playing, and no hint asks for a click', heard.music === 'playing' && !heard.hint, `music ${heard.music}`);
+    await page.keyboard.press('Escape');
+    await gone(page);
+    ok('Esc still leaves the film for the title screen', !!(await page.$('.mw-title-screen')));
+    await ctx.close();
+  }
+
+  // 2. the same policy: a click starts the film too, and Esc at the card skips it
+  if (only.includes(2)) {
+    {
+      const ctx = await browser.newContext({ viewport });
+      const { page, look } = await visit(ctx);
+      await look.until((s) => s.gated, 30000);
+      await wait(1500);
+      await page.mouse.click(480, 270);
+      await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
+      await page.waitForFunction(() => window.__log.some((r) => r.what === 'sfx'), null, { timeout: 120000 });
+      const s = await page.evaluate(readSound);
+      ok('a click on the card begins the film too, with the audio running and the horn sounding', s.playing && !s.gated && s.ctx === 'running' && sfxOf(s.log)[0] === 'horn', `now ${s.ctx}: ${named(s.log)}`);
+      await ctx.close();
+    }
+    {
+      const ctx = await browser.newContext({ viewport });
+      const { page, look } = await visit(ctx);
+      await look.until((s) => s.gated, 30000);
+      await wait(1500);
+      await page.keyboard.press('Escape');
+      const s = await look.until((x) => !x.shown, 60000);
+      ok('Esc at the card skips the film: the title screen comes up', s.title);
+      ok('nothing sounded, and the browser still keeps the audio off (Esc is no input to it)', sfxOf(s.log).length === 0 && spoken(s.log).length === 0 && s.ctx === 'suspended', `${named(s.log) || 'nothing logged'}; now ${s.ctx}`);
+      await page.mouse.click(5, 5);
+      await page.waitForFunction(async () => (await import('/src/audio/music.js')).music.state().playing, null, { timeout: 20000 });
+      ok('and the first click on the title screen starts its music, as it always did', true);
+      await ctx.close();
+    }
+  }
+
+  // 3. the browser's autoplay policy switched off
+  if (only.includes(3)) {
+    const flagged = await chromium.launch({ args: [...LAUNCH_ARGS, '--autoplay-policy=no-user-gesture-required'] });
+    try {
+      const ctx = await flagged.newContext({ viewport });
+      const { page } = await visit(ctx);
+      await allowed('autoplay allowed', page);
+      await page.keyboard.press('Escape');
+      await gone(page);
+      ok('autoplay allowed: Esc leaves the film for the title screen', !!(await page.$('.mw-title-screen')));
+      await ctx.close();
+    } finally {
+      await flagged.close();
+    }
+  }
+
+  // 4. a site set to "Sound: Allow", the one-time setting in the browser (a profile's content settings)
+  if (only.includes(4)) {
+    const dir = mkdtempSync(join(tmpdir(), 'mythicwar-sound-'));
+    mkdirSync(join(dir, 'Default'), { recursive: true });
+    writeFileSync(join(dir, 'Default', 'Preferences'), JSON.stringify({ profile: { content_settings: { exceptions: { sound: { [`${new URL(base).origin},*`]: { setting: 1 } } } } } }));
+    const ctx = await chromium.launchPersistentContext(dir, { channel: 'chromium', headless: true, args: LAUNCH_ARGS, viewport });
+    try {
+      const { page } = await visit(ctx);
+      await allowed('sound allowed for the site', page);
+    } finally {
+      await ctx.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  return results;
+}
+
 // ---------------------------------------------------------------- main
 
 const server = await ensureServer();
@@ -674,6 +913,8 @@ try {
     failed = (await narration(browser, errors)).filter((r) => !r.pass).length;
   } else if (flag('music')) {
     failed = (await score(browser, errors, opt('scenes', '1,2,3,4').split(',').map(Number))).filter((r) => !r.pass).length;
+  } else if (flag('sound')) {
+    failed = (await sound(browser, errors, opt('scenes', '1,2,3,4').split(',').map(Number))).filter((r) => !r.pass).length;
   } else {
     console.log(`stills at ${times.join(', ')} s:`);
     const files = await stills(browser, errors);

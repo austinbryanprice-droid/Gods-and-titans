@@ -125,8 +125,9 @@ export const CAPTIONS = Object.freeze([
 export const CAPTION_FADE = 0.7;
 
 /**
- * Sounds under the picture, from the game's own synthesized set (src/audio/sfx.js). The page only
- * unlocks audio after a click or a key, so on a first visit these are silent; they play when it is open.
+ * Sounds under the picture, from the game's own synthesized set (src/audio/sfx.js). They are heard where the browser lets
+ * the page sound: from the page's first moment where it allows that with no input, and otherwise from the key press or
+ * click the film waits for behind its opening card (src/ui/intro.js); they are silent only for a player with the sound off.
  */
 export const AUDIO_CUES = Object.freeze([
   { at: 0.6, name: 'horn', volume: 0.6 },

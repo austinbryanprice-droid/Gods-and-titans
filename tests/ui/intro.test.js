@@ -666,6 +666,200 @@ test('by default the score is the page\'s music engine playing the title theme: 
   music.stop();
 });
 
+// ---------------------------------------------------------------- the card that waits for sound
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The sound engine before the browser has allowed it: `allow()` is the browser saying yes (a key press, a click, a site setting). */
+function lockedAudio() {
+  const a = { ready: false, supported: true, unlocks: 0, plays: [], hooks: [] };
+  a.play = (name, o) => a.plays.push([name, o.volume]);
+  a.unlock = () => {
+    a.unlocks++;
+  };
+  a.onReady = (cb) => {
+    a.hooks.push(cb);
+    return () => {
+      a.hooks = a.hooks.filter((x) => x !== cb);
+    };
+  };
+  a.allow = () => {
+    a.ready = true;
+    for (const cb of a.hooks.splice(0)) cb();
+  };
+  return a;
+}
+
+test('sound wanted and not allowed: the film waits at its first frame behind a card that asks for a key or a click, and begins with it', async () => {
+  const audio = lockedAudio();
+  const score = fakeScore();
+  const { intro, overlay, find } = start({ gate: true, audio, createScore: score.create });
+  assert.equal(overlay.classList.contains('is-gated'), true, 'the card asks from the first moment');
+  assert.equal(find('mw-intro-begin').textContent, 'Press any key or click to beginThe film has sound · Esc skips it');
+  await sleep(350); // the code loads and the first frame is drawn, behind the card
+  assert.equal(FakeFilm.made.length, 1, 'the film is built while the card waits, so it starts the moment the input comes');
+  assert.equal(FakeFilm.made[0].drawn, 1);
+  assert.equal(overlay.classList.contains('is-playing'), false, 'but it does not play');
+  assert.equal(overlay.classList.contains('is-gated'), true);
+  assert.deepEqual(score.calls('start'), [], 'no score yet: it begins with the film\'s first frame, not before');
+  press('a');
+  await intro.ready;
+  assert.equal(overlay.classList.contains('is-gated'), false, 'the card goes');
+  assert.equal(overlay.classList.contains('is-playing'), true, 'the film plays');
+  assert.equal(audio.unlocks, 1, 'the browser is asked to start its audio with that key press');
+  assert.deepEqual(score.calls('start').length, 1, 'and the score begins with the film');
+  assert.equal(FakeFilm.made[0].t, 0.001, 'at the film\'s first moment, so every sound is there from its start');
+  assert.deepEqual(audio.plays, [], 'the first cue (0.6 s) is still ahead');
+  for (let i = 0; i < 8; i++) intro.advance(0.1);
+  assert.deepEqual(audio.plays, [[AUDIO_CUES[0].name, AUDIO_CUES[0].volume]], 'and it sounds');
+  intro.skip();
+  await intro.done;
+});
+
+test('on the card every key but Esc begins the film (Enter and Space too); a modifier alone, a shortcut and a held key do not', async () => {
+  const audio = lockedAudio();
+  const { intro, overlay } = start({ gate: true, audio });
+  await sleep(350);
+  const waiting = () => overlay.classList.contains('is-gated');
+  for (const [key, extra] of [['Shift'], ['Control'], ['Alt'], ['Meta'], ['CapsLock'], ['F5'], ['F12'], ['Dead'], ['r', { ctrlKey: true }], ['l', { metaKey: true }], ['Tab', { altKey: true }], ['a', { repeat: true }]]) {
+    press(key, extra);
+    assert.equal(waiting(), true, `${key}${extra ? ` ${JSON.stringify(extra)}` : ''} does not begin it`);
+  }
+  assert.equal(audio.unlocks, 0, 'and the audio is left alone');
+  const ev = press('Enter');
+  assert.equal(ev.prevented && ev.stopped, true, 'the key is the film\'s, not the title screen\'s');
+  await intro.ready;
+  assert.equal(waiting(), false, 'Enter begins it, for the card says any key');
+  assert.equal(FakeFilm.made[0].t, 0.001, 'it did not also skip it');
+  const space = press(' ');
+  assert.equal(space.prevented && space.stopped, true);
+  assert.equal(await intro.done, 'skipped', 'once it plays, Enter and Space skip it again');
+});
+
+test('a key that begins it is a plain key too: letters, digits and arrows each start the film', async () => {
+  for (const key of ['q', '7', 'ArrowDown', ' ']) {
+    const { intro, overlay } = start({ gate: true, audio: lockedAudio() });
+    await sleep(350);
+    assert.equal(overlay.classList.contains('is-playing'), false, 'held at the card until a key');
+    press(key);
+    await intro.ready;
+    assert.equal(overlay.classList.contains('is-playing'), true, `${JSON.stringify(key)} begins it`);
+    intro.skip();
+    await intro.done;
+  }
+});
+
+test('a click anywhere on the film begins it, and then goes to the voice as before', async () => {
+  const audio = lockedAudio();
+  const voice = fakeVoice();
+  const { intro, overlay } = start({ gate: true, audio, createVoice: voice.create });
+  await sleep(350);
+  overlay.click();
+  await intro.ready;
+  assert.equal(overlay.classList.contains('is-playing'), true);
+  assert.equal(audio.unlocks, 1);
+  assert.equal(voice.retries, 1, 'the click is also the one a browser that refused to speak wants');
+  overlay.click();
+  assert.equal(audio.unlocks, 1, 'later clicks do not ask again');
+  intro.skip();
+  await intro.done;
+});
+
+test('Esc skips from the card: no film, no sound, no dip, the title at once, and the wait ends', async () => {
+  const audio = lockedAudio();
+  const score = fakeScore();
+  const wait = gate();
+  const { intro, overlay, handovers } = start({ gate: true, audio, wait, createScore: score.create });
+  await sleep(350);
+  press('Escape');
+  await tick();
+  assert.equal(overlay.classList.contains('is-skipping'), false, 'nothing to dip: no picture was up');
+  assert.equal(overlay.classList.contains('is-black'), true);
+  assert.deepEqual(handovers.length, 1, 'the title shows');
+  assert.equal(overlay.classList.contains('is-gated'), false, 'the card is not left up');
+  await intro.ready; // settles, rather than waiting for a key for ever
+  assert.equal(overlay.classList.contains('is-playing'), false);
+  assert.deepEqual(score.calls('start'), [], 'the score never began');
+  assert.equal(audio.unlocks, 0);
+  await wait.release();
+  assert.equal(await intro.done, 'skipped');
+});
+
+test('the Skip button works on the card too, and does not begin the film', async () => {
+  const { intro, find, handovers, overlay } = start({ gate: true, audio: lockedAudio() });
+  await sleep(350);
+  find('mw-intro-skip').click();
+  assert.equal(await intro.done, 'skipped');
+  assert.equal(overlay.classList.contains('is-playing'), false);
+  assert.deepEqual(handovers.length, 1);
+});
+
+test('a browser that allows sound after all lets the film begin by itself, and a key is not needed', async () => {
+  const audio = lockedAudio();
+  const { intro, overlay } = start({ gate: true, audio });
+  await sleep(350);
+  assert.equal(overlay.classList.contains('is-gated'), true);
+  audio.allow(); // the context started a moment late (or the site is allowed)
+  await intro.ready;
+  assert.equal(overlay.classList.contains('is-gated'), false);
+  assert.equal(overlay.classList.contains('is-playing'), true);
+  assert.equal(audio.unlocks, 0, 'nobody pressed anything');
+  assert.equal(audio.hooks.length, 0, 'and nothing is left listening');
+  intro.skip();
+  await intro.done;
+});
+
+test('input before the film has even loaded counts: it begins the moment the first frame is ready', async () => {
+  const audio = lockedAudio();
+  let release;
+  const { intro, overlay } = start({
+    gate: true,
+    audio,
+    load: () => new Promise((resolve) => (release = () => resolve({ IntroFilm: FakeFilm, Renderer: class {} }))),
+  });
+  assert.equal(overlay.classList.contains('is-gated'), true, 'the card is up while the code loads');
+  press('x');
+  assert.equal(overlay.classList.contains('is-gated'), false, 'the card has what it asked for');
+  assert.equal(overlay.classList.contains('is-playing'), false, 'the film is still loading');
+  release();
+  await intro.ready;
+  assert.equal(overlay.classList.contains('is-playing'), true, 'and it plays as soon as it is built, with no second input');
+  intro.skip();
+  await intro.done;
+});
+
+test('no card when there is nothing to wait for: sound already allowed, not wanted, not possible, or a stand-in engine', async () => {
+  const cases = {
+    'sound is already allowed (a site set to allow it)': { gate: true, audio: { ...lockedAudio(), ready: true } },
+    'the player wants no sound (volume 0, music off)': { gate: false, audio: lockedAudio() },
+    'this browser has no WebAudio': { gate: true, audio: { ...lockedAudio(), supported: false } },
+    'an engine that does not say (tools and tests)': { gate: true, audio: { play: () => {} } },
+    'the default, which is no card': { audio: lockedAudio() },
+  };
+  for (const [why, o] of Object.entries(cases)) {
+    const { intro, overlay } = start(o);
+    assert.equal(overlay.classList.contains('is-gated'), false, why);
+    await intro.ready;
+    assert.equal(overlay.classList.contains('is-playing'), true, `${why}: it just plays`);
+    intro.skip();
+    await intro.done;
+  }
+});
+
+test('on a screen you touch the card says tap', async () => {
+  const had = globalThis.matchMedia;
+  globalThis.matchMedia = (q) => ({ matches: q === '(pointer: coarse)' });
+  try {
+    const { intro, find } = start({ gate: true, audio: lockedAudio() });
+    assert.equal(find('mw-intro-begin').textContent, 'Tap to beginThe film has sound');
+    intro.skip();
+    await intro.done;
+  } finally {
+    if (had === undefined) delete globalThis.matchMedia;
+    else globalThis.matchMedia = had;
+  }
+});
+
 // ---------------------------------------------------------------- the ways out
 
 test('the end of the film: hands over to the title once, behind black, and cleans up after itself', async () => {

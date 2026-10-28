@@ -1,8 +1,11 @@
 // The page's audio in one place. The sound effects (sfx.js) and the music (music.js) share one
-// AudioContext and one master limiter, so the browser's "start audio on a click" unlock happens
-// once for both, and the player's settings reach both from here.
+// AudioContext and one master limiter, so the browser's "start audio on a key press or a click"
+// unlock happens once for both, and the player's settings reach both from here.
 //
-//   initAudio(settings)             once at boot: start both engines from the saved settings
+//   initAudio(settings)             once at boot: start both engines from the saved settings. The audio context is
+//                                   made and started at once, so a browser that allows sound without any input (a
+//                                   site set to "Sound: Allow") plays from the first moment; the others wait for the
+//                                   first key press or click
 //   syncAudio(settings, changed)    apply a settings change (the arguments of onSettingsChange)
 //   playTitleMusic()                the title screen's score (the menu calls it on every screen of the menu)
 //   quietMusic(fade)                fade the music out and keep it quiet (the intro film starts a score of its own
