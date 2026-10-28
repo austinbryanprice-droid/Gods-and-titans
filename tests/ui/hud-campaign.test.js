@@ -138,3 +138,24 @@ test('the title screen opens the chapter; a locked mission cannot start; Begin s
   assert.match(root.textContent, /three great longhouses/);
   assert.match(root.textContent, /5:00/, 'the best time of the first');
 });
+
+test('Begin Mission right away cancels the briefing that was about to be read', async () => {
+  saveSettings({ narration: true, volume: 0.7 });
+  const { campaignScreen } = await import('../../src/ui/menu-campaign.js');
+  const said = [];
+  const voice = () => ({ say: (t) => said.push(t), stop: () => {} });
+  const open = () => {
+    const scr = campaignScreen({ go: () => {}, onBegin: () => {}, makeVoice: voice });
+    Object.defineProperty(scr.el, 'isConnected', { value: true });
+    return scr;
+  };
+  open();
+  await new Promise((r) => setTimeout(r, 450));
+  assert.equal(said.length, 1, 'left alone, the screen reads its briefing');
+  said.length = 0;
+  const scr = open();
+  scr.el.all('button').find((b) => b.textContent === 'Begin Mission').click();
+  await new Promise((r) => setTimeout(r, 450));
+  assert.deepEqual(said, [], 'no briefing over the mission');
+  saveSettings({ narration: false });
+});

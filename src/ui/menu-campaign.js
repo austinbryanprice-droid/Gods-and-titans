@@ -32,6 +32,8 @@ export function campaignScreen({ go, onBegin, mission = null, makeVoice = (m) =>
   const progress = getProgress();
   let selected = mission && MISSION_BY_ID[mission] && isUnlocked(mission, progress) ? MISSION_BY_ID[mission] : nextToPlay(progress);
   let voice = null;
+  let live = true; // false once the screen is left or a mission begins: a late briefing must not start
+  let briefTimer = 0;
   const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
   const list = h('ol.mw-mission-list', { 'aria-label': 'Missions' });
   const detail = h('div.mw-briefing', { 'aria-live': 'polite' });
@@ -53,6 +55,7 @@ export function campaignScreen({ go, onBegin, mission = null, makeVoice = (m) =>
   });
 
   function speak() {
+    if (!live) return false;
     if (voice) voice.stop();
     voice = makeVoice(selected);
     return voice.say(selected.briefing);
@@ -64,7 +67,7 @@ export function campaignScreen({ go, onBegin, mission = null, makeVoice = (m) =>
     const { enemies, allies } = sides(m);
     const narrating = getSettings().narration;
     const begin = h('button.mw-btn.mw-btn--primary.mw-begin-btn', { type: 'button', onclick: () => {
-      if (voice) voice.stop();
+      leave();
       onBegin(m.id);
     } }, 'Begin Mission');
     const hear = h('button.mw-btn.mw-btn--small.mw-btn--ghost', { type: 'button', onclick: () => speak(), title: narrating ? 'The narrator reads the briefing' : 'Narration is off in Settings', disabled: !narrating }, '🔊 Hear the briefing');
@@ -103,15 +106,18 @@ export function campaignScreen({ go, onBegin, mission = null, makeVoice = (m) =>
           detail))));
   const focus = render();
   // The briefing is read when the screen opens (a browser that has not had a click yet stays quiet until one).
-  setTimeout(() => {
+  briefTimer = setTimeout(() => {
     if (el.isConnected) speak();
   }, 350);
+  function leave() {
+    live = false;
+    clearTimeout(briefTimer);
+    if (voice) voice.stop();
+  }
   return {
     el,
     focus,
     onEscape: () => go('title'),
-    cleanup: () => {
-      if (voice) voice.stop();
-    },
+    cleanup: leave,
   };
 }

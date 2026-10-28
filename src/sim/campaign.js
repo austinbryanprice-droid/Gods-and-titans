@@ -344,7 +344,19 @@ export function campaignVictory(world) {
   if (world.gameOver) return;
   const me = world.players[HERO];
   if (!me || me.defeated) return end(world, false);
-  if (enemiesLeft(world) === 0) end(world, true);
+  if (enemiesLeft(world) > 0) return;
+  // A protected building that fell since the last once-a-second look still fails the mission.
+  const cp = world.campaign;
+  if (cp && cp.m.objectives.some((o, i) => o.kind === 'protect' && cp.state[i] !== FAILED && tagged(world, o.tag).length === 0)) {
+    cp.m.objectives.forEach((o, i) => {
+      if (o.kind !== 'protect' || cp.state[i] === FAILED || tagged(world, o.tag).length) return;
+      cp.state[i] = FAILED;
+      cp.shown[i] = true;
+      world.emit({ type: 'objective', i, s: FAILED });
+    });
+    return end(world, false);
+  }
+  end(world, true);
 }
 
 /** One tick of the director: events on the clock; once a second the objectives, the pointer and the end. */

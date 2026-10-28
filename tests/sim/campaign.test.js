@@ -169,3 +169,13 @@ test('a computer playing the hero wins the first mission in good time', () => {
   assert.ok(w.time < 10 * 60, `won at ${w.time}`);
   assert.equal(w.perf.commandErrors, 0);
 });
+
+test('a protected building lost on the same second as the last enemy still fails the mission', () => {
+  const w = world('pass');
+  w.killEntity(w.buildingList.find((b) => b.cTag === 'oracle'), null);
+  for (const b of w.buildingList.filter((x) => x.owner === 1)) w.killEntity(b, null);
+  run(w, 2);
+  assert.equal(w.gameOver.winningTeam, 2);
+  const i = MISSION_BY_ID.pass.objectives.findIndex((o) => o.id === 'oracle');
+  assert.equal(w.campaign.state[i], FAILED);
+});
