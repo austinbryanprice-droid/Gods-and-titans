@@ -73,6 +73,7 @@ export class InputController {
     this.lastAlert = null;
     this.idleIndex = -1;
     this.hoverId = null;
+    this.hoverRelic = null; // a relic on the ground under the cursor (vs.relicNear)
     this.hoverAt = 0;
     this.hoverMoved = true;
     this.placeAt = 0;
@@ -559,6 +560,17 @@ export class InputController {
       cmd.x = px;
       cmd.y = py;
       let kind = 'move';
+      // A relic on the ground under the cursor (DESIGN 5.15): the nearest carrier picks it up.
+      const relic = p && !(target && target.k !== 'm' && (vs.isEnemy(target.o) || target.o < 0) && vs.canHarm(target.o)) ? vs.relicNear(p.x, p.y) : null;
+      if (relic) {
+        cmd.relic = relic.i;
+        cmd.x = relic.x;
+        cmd.y = relic.y;
+        this.command(cmd);
+        this.marker(relic.x, relic.y, 'gather');
+        sfx.play('move');
+        return;
+      }
       if (target && !(target.k === 'u' && units.includes(target.id))) {
         cmd.target = target.id;
         if (target.k === 'm') kind = 'gather';
@@ -1522,11 +1534,14 @@ export class InputController {
       this.hoverMoved = false;
       const e = this.pick(p.x, p.y);
       const id = e ? e.id : null;
+      const g = e ? null : this.ground(p.x, p.y);
+      this.hoverRelic = g ? this.vs.relicNear(g.x, g.y) : null;
       if (id !== this.hoverId) {
         this.hoverId = id;
         r.setHover(id);
       }
     } else if ((!this.overCanvas || overlay) && this.hoverId !== null) {
+      this.hoverRelic = null;
       this.hoverId = null;
       r.setHover(null);
     }
@@ -1573,7 +1588,7 @@ export class InputController {
       return this.setCursor('target');
     }
     if (h && this.sel.ownUnitIds().length && vs.canHarm(h.o) && (h.o >= 0 || h.k === 'u')) return this.setCursor('enemy');
-    if (h) return this.setCursor('select');
+    if (h || (this.hoverRelic && this.sel.ownUnitIds().length)) return this.setCursor('select');
     return this.setCursor('');
   }
 

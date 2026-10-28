@@ -1,4 +1,4 @@
-// The Career screen's replays (DESIGN 9.3): the matches kept on this device, newest first, each with
+// The Career screen's replays (DESIGN 9.4): the matches kept on this device, newest first, each with
 // Watch, Save (a file to keep or send, for a friend or a bug report) and Delete, and a button to open
 // a replay file. The list fills in once storage answers (IndexedDB is asynchronous).
 import { h, setChildren } from './menu-dom.js';

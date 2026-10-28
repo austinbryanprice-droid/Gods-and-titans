@@ -135,7 +135,7 @@ test('speeds, pause and the viewer', () => {
   s.step(1);
   assert.equal(s.viewState.revealAll, true);
   s.setSpeed(4);
-  assert.equal(s.ticker.rate, 80);
+  assert.equal(s.ticker.interval, 1000 / 80);
   assert.equal(s.snapEvery(), 2);
   s.nudgeSpeed(1);
   assert.equal(s.speed, 8);
@@ -197,6 +197,8 @@ test('sanitizeReplay keeps a good record and refuses a bad one', () => {
   assert.ok(clean);
   assert.equal(clean.cmds.length, record.cmds.length);
   assert.equal(clean.ticks, record.ticks);
+  assert.equal(sanitizeReplay({ ...record, setup: { ...record.setup, twist: 'golden' } }).setup.twist, 'golden', 'a daily challenge\'s twist stays');
+  assert.equal(sanitizeReplay({ ...record, setup: { ...record.setup, twist: 'nope' } }).setup.twist, undefined);
   assert.equal(sanitizeReplay({ ...record, format: 99 }), null);
   assert.equal(sanitizeReplay({ ...record, cmds: [[5, 0, { type: 'nope' }]] }), null);
   assert.equal(sanitizeReplay({ ...record, cmds: [[5, 9, { type: 'stop' }]] }), null, 'no such player');

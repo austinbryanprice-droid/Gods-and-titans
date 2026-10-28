@@ -6,6 +6,7 @@ import { updateGather, updateReturn, updatePray, releasePrayerSlot } from './eco
 import { updateBuild, updateRepair, findRepairTarget, refund } from './construction.js';
 import { updateCastOrder, tryAutocast } from './abilities.js';
 import { updateCreep, aggroCamp } from './creeps.js';
+import { updateRelicPickup, updateRelicDeliver } from './relics.js';
 import { isMelee } from './surround.js';
 import { hyp, edgeDist } from './common.js';
 import { AUTO_REPAIR_RANGE } from '../config.js';
@@ -315,6 +316,8 @@ function runOrder(world, u, o) {
     case 'repair': return u.def.class !== 'worker' || updateRepair(world, u, o);
     case 'pray': return u.def.class !== 'worker' || updatePray(world, u, o);
     case 'cast': return updateCastOrder(world, u, o);
+    case 'relic': return updateRelicPickup(world, u, o);
+    case 'deliver': return updateRelicDeliver(world, u, o);
     default: return true;
   }
 }

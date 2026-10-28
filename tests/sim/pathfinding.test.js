@@ -228,6 +228,43 @@ test('a crowd queueing at a one-tile gap waits its turn instead of giving up the
   assert.ok(us.every((u) => u.y > 27), 'everyone made it through the gap');
 });
 
+test('a Titan and soldiers jammed in a one-tile pass squeeze through instead of holding each other there', () => {
+  // Found in an AI game (seed 6, Aztec): Cipactli (radius 1.6), two gods and an archer pushing into the
+  // same bent one-tile pass held each other in it for good; each got through alone. The ground here is
+  // that pass, copied from the generated map, with the units where they stood.
+  const pass = [
+    '#########..#....', '#########.##....', '########..##....', '#######..###....',
+    '#######.####....', '#######.###.....', '#####...###.....', '####.....#......',
+    '####.......###..', '#........######.', '..##.....#######', '.#####.#########',
+    '#####..#########', '###...##########', '##..############', '...#############',
+  ];
+  const O = 16;
+  const rock = [{ x: 0, y: 0, w: 48, h: O }, { x: 0, y: O, w: O, h: 32 }, { x: O, y: O + 16, w: 32, h: 16 }, { x: O + 16, y: O + 9, w: 16, h: 7 }];
+  pass.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] === '#') rock.push({ x: O + x, y: O + y, w: 1, h: 1 });
+  });
+  const w = makeWorld({ map: { width: 48, height: 48, rock, starts: [{ x: 40, y: 2 }, { x: 44, y: 9 }], mines: [] } });
+  clearUnits(w, 0);
+  clearUnits(w, 1);
+  const us = [
+    spawn(w, 0, 'aztec_huitzilopochtli', O + 7.55, O + 7.01),
+    spawn(w, 0, 'aztec_cipactli', O + 8.55, O + 9),
+    spawn(w, 0, 'aztec_quetzalcoatl', O + 8.55, O + 7.45),
+    spawn(w, 0, 'archer', O + 7.03, O + 7.77),
+  ];
+  w.issueCommand(0, { type: 'attackMove', units: us.map((u) => u.id), x: O + 15.5, y: O + 3 });
+  runUntil(w, () => us.every((u) => u.x > O + 11), 30);
+  assert.ok(us.every((u) => u.x > O + 11), `everyone made it through: ${us.map((u) => `${u.x.toFixed(1)},${u.y.toFixed(1)}`).join(' ')}`);
+  // Walking through allies is only a squeeze: once out, they stand apart again.
+  run(w, 5);
+  for (let i = 0; i < us.length; i++) {
+    for (let j = i + 1; j < us.length; j++) {
+      const d = Math.hypot(us[i].x - us[j].x, us[i].y - us[j].y);
+      assert.ok(d > (us[i].radius + us[j].radius) * 0.8, `${us[i].type} and ${us[j].type} overlap (${d.toFixed(2)})`);
+    }
+  }
+});
+
 test('workers path to the reachable side of a mine', () => {
   const w = makeWorld({ map: { width: 48, height: 48, starts: [{ x: 6, y: 30 }, { x: 38, y: 38 }], mines: [{ tx: 20, ty: 10, amount: 5000 }, { tx: 40, ty: 30, amount: 5000 }], rock: [{ x: 18, y: 8, w: 7, h: 2 }, { x: 18, y: 8, w: 2, h: 7 }, { x: 23, y: 8, w: 2, h: 7 }] } });
   const u = w.unitsOf(0)[0];

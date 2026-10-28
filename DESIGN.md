@@ -730,7 +730,6 @@ has 3 to 5 (`mapData.sacred`, 6.7); they exist in every game. Rules in `src/sim/
 - **Client:** the 🛐 chip beside the clock (`src/ui/hud-sites.js`: sites held / total, and the countdown, green
   when it is your side's, red and pulsing when a rival's), alerts (9), the minimap diamond, the 3D site (8), the
   red ghost, How to Play, two tips, and the game-over line for a Sacred Victory.
-
 ### 5.12 Match statistics and score
 Each player's `stats` (`newStats` in `src/data/score.js`, shared by the sim and the HUD) count:
 `gathered` (gold + wood delivered) and the two apart (`gold`, `wood`); `faith` earned (prayer,
@@ -800,6 +799,45 @@ HUD) and run from `World.tick` (`updateSurvival`, before the units move):
   Measured (seeds 3 to 9, AIs only): one Easy AI falls at wave 20 (30:44), one Normal AI at wave 21 (32:37), two Normal
   AIs at wave 25 (38:44), four Hard AIs at wave 28 (42:50, the 120-monster cap reached); every AI beat waves 1 to 10.
 
+### 5.15 Relics (src/data/relics.js, src/sim/relics.js)
+Treasures of world myth that give creeping a reward beyond the bounty (WC3 items, Age of Mythology relics).
+- **Where:** every creep camp of level `RELIC_CAMP_LEVEL` (2) or more guards one relic (4 or 5 on the usual
+  maps; level 1 camps guard none). Types are drawn without repeats from the ten in `RELIC_LIST`, shuffled by an
+  RNG seeded with `${seed}:relics` (the sim RNG is untouched, so nothing else in a game changes).
+- **Dropping:** when the camp's last creature dies (`World.killEntity` calls `onCampMemberKilled`) the relic lies
+  on the ground at the camp's centre and `{ type: 'relic', ev: 'drop', player }` names the killer's owner.
+- **Carrying:** a smart order with `relic: index` sends the nearest unit that can carry (a Worshipper or a god of
+  a player, not summoned, not already carrying one) to it; the rest of the selection walks along. Soldiers get
+  `Only a Worshipper or a god can carry a relic.` A relic still guarded, or already taken, makes it a plain move.
+  Picked up within 0.6 tiles (edge distance) (`ev: 'take'`), the carrier sets off at once for its owner's nearest
+  finished Temple (an order `deliver`) unless more orders were queued; an idle carrier is sent there every
+  10 ticks once a Temple stands. A carrier on its own finished Temple with a smart order delivers before it would
+  pray or repair. Any player can take a relic from the ground, enemies included.
+- **Resting:** next to the Temple it goes in (`ev: 'house'`) and its effects (the upgrade vocabulary of 4.3) are
+  folded into the owner's mods: `computeMods(upList, pantheon, p.relics)` and `World.refreshMods(i)`, the same path
+  as a researched upgrade, so every stat is applied at once. There is no limit per Temple.
+- **Losing it:** a carrier that dies drops it where it fell; a Temple that falls drops what rested in it on its
+  south side, and the owner loses the bonus (`ev: 'lose'`, player: the previous holder). A defeated player's
+  relics fall with their last Temple.
+  A relic on the ground under a building raised over it rolls to the nearest open tile (checked every 10 ticks).
+- **The ten:** Golden Fleece (Greek, soldiers +10% health), Brísingamen (Norse, +25% Faith at Shrines and
+  Temples), Eye of Horus (Egyptian, buildings +2 armor), Pot of Amrita (Hindu, gods regenerate +1.5 hp/s),
+  Kusanagi (Japanese, Warriors and Archers +8% damage), Peaches of Immortality (Chinese, soldiers and creatures
+  heal 0.5 hp/s), Smoking Mirror (Aztec, god and Titan abilities recharge 10% faster), Cauldron of the Dagda
+  (Celtic, +2 gold and wood per trip), Tablet of Destinies (Mesopotamian, research and growing 20% faster), Box of
+  Stories (West African, Worshippers work 10% faster). Each is a small, always-on edge, like a blessing (4.10).
+- **Net:** the snapshot's `relics` list (6.3) changes only when a relic changes state (a carried one goes by its
+  carrier's id, so walking costs nothing); the player record's `rl` lists the types resting in their Temples.
+- **Shown:** a glowing jewel in a gold ring, tinted per relic, over the ground under a beam of light while it is
+  guarded or free (brighter and pulsing once free), smaller over its carrier's head, circling over the Temple's
+  roof once it rests there (src/render/relics.js); a gold diamond on the minimap; the cursor's hand over a free
+  relic in sight; a relic chip at the top left ("1/5", the bonuses and where the others are in its tooltip); a
+  chip on a carrier's selection panel and a Relics line on a Temple's; alerts when a camp I cleared drops one,
+  when one comes to rest in my Temple or a rival's, and when I lose one. How to Play and a tip explain it.
+- **AI:** `src/ai/relics.js` sends the nearest gathering or idle Worshipper for a free relic within 70 tiles of
+  home once it has a finished Temple and no enemy stands within 10 tiles of the relic; the economy leaves a
+  Worshipper on that errand alone (job `relic`). In AI-vs-AI games each side brought home two or three.
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -839,7 +877,7 @@ counted in `world.perf.commandErrors`.
 { type: 'move',       units: [ids], x, y, queue }
 { type: 'attackMove', units, x, y, queue }
 { type: 'attack',     units, target: id, queue }
-{ type: 'smart',      units, x, y, target?: id, tx?, ty?, queue } // right-click; sim decides (below)
+{ type: 'smart',      units, x, y, target?: id, tx?, ty?, relic?: index, queue } // right-click; sim decides (below)
 { type: 'gather',     units, target?: mineId, tx?, ty? }          // mine or tree tile
 { type: 'pray',       units, target: buildingId }
 { type: 'returnCargo', units }
@@ -863,7 +901,8 @@ counted in `world.perf.commandErrors`.
 { type: 'godPower',   power: powerId, x?, y? }               // cast one of my pantheon's god powers (4.11); x / y for a strike
 { type: 'surrender' }
 ```
-**smart** resolution per unit: enemy target → attack; worker + gold mine → gather; worker +
+**smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
+(5.15). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
@@ -894,7 +933,7 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That House is being combined into a Manor.` (and `Not enough gold. Combined 1 of 2 squares.` when the purse
 runs short part way) Trades: `Choose a teammate to send to.` `You can only send resources
 to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
-`Choose gold, wood or faith to send.` `You cannot trade now.`
+`Choose gold, wood or faith to send.` `You cannot trade now.` Relics: `Only a Worshipper or a god can carry a relic.`
 
 ### 6.3 ViewSnapshot (`world.getSnapshot()`)
 Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to integers.
@@ -904,11 +943,14 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
+              rl?: [relic types resting in their Temples] (5.15; omitted when none),
               stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army }, // 5.12
               gp, gb? }],               // god powers (4.11): gp bit i = the tier i+1 power is spent; gb = boons running [[stat, pct, seconds left]]
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
+  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.15: index, type, state 'k' guarded | 'g' on the ground (x, y)
+                              // | 'c' carried (c: carrier id, o) | 'h' resting in a Temple (b: its id, o)
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
   sites: [{ x, y, o, p?, c?, cn? }], // sacred sites (5.11): holder, capture progress, capturing player, contested
@@ -962,6 +1004,7 @@ EntityView = {
 { type: 'tierUp',  player, tier }
 { type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
+{ type: 'relic',   ev, i, t, player, x, y }                          // 5.15: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
 { type: 'levelUp', id, level }
 { type: 'rankUp',  id, rank }                                        // a soldier reached a new rank (5.9)
 { type: 'treeFelled', tx, ty }
@@ -1555,6 +1598,17 @@ per-frame budget, so a revealed army appears over a few frames.
   markers, flags, placement ghosts) live in their own scene drawn after post-processing, so they
   keep exact colors. Sun shadows on medium and up, unit mesh shadows on high / ultra, cloud
   shadows on medium and up; VFX point lights 0 / 2 / 4 (low / medium / high and ultra).
+  The sun's shadow box (`updateShadowCamera`) is fitted each frame to the view's ground quad as the
+  sun sees it (its extent along the light's right and up axes, plus a margin on the up-sun side for
+  what stands 8 units above the ground), not a square as wide as the view: anything whose shadow
+  falls in the view lies on the same sun ray as the point it darkens, so this covers every caster,
+  and a low sun no longer stretches the box 100+ tiles up-sun (that drew every forest chunk along
+  the strip into the map, more triangles than the visible scene). Its half sizes step by 2 tiles and
+  its center snaps to texels. Forest chunks are culled by their instances' box as well as their
+  bounding sphere (`chunkInFrustum` in props.js; the box grows by `CHUNK_BOX_PAD` for what the
+  shader does to a tree: a spruce's own shape and the wind). Late game at the population cap, Medium, default
+  zoom: shadow-pass triangles 1.0M to 0.6M, whole frame 1.75M to 1.1M, draw calls 373 to 228
+  (`node tools/perf-late.mjs`, which also profiles the real game with `--game`).
   Buildings (`src/render/models/building-*.js`, four layers): `building-core.js` holds the colors,
   surface classes and geometry primitives and the Kit that merges a building's parts into four
   vertex-colored buckets (foundation, body, team, glow); `building-materials.js` the shared materials
@@ -1798,6 +1852,15 @@ per-frame budget, so a revealed army appears over a few frames.
   random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
   AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
   Online games offer neither.
+  **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
+  choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
+  (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the
+  F10 menu: `Ticker.setSpeed` runs that many more or fewer ticks a real second (each tick is still `DT` of game time,
+  so the sim and its determinism are untouched), `ViewState.setRate` plays the snapshots back on local time × rate
+  (re-anchoring the clock; above normal the interpolation delay stays as long in real time), and
+  `GameRenderer.setSpeed` scales the animations' dt but not the camera's. Online games always run at Normal and their
+  F10 menu leaves the row out. The interface size multiplies the HUD's base font size (`--hud-scale` on #hud-root):
+  Small 0.85, Normal 1, Large 1.15, Larger 1.3; every HUD panel is sized in em, so all of it follows.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`
@@ -2114,7 +2177,27 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
-### 9.3 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
+### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
+One game against the computer per local calendar day, the same on every device: everything comes from the day's
+key ('YYYY-MM-DD'): the map seed, my pantheon, any AI ally's and the rivals' pantheons (no pantheon twice) and a
+twist. The nine twists come round in a seeded shuffle of nine days, so every twist appears once a cycle:
+- Start changes the sim applies to every city, AI included (`setup.twist`, read by the World through
+  `startOf`; an unknown id is a normal game): Golden Age (three times the gold and wood), Blessed Start
+  (+350 faith), Humble Beginnings (two worshippers, half the gold and wood), Crowded Hearths (ten worshippers).
+- Sides and modes built into the lobby state: A Worthy Foe (one Hard AI), Outnumbered (a Normal and an Easy AI
+  allied against me, medium map), Brothers in Arms (an AI ally against two Normal AIs), Holy Ground
+  (Sacred Victory, 5.11), Trial of the Titans (with an AI ally, 5.14). Other twists face one Normal AI on a small map.
+
+Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
+today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
+loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
+with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in
+localStorage under `mythicwar-daily`: `{ days: { day: { best, plays, won } } }`, the last 60 days. The streak
+is the run of days played up to today, or up to yesterday while today is not played yet.
+
+### 9.4 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
 The sim is deterministic (same setup and the same commands on the same ticks give the same game), so a
 replay is not a video: it is the GameSetup, every command the World accepted with its tick, the chat with
 its ticks, and checksums.

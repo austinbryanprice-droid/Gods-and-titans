@@ -7,6 +7,11 @@ export const GAME_VERSION = '0.1.0';
 // ---- Simulation timing ----
 export const TICK_RATE = 20; // ticks per second
 export const DT = 1 / TICK_RATE; // seconds per tick
+// Game speed of a match against the computer (DESIGN 9): game seconds per real second. Online games
+// always run at 'normal'. The ticks stay DT long; the ticker just runs more or fewer of them a second.
+export const GAME_SPEEDS = { slow: 0.5, normal: 1, fast: 1.5, faster: 2 };
+// Size of the in-game interface (DESIGN 9): a factor on the HUD's base font size, which scales with the window.
+export const UI_SCALES = { small: 0.85, normal: 1, large: 1.15, larger: 1.3 };
 
 // ---- Players ----
 export const MAX_PLAYERS = 4;

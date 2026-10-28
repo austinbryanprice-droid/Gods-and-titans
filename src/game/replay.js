@@ -1,4 +1,4 @@
-// Match replays (DESIGN 9.3). The sim is deterministic: the same GameSetup and the same commands on
+// Match replays (DESIGN 9.4). The sim is deterministic: the same GameSetup and the same commands on
 // the same ticks give the same game (tests/sim/world.test.js). So a replay is the setup, every
 // command the World accepted (from every player, the AIs too) with the tick it was applied on, the
 // chat lines with their ticks, and now and then a checksum of the world, by which a replay played on
@@ -13,6 +13,7 @@ import { survivalOn } from '../sim/survival.js';
 import { peaceSeconds } from '../sim/peace.js';
 import { sacredVictoryOn } from '../sim/sacred.js';
 import { PANTHEONS } from '../data/index.js';
+import { twistOf } from '../data/twists.js';
 import { TICK_RATE } from '../config.js';
 
 export const REPLAY_FORMAT = 1;
@@ -208,6 +209,7 @@ export function sanitizeReplay(rec) {
   const v = validateSetup(rec.setup, 0);
   if (!v) return null;
   const setup = v.setup;
+  if (twistOf(rec.setup)) setup.twist = rec.setup.twist; // the daily challenge's twist changes the start (a solo game: no client checks it)
   const n = setup.players.length;
   const ticks = rec.ticks;
   if (!Number.isSafeInteger(ticks) || ticks < 1 || ticks > 24 * 3600 * TICK_RATE) return null;

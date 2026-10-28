@@ -270,6 +270,24 @@ export class Minimap {
       ctx.fillStyle = this.colorOf(e.o);
       ctx.fillRect(x - s / 2, y - s / 2, s, s);
     }
+    // Relics on the ground or still guarded (DESIGN 5.15): a gold diamond, brighter once free.
+    const rs = Math.max(3, k * 1.6);
+    for (const r of vs.relics || []) {
+      if ((r.s !== 'g' && r.s !== 'k') || !vs.relicKnown(r)) continue;
+      const x = r.x * k;
+      const y = r.y * k;
+      ctx.beginPath();
+      ctx.moveTo(x, y - rs);
+      ctx.lineTo(x + rs, y);
+      ctx.lineTo(x, y + rs);
+      ctx.lineTo(x - rs, y);
+      ctx.closePath();
+      ctx.fillStyle = r.s === 'g' ? '#fff3b0' : '#e0a93a';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(40,20,0,0.9)';
+      ctx.stroke();
+    }
   }
 
   /**
@@ -339,7 +357,8 @@ export class Minimap {
     if (this.pings.length) {
       this.pings = this.pings.filter((p) => now - p.t0 < PING_MS);
       for (const p of this.pings) {
-        const t = Math.max(0, (now - p.t0) / PING_MS); // (a ping raised later in this frame than its start time)
+        // (A ping raised during this frame can be newer than the frame's timestamp: never a negative radius.)
+        const t = Math.max(0, (now - p.t0) / PING_MS);
         for (let r = 0; r < 2; r++) {
           const tt = (t * 3 + r * 0.5) % 1;
           ctx.beginPath();
@@ -368,7 +387,7 @@ export class Minimap {
     ctx.lineWidth = Math.max(1.5, w / 120);
     for (const m of marks) {
       const fade = Math.min(1, Math.max(0, (m.t1 - now) / 800));
-      const t = (now - m.t0) / 1000;
+      const t = Math.max(0, (now - m.t0) / 1000);
       ctx.strokeStyle = this.colorOf(m.from);
       for (let i = 0; i < 2; i++) {
         const tt = (t * 0.8 + i * 0.5) % 1;

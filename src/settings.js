@@ -2,6 +2,8 @@
 // Every storage access is guarded: private windows, blocked storage and Node
 // (tests) simply fall back to in-memory settings.
 
+import { GAME_SPEEDS, UI_SCALES } from './config.js';
+
 const STORAGE_KEY = 'mythicwar-settings';
 const QUALITIES = ['low', 'medium', 'high', 'ultra'];
 // The sky: the day and night cycle that follows the match clock, or one time of day held
@@ -13,6 +15,9 @@ const ALERT_LEVELS = ['all', 'important', 'off'];
 // What a tab in the background does when the game needs the player (src/ui/tab-attention.js):
 // nothing, flash the tab's title, or also raise a desktop notification (needs the browser's permission).
 const TAB_ALERTS = ['off', 'title', 'notify'];
+// Game speed of a match against the computer, and the size of the in-game interface (src/config.js).
+const SPEEDS = Object.keys(GAME_SPEEDS);
+const SCALES = Object.keys(UI_SCALES);
 const MAX_NAME_LENGTH = 20;
 
 const listeners = new Set();
@@ -36,10 +41,11 @@ function cleanName(name) {
  * when the game needs the player ('off', 'title', 'notify'). `intro` plays the intro film
  * when the game opens (src/ui/intro.js) and `narration` has a voice read its captions aloud
  * (src/intro/narrator.js). `aiChat` shows the computer players' in-character chat lines (src/ai/voice.js). `volume` is the sound effects; `musicVolume` (0..1) and `musicMuted`
- * are the background music's own (src/audio/music.js).
+ * are the background music's own (src/audio/music.js). `gameSpeed` is the pace of a match against the
+ * computer (online games always run at normal speed) and `uiScale` the size of the in-game interface.
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal' };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -61,6 +67,8 @@ function sanitize(raw, base) {
   if (typeof raw.aiChat === 'boolean') out.aiChat = raw.aiChat;
   if (typeof raw.musicVolume === 'number' && Number.isFinite(raw.musicVolume)) out.musicVolume = Math.min(1, Math.max(0, raw.musicVolume));
   if (typeof raw.musicMuted === 'boolean') out.musicMuted = raw.musicMuted;
+  if (SPEEDS.includes(raw.gameSpeed)) out.gameSpeed = raw.gameSpeed;
+  if (SCALES.includes(raw.uiScale)) out.uiScale = raw.uiScale;
   return out;
 }
 
@@ -102,7 +110,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger' }}
  */
 export function getSettings() {
   return load();
@@ -159,3 +167,5 @@ export const QUALITY_LEVELS = QUALITIES;
 export const TIME_OF_DAY_MODES = TIMES_OF_DAY;
 export const ALERT_LEVEL_IDS = ALERT_LEVELS;
 export const TAB_ALERT_MODES = TAB_ALERTS;
+export const GAME_SPEED_IDS = SPEEDS;
+export const UI_SCALE_IDS = SCALES;

@@ -75,7 +75,7 @@ export class CameraController {
     this.viewportHeight = 1;
     /** The framing set by setFree (the intro film), or null while the player's controls frame the view. */
     this.free = null;
-    /** The free camera of a replay (DESIGN 9.3): turned round the target (radians, 0 = looking north) and tilted (degrees on the pitch). */
+    /** The free camera of a replay (DESIGN 9.4): turned round the target (radians, 0 = looking north) and tilted (degrees on the pitch). */
     this.yaw = 0;
     this.tilt = 0;
     this.apply();

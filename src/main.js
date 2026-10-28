@@ -1,12 +1,13 @@
 // Entry point: boots settings and audio, shows the menu, and hands a started
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
 // completely, so matches can be played one after another without a reload. Replays
-// (DESIGN 9.3) play in a Game of their own, from the Career screen or the game-over screen.
+// (DESIGN 9.4) play in a Game of their own, from the Career screen or the game-over screen.
 import { getSettings, onSettingsChange } from './settings.js';
 import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
 import { isSoloLaunch, saveSkirmish, launchFrom } from './game/rematch.js';
+import { dailyLaunch } from './game/daily.js';
 
 export { showMenu, hideMenu };
 
@@ -78,7 +79,9 @@ export async function startGame(launch) {
   }
   const notice = showStartNotice();
   // A game against the computer only: remember its lobby for Quick Match, and offer Play Again at its end.
-  const skirmish = isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
+  // The daily challenge (DESIGN 9.4) is not a lobby to remember: Play Again tries the same day's challenge again.
+  const daily = launch && launch.daily ? launch.daily : null;
+  const skirmish = !daily && isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
   if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
@@ -90,7 +93,7 @@ export async function startGame(launch) {
         if (current === game) current = null;
         backToMenu();
       },
-      onRematch: skirmish ? () => rematch(skirmish) : null,
+      onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : null,
       onReplay: (record, opts) => startReplay(record, opts),
     });
     current = game;
@@ -159,6 +162,17 @@ async function rematch(state) {
     await startGame(launch);
   } catch (err) {
     console.error('[main] the rematch failed to start', err);
+    backToMenu();
+  }
+}
+
+/** Play Again on a daily challenge: the same day's game (same map and sides) once more; the best score is kept. */
+async function retryDaily(day) {
+  try {
+    const mod = await import('./net/lobby.js');
+    await startGame(dailyLaunch(mod, day, getSettings().name));
+  } catch (err) {
+    console.error('[main] the daily challenge failed to start', err);
     backToMenu();
   }
 }

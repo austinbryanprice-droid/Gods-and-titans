@@ -9,6 +9,7 @@ import { el } from './hud-dom.js';
 import { chronicleView } from './hud-chronicle.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS } from './speed-options.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
@@ -21,6 +22,17 @@ const END_TEXT = {
 };
 
 /** The line under a finished Trial of the Titans. */
+/** The daily challenge's result (DESIGN 9.3): the score against today's best, and the streak of days. */
+function dailyLine(d) {
+  if (!d) return null;
+  const n = (v) => v.toLocaleString('en-US');
+  const score = d.first ? `Daily challenge: ${n(d.score)} points, today's first try.`
+    : d.isNew ? `Daily challenge: ${n(d.score)} points, a new best today (it was ${n(d.previous)}).`
+      : `Daily challenge: ${n(d.score)} points · today's best ${n(d.best)}.`;
+  const streak = d.streak > 1 ? ` 🔥 ${d.streak} days in a row.` : '';
+  return el('div', `hud-go-best hud-go-daily${d.isNew ? ' is-new' : ''}`, score + streak);
+}
+
 function survivalLine(wave) {
   if (wave <= 0) return 'The Trial of the Titans is over before the first wave even came.';
   if (wave === 1) return 'The Trial of the Titans is over: the first wave broke your city.';
@@ -149,6 +161,9 @@ export class Overlays {
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
+    // Game speed only in a match against the computer: an online game runs at one pace for everyone.
+    const speed = game.solo ? choiceRow('Game speed', GAME_SPEED_OPTIONS, s.gameSpeed, (v) => saveSettings({ gameSpeed: v })) : null;
+    const uiScale = choiceRow('Interface size', UI_SCALE_OPTIONS, s.uiScale, (v) => saveSettings({ uiScale: v }));
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
     const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
@@ -218,7 +233,9 @@ export class Overlays {
       el('div', 'hud-obtns is-col', ...buttons),
       el('div', 'hud-options',
         el('div', 'mw-label', 'Options'),
+        speed && speed.row,
         sky.row,
+        uiScale.row,
         bars.row,
         edge.row,
         tips.row,
@@ -301,7 +318,7 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
-  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null }) {
+  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null }) {
     this.gameOverShown = true;
     const vs = this.game.viewState;
     const survival = result === 'survival';
@@ -320,6 +337,7 @@ export class Overlays {
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
       best,
+      dailyLine(daily),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
       this.medalCard(medal),
       chronicleView(vs, winningTeam, this.game.chronicle || null),

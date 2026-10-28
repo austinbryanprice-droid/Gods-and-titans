@@ -1,4 +1,4 @@
-// The replay bar (DESIGN 9.3): over the bottom panel while a replay plays. Play / pause, the speeds,
+// The replay bar (DESIGN 9.4): over the bottom panel while a replay plays. Play / pause, the speeds,
 // a timeline to click (ahead jumps in place, back starts over and jumps), +30 s, whose eyes to see
 // through (everyone or one player, with their fog of war), the free camera (turn and tilt, back to
 // the normal view) and leaving. It also says when the replay was recorded on another version of the

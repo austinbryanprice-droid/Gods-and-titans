@@ -1,4 +1,4 @@
-// Replay playback (DESIGN 9.3): a session with the surface of HostSession (setup, myIndex, mapData,
+// Replay playback (DESIGN 9.4): a session with the surface of HostSession (setup, myIndex, mapData,
 // viewState, onChat, onEnd, start, stop, …) whose World is driven by a replay's recorded commands
 // instead of players and AIs. It plays at 0.5× to 8× (the ticker runs that many times faster, a
 // snapshot every few ticks), pauses, jumps ahead (running the ticks in slices of a few milliseconds so
@@ -90,7 +90,8 @@ export class ReplaySession {
     this.seeking = null; // { target, timer }
     this.ticksSinceSnap = 0;
     this.errors = 0;
-    this.ticker = new Ticker({ onTick: () => this.tickOnce(), onBatch: () => this.afterTicks(), rate: TICK_RATE * this.speed, maxCatchUp: this.catchUp(), useWorker });
+    this.ticker = new Ticker({ onTick: () => this.tickOnce(), onBatch: () => this.afterTicks(), rate: TICK_RATE, maxCatchUp: this.catchUp(), useWorker });
+    this.ticker.setSpeed(this.speed);
     this.pendingStart = Math.max(0, Math.min(this.length, Math.floor(startAt) || 0));
     this.pendingViewer = viewer;
     this.takeSnapshot();
@@ -209,12 +210,8 @@ export class ReplaySession {
     if (!REPLAY_SPEEDS.includes(s) || s === this.speed) return;
     this.speed = s;
     this.clock.setSpeed(s);
-    const running = this.ticker.running;
-    if (running) this.ticker.stop();
-    this.ticker.rate = TICK_RATE * s;
-    this.ticker.interval = 1000 / this.ticker.rate;
     this.ticker.maxCatchUp = this.catchUp();
-    if (running) this.ticker.start();
+    this.ticker.setSpeed(s);
     this.viewState.resetClock();
     this.emitChange();
   }
