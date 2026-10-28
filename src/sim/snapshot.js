@@ -2,6 +2,7 @@
 import { canRank } from '../data/ranks.js';
 import { statusCodes } from './status.js';
 import { activeMiners } from './economy.js';
+import { relicViews } from './relics.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -116,7 +117,7 @@ export function buildSnapshot(world) {
   const players = world.players.map((p, i) => {
     const fallen = {};
     for (const k in p.fallen) fallen[k] = p.fallen[k].level;
-    return {
+    const out = {
       i, name: p.name, team: p.team, pantheon: p.pantheon, color: p.color, kind: p.kind,
       gold: Math.floor(p.gold), wood: Math.floor(p.wood), faith: Math.floor(p.faith + 1e-6), faithRate: r2(p.faithRate),
       pop: p.popUsed, popCap: p.popCap, tier: p.tier, defeated: p.defeated,
@@ -124,6 +125,8 @@ export function buildSnapshot(world) {
       up: p.upList.slice(), ar: p.autoRepair,
       stats: { ...p.stats },
     };
+    if (p.relics.length) out.rl = p.relics.slice(); // relic types resting in their Temples
+    return out;
   });
   return {
     tick: world.tickCount,
@@ -132,6 +135,7 @@ export function buildSnapshot(world) {
     entities,
     fields: world.fields.map((f) => ({ id: f.id, x: r2(f.x), y: r2(f.y), r: r2(f.r), el: f.el, rem: r1(f.rem) })),
     reveals: world.reveals.map((v) => ({ x: r2(v.x), y: r2(v.y), r: r2(v.r), tm: v.team, rem: r1(v.rem) })),
+    relics: relicViews(world),
     events: world.events,
     felled: world.felled,
     gameOver: world.gameOver ? { winningTeam: world.gameOver.winningTeam } : null,

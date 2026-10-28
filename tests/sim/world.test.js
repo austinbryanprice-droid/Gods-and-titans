@@ -9,7 +9,7 @@ test('snapshot shape: top level and player view', () => {
   const w = makeWorld();
   w.tick();
   const s = w.getSnapshot();
-  assert.deepEqual(Object.keys(s).sort(), ['entities', 'events', 'felled', 'fields', 'gameOver', 'players', 'reveals', 'tick', 'time'].sort());
+  assert.deepEqual(Object.keys(s).sort(), ['entities', 'events', 'felled', 'fields', 'gameOver', 'players', 'relics', 'reveals', 'tick', 'time'].sort());
   assert.equal(s.tick, 1);
   assert.equal(s.time, 0.05);
   assert.equal(s.gameOver, null);

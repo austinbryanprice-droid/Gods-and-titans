@@ -22,6 +22,7 @@ import { updateProduction } from './production.js';
 import { cancelMerge } from './homes.js';
 import { awardSpoils, accrueBlessedFaith } from './spoils.js';
 import { spawnCreeps } from './creeps.js';
+import { setupRelics, updateRelics, onCampMemberKilled } from './relics.js';
 import { setOrder, discardOrder, updateUnit, onUnitAttacked } from './orders.js';
 import { applyCommand, normalizeCommand, MAX_COMMANDS_PER_TICK } from './commands.js';
 import { buildSnapshot } from './snapshot.js';
@@ -50,6 +51,7 @@ export class World {
     this.mineList = [];
     this.auraHolders = [];
     this.camps = [];
+    this.relics = []; // sim/relics.js
     this.nextId = 1;
     this.nextFieldId = 1;
     this.events = [];
@@ -97,6 +99,7 @@ export class World {
         fallen: {},
         upgrades: {}, // researched upgrade id -> true
         upList: [], // the same ids in the order they finished (snapshot)
+        relics: [], // relic types resting in their Temples (sim/relics.js), folded into mods
         mods: computeMods([], pantheon), // their pantheon's blessings and upgrades combined (data/upgrades.js computeMods)
         autoRepair: false, // idle worshippers mend nearby damaged buildings
         lastAlert: -Infinity,
@@ -115,6 +118,7 @@ export class World {
       this.placeStartWorkers(i, tc, mine);
     });
     spawnCreeps(this, mapData.camps || []);
+    setupRelics(this);
     this.recomputePop();
     for (let i = 0; i < this.players.length; i++) this.recomputeTier(i, true);
     this.hash.rebuild(this.unitList);
@@ -293,11 +297,18 @@ export class World {
     if (!p || p.upgrades[upId]) return;
     p.upgrades[upId] = true;
     p.upList.push(upId);
-    p.mods = computeMods(p.upList, p.pantheon);
+    this.refreshMods(i);
+    this.emit({ type: 'researched', player: i, up: upId });
+  }
+
+  /** Recombine player i's blessings, upgrades and relics and apply them to everything the player owns. */
+  refreshMods(i) {
+    const p = this.players[i];
+    if (!p) return;
+    p.mods = computeMods(p.upList, p.pantheon, p.relics);
     for (const u of this.unitList) if (!u.dead && u.owner === i) this.applyUnitStats(u);
     for (const b of this.buildingList) if (!b.dead && b.owner === i) this.applyBuildingStats(b);
     this.recomputePopCap(i);
-    this.emit({ type: 'researched', player: i, up: upId });
   }
 
   gainXp(u, amount) {
@@ -532,6 +543,7 @@ export class World {
           this.emit({ type: 'bounty', player: killer, amount, x: r2(e.x), y: r2(e.y) });
         }
       }
+      if (e.camp) onCampMemberKilled(this, e, killer);
     } else if (e.kind === 'building') {
       this.emit({ type: 'death', id: e.id, t: e.type, o: e.owner, x: r2(e.x), y: r2(e.y), k: 'b' });
       this.releaseBuilding(e);
@@ -759,6 +771,7 @@ export class World {
       if (u.expire <= 1e-9) this.killEntity(u, null, true);
     }
 
+    updateRelics(this);
     this.accrueFaith();
     this.cleanup();
     this.checkDefeats();

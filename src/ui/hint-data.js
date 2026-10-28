@@ -41,6 +41,7 @@ export function hintContext(vs) {
     damaged: false,
     walls: 0,
     has: {},
+    relics: Array.isArray(vs.relics) ? vs.relics.length : 0,
   };
   for (const p of vs.players || []) if (p.i !== vs.myIndex && !p.defeated && p.team === vs.myTeam) c.ally = true;
   for (const e of vs.entities.values()) {
@@ -110,6 +111,7 @@ export const HINTS = [
   { id: 'air', text: 'Only archers, priests, gods and the other units that can hit air can strike a flyer. Warriors cannot.', when: (c) => c.time > 300 },
   { id: 'spells-buildings', text: `Spells ignore armor but deal only ${percent(SPELL_VS_BUILDING)}% to buildings. Break a base with soldiers and rams.`, when: (c) => c.gods >= 1 && c.time > 300 },
   { id: 'creeps', text: 'Neutral creatures guard camps across the map and pay a bounty when they fall. Clear the weaker camps early.', when: (c) => c.time < 900 },
+  { id: 'relics', text: 'A beam of light marks a camp that guards a relic. Clear it, right-click the relic with a Worshipper or a god, and it gives you a lasting bonus while it rests in your Temple.', when: (c) => c.relics > 0 && c.time > 120 },
 
   // ---- walls
   { id: 'walls', text: 'Choose Wooden Wall in the build menu ([[B]], then [[W]]) and drag across the ground to lay a whole line at once.', when: (c) => c.tier >= 2 && c.walls === 0 },

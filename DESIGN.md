@@ -655,6 +655,44 @@ for one great battle. Rules live in `src/sim/peace.js` (helpers shared with the 
   mine sizes are not scaled for the mode. With no mines left the war is fought off that bank
   (one side was down to about 60 gold ten minutes in).
 
+### 5.11 Relics (src/data/relics.js, src/sim/relics.js)
+Treasures of world myth that give creeping a reward beyond the bounty (WC3 items, Age of Mythology relics).
+- **Where:** every creep camp of level `RELIC_CAMP_LEVEL` (2) or more guards one relic (4 or 5 on the usual
+  maps; level 1 camps guard none). Types are drawn without repeats from the ten in `RELIC_LIST`, shuffled by an
+  RNG seeded with `${seed}:relics` (the sim RNG is untouched, so nothing else in a game changes).
+- **Dropping:** when the camp's last creature dies (`World.killEntity` calls `onCampMemberKilled`) the relic lies
+  on the ground at the camp's centre and `{ type: 'relic', ev: 'drop', player }` names the killer's owner.
+- **Carrying:** a smart order with `relic: index` sends the nearest unit that can carry (a Worshipper or a god of
+  a player, not summoned, not already carrying one) to it; the rest of the selection walks along. Soldiers get
+  `Only a Worshipper or a god can carry a relic.` A relic still guarded, or already taken, makes it a plain move.
+  Picked up within 0.6 tiles (edge distance) (`ev: 'take'`), the carrier sets off at once for its owner's nearest
+  finished Temple (an order `deliver`) unless more orders were queued; an idle carrier is sent there every
+  10 ticks once a Temple stands. A carrier on its own finished Temple with a smart order delivers before it would
+  pray or repair. Any player can take a relic from the ground, enemies included.
+- **Resting:** next to the Temple it goes in (`ev: 'house'`) and its effects (the upgrade vocabulary of 4.3) are
+  folded into the owner's mods: `computeMods(upList, pantheon, p.relics)` and `World.refreshMods(i)`, the same path
+  as a researched upgrade, so every stat is applied at once. There is no limit per Temple.
+- **Losing it:** a carrier that dies drops it where it fell; a Temple that falls drops what rested in it on its
+  south side, and the owner loses the bonus (`ev: 'lose'`, player: the previous holder). A defeated player's
+  relics fall with their last Temple.
+- **The ten:** Golden Fleece (Greek, soldiers +10% health), Brísingamen (Norse, +25% Faith at Shrines and
+  Temples), Eye of Horus (Egyptian, buildings +2 armor), Pot of Amrita (Hindu, gods regenerate +1.5 hp/s),
+  Kusanagi (Japanese, Warriors and Archers +8% damage), Peaches of Immortality (Chinese, soldiers and creatures
+  heal 0.5 hp/s), Smoking Mirror (Aztec, god and Titan abilities recharge 10% faster), Cauldron of the Dagda
+  (Celtic, +2 gold and wood per trip), Tablet of Destinies (Mesopotamian, research and growing 20% faster), Box of
+  Stories (West African, Worshippers work 10% faster). Each is a small, always-on edge, like a blessing (4.10).
+- **Net:** the snapshot's `relics` list (6.3) changes only when a relic changes state (a carried one goes by its
+  carrier's id, so walking costs nothing); the player record's `rl` lists the types resting in their Temples.
+- **Shown:** a glowing jewel in a gold ring, tinted per relic, over the ground under a beam of light while it is
+  guarded or free (brighter and pulsing once free), smaller over its carrier's head, circling over the Temple's
+  roof once it rests there (src/render/relics.js); a gold diamond on the minimap; the cursor's hand over a free
+  relic in sight; a relic chip at the top left ("1/5", the bonuses and where the others are in its tooltip); a
+  chip on a carrier's selection panel and a Relics line on a Temple's; alerts when a camp I cleared drops one,
+  when one comes to rest in my Temple or a rival's, and when I lose one. How to Play and a tip explain it.
+- **AI:** `src/ai/relics.js` sends the nearest gathering or idle Worshipper for a free relic within 70 tiles of
+  home once it has a finished Temple and no enemy stands within 10 tiles of the relic; the economy leaves a
+  Worshipper on that errand alone (job `relic`). In AI-vs-AI games each side brought home two or three.
+
 ## 6. Simulation API (src/sim/)
 
 ```js
@@ -691,7 +729,7 @@ counted in `world.perf.commandErrors`.
 { type: 'move',       units: [ids], x, y, queue }
 { type: 'attackMove', units, x, y, queue }
 { type: 'attack',     units, target: id, queue }
-{ type: 'smart',      units, x, y, target?: id, tx?, ty?, queue } // right-click; sim decides (below)
+{ type: 'smart',      units, x, y, target?: id, tx?, ty?, relic?: index, queue } // right-click; sim decides (below)
 { type: 'gather',     units, target?: mineId, tx?, ty? }          // mine or tree tile
 { type: 'pray',       units, target: buildingId }
 { type: 'returnCargo', units }
@@ -714,7 +752,8 @@ counted in `world.perf.commandErrors`.
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
 { type: 'surrender' }
 ```
-**smart** resolution per unit: enemy target → attack; worker + gold mine → gather; worker +
+**smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
+(5.11). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
@@ -745,7 +784,7 @@ Errors emit `{ type: 'error', player, message }` with these messages:
 `That House is being combined into a Manor.` (and `Not enough gold. Combined 1 of 2 squares.` when the purse
 runs short part way) Trades: `Choose a teammate to send to.` `You can only send resources
 to a teammate.` `That ally has been defeated.` `Send at least 20 gold.` (wood / faith)
-`Choose gold, wood or faith to send.` `You cannot trade now.`
+`Choose gold, wood or faith to send.` `You cannot trade now.` Relics: `Only a Worshipper or a god can carry a relic.`
 
 ### 6.3 ViewSnapshot (`world.getSnapshot()`)
 Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to integers.
@@ -755,10 +794,13 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
   players: [{ i, name, team, pantheon, color, kind, gold, wood, faith, faithRate, pop, popCap,
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
+              rl?: [relic types resting in their Temples] (5.11; omitted when none),
               stats: { gathered, unitsTrained, kills, losses, buildings } }],
   entities: [EntityView],
   fields: [{ id, x, y, r, el, rem }], // active ground zones: radius, element, remaining seconds
   reveals: [{ x, y, r, tm, rem }],    // ability reveals: sight circle for team tm, remaining seconds
+  relics: [{ i, t, s, x?, y?, c?, b?, o? }], // 5.11: index, type, state 'k' guarded | 'g' on the ground (x, y)
+                              // | 'c' carried (c: carrier id, o) | 'h' resting in a Temple (b: its id, o)
   events: [Event],            // since the previous getSnapshot()
   felled: [[tx, ty], ...],    // trees felled since the previous getSnapshot()
   gameOver: null | { winningTeam },
@@ -809,6 +851,7 @@ EntityView = {
 { type: 'tierUp',  player, tier }
 { type: 'researched', player, up }                                   // a building upgrade finished
 { type: 'trade',   from, to, res, amt, got }                         // team market transfer (amt sent, got received)
+{ type: 'relic',   ev, i, t, player, x, y }                          // 5.11: ev 'drop' (camp cleared by player) | 'take' | 'house' | 'lose'
 { type: 'levelUp', id, level }
 { type: 'rankUp',  id, rank }                                        // a soldier reached a new rank (5.9)
 { type: 'treeFelled', tx, ty }

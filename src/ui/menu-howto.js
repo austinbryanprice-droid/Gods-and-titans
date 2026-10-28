@@ -3,6 +3,7 @@ import { h } from './menu-dom.js';
 import { BUILDINGS } from '../data/index.js';
 import { RANK_NAMES } from '../data/ranks.js';
 import { MANOR, mergeRule } from '../data/houses.js';
+import { RELIC_LIST } from '../data/relics.js';
 import { DELETE_CONFIRM_ABOVE } from './delete-key.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
@@ -20,6 +21,8 @@ function faithRate(id) {
   const b = BUILDINGS[id];
   return b && b.faithRate ? `${b.faithRate}` : '?';
 }
+
+const RELIC_NAMES = `${RELIC_LIST.slice(0, 3).map((r) => `the ${r.name}`).join(', ')} and ${RELIC_LIST.length - 3} more`;
 
 const HOTKEYS = [
   ['Units', [
@@ -139,6 +142,7 @@ export function renderHowToContent() {
       `Gods gain experience when enemies fall nearby and rise to level ${GOD_MAX_LEVEL}. Their first ability (Q) is ready at once, the second (W) at level 2 and the ultimate (R) at level 4. A fallen god can be revived at the Temple for ${REVIVE_COST_MULT === 0.5 ? 'half' : `${Math.round(REVIVE_COST_MULT * 100)}% of`} the price and time, keeping its level.`),
     step(6, '⚔️', 'Wage war',
       `Armor softens blows; arrows and spells never miss. Spells ignore armor but deal only ${Math.round(SPELL_VS_BUILDING * 100)}% to buildings. Only units that can hit air can strike flyers. Neutral creatures guard camps across the map and pay a gold bounty. A player with no buildings left is defeated, and the last team standing wins.`,
+      `The bigger camps, marked by a beam of light, guard a relic from world myth (${RELIC_NAMES}). When the camp's last creature falls the relic drops: right-click it with a Worshipper or a god, who carries it to your Temple. While it rests there it gives you a lasting bonus, such as more health for your soldiers or faster research. A carrier that dies drops it, and a Temple that falls frees what rested in it.`,
       `Soldiers from the Barracks earn experience for the enemies and buildings they destroy (Priests for the wounds they mend) and rise from ${RANK_NAMES[0]} to ${rankLadder()}. Each rank adds ${Math.round(RANK_DAMAGE * 100)}% damage, ${Math.round(RANK_HP * 100)}% health and ${RANK_ARMOR} armor, and small bronze, silver and gold diamonds over a soldier show its rank.`,
       `Worshippers can lay walls too: choose Wooden Wall in the build menu (W), then press on a tile and drag to lay a line of up to ${MAX_WALL_LINE} segments, which your Worshippers build one by one; a line goes up only within ${WALL_PLACE_RANGE} tiles of the Worshippers you order. Walls block every ground unit, yours too, so enemy armies have to break through them; ranged units can shoot over a wall at anything within range. Select a wall and press U to upgrade it to stone (${WALL_UPGRADE_TEXT}). A Tower raised on a wall, or in line with one, becomes part of the wall, and you can dismantle a segment (D) to open a gap of your own.`,
       `The host can pick the ${PEACE_NAME} game mode in the lobby: for ${PEACE_MINUTES_TEXT} no player can harm another with weapons or spells and nobody can build within ${PEACE_BUILD_GAP} tiles of an enemy Town Center (that ground turns red when you place a building), so everyone has time to build up and mass armies for one great battle. A countdown beside the game clock shows what is left, creatures still fight, and a horn sounds when the peace ends.`),
