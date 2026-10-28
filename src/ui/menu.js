@@ -7,7 +7,7 @@
 // launch = { role: 'host'|'client', setup, myIndex, conns | conn, lobby }.
 // Lobbies come from src/net/lobby.js (DESIGN 7), or from ./menu-mock.js when
 // the URL has ?mockLobby=1. ?transport=local swaps PeerJS for BroadcastChannel.
-import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME } from '../config.js';
+import { GAME_TITLE, GAME_SUBTITLE, GAME_VERSION, PLAYER_COLORS, MAP_SIZES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SACRED_NAME } from '../config.js';
 import { PANTHEON_LIST } from '../data/index.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
@@ -515,6 +515,21 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('div.mw-hint.mw-peace-hint', 'Creatures still fight. A horn sounds when the peace ends.'),
     );
     const modeStatic = h('div.mw-map-static');
+    // Victory: destroy every enemy building, and with Sacred Victory on, holding every sacred site for 8 minutes too.
+    const sacredInput = h('input', {
+      type: 'checkbox',
+      onchange: () => {
+        try {
+          lobby.setSacred(sacredInput.checked);
+        } catch (err) {
+          toast(err?.message || 'Could not change the victory rules.');
+        }
+      },
+    });
+    const sacredToggle = h('label.mw-toggle.mw-sacred-toggle', { title: M.SACRED_HINT }, sacredInput,
+      h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')),
+      h('span.mw-toggle-text', h('span', SACRED_NAME), h('small', M.SACRED_NOTE)));
+    const victoryStatic = h('div.mw-map-static');
     const options = h('div.mw-lobby-options',
       isHost ? h('div.mw-opt-group',
         h('div.mw-label', 'Presets'),
@@ -527,6 +542,10 @@ export function createMenu({ root, onStart, onIntro = null }) {
       h('div.mw-opt-group.mw-mode-group',
         h('div.mw-label', 'Game mode'),
         isHost ? [h('div.mw-segmented', modeBtns), peaceRow] : modeStatic,
+      ),
+      h('div.mw-opt-group.mw-victory-group',
+        h('div.mw-label', 'Victory'),
+        isHost ? sacredToggle : victoryStatic,
       ),
     );
 
@@ -679,6 +698,8 @@ export function createMenu({ root, onStart, onIntro = null }) {
       peaceBtns.forEach((b) => b.classList.toggle('is-active', Number(b.dataset.peace) === peace));
       peaceRow.hidden = peace === 0;
       modeStatic.textContent = M.gameModeLabel(st());
+      sacredInput.checked = M.sacredOn(st());
+      victoryStatic.textContent = M.victoryLabel(st());
     }
 
     function renderAll() {

@@ -9,6 +9,7 @@ import { TERRAIN, DROPOFF_MINE_GAP, WALL_PLACE_RANGE } from '../config.js';
 import { BUILDINGS, UNITS, GOLD_MINE } from '../data/index.js';
 import { wallLine } from '../data/walls.js';
 import { PEACE_ANCHOR, peaceBlocksFootprint, peaceBuildNotice } from '../sim/peace.js';
+import { SITE_IN_WAY, siteBlocksFootprint } from '../sim/sacred.js';
 
 /** Minimum Chebyshev gap (empty tiles) between a drop-off (Town Center, Storehouse) and a gold mine. */
 export const MINE_GAP = DROPOFF_MINE_GAP;
@@ -102,7 +103,8 @@ export function peaceAnchors(vs) {
  *   size×size row-major, true = this tile is fine; message: null when valid, else the reason, in this order
  *   of preference: UNEXPLORED (fog; checked before the terrain so the text does not tell what lies in it),
  *   CANT_BUILD (water, rock, map edge), TREES_IN_WAY, BUILDING_IN_WAY, MINE_IN_WAY, UNIT_IN_WAY,
- *   the Decade of Peace's notice (near an enemy Town Center; peace is true then), TOO_CLOSE_TO_MINE (the
+ *   the Decade of Peace's notice (near an enemy Town Center; peace is true then), SITE_IN_WAY (next to a
+ *   sacred site), TOO_CLOSE_TO_MINE (the
  *   mine gap alone). The sim words the same reasons the same way.
  */
 export function checkPlacement(vs, playerIndex, buildingTypeId, tx, ty, planned = null) {
@@ -205,6 +207,18 @@ function checkFootprint(vs, def, tx, ty, footprints, anchors) {
     }
   }
 
+  // Sacred sites (DESIGN 5.11): no building within SITE_KEEP of a site's center. Sites are public, so this is exact.
+  let siteBlock = false;
+  if (vs.sites && vs.sites.length) {
+    for (let dy = 0; dy < s; dy++) {
+      for (let dx = 0; dx < s; dx++) {
+        if (!siteBlocksFootprint(vs.sites, tx + dx, ty + dy, 1)) continue;
+        tiles[dy * s + dx] = false;
+        siteBlock = true;
+      }
+    }
+  }
+
   const valid = tiles.every(Boolean);
   let message = null;
   let peace = false;
@@ -218,7 +232,8 @@ function checkFootprint(vs, def, tx, ty, footprints, anchors) {
     else if (peaceBlock) {
       message = peaceBuildNotice(vs.peaceLeft());
       peace = true;
-    } else message = mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD;
+    } else if (siteBlock) message = SITE_IN_WAY;
+    else message = mineProblem && !otherProblem ? TOO_CLOSE_TO_MINE : CANT_BUILD;
   }
   return { valid, tiles, size: s, message, peace };
 }
