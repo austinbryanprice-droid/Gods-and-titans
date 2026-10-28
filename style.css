@@ -1277,3 +1277,16 @@ kbd {
   .mw-crest { display: none; }
   .mw-tagline { display: none; }
 }
+
+/* Career screen: replays (src/ui/menu-replays.js) */
+.mw-rp-list { display: flex; flex-direction: column; gap: 0.45em; margin: 0; padding: 0; list-style: none; }
+.mw-rp { display: flex; align-items: center; gap: 0.75em; padding: 0.55em 0.75em; border-radius: 6px; border: 1px solid rgba(196, 146, 72, 0.25); background: rgba(0, 0, 0, 0.22); }
+.mw-rp.is-victory { border-color: rgba(255, 210, 58, 0.5); }
+.mw-rp-icon { font-size: 1.5em; width: 1.3em; text-align: center; }
+.mw-rp-main { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; flex: 1; }
+.mw-rp-title { font: 600 0.95em/1.2 var(--mw-font-display); color: var(--mw-ink); }
+.mw-rp-result { color: var(--mw-gold); }
+.mw-rp-sub, .mw-rp-who { font-size: 0.8em; color: var(--mw-ink-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mw-rp-btns { display: flex; gap: 0.35em; flex-wrap: wrap; justify-content: flex-end; }
+.mw-rp-foot { display: flex; align-items: center; gap: 0.9em; margin-top: 0.6em; flex-wrap: wrap; }
+@media (max-width: 700px) { .mw-rp { flex-wrap: wrap; } .mw-rp-btns { width: 100%; } }

@@ -1324,6 +1324,7 @@ export class InputController {
       if (!rep) overlays.openMenu();
       return;
     }
+    if (this.game.replayBar && this.game.replayBar.onKey(e)) return; // a replay's own keys (src/ui/hud-replay.js)
     if (key === 'Enter') {
       e.preventDefault();
       if (!rep) hud.openChat();

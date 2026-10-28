@@ -2114,6 +2114,45 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
 
+### 9.3 Replays (src/game/replay.js, replay-session.js, replay-store.js, src/ui/hud-replay.js, src/ui/menu-replays.js)
+The sim is deterministic (same setup and the same commands on the same ticks give the same game), so a
+replay is not a video: it is the GameSetup, every command the World accepted with its tick, the chat with
+its ticks, and checksums.
+- Recording (host only: a client has no World): `ReplayRecorder` sets `World.onCommand`, which
+  `issueCommand` calls for each command it queues, from every player (the AIs and an AI that took over
+  from a player who left too), as the compact form of `normalizeCommand`'s copy (empty fields dropped;
+  normalizing it again gives the same command). On each host snapshot, at most every 10 s of game time,
+  it keeps `worldChecksum` (the tick, every player's resources, every living unit's id, place and health,
+  every building's health), and one on the last tick. The guided first match is not recorded.
+- Kept: at the game-over screen (with the result) or on leaving (result null, "Left early"), when the game
+  ran 30 s or more. `saveReplay` stores it in IndexedDB (`mythicwar-replays`: a `meta` list row and the
+  `data`, gzip-compressed by CompressionStream; a 2-player 15-minute game is about 26 KB, a 4-player
+  22-minute one about 100 KB), keeping the newest 12. Storage that is off keeps nothing, silently.
+  A record: `{ format: 1, id, version (PROTOCOL_VERSION), date, setup, pov, ticks, result, winningTeam,
+  mode, players, truncated, cmds: [[tick, player, cmd]], chat: [[tick, from, text, voice?, system?]],
+  sums: [[tick, hash]] }`. Loading (and opening a file, untrusted) goes through `sanitizeReplay`:
+  the setup through `validateSetup`, the commands in tick order through `normalizeCommand`.
+- Playback: a Game built with `replay` runs a `ReplaySession` (the HostSession surface) whose World gets
+  the recorded commands on their ticks: no AIs, no orders taken, no alerts, chronicle, career or recording.
+  Speeds ½×, 1×, 2×, 4×, 8× (the ticker runs that fast, a snapshot every speed/2 ticks); the ViewState's
+  `clock` is a `PlaybackClock` running at the same speed and stopping while paused, so units move smoothly
+  at every speed. A jump ahead runs the ticks in 24 ms slices (events dropped, the trees felled on the way
+  fall at once with `felledAll`). Going back starts a new Game at that tick (a World cannot run backwards,
+  nor can the trees regrow), keeping speed, eyes and camera. A checksum that does not match marks the
+  moment the replay parted from the recorded game (a replay from an earlier build, whose rules have
+  changed): the timeline gets a red mark and the bar says so; one from another build says it may differ.
+- Eyes: everyone (`myIndex` -1, no fog) or one player (`ViewState.setViewer`: their fog of war and top bar;
+  the map counts as explored, as no memory of it was kept). The free camera turns round its target and
+  tilts (`CameraController.rotate`, `tiltBy`, `resetAngle`: pan and edge scroll turn with it; the pitch
+  stays 22° to 68°).
+- The bar (above the bottom panel; the command card and the marker and power buttons are hidden): ⏮, play /
+  pause (↻ at the end), +30 s, the speeds, the timeline (click: go there), the eyes, turn ⟲ ⟳, tilt ⤒ ⤓,
+  the normal view ⌖, Leave. Keys: Space play / pause, [ and ] speed, J +30 s, V next eyes, Q / E turn,
+  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free).
+- Where: the game-over screen's Watch Replay (this match from its start), and the Career screen's Replays:
+  each kept game with its sides, result, date, mode and length, Watch, Save (a `.mwreplay` file, the packed
+  record) and Delete, and Open a replay file.
+
 ## 10. AI (src/ai/)
 
 `createAI(world, playerIndex, difficulty) → { tick() }` (difficulty `'tutorial'` is the sleeping camp of 5.13,

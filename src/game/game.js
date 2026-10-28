@@ -2,7 +2,9 @@
 // and AIs, or ClientSession), the 3D renderer, the HUD and the input
 // controller; runs the frame loop; turns view-state events into sounds and HUD
 // messages; handles waiting for the host, pause in single player, game over,
-// the host leaving, chat, and a full teardown back to the menu.
+// the host leaving, chat, and a full teardown back to the menu. The host records
+// the match (src/game/replay.js) and keeps it at the end; a replay plays in a Game
+// of its own, built on a ReplaySession instead of a live one (DESIGN 9.3).
 //
 //   const game = new Game({ launch, settings, onExit });   // launch from the menu
 //   await game.ready;                                      // view is up
@@ -36,6 +38,10 @@ import { recordTutorial } from './career.js';
 import { TutorialDirector } from './tutorial.js';
 import { isTutorial } from '../sim/tutorial.js';
 import { medalFor } from '../data/medals.js';
+import { ReplayRecorder } from './replay.js';
+import { saveReplay } from './replay-store.js';
+import { ReplaySession } from './replay-session.js';
+import { ReplayBar } from '../ui/hud-replay.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
 const BREACH_MESSAGE_MS = 6000; // between two "wall breached" messages
@@ -189,13 +195,21 @@ export class Game {
    * @param {object} [o.settings] getSettings()
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
    * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
+   * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
+   * @param {(record: object, opts?: object) => void} [o.onReplay] watch a replay (main.js tears this Game down and
+   *   builds the replay's): the game-over screen's Watch Replay, and a replay going back in time
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
+    this.replay = replay && replay.record ? replay : null;
+    this.onReplay = onReplay;
+    this.recorder = null; // ReplayRecorder: this match, kept for a replay at its end (the host only)
+    this.replayRecord = null; // the finished recording
+    this.replayBar = null;
     this.session = session;
     this.settings = settings || getSettings();
     this.onExit = onExit;
@@ -255,7 +269,7 @@ export class Game {
     this.root.hidden = false;
     this.setLoading(true);
     // Only a launch that runs the match here needs the AI module (a client's host runs the AIs).
-    const needsAI = !createAI && !this.session && !(this.launch && this.launch.role === 'client');
+    const needsAI = !createAI && !this.session && !this.replay && !(this.launch && this.launch.role === 'client');
     const [loadedAI, RendererClass] = await Promise.all([
       createAI ? Promise.resolve({ createAI, createVoices }) : needsAI ? loadAI() : Promise.resolve({ createAI: idleAI, createVoices: null }),
       Renderer ? Promise.resolve(Renderer) : import('../render/game-renderer.js').then((m) => m.GameRenderer),
@@ -265,6 +279,12 @@ export class Game {
     const aiFactory = (loadedAI && loadedAI.createAI) || idleAI;
     const voiceFactory = (loadedAI && loadedAI.createVoices) || null;
 
+    if (!this.session && this.replay) {
+      const r = this.replay;
+      this.session = new ReplaySession({ record: r.record, createWorld, startAt: r.startAt || 0, viewer: r.viewer ?? -1, speed: r.speed || 1 });
+      if (r.paused) this.session.userPaused = true;
+      this.session.onRestart = (tick) => this.replayFrom(tick);
+    }
     if (!this.session) {
       const l = this.launch;
       if (!l || !l.setup) throw new Error('Game needs a launch or a session.');
@@ -275,29 +295,40 @@ export class Game {
     this.viewState = session.viewState;
     this.selection = new Selection(this.viewState);
     // The guided first match (DESIGN 9.2): its objectives, read from the view and the selection; the HUD shows them.
-    if (isTutorial(session.setup) && session.isHost) {
+    if (isTutorial(session.setup) && session.isHost && !this.replay) {
       this.tutorial = new TutorialDirector({ viewState: this.viewState, getSelection: () => this.selection.ids, onStep: (next, i, done) => this.onTutorialStep(next, done) });
     }
 
     this.hud = new Hud({ root: this.hudRoot, game: this });
+    if (this.replay) this.replayBar = new ReplayBar({ root: this.hudRoot, game: this, onSeekBack: (tick) => this.replayFrom(tick) });
     if (session.mapMismatch) this.hud.setMapMismatch(true);
     this.offs.push(session.onChat((line) => this.onChat(line)));
     if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
     this.offs.push(session.onEnd((info) => this.onEnd(info)));
     this.offs.push(this.viewState.on('*', (ev) => this.onEvent(ev)));
-    // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
-    this.tab = new TabAttention();
-    this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
-    // Score, army, resources and kills every 30 s of game time, for the game-over screen's timeline (src/game/chronicle.js).
-    this.chronicle = new Chronicle({ viewState: this.viewState }).attach();
-    this.offs.push(() => {
-      this.alerts.dispose();
-      this.chronicle.dispose();
-      this.tab.dispose();
-    });
+    // A replay is watched, not played: no alerts, chronicle, career or recording of its own.
+    if (!this.replay) {
+      // Reminders and warnings beyond the events above (src/game/alerts.js), and the tab flash for a player who looked away.
+      this.tab = new TabAttention();
+      this.alerts = new AlertEngine({ viewState: this.viewState, notify: (alert) => this.onAlert(alert) }).attach();
+      // Score, army, resources and kills every 30 s of game time, for the game-over screen's timeline (src/game/chronicle.js).
+      this.chronicle = new Chronicle({ viewState: this.viewState }).attach();
+      this.offs.push(() => {
+        this.alerts.dispose();
+        this.chronicle.dispose();
+        this.tab.dispose();
+      });
+    } else this.offs.push(() => this.replayBar && this.replayBar.dispose());
+    // The host keeps a replay of the match (src/game/replay.js): every command the World takes, with its tick.
+    if (!this.replay && !this.tutorial && session.isHost && session.world) {
+      this.recorder = new ReplayRecorder({ world: session.world, setup: session.setup, myIndex: session.myIndex }).attach();
+      this.offs.push(this.viewState.on('snapshot', () => this.recorder.sample()));
+      this.offs.push(session.onChat((line) => this.recorder.chat(line)));
+      this.offs.push(() => this.recorder.detach());
+    }
     // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
     // The guided first match is not a game of the career: its medal is kept instead (checkEnd).
-    if (!this.tutorial) {
+    if (!this.tutorial && !this.replay) {
       this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
       this.offs.push(() => this.career.dispose());
     }
@@ -333,6 +364,7 @@ export class Game {
     this.resize();
     this.applyShowAllBars();
     this.centerOnStart();
+    if (this.replay && this.replay.camera) this.restoreCamera(this.replay.camera);
     this.input = new InputController({ game: this, canvas: this.canvas, overlayRoot: this.hudRoot });
     this.selection.onChange(() => this.renderer && this.renderer.setSelection(this.selection.ids));
 
@@ -450,9 +482,10 @@ export class Game {
 
   centerOnStart() {
     const vs = this.viewState;
+    const who = this.replay ? (vs.myIndex >= 0 ? vs.myIndex : this.replay.record.pov) : vs.myIndex;
     let best = null;
     for (const e of vs.entities.values()) {
-      if (e.o !== vs.myIndex) continue;
+      if (e.o !== who) continue;
       if (e.k === 'b' && e.t === 'town_center') {
         best = e;
         break;
@@ -533,6 +566,7 @@ export class Game {
     const t1 = performance.now();
     try {
       this.hud.update(now);
+      if (this.replayBar) this.replayBar.update();
     } catch (err) {
       this.frameFault(err);
     }
@@ -626,6 +660,11 @@ export class Game {
   /** Pause the simulation (single player only). Returns true if the game is paused. */
   setPaused(on) {
     const s = this.session;
+    if (this.replay) {
+      // The menu holds a replay still; the picture keeps drawing, so the camera stays free.
+      if (s && typeof s.hold === 'function') s.hold(on);
+      return !!on;
+    }
     if (!isSolo(s)) return false;
     if (on && !this.paused) {
       s.ticker.stop();
@@ -709,6 +748,7 @@ export class Game {
 
   checkEnd() {
     const vs = this.viewState;
+    if (this.replay) return; // the replay bar says when it is over
     if (vs.gameOver && !this.overShown) {
       this.overShown = true;
       const wt = vs.gameOver.winningTeam;
@@ -723,6 +763,7 @@ export class Game {
       // The guided first match: a victory earns a medal by its game time, kept with the career.
       const medal = this.tutorial && result === 'victory' ? medalFor(vs.time) : null;
       if (medal) unlocked = recordTutorial(medal.rank);
+      if (this.recorder) this.keepReplay(result, wt);
       // (A defeat already heard when the local player fell is not played again.)
       if (result === 'victory') sfx.play('victory');
       else if (!this.defeatSounded) sfx.play('defeat');
@@ -968,6 +1009,7 @@ export class Game {
    * host ended, or one left in its first minute, is not counted.
    */
   countLeave() {
+    if (this.recorder) this.keepReplay(null);
     const vs = this.viewState;
     if (!this.career || !vs || vs.gameOver) return;
     const defeated = !!(vs.me && vs.me.defeated);
@@ -1081,6 +1123,67 @@ export class Game {
     this.renderer = null;
     this.input = null;
     if (typeof window !== 'undefined' && window.__game === this) window.__game = null;
+  }
+
+  // ---------------------------------------------------------------- replays
+
+  /**
+   * Keep this match's replay (once): at the game-over screen with how it ended, or on leaving
+   * (result null) when it ran long enough. The save is in the background; the record stays here for
+   * Watch Replay.
+   */
+  keepReplay(result, winningTeam = null) {
+    const rec = this.recorder;
+    if (!rec || rec.done) return this.replayRecord;
+    let record = null;
+    try {
+      record = rec.finish({ result, winningTeam });
+    } catch (err) {
+      console.warn('[game] the replay could not be finished', err);
+    }
+    this.replayRecord = record;
+    if (record) saveReplay(record).catch(() => {});
+    return record;
+  }
+
+  /** Can the game-over screen offer Watch Replay? */
+  canWatchReplay() {
+    return !!this.replayRecord && typeof this.onReplay === 'function' && !this.disposed;
+  }
+
+  /** Watch this match's replay from its start (the game-over screen). */
+  watchReplay() {
+    if (!this.canWatchReplay()) return;
+    const record = this.replayRecord;
+    const next = this.onReplay;
+    this.countLeave();
+    this.dispose();
+    next(record, {});
+  }
+
+  /** A replay going back: start it over at `tick`, keeping the speed, the eyes and the camera. */
+  replayFrom(tick) {
+    if (!this.replay || this.disposed || typeof this.onReplay !== 'function') return;
+    const s = this.session;
+    const record = this.replay.record;
+    const opts = { startAt: tick, viewer: s.myIndex, speed: s.speed, paused: !!s.userPaused && !s.ended, camera: this.cameraState() };
+    const next = this.onReplay;
+    this.dispose();
+    next(record, opts);
+  }
+
+  cameraState() {
+    const c = this.renderer && this.renderer.camera;
+    return c ? { x: c.goal.x, y: c.goal.y, distance: c.goalDistance, yaw: c.yaw || 0, tilt: c.tilt || 0 } : null;
+  }
+
+  restoreCamera(st) {
+    const c = this.renderer && this.renderer.camera;
+    if (!c || !st) return;
+    c.yaw = Number.isFinite(st.yaw) ? st.yaw : 0;
+    c.tilt = Number.isFinite(st.tilt) ? st.tilt : 0;
+    if (Number.isFinite(st.distance)) c.setDistance(st.distance, true);
+    c.centerOn(st.x, st.y);
   }
 
   /** True when the game-over screen may offer Play Again (a game against the computer only). */

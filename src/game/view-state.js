@@ -46,9 +46,12 @@ export class ViewState {
    * @param {object} o.mapData MapData from generateMap (cloned; the original is never modified)
    * @param {number} o.myIndex my player index (-1 = spectator: sees everything)
    * @param {number} [o.interpDelayMs] render this far behind the newest snapshot
+   * @param {() => number} [o.clock] the local time in ms in place of the time passed in (a replay's
+   *   playback clock, which runs faster or slower than real time and stops while paused)
    */
-  constructor({ setup, mapData, myIndex, interpDelayMs = INTERP_DELAY_MS }) {
+  constructor({ setup, mapData, myIndex, interpDelayMs = INTERP_DELAY_MS, clock = null }) {
     this.setup = setup;
+    this.clock = clock;
     this.myIndex = myIndex;
     this.interpDelayMs = interpDelayMs;
     this.map = cloneMap(mapData);
@@ -299,6 +302,7 @@ export class ViewState {
    * @param {{ felledAll?: number[][] }} [extra] felledAll from a full resync
    */
   pushSnapshot(snap, now = nowMs(), extra = null) {
+    if (this.clock) now = this.clock();
     // Trees: this snapshot's treeFelled events fire as usual; trees known only from
     // `felled` or from a resync's `felledAll` get a synthetic event so the renderer
     // can remove them too (sync: true marks the ones felled before we joined).
@@ -392,6 +396,26 @@ export class ViewState {
     for (const ev of synthetic) this.fire(ev);
     for (const ev of events) this.fire(ev);
     this.emit('snapshot', snap);
+  }
+
+  /**
+   * See the game as another player does (a replay's vision choice): their fog of war, or everything
+   * for -1. What the new eyes remember is not known, so the whole map counts as explored and no
+   * enemy building is remembered in the fog until it is seen.
+   */
+  setViewer(index) {
+    const i = Number.isInteger(index) && index >= 0 && this.setup && this.setup.players && index < this.setup.players.length ? index : -1;
+    if (i === this.myIndex) return;
+    this.myIndex = i;
+    this.me = this.players[i] || null;
+    const sp = i >= 0 ? this.me || this.setup.players[i] : null;
+    this.myTeam = sp ? sp.team : null;
+    this.revealAll = i < 0 || !!this.gameOver || !!(this.me && this.me.defeated);
+    this.explored.fill(1);
+    this.lastSeen.clear();
+    this.updateVisibility();
+    this.updateLastSeen();
+    this.updateSeenTerrain();
   }
 
   /** Re-anchor the playback clock on the next snapshot (after a pause: sim time stood still). */
@@ -516,6 +540,7 @@ export class ViewState {
    * @param {number} [now] local time in ms
    */
   update(now = nowMs()) {
+    if (this.clock) now = this.clock();
     if (this.clockOffset === null) return;
     const rt = now - this.clockOffset - this.interpDelayMs;
     this.renderTime = Math.max(0, Math.min(this.time, rt / 1000));

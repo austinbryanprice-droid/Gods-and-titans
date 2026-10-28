@@ -339,7 +339,7 @@ export class Minimap {
     if (this.pings.length) {
       this.pings = this.pings.filter((p) => now - p.t0 < PING_MS);
       for (const p of this.pings) {
-        const t = (now - p.t0) / PING_MS;
+        const t = Math.max(0, (now - p.t0) / PING_MS); // (a ping raised later in this frame than its start time)
         for (let r = 0; r < 2; r++) {
           const tt = (t * 3 + r * 0.5) % 1;
           ctx.beginPath();

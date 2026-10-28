@@ -190,7 +190,8 @@ export class Overlays {
 
     const resume = btn('Resume', 'mw-btn--primary', () => this.closeMenu());
     const buttons = [resume];
-    if (!over && !defeated) {
+    const replay = !!game.replay;
+    if (!over && !defeated && !replay) {
       buttons.push(btn('Surrender', 'mw-btn--ghost is-danger', () => this.confirm(
         'Surrender?', 'Your buildings will crumble and you will be defeated.', 'Surrender',
         () => {
@@ -202,17 +203,18 @@ export class Overlays {
       )));
     }
     let quitHint = 'Return to the main menu.';
-    if (!over) {
+    if (replay) quitHint = 'Leave the replay.';
+    else if (!over) {
       if (this.hostingOthers()) quitHint = 'The game ends for every player.';
       else if (game.session && !game.session.isHost) quitHint = 'An AI will take over your army.';
       else quitHint = 'The battle will be lost.';
     }
-    buttons.push(btn('Quit to Menu', 'mw-btn--ghost', () => {
-      if (over) return game.quitToMenu();
+    buttons.push(btn(replay ? 'Leave Replay' : 'Quit to Menu', 'mw-btn--ghost', () => {
+      if (over || replay) return game.quitToMenu();
       this.confirm('Quit to Menu?', quitHint, 'Quit', () => game.quitToMenu(), () => this.openMenu());
     }));
 
-    const node = this.panel('Game Menu', paused ? 'The game is paused.' : `Game time ${formatClock(vs.time)}`,
+    const node = this.panel(replay ? 'Replay Menu' : 'Game Menu', paused ? (replay ? 'The replay is paused.' : 'The game is paused.') : `Game time ${formatClock(vs.time)}`,
       el('div', 'hud-obtns is-col', ...buttons),
       el('div', 'hud-options',
         el('div', 'mw-label', 'Options'),
@@ -325,9 +327,15 @@ export class Overlays {
       this.careerLine(),
       el('div', 'hud-obtns',
         this.canRematch() ? btn('Play Again', 'mw-btn--primary', () => this.game.rematch()) : null,
+        this.canWatchReplay() ? btn('Watch Replay', 'mw-btn--ghost', () => this.game.watchReplay()) : null,
         btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
         btn('Keep Watching', 'mw-btn--ghost', () => this.hide())));
     this.show('gameover', node, () => this.hide());
+  }
+
+  /** Watch Replay: the host kept this match (Game.canWatchReplay). */
+  canWatchReplay() {
+    return typeof this.game.canWatchReplay === 'function' && this.game.canWatchReplay();
   }
 
   /** Play Again is offered for a game against the computer only (Game.canRematch). */
