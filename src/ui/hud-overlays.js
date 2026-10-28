@@ -367,7 +367,7 @@ export class Overlays {
       el('span', 'hud-medal-text', el('b', null, `${medal.name} medal`), el('small', null, hint)));
   }
 
-  /** "Career: 12 wins in 20 games (60%) · 9 of 39 achievements" (null for a spectator). */
+  /** "Career: 12 wins in 20 games (60%) · 9 of 40 achievements" (null for a spectator). */
   careerLine() {
     if ((this.game.viewState.myIndex ?? -1) < 0) return null;
     const c = getCareer();

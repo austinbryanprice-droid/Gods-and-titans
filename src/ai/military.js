@@ -107,18 +107,21 @@ export function localForces(ai, x, y, r, opts = {}) {
   return { mine, theirs };
 }
 
-/** Centroid of a unit list (ground units weigh more so flyers don't pull it over water). */
-function centroid(units) {
-  let x = 0;
-  let y = 0;
-  let w = 0;
-  for (const u of units) {
-    const k = u.air ? 0.3 : 1;
-    x += u.x * k;
-    y += u.y * k;
-    w += k;
-  }
-  return w > 0 ? { x: x / w, y: y / w } : null;
+/**
+ * Where the bulk of a unit list stands: the median x and y of its ground units
+ * (of all of them if none walk). A mean is pulled away by stragglers: fresh
+ * recruits walking out from home once held an army's "centre" 30 tiles behind
+ * it, so a siege kept restarting its march and the army stood idle at the
+ * first waypoint for the rest of the game.
+ */
+export function centroid(units) {
+  let list = units.filter((u) => !u.air);
+  if (!list.length) list = units;
+  if (!list.length) return null;
+  const xs = list.map((u) => u.x).sort((a, b) => a - b);
+  const ys = list.map((u) => u.y).sort((a, b) => a - b);
+  const mid = list.length >> 1;
+  return list.length % 2 ? { x: xs[mid], y: ys[mid] } : { x: (xs[mid - 1] + xs[mid]) / 2, y: (ys[mid - 1] + ys[mid]) / 2 };
 }
 
 /**
@@ -325,8 +328,9 @@ export function runMilitary(ai, s) {
   const t = s.t;
   const fighters = [];
   const rams = [];
+  const raid = ai.raid && ai.raid.ids;
   for (const u of s.army) {
-    if (ai.godRetreat.has(u.id)) continue;
+    if (ai.godRetreat.has(u.id) || ai.wounded.has(u.id) || (raid && raid.has(u.id))) continue;
     if (u.def.class === 'siege') rams.push(u);
     else fighters.push(u);
   }

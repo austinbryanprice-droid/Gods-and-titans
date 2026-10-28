@@ -37,7 +37,7 @@ export function godPlan(ai) {
   };
   const pool = gods.slice();
   const take = (g) => pool.splice(pool.indexOf(g), 1);
-  const jitter = ai.difficulty === 'hard' ? 0.15 : 0.4;
+  const jitter = ai.prof.godJitter;
   const first = pickBy('damage', pool, jitter);
   take(first);
   const second = pickBy('heal', pool, jitter);

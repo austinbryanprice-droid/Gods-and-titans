@@ -48,6 +48,10 @@ const BASE = {
   pilgrimsFrom: 150, // Worshippers go out to capture sacred sites from this time (ai/sacred.js)
   pilgrims: 2, // at most this many at once (+1 with Sacred Victory on)
   stealSites: true, // also take a rival's unguarded site
+  godJitter: 0.4, // randomness in which gods it summons first (low = always the strongest picks)
+  // Smarter play (Hard and Brutal); off by default.
+  raids: null, // worker raids (raid.js): { from (s), every (s after the last raid came home), pop (squad pop), minArmy (army pop kept home) }
+  pullWounded: 0, // soldiers under this hp fraction step back to a Priest in a fight (micro.js)
 };
 
 export const PROFILES = {
@@ -129,7 +133,19 @@ export const PROFILES = {
     godRejoin: 0.55,
     castThreshold: 0.85,
     armyCap: Math.round(POP_MAX * 0.93),
+    godJitter: 0.15,
+    raids: { from: 330, every: 110, pop: 10, minArmy: 14 },
+    pullWounded: 0.3,
   },
+};
+
+// Brutal: Hard's play, thinking faster and raiding more often, with a gather bonus
+// (AI_INCOME_BONUS in config.js, applied by the sim). Sharper fair timings were measured
+// and made no difference, so the bonus is what puts it above Hard.
+PROFILES.brutal = {
+  ...PROFILES.hard,
+  think: AI_THINK_INTERVAL.brutal,
+  raids: { from: 270, every: 80, pop: 12, minArmy: 12 },
 };
 
 /** Profile for a difficulty name (unknown → normal). */
