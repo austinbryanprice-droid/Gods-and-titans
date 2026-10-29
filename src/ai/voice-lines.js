@@ -1,13 +1,15 @@
 // What computer players say in chat (DESIGN 10.1), per pantheon and per moment of the match.
 // `{unit}` is the god or Titan the line is about, `{enemy}` the other player's name; a line
-// whose blanks cannot be filled is skipped. Keep each line short (one card in the message feed).
+// whose blanks cannot be filled is skipped. `greetAlly` is the greeting of a match with no enemy
+// player (the Trial of the Titans: everyone together against the monsters). Keep each line short (one card in the message feed).
 
 /** The moments an AI speaks, in the order DESIGN 10.1 lists them. */
-export const VOICE_TRIGGERS = ['greet', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory'];
+export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory'];
 
 export const VOICE_LINES = {
   greek: {
     greet: ['May the Olympians judge us fairly. They rarely do.', 'Olympus is watching. Try not to embarrass yourself.'],
+    greetAlly: ['Shoulder to shoulder, friends. Olympus fights with us.', 'Together, then. Let the monsters come and meet the bronze.'],
     contact: ['So, {enemy}, we meet at last. Olympus has noticed you.', 'Strangers on our borders. Sharpen the bronze.'],
     struck: ['You dare raise a hand against Olympus, {enemy}?', 'Hubris, {enemy}. The gods punish hubris.'],
     peaceEnd: ['The truce is over. Let the war of the gods begin!', 'Enough talk. Ares is hungry.'],
@@ -20,6 +22,7 @@ export const VOICE_LINES = {
   },
   norse: {
     greet: ['Skål! May your mead be strong and your walls weak.', 'The ravens are flying. Odin wants a good show.'],
+    greetAlly: ['Skål, shield-siblings! Let the beasts come.', 'Stand with me, friends. The ravens want a good fight.'],
     contact: ['Ha! Fresh foes, {enemy}. The skalds will need new verses.', 'I smell strangers. Ready the longships.'],
     struck: ['You strike first, {enemy}? Bold. Foolish, but bold.', 'Blood for blood, {enemy}. That is the way of the North.'],
     peaceEnd: ['Ten years of peace is far too long. Axes up!', 'The horn sounds! Now the real fun begins.'],
@@ -32,6 +35,7 @@ export const VOICE_LINES = {
   },
   egyptian: {
     greet: ['Ra sees all from his sun boat. Build well, for he judges.', 'Greetings. My pyramids will outlast your whole people.'],
+    greetAlly: ['Ra shines on all of us today, friends. Hold the walls.', 'Together we stand, as the pyramids stand.'],
     contact: ['Strangers in the desert, {enemy}? The sands swallow many.', 'Foreigners at the edge of the Black Land. Watch them.'],
     struck: ['You profane the land of Ra, {enemy}. Your heart will be weighed.', 'Anubis readies the scales for you, {enemy}.'],
     peaceEnd: ['The peace is ended. Let the chariots roll.', 'Set is restless. The time for war has come.'],
@@ -44,6 +48,7 @@ export const VOICE_LINES = {
   },
   hindu: {
     greet: ['Namaste. May dharma guide this battle.', 'The wheel turns. Let us see where it stops for you.'],
+    greetAlly: ['Namaste, friends. Together we hold back the dark.', 'Our dharma is one today. Let the monsters come.'],
     contact: ['{enemy} crosses our path. Karma brings us together.', 'Strangers on the horizon. Let them come.'],
     struck: ['You strike at us, {enemy}? Your karma darkens.', 'Violence answered with violence, {enemy}. So be it.'],
     peaceEnd: ['The age of peace passes. Now comes the age of war.', 'Shiva begins his dance. The peace is over.'],
@@ -56,6 +61,7 @@ export const VOICE_LINES = {
   },
   japanese: {
     greet: ['Honour to you, rivals. May the kami favour the worthy.', 'The cherry blossoms fall. So will your walls.'],
+    greetAlly: ['Honour to you, my allies. May the kami guard us all.', 'Side by side, like the pines of the shrine. Let them come.'],
     contact: ['So, {enemy}, our blades finally meet.', 'Strangers beyond the torii. Prepare yourselves.'],
     struck: ['A dishonourable strike, {enemy}. It will be answered.', 'You wake the storm, {enemy}.'],
     peaceEnd: ['The peace was a fine dream. Now, the sword.', 'Draw your blades. The truce has ended.'],
@@ -68,6 +74,7 @@ export const VOICE_LINES = {
   },
   chinese: {
     greet: ['Greetings. Heaven granted its mandate to me, not you.', 'May your rice bowl stay full. Mine will be fuller.'],
+    greetAlly: ['Greetings, allies. Heaven favours those who stand together.', 'Man the walls with me, friends. The beasts are coming.'],
     contact: ['Ah, {enemy}. The Middle Kingdom has noticed you.', 'Barbarians on the frontier. Man the walls.'],
     struck: ['Striking first, {enemy}? Sun Tzu would disapprove.', 'You have lost the Mandate of Heaven, {enemy}.'],
     peaceEnd: ['The years of peace are over. Raise the banners!', 'Even a long peace must end. To war.'],
@@ -80,6 +87,7 @@ export const VOICE_LINES = {
   },
   aztec: {
     greet: ['The Fifth Sun shines on us. It must be fed.', 'Welcome, friends. The sun is hungry today.'],
+    greetAlly: ['Welcome, friends. Today the sun feeds on monsters.', 'Together we stand. Ready the obsidian for the beasts.'],
     contact: ['{enemy}! The sun will be glad to meet you.', 'Captives for the sun approach. Ready the obsidian.'],
     struck: ['You bring war to us, {enemy}? A flower war it is!', 'Your blood will feed the sun, {enemy}.'],
     peaceEnd: ['The peace is done. Let the flower war begin!', 'Beat the drums! The truce is over.'],
@@ -92,6 +100,7 @@ export const VOICE_LINES = {
   },
   celtic: {
     greet: ['Well met, strangers. The druids say this ends badly for you.', 'May the wild lands welcome you... briefly.'],
+    greetAlly: ['Well met, friends. The clans fight as one today.', 'Stand with us in the old woods. The beasts will regret coming.'],
     contact: ['Ah, {enemy} wanders into our forests. Unwise.', 'Strangers in the old woods. The trees whisper of them.'],
     struck: ['Raiding us, {enemy}? We will have your cattle for that.', 'You have woken the wild, {enemy}.'],
     peaceEnd: ['The peace is broken. Paint your faces!', 'The crows are circling. War has come.'],
@@ -104,6 +113,7 @@ export const VOICE_LINES = {
   },
   mesopotamian: {
     greet: ['Greetings from the first city. We invented all this, you know.', 'The gods of Sumer are watching. They keep careful records.'],
+    greetAlly: ['Greetings, allies. The scribes will record our stand together.', 'Behind the walls, friends. We built walls first, you know.'],
     contact: ['{enemy}! Your name is now written on my clay tablets.', 'Foreigners beyond the river. Tell the scribes.'],
     struck: ['An attack, {enemy}? The scribes will record your crimes.', 'You have angered the city\'s patron, {enemy}.'],
     peaceEnd: ['The peace treaty expires. Sharpen the bronze.', 'The tablets of peace are broken. To war!'],
@@ -116,6 +126,7 @@ export const VOICE_LINES = {
   },
   west_african: {
     greet: ['Welcome, friends. Anansi has already told me your plans.', 'May the ancestors give us a good contest.'],
+    greetAlly: ['Welcome, friends. The drums call us to stand together.', 'May the ancestors guard us all. Let the beasts come.'],
     contact: ['Ah, {enemy}. The drums told me you were coming.', 'Strangers near our villages. The drums speak of them.'],
     struck: ['You strike us, {enemy}? Shango\'s thunder answers.', 'Àṣẹ! You will regret this, {enemy}.'],
     peaceEnd: ['The peace is over. Let the war drums speak!', 'Ogun sharpens his blades. War has come.'],

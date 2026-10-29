@@ -8,6 +8,7 @@ import { el, setClass, setStyle, safeColor } from './hud-dom.js';
 
 const EDGE_PAD_EM = 3.2; // distance from the border of the play area to the chip of an edge arrow
 const ARROW_EM = 1.9; // distance from that chip's middle to its arrowhead
+const PIN_EM = 5.6; // height of a standing pin (name, chip, stem and bob) above its spot, plus the top bar's crest
 const INSET_REFRESH_MS = 500; // how often the heights of the top bar and bottom console are read again
 const FADE_MS = 800; // a mark fades out over its last moments
 
@@ -136,6 +137,8 @@ export class MarksLayer {
     }
     setStyle(item.root, 'transform', `translate(${Math.round(x * 2) / 2}px, ${Math.round(y * 2) / 2}px)`);
     setClass(item.root, 'is-edge', !inside);
+    // A spot just below the top bar: the pin hangs under it, stem up, instead of standing up into the bar.
+    setClass(item.root, 'is-below', inside && y - PIN_EM * this.em < area.top);
     if (!inside) setStyle(item.arrow, 'transform', `rotate(${Math.round(angle * 100) / 100}rad) translateX(${ARROW_EM}em)`);
     const fade = Math.min(1, Math.max(0, (m.t1 - now) / FADE_MS));
     setStyle(item.root, 'opacity', fade < 1 ? String(Math.round(fade * 20) / 20) : '');

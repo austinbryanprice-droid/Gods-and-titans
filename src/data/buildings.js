@@ -241,6 +241,19 @@ export const BUILDINGS = {
         description: 'Newly summoned gods arrive at level 2, and revived gods at level 2 or higher.' },
     ],
     icon: '⛩️',
+    // Each pantheon raises its own Temple (the models differ too): the portrait and build button wear its icon (buildingIcon).
+    pantheonIcons: {
+      greek: '🦉', // Athena's owl over the Parthenon
+      norse: '🌈', // Bifröst, the bridge to Asgard
+      egyptian: '👁️', // the eye of Horus
+      hindu: '🕉️',
+      japanese: '⛩️',
+      chinese: '🏯', // the pagoda
+      aztec: '🌞', // the Fifth Sun the temple feeds
+      celtic: '🌿', // the druids' mistletoe and sacred grove
+      mesopotamian: '🌙', // Nanna, the moon of Ur's ziggurat
+      west_african: '🥁', // the shrine drums
+    },
     hotkey: 'E',
     description: 'Summons and revives your gods. Up to 5 Worshippers pray here for extra Faith. Requires a Shrine.',
   },
@@ -377,4 +390,16 @@ export const GOLD_MINE = {
 };
 
 // Order of buttons in a Worshipper's build menu.
+/**
+ * A building's icon as a pantheon builds it: its `pantheonIcons` entry for that pantheon, else its icon.
+ * @param {string} type building type id
+ * @param {string} [pantheon] the owner's pantheon id
+ */
+export function buildingIcon(type, pantheon) {
+  const b = Object.hasOwn(BUILDINGS, type) ? BUILDINGS[type] : null;
+  if (!b) return null;
+  const own = b.pantheonIcons && typeof pantheon === 'string' && Object.hasOwn(b.pantheonIcons, pantheon) ? b.pantheonIcons[pantheon] : null;
+  return own || b.icon;
+}
+
 export const BUILD_MENU = ['house', 'barracks', 'shrine', 'storehouse', 'tower', 'temple', 'titan_gate', 'town_center', 'wooden_wall'];

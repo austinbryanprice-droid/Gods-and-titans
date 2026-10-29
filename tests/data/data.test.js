@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { validateData, PANTHEON_LIST, UNITS, BUILDINGS, POWERS } from '../../src/data/index.js';
+import { validateData, PANTHEON_LIST, UNITS, BUILDINGS, POWERS, buildingIcon } from '../../src/data/index.js';
 
 test('all game data is valid', () => {
   const errors = validateData();
@@ -30,9 +30,27 @@ test('data icons stay within Emoji 11 so older systems draw them', () => {
     for (const a of u.abilities || []) icons.push([a.id, a.icon]);
     for (const p of u.passives || []) if (p.icon) icons.push([u.id, p.icon]);
   }
-  for (const b of Object.values(BUILDINGS)) icons.push([b.id, b.icon]);
+  for (const b of Object.values(BUILDINGS)) {
+    icons.push([b.id, b.icon]);
+    for (const [p, icon] of Object.entries(b.pantheonIcons || {})) icons.push([`${b.id} (${p})`, icon]);
+  }
   for (const pw of Object.values(POWERS)) icons.push([pw.id, pw.icon]);
   for (const [id, icon] of icons) assert.ok(!NEWER_EMOJI.test(icon), `${id} icon ${icon} needs Emoji 12 or newer`);
+});
+
+test('every pantheon raises a Temple with its own icon, not another pantheon\'s torii', () => {
+  const seen = new Set();
+  for (const p of PANTHEON_LIST) {
+    const icon = buildingIcon('temple', p.id);
+    assert.ok(icon && Object.hasOwn(BUILDINGS.temple.pantheonIcons, p.id), p.id);
+    assert.ok(!seen.has(icon), `${p.id}: ${icon} is another pantheon's Temple icon`);
+    seen.add(icon);
+    for (const id of ['house', 'barracks', 'town_center', 'shrine']) assert.notEqual(icon, BUILDINGS[id].icon, `${p.id}: the Temple looks like the ${id}`);
+  }
+  assert.equal(buildingIcon('temple', 'japanese'), '⛩️');
+  assert.equal(buildingIcon('temple', 'nope'), BUILDINGS.temple.icon, 'an unknown pantheon gets the plain icon');
+  assert.equal(buildingIcon('house', 'aztec'), BUILDINGS.house.icon);
+  assert.equal(buildingIcon('nope', 'aztec'), null);
 });
 
 test('UI strings stay within Emoji 11 too (HUD chips, command card, menu, tips)', () => {

@@ -93,14 +93,14 @@ export const TUTORIAL_STEPS = [
   },
   {
     id: 'mine', icon: '⛏️', title: 'Mine gold',
-    text: () => 'Right-click the gold mine with Worshippers selected. Put three of them to work there: gold pays for nearly everything.',
+    text: () => 'With your Worshippers selected, right-click the gold mine to send them all to work there. Gold pays for nearly everything: keep at least three on it.',
     done: (c) => c.tasks.gold >= 3,
     progress: (c) => count(c.tasks.gold, 3),
     target: (c) => c.mine,
   },
   {
     id: 'wood', icon: '🌲', title: 'Chop wood',
-    text: () => 'Select the other Worshippers (click one, Shift+click to add) and right-click a tree at the forest edge. Get two of them chopping.',
+    text: () => 'Wood builds your city. Click one Worshipper (a miner will do), Shift+click a second, then right-click a tree at the forest edge. Get two of them chopping.',
     done: (c) => c.tasks.wood >= 2,
     progress: (c) => count(c.tasks.wood, 2),
     target: (c) => c.forest,
