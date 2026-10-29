@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // God power bench: every strike and cataclysm cast on a carpet of 150 tough enemy soldiers (a disc of
 // radius 13, 20000 hp each, holding still) and the health it removes in 25 s, a damage-times-area score
-// for an army that stands and fights in it. Buffs, summons, stuns and slows are not counted, so read the
-// numbers next to each power's extras. Used to keep the ten pantheons' powers comparable (DESIGN 4.11).
+// for an army that stands and fights in it. Buffs, summons (kept from attacking), stuns and slows are not
+// counted, so read the numbers next to each power's extras. Used to keep the ten pantheons' powers
+// comparable (DESIGN 4.11).
 //
 // Usage: node tools/power-bench.mjs
 import { createWorld } from '../src/sim/world.js';
@@ -38,6 +39,8 @@ function score(pantheon, pw) {
   castPower(w, 0, pw.id, cx, cy);
   let lost = 0;
   for (let i = 0; i < 25 * 20; i++) {
+    // Summoned minions (the Crows' crows, Apep's mummies) are extras, not the power's own damage: they never strike.
+    for (const u of w.unitList) if (u.owner === 0 && u.summoned) u.attackCd = 1e9;
     w.tick();
     w.events.length = 0;
     for (const id of ids) {
