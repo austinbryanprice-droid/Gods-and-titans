@@ -364,9 +364,14 @@ export class Game {
       });
     } else this.offs.push(() => this.replayBar && this.replayBar.dispose());
     // The host keeps a replay of the match (src/game/replay.js): every command the World takes, with its tick.
-    // (Not a game carried on from a save: a replay plays from the setup, and the start of this one is gone.)
-    if (!this.replay && !this.tutorial && !resumed && session.isHost && session.world) {
-      this.recorder = new ReplayRecorder({ world: session.world, setup: session.setup, myIndex: session.myIndex }).attach();
+    // A game carried on from a save records on from the recording the save carried (a replay plays from the
+    // setup); a save without one (an older build's, or a game too long to carry) gets no replay.
+    if (!this.replay && !this.tutorial && session.isHost && session.world) {
+      if (!resumed) this.recorder = new ReplayRecorder({ world: session.world, setup: session.setup, myIndex: session.myIndex });
+      else if (resumed.replay) this.recorder = ReplayRecorder.resume({ world: session.world, carried: resumed.replay });
+    }
+    if (this.recorder) {
+      this.recorder.attach();
       this.offs.push(this.viewState.on('snapshot', () => this.recorder.sample()));
       this.offs.push(session.onChat((line) => this.recorder.chat(line)));
       this.offs.push(() => this.recorder.detach());
