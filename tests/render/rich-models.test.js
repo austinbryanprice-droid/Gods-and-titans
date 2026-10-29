@@ -2326,7 +2326,8 @@ test('detail picks the rich model on request and keeps the low-poly one by defau
   const warrior = norse('warrior');
   const base = buildUnitModel(warrior, PLAYER_COLORS[0]);
   assert.equal(base.rich, null);
-  assert.ok(!base.root.getObjectByProperty('isSkinnedMesh', true));
+  // (its only skinned mesh, if any, is its rigid parts joined into one draw)
+  assert.ok(!base.root.getObjectByProperty('isSkinnedMesh', true) || base.root.getObjectByProperty('isSkinnedMesh', true) === base.joined?.mesh);
   const rich = buildUnitModel(warrior, PLAYER_COLORS[0], { detail: 'rich' });
   assert.ok(rich.rich);
   const body = rich.root.getObjectByName('body');
