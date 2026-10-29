@@ -2294,6 +2294,9 @@ per-frame budget, so a revealed army appears over a few frames.
   abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:
   Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R, pantheon elite E; Shrine: creatures Q W E;
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
+  A train or summon button's tooltip carries the unit's base stats under its cost (`unitStats`, `stats` on the
+  button): "HP · melee damage, or ranged damage and range · armor · speed", a line on what it is good or bad against
+  (flying, hits flyers or not, buildings only, ×n damage vs buildings, splash) and one line per passive.
   Wall segments: U upgrade to stone (every idle segment of the active subgroup, as many as the purse
   allows), D dismantle finished segments, C cancel unfinished segments or upgrades.
   Houses: U combine into a Manor (5.3), C cancel the combining. The button reads the same rule as the

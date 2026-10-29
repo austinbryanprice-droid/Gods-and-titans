@@ -1074,6 +1074,7 @@
 .ht-res.is-wood { color: #e2b98a; }
 .ht-res.is-faith { color: #bfe3ff; }
 .ht-res.is-time, .ht-res.is-dim { color: var(--mw-ink-dim); font-weight: 600; }
+.ht-stats { margin-top: 0.35em; font-size: max(0.84em, var(--mw-min-text)); line-height: 1.35; color: var(--mw-ink); }
 .ht-desc { margin-top: 0.4em; font-size: max(0.9em, var(--mw-min-text)); line-height: 1.4; color: var(--mw-ink-dim); }
 .ht-note { margin-top: 0.35em; font-size: max(0.82em, var(--mw-min-text)); color: #9fd8a8; font-style: italic; }
 .ht-reason { margin-top: 0.4em; font: 700 max(0.9em, var(--mw-min-text))/1.3 var(--mw-font-ui); color: #ff8a6a; }
