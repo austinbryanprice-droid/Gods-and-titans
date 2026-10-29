@@ -5,6 +5,7 @@ import { ARMOR_FACTOR, PROJECTILE_SPEED, SPELL_VS_BUILDING, BREACH_RANGE, DT } f
 import { hyp, edgeDist, distToEntity } from './common.js';
 import { absorbShield, addStatus } from './status.js';
 import { moveToEntity, stopMove } from './movement.js';
+import { buildingsNear } from './building-grid.js';
 import { isMelee, approachSpot, holdSpot, hasFreeSpot, spotCost, SURROUND_DIST } from './surround.js';
 
 /** Damage multiplier for an armor value (WC3). */
@@ -46,6 +47,9 @@ export function targetCategory(t) {
   return t.def.attack && !t.ghost ? 0 : 1;
 }
 
+// Buildings near a findTarget search (reused: no garbage per scan).
+const nearBuildings = [];
+
 /**
  * Best target for u within range (edge distance). Priority: closest enemy unit
  * that can attack, then other units, then buildings. Wall segments are never picked
@@ -82,7 +86,10 @@ export function findTarget(world, u, range, opts = {}) {
     }
   }
   if (bestCat <= 1 || opts.unitsOnly || maxCat < 2) return best;
-  const bl = world.buildingList;
+  // Only buildings near enough can be in range (same order as buildingList: same tie-breaks).
+  const bl = nearBuildings;
+  bl.length = 0;
+  buildingsNear(world, px, py, range + self, bl);
   for (let i = 0; i < bl.length; i++) {
     const b = bl[i];
     if (b.dead || b.def.wall || b.id === exclude || !canTarget(world, u, b)) continue;
@@ -125,7 +132,9 @@ function findTargetWithRoom(world, u, range, tmp, px, py, self, exclude, maxCat,
     n++;
   }
   if (!unitsOnly && maxCat >= 2 && (bi < 0 || roomC[bi] === 2 || n < 64)) {
-    const bl = world.buildingList;
+    const bl = nearBuildings;
+    bl.length = 0;
+    buildingsNear(world, px, py, range + self, bl);
     for (let i = 0; i < bl.length; i++) {
       const b = bl[i];
       if (b.dead || b.def.wall || b.id === exclude || !canTarget(world, u, b)) continue;
