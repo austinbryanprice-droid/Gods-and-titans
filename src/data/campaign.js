@@ -1,6 +1,7 @@
-// The campaign (DESIGN 5.16): two chapters of five linked missions each. Chapter I, "The Long Winter", for
+// The campaign (DESIGN 5.16): three chapters of five linked missions each. Chapter I, "The Long Winter", for
 // the Greeks against raiders out of the frozen north; Chapter II, "The Wolf Age", for the Norse against Loki,
-// opened by winning the last mission of Chapter I. Plain data, read by the sim (src/sim/campaign.js runs the
+// opened by winning the last mission of Chapter I; Chapter III, "The Sea of Chaos", for the Egyptians against
+// Akkad and Tiamat, opened by winning the last of Chapter II. Plain data, read by the sim (src/sim/campaign.js runs the
 // objectives and the scripted events), the HUD (the objective panel) and the menu (the chapter
 // screen and the briefings). The briefings and the lines said during a mission are recorded
 // (assets/narration/campaign, tools/narration/render.py --campaign); a line's clip is named by
@@ -26,8 +27,9 @@
 // event that reveals it), so a player who has beaten every enemy knows the mission is not over.
 //
 // Events: { at: seconds } or { after: objective id }, then any of: say (a line on the screen, spoken),
-// spawn { owner, tag, units: [[type, n]], at: 'home'|'front', march, always } (march: sent at the hero's
-// buildings, or at the building tagged `target`; always: it comes even once its owner is beaten, from where
+// spawn { owner, tag, units: [[type, n]], at: 'home'|'front', march, guard, always } (march: sent at the hero's
+// buildings, or at the building tagged `target`; guard: they stay where they spawn, never taken into their
+// owner's army; always: it comes even once its owner is beaten, from where
 // their Town Center stood; otherwise a beaten owner's spawn does not come), reveal (an objective id).
 
 /** Units of a spawn list: [[type, count], ...]. */
@@ -349,6 +351,170 @@ const WOLF_AGE = [
   },
 ];
 
+const CHAOS_SEA = [
+  {
+    id: 'delta',
+    title: 'Sails on the Nile',
+    place: 'The Nile delta',
+    seed: 7201,
+    mapSize: 'small',
+    creeps: false,
+    players: [
+      { pantheon: 'egyptian', team: 1 },
+      { name: 'Raiders of Akkad', pantheon: 'mesopotamian', team: 2, difficulty: 'tutorial' },
+    ],
+    start: [
+      { gold: 500, wood: 300, faith: 80, units: U(['warrior', 3]), buildings: [{ type: 'storehouse', tag: 'granary', ring: 8 }] },
+      { townHp: 1500, units: U(['warrior', 3], ['archer', 2]) },
+    ],
+    briefing: 'The Nile delta, at the mouth of the great river. The Pharaoh who sent her legions north to fight the fire giant has come home to a strange new war. Out of the east sail the raiders of Akkad, and their priests sing to Tiamat, the mother of monsters, who sleeps in the sea of chaos. Raise a Temple, Pharaoh, and call the gods of Egypt. And guard the granary: the harvest of the Nile feeds the whole kingdom.',
+    victory: 'The raiders of Akkad are driven into the sea. On their banners is the sign of the dragon of the deep. Their priests have already gone south, the prisoners say, to poison the wells of the desert.',
+    defeat: 'The raiders burned the delta. Gather your people and try again.',
+    objectives: [
+      { id: 'temple', kind: 'build', type: 'temple', count: 1, icon: '🏛️', text: 'Raise a Temple' },
+      { id: 'god', kind: 'gods', count: 1, icon: '☀️', text: 'Summon a god of Egypt' },
+      { id: 'raid', kind: 'kill', tag: 'raid', icon: '⚔️', text: 'Drive off the raiders of Akkad', hidden: true },
+      { id: 'granary', kind: 'protect', tag: 'granary', icon: '🌾', text: 'Keep the granary standing' },
+      { id: 'home', kind: 'protect', tag: 'home', icon: '🛡️', text: 'Keep your Town Center standing' },
+      { id: 'camp', kind: 'conquer', optional: true, icon: '🔥', text: 'Bonus: burn the raiders\' camp' },
+    ],
+    events: [
+      { at: 4, say: 'Strange sails at the mouth of the river, Pharaoh. The raiders will come for the harvest. Make ready.' },
+      { at: 270, say: 'The raiders are on the riverbank, with scorpion men at their side! They make for the granary.', reveal: 'raid', spawn: { owner: 1, tag: 'raid', units: U(['warrior', 3], ['archer', 2], ['mesopotamian_scorpion_man', 1]), at: 'front', march: true, target: 'granary' } },
+      { after: 'raid', say: 'The raiders are broken. Finish what you started.' },
+    ],
+  },
+  {
+    id: 'siwa',
+    title: 'The Wells of the Desert',
+    place: 'The oasis of Siwa',
+    seed: 7301,
+    mapSize: 'small',
+    players: [
+      { pantheon: 'egyptian', team: 1 },
+      { name: 'Priests of Tiamat', pantheon: 'mesopotamian', team: 2, difficulty: 'easy' },
+    ],
+    start: [
+      { gold: 600, wood: 400, faith: 150, units: U(['warrior', 3], ['archer', 2], ['priest', 2]), buildings: [{ type: 'barracks' }, { type: 'house' }] },
+      {},
+    ],
+    briefing: 'In the western desert lies the oasis of Siwa, where the wells are holy and the oracle of Amun speaks. The priests of Tiamat have come to poison them, and to turn the sacred water to the bitter sea of chaos. Send your Worshippers and Priests to the holy stones, Pharaoh, and hold two of them together for a minute and a half. Be quick: in eighteen minutes the wells will be bitter for ever.',
+    victory: 'The wells of Siwa run sweet, and the oracle of Amun has spoken. Tiamat\'s servants are marching on Karnak, the house of the gods, to put out its sacred flame. When it goes out, the oracle says, the sun goes with it.',
+    defeat: 'The wells have turned to bitter water. Try again, and guard the holy stones.',
+    objectives: [
+      { id: 'wells', kind: 'hold', count: 2, seconds: 90, limit: 1080, icon: '💧', text: 'Hold two sacred sites at once for 1:30' },
+      { id: 'home', kind: 'protect', tag: 'home', icon: '🛡️', text: 'Keep your Town Center standing' },
+    ],
+    events: [
+      { at: 4, say: 'The sacred sites glow on the map. Stand a Worshipper or a Priest on one, with no enemy near, to take it.' },
+      { at: 360, say: 'Anzu birds out of the east! The priests send them to drive you from the wells.', spawn: { owner: 1, tag: 'anzu', units: U(['mesopotamian_anzu', 2], ['warrior', 3]), at: 'front', march: true } },
+      { at: 780, say: 'The water darkens in the wells. Five minutes left, Pharaoh!' },
+    ],
+  },
+  {
+    id: 'karnak',
+    title: 'The Sacred Flame',
+    place: 'The temple of Karnak',
+    seed: 7403,
+    mapSize: 'medium',
+    creeps: false,
+    players: [
+      { pantheon: 'egyptian', team: 1 },
+      { name: 'Host of Akkad', pantheon: 'mesopotamian', team: 2, difficulty: 'tutorial' },
+    ],
+    start: [
+      { gold: 700, wood: 500, faith: 250, units: U(['warrior', 5], ['archer', 3]), buildings: [{ type: 'barracks' }, { type: 'house' }, { type: 'house' }, { type: 'temple', tag: 'flame', ring: 11 }] },
+      { townHp: 5000, units: U(['warrior', 4], ['archer', 2]) },
+    ],
+    waitFor: ['hold'], // razing Akkad's camp early does not bring the sun back up: the night still has to be held
+    briefing: 'Karnak, the house of the gods, where a flame has burned for Ra since the first morning of the world. The host of Akkad is marching on it to put it out, and with it the sun. Keep the Temple of the flame standing, Pharaoh, through ten minutes of darkness, until Ra rises again and the army of Nubia comes down the river to your aid.',
+    victory: 'The sun has risen over Karnak, and the flame still burns. The Nubians have come. But Akkad\'s king has opened the old road through the Sinai, and behind his gate a greater army is gathering.',
+    defeat: 'The sacred flame is out, and the sun has not risen over Egypt.',
+    objectives: [
+      { id: 'hold', kind: 'survive', seconds: 600, icon: '⏳', text: 'Hold out until the sun rises' },
+      { id: 'flame', kind: 'protect', tag: 'flame', icon: '🔥', text: 'Keep the Temple of the flame standing' },
+      { id: 'home', kind: 'protect', tag: 'home', icon: '🛡️', text: 'Keep your Town Center standing' },
+    ],
+    events: [
+      { at: 4, say: 'Night is falling, and the host of Akkad comes with it. Put your soldiers between them and the Temple.' },
+      { at: 75, spawn: { owner: 1, tag: 'w1', units: U(['warrior', 4], ['archer', 2]), at: 'front', march: true, target: 'flame' } },
+      { at: 165, spawn: { owner: 1, tag: 'w2', units: U(['warrior', 4], ['mesopotamian_slinger', 3], ['mesopotamian_scorpion_man', 1]), at: 'front', march: true, target: 'flame' } },
+      { at: 255, say: 'Scorpion men out of the dark!', spawn: { owner: 1, tag: 'w3', units: U(['warrior', 4], ['archer', 3], ['mesopotamian_scorpion_man', 3]), at: 'front', march: true, target: 'flame' } },
+      { at: 285, say: 'Ra sends the Bennu birds, the fire of the morning, to your side!', spawn: { owner: 0, tag: 'bennu', units: U(['egyptian_bennu', 3]), at: 'home' } },
+      { at: 345, spawn: { owner: 1, tag: 'w4', units: U(['warrior', 6], ['mesopotamian_slinger', 4], ['mesopotamian_scorpion_man', 2]), at: 'front', march: true, target: 'flame' } },
+      { at: 435, say: 'Anzu birds in the dark sky! Archers, look up!', spawn: { owner: 1, tag: 'w5', units: U(['warrior', 5], ['archer', 4], ['mesopotamian_anzu', 3]), at: 'front', march: true, target: 'flame' } },
+      { at: 525, say: 'A lamassu leads the last of them. Hold until the dawn, Pharaoh!', spawn: { owner: 1, tag: 'w6', units: U(['mesopotamian_lamassu', 1], ['warrior', 6], ['archer', 4], ['mesopotamian_scorpion_man', 2]), at: 'front', march: true, target: 'flame' } },
+      { at: 600, spawn: { owner: 0, tag: 'nubia', units: U(['warrior', 8], ['archer', 4]), at: 'home' } },
+    ],
+  },
+  {
+    id: 'sinai',
+    title: 'The Gate of the East',
+    place: 'The road through the Sinai',
+    seed: 7504,
+    mapSize: 'small',
+    players: [
+      { pantheon: 'egyptian', team: 1 },
+      { name: 'Wardens of the Gate', pantheon: 'mesopotamian', team: 2, difficulty: 'easy' },
+    ],
+    start: [
+      { gold: 700, wood: 500, faith: 150, units: U(['warrior', 4], ['archer', 3]), buildings: [{ type: 'barracks' }, { type: 'house' }, { type: 'house' }] },
+      { gold: 400, wood: 300, buildings: [{ type: 'tower', tag: 'gate', ring: 9 }, { type: 'tower', tag: 'gate', ring: 9 }, { type: 'barracks', ring: 7 }] },
+    ],
+    briefing: 'On the old road through the Sinai, the king of Akkad has raised a gate of two great towers, and behind it his armies gather to pour into Egypt. Muster an army, Pharaoh, then tear the gate down. Two lamassu, the winged bulls of the east, stand guard before it. Bring them down too, if you can.',
+    victory: 'The gate of the east is rubble, and the road lies open, to us now. The king of Akkad has fled to the marshes of Eridu, where the sea of chaos meets the land. There his priests will wake Tiamat herself.',
+    defeat: 'The armies of the east have come through the gate. Try again, Pharaoh.',
+    objectives: [
+      { id: 'army', kind: 'army', count: 14, icon: '⚔️', text: 'Muster an army of fourteen soldiers' },
+      { id: 'gate', kind: 'destroy', tag: 'gate', icon: '🗼', text: 'Tear down the two towers of the gate', hidden: true },
+      { id: 'home', kind: 'protect', tag: 'home', icon: '🛡️', text: 'Keep your Town Center standing' },
+      { id: 'lamassu', kind: 'kill', tag: 'lamassu', optional: true, icon: '🐂', text: 'Bonus: slay the two lamassu' },
+    ],
+    events: [
+      { at: 2, spawn: { owner: 1, tag: 'lamassu', units: U(['mesopotamian_lamassu', 2]), at: 'front', guard: true } },
+      { at: 4, say: 'The gate stands beyond the wardens\' camp. Gather wood and gold, and muster your army.' },
+      { after: 'army', say: 'Your army is ready. Now tear down the gate!', reveal: 'gate' },
+      { at: 540, say: 'The wardens come out to meet you, with the bulls of heaven!', spawn: { owner: 1, tag: 'wardens', units: U(['mesopotamian_bull_of_heaven', 2], ['warrior', 5], ['mesopotamian_slinger', 3]), at: 'front', march: true } },
+    ],
+  },
+  {
+    id: 'eridu',
+    title: 'The Mother of Monsters',
+    place: 'The marshes of Eridu',
+    seed: 7605,
+    mapSize: 'medium',
+    players: [
+      { pantheon: 'egyptian', team: 1 },
+      { name: 'The King of Akkad', pantheon: 'mesopotamian', team: 2, difficulty: 'normal' },
+      { name: 'Jarl of Hordaland', pantheon: 'norse', team: 1, difficulty: 'normal' },
+      { name: 'Children of Tiamat', pantheon: 'mesopotamian', team: 2, difficulty: 'easy' },
+    ],
+    start: [
+      { gold: 700, wood: 500, faith: 200, units: U(['warrior', 4], ['archer', 3]), buildings: [{ type: 'barracks' }, { type: 'house' }, { type: 'house' }] },
+      { gold: 900, wood: 700, faith: 200, buildings: [{ type: 'barracks' }, { type: 'house' }, { type: 'tower', ring: 8 }] },
+      {},
+      { gold: 600, wood: 400 },
+    ],
+    waitFor: ['tiamat'], // breaking Akkad before 13:00 does not end it: Tiamat still rises, and must fall
+    briefing: 'In the marshes of Eridu, where the rivers meet the sea of chaos, the king of Akkad makes his last stand, and his priests are singing Tiamat awake. The Jarl of Hordaland remembers how Egypt stood with the north, and has sailed south with the Norse to stand with us. Break the king and his monsters, Pharaoh. And when the mother of monsters rises from the deep, bring her down.',
+    victory: 'Tiamat has sunk back into the deep, and the sea of chaos is still. The sun shines on the Nile and on the marshes of Eridu alike. Three pantheons have stood together, and the world is whole. But the gods are never quiet for long.',
+    defeat: 'Tiamat has risen, and the sea of chaos covers the world. Try again, Pharaoh.',
+    objectives: [
+      { id: 'conquer', kind: 'conquer', icon: '🔥', text: 'Destroy Akkad and the children of Tiamat' },
+      { id: 'tiamat', kind: 'kill', tag: 'tiamat', icon: '🐉', text: 'Slay Tiamat, the mother of monsters', hidden: true, waitText: 'Tiamat rises from the deep' },
+      { id: 'home', kind: 'protect', tag: 'home', icon: '🛡️', text: 'Keep your Town Center standing' },
+    ],
+    events: [
+      { at: 4, say: 'The Norse of Hordaland stand beside you. Build, summon, and strike.' },
+      { at: 720, say: 'The marsh water boils, and the singing grows loud. Tiamat is rising!' },
+      { at: 780, say: 'Tiamat rises from the sea of chaos! Bring the mother of monsters down!', reveal: 'tiamat', spawn: { owner: 1, tag: 'tiamat', units: U(['mesopotamian_tiamat', 1]), at: 'front', march: true, always: true } },
+      { after: 'tiamat', say: 'The mother of monsters has fallen! Now finish the king of Akkad.' },
+      // Her serpents, on a tag of their own: "Slay Tiamat" is done when she falls, not when the last of them does.
+      { at: 780, spawn: { owner: 1, tag: 'tiamat_brood', units: U(['mesopotamian_mushussu', 3]), at: 'front', march: true, always: true } },
+    ],
+  },
+];
+
 /** The chapters, in order; a chapter's first mission opens once the last of the chapter before is won. */
 export const CHAPTERS = Object.freeze([
   {
@@ -368,6 +534,15 @@ export const CHAPTERS = Object.freeze([
     people: 'the Norse',
     blurb: 'Loki has slipped his chains, and the winter will not end. Five battles for the Norse of Hordaland, to stop the end of the world.',
     missions: WOLF_AGE,
+  },
+  {
+    id: 'chaos_sea',
+    chapter: 'Chapter III',
+    title: 'The Sea of Chaos',
+    pantheon: 'egyptian',
+    people: 'the Egyptians',
+    blurb: 'Out of the east come the priests of Tiamat, to drown the world in the sea of chaos. Five battles for the Egyptians of the Nile.',
+    missions: CHAOS_SEA,
   },
 ].map((c, ci) => Object.freeze({
   ...c,

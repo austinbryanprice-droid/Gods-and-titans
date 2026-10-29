@@ -182,9 +182,15 @@ test('the last mission of Chapter I says the chapter is done and opens Chapter I
   const end = document.createElement('div');
   const ov2 = new Overlays(end, game);
   ov2.statsTable = () => null;
-  ov2.showGameOver({ result: 'victory', winningTeam: 1, unlocked: null, how: 'campaign', mission: { m: MISSION_BY_ID.vigrid, record: { first: true, best: 1600, previous: 0, chapterDone: true }, next: null } });
-  assert.match(end.textContent, /Chapter II complete! The Wolf Age is told\.$|Chapter II complete! The Wolf Age is told\./);
-  assert.ok(!end.all('button').some((b) => /Next Mission|Begin Chapter/.test(b.textContent)));
+  ov2.showGameOver({ result: 'victory', winningTeam: 1, unlocked: null, how: 'campaign', mission: { m: MISSION_BY_ID.vigrid, record: { first: true, best: 1600, previous: 0, chapterDone: true }, next: MISSION_BY_ID.delta } });
+  assert.match(end.textContent, /Chapter II complete! The Wolf Age is told\. Chapter III is open: The Sea of Chaos\./);
+  assert.ok(end.all('button').some((b) => b.textContent === 'Begin Chapter III'));
+  const last = document.createElement('div');
+  const ov3 = new Overlays(last, game);
+  ov3.statsTable = () => null;
+  ov3.showGameOver({ result: 'victory', winningTeam: 1, unlocked: null, how: 'campaign', mission: { m: MISSION_BY_ID.eridu, record: { first: true, best: 1600, previous: 0, chapterDone: true }, next: null } });
+  assert.match(last.textContent, /Chapter III complete! The Sea of Chaos is told\./);
+  assert.ok(!last.all('button').some((b) => /Next Mission|Begin Chapter/.test(b.textContent)));
 });
 
 test('Chapter II stays locked until Chapter I is won, then the title screen and the chapter screen open on it', () => {

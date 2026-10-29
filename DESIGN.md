@@ -859,7 +859,7 @@ Treasures of world myth that give creeping a reward beyond the bounty (WC3 items
 A GameSetup with `campaign: '<mission id>'` (built by `campaignSetup(id, { name, version })`, started from the
 chapter screen of 9.6, solo, no lobby) plays one mission of the campaign: Chapter I, "The Long Winter" (five
 missions for the Greeks against Norse raiders), then Chapter II, "The Wolf Age" (five for the Norse against Loki),
-in order (`CHAPTERS`, each mission carrying its `chapter` id and its number `n` in it; `MISSIONS` is all of them
+then Chapter III, "The Sea of Chaos" (five for the Egyptians against Akkad and Tiamat), in order (`CHAPTERS`, each mission carrying its `chapter` id and its number `n` in it; `MISSIONS` is all of them
 in the order they open). The hero is always player 0; the mission's data fixes the seed, map size,
 the computer players (name, pantheon, team, difficulty; `'tutorial'` is the sleeping camp of 5.13), whether creep
 camps are spawned, and each side's start (`start[i]`: purse, a Town Center health in place of 2000, finished
@@ -872,9 +872,11 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
-  `{ owner, tag, units, at, march, target, always }`: units in a line in front of the owner's Town Center (none if the
+  `{ owner, tag, units, at, march, target, guard, always }`: units in a line in front of the owner's Town Center (none if the
   owner is beaten, unless `always`: then from where that Town Center stood at the start, `cp.homes`), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
-  nearest building; idle marchers are sent again each second.
+  nearest building; idle marchers are sent again each second. A `guard` spawn stays where it stands (`u.cGuard`):
+  like a marcher, its owner's AI counts it but never gives it orders. Each spawn group has its own tag, so a
+  `kill` objective counts only its own units (a test checks).
 - The end (`gameOver.how: 'campaign'`): won when every objective that is neither optional nor a protect one is
   done, or when every enemy player is beaten (a conquest wins whatever is left undone, except what the
   mission's `waitFor` names: a story beat that must still happen, so that win waits until those objectives are
@@ -895,7 +897,15 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   must fall). While a hidden `waitFor` objective waits to be revealed, the objective panel shows its `waitText`
   as an extra row with the clock to the event that reveals it ("Loki comes at the world's end 2:14"), derived from
   the snapshot (no new sim state, no change to the objective list); a shown one (Burning Bridge's hold) already
-  shows its clock.
+  shows its clock. Chapter III: Sails on the Nile (a Temple, a god, and a raid with a scorpion man at 4:30 that
+  makes for the tagged granary), The Wells of the Desert (hold two sacred sites for 1:30 within 18:00 against an
+  Easy Mesopotamian AI, Anzû birds at 6:00), The Sacred Flame (hold the tagged Temple at Karnak ten minutes against
+  six waves of slingers, scorpion men, Anzû and a lamassu, Bennu birds for the hero at 4:45, the Nubians at 10:00;
+  `waitFor: ['hold']`), The Gate of the East (muster fourteen soldiers, which reveals "tear down the two tagged
+  towers of the gate"; two lamassu stand guard as a bonus kill; the Bulls of Heaven come out at 9:00), The Mother
+  of Monsters (conquer a Normal and an Easy Mesopotamian AI with the Norse ally "Jarl of Hordaland"; Tiamat rises at
+  13:00 with three mušḫuššu on their own tag, `waitFor: ['tiamat']`). AI-only runs of Chapter III: a Normal hero
+  wins all five, an idle one loses all five, an Easy one wins the first three.
 
 ## 6. Simulation API (src/sim/)
 
@@ -2536,8 +2546,8 @@ its ticks, and checksums.
 
 ### 9.6 Campaign (src/ui/menu-campaign.js, src/ui/hud-campaign.js, src/game/campaign-progress.js, src/game/campaign-voice.js)
 Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won", naming the chapter
-of the next mission to play) opens the chapter screen: a tab per chapter (Chapter II locked until Chapter I's last
-mission is won), the chosen chapter's five missions down the left (locked with a padlock until the one before is won, a tick and
+of the next mission to play) opens the chapter screen: a tab per chapter (each locked until the last mission of the
+chapter before is won), the chosen chapter's five missions down the left (locked with a padlock until the one before is won, a tick and
 the best time once won) and the chosen one's briefing on the right (where, who you face and who stands with
 you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in localStorage
 `mythicwar-campaign` (`{ won: { id: { best, at } } }`); missions are not games of the career, nor saved (9.4); a mission is kept as a replay (9.5), whose panel and narrator follow the mission.
@@ -2555,7 +2565,7 @@ you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in 
   or revealed go to the feed.
 - The end: "Mission Complete" with the victory text (also spoken) and what opened ("The next mission is open:
   …", a new best time, "Chapter I complete! … Chapter II is open: The Wolf Age."), and Next Mission ("Begin
-  Chapter II" when it leads into the next chapter) (the chapter screen on the next briefing), Play
+  Chapter II", "Begin Chapter III" when it leads into the next chapter) (the chapter screen on the next briefing), Play
   It Again, Campaign; "Mission Failed" with the defeat text and Retry Mission.
 
 ## 10. AI (src/ai/)

@@ -225,6 +225,7 @@ function fire(world, cp, i) {
       for (const u of units) {
         u.cTag = s.tag;
         if (s.march) u.cMarch = s.target || true;
+        else if (s.guard) u.cGuard = true;
       }
       if (s.march) march(world, units, s.target);
     }
