@@ -54,6 +54,7 @@ class RelicView {
     for (const m of [gem, ring, ring2]) m.castShadow = true;
     patchFowObject(this.jewel);
     this.beamMat = new THREE.MeshBasicMaterial({ color, vertexColors: true, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    this.beamMat.forceSinglePass = true; // additive, no depth writes: one pass draws what two would
     this.beam = new THREE.Mesh(parts.beam, this.beamMat);
     this.beam.renderOrder = 2;
     this.root.add(this.jewel, this.beam);
