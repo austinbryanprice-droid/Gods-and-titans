@@ -8,7 +8,7 @@ Up to 4 players per match, each a person or a computer opponent (Easy, Normal, H
 
 New to the game? **Learn to Play** on the title screen is a guided first match: an objective panel, an arrow to each target and glowing buttons walk you through gathering, building, praying, summoning a god, training soldiers and destroying a sleeping camp of raiders, with a gold, silver or bronze medal for how fast you win.
 
-Then try the **Campaign**: Chapter I, *The Long Winter*, five story missions for the Greeks of Thera against raiders from the frozen north, each with its own map, objectives, scripted raids and reinforcements, and a narrated briefing. A mission opens when you win the one before it, and the last ends with Surtr, the fire giant.
+Then try the **Campaign**: Chapter I, *The Long Winter*, five story missions for the Greeks of Thera against raiders from the frozen north, each with its own map, objectives, scripted raids and reinforcements, and a narrated briefing. A mission opens when you win the one before it, and the last ends with Surtr, the fire giant. Winning it opens Chapter II, *The Wolf Age*: five more for the Norse of Hordaland against Loki, from the burning of their winter stores to the last battle on the plain of Vigrid, with the Greeks of Thera beside them.
 
 ## Playing online with friends
 
