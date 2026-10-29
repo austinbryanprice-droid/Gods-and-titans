@@ -1,7 +1,7 @@
 // Shared lookups for the HUD, the command card and the input controller:
 // entity definitions, names, icons, subgroup ordering and small helpers that
 // read a ViewState. Pure (no DOM), so Node tests can use it.
-import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES } from '../data/index.js';
+import { UNITS, BUILDINGS, GOLD_MINE, PANTHEONS, UPGRADES, buildingIcon } from '../data/index.js';
 import { MINE_TIME, CARRY_AMOUNT, PEACE_NAME } from '../config.js';
 import { NO_MODS, computeMods, workSpeed } from '../data/upgrades.js';
 import { getRelic } from '../data/relics.js';
@@ -28,9 +28,10 @@ export function nameOf(e) {
   return d.name;
 }
 
-/** Emoji icon of an entity. */
-export function iconOf(e) {
+/** Emoji icon of an entity; with the ViewState, a building wears its owner's pantheon's icon (a Temple). */
+export function iconOf(e, vs = null) {
   const d = defOf(e);
+  if (d && e.k === 'b' && vs) return buildingIcon(e.t, pantheonOf(vs, e.o)) || d.icon;
   return (d && d.icon) || '❔';
 }
 

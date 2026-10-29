@@ -238,6 +238,9 @@ gold, glowing bits, `skin` = skin / fur / scales. Every unit also gets a **team 
 `style.wall`: `marble | timber | sandstone | stone | mudbrick | brick | lacquer`
 `style.ornament`: `columns | carvings | obelisks | torii | lanterns | serpents | knots | winged_bulls | spikes | banners`
 `colors`: `wall`, `roof`, `trim`, `accent`. Team color appears on banners/flags.
+A building may carry `pantheonIcons` (pantheon id → emoji, Emoji 11 at most): the Temple does, so its portrait, build
+button and "completed" note show the builder's own (Greek 🦉, Norse 🌈, Egyptian 👁️, Hindu 🕉️, Japanese ⛩️, Chinese 🏯,
+Aztec 🌞, Celtic 🌿, Mesopotamian 🌙, West African 🥁) instead of everyone's torii (`buildingIcon(type, pantheon)`).
 
 ### 4.8 Pantheon roster (fixed — content files must use these)
 | id | name | gods (4) | titan | creatures T1 / T2 / T3 | style |
@@ -2213,7 +2216,8 @@ achievements with the time, and the ones not yet seen.
   (Normal, Hard and Brutal AI, a human enemy, an ally, the Decade of Peace, waves 10 and 20 of the Trial of the Titans, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
   "Career: W wins in G games (P%) · U of 40 achievements". Title screen: a Career button (a red count of
-  unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
+  unseen unlocks) opens the Career screen: profile tiles, wins by pantheon (at most five cards to a row, each
+  name on one line), the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
 - The guided first match (9.2) is not a game of the career: no tracker runs in it. Its victory keeps the best
   medal (`best.medal`, 1 bronze … 3 gold, `recordTutorial`) and unlocks First Lessons (any medal) and Top of

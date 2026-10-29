@@ -1190,12 +1190,13 @@ kbd {
 .mw-car-stat-value { font: 600 1.35em/1.15 var(--mw-font-display); color: var(--mw-ink); }
 .mw-car-stat-label { font-size: 0.72em; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mw-gold); }
 .mw-car-stat-note { font-size: 0.75em; color: var(--mw-ink-mute); }
-.mw-car-pantheons { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5em, 1fr)); gap: 0.5em; }
-.mw-car-pan { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 0.55em; align-items: center; padding: 0.5em 0.7em; border: 1px solid rgba(196, 146, 72, 0.2); border-radius: 6px; background: rgba(0, 0, 0, 0.18); opacity: 0.6; }
+/* at most five to a row (two even rows of the ten), each wide enough for "Mesopotamian" on one line */
+.mw-car-pantheons { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(10em, 18%), 1fr)); gap: 0.5em; }
+.mw-car-pan { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 0.55em; align-items: center; padding: 0.5em 0.7em; border: 1px solid rgba(196, 146, 72, 0.2); border-radius: 6px; background: rgba(0, 0, 0, 0.18); opacity: 0.6; }
 .mw-car-pan.is-played { opacity: 0.85; }
 .mw-car-pan.is-won { opacity: 1; border-color: rgba(255, 210, 58, 0.5); box-shadow: inset 0 0 12px rgba(255, 200, 60, 0.12); }
 .mw-car-pan-emblem { grid-row: span 2; font-size: 1.5em; }
-.mw-car-pan-name { font-size: 0.85em; color: var(--mw-ink); }
+.mw-car-pan-name { min-width: 0; font-size: 0.85em; color: var(--mw-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mw-car-pan-record { font-size: 0.75em; color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
 .mw-car-history { display: flex; flex-wrap: wrap; gap: 0.45em; margin: 0; padding: 0; list-style: none; }
 .mw-car-game { display: flex; align-items: center; gap: 0.35em; padding: 0.35em 0.6em; border-radius: 5px; border: 1px solid rgba(196, 146, 72, 0.25); background: rgba(0, 0, 0, 0.2); font-size: 0.85em; }
