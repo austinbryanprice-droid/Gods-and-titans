@@ -54,3 +54,34 @@ test('migrate: a player who cannot follow the heir after a menu quit ends as a l
   assert.equal(ended[0].reason, REASONS.HOST_LEFT);
   assert.equal(g.migrating, false);
 });
+
+/** A host of an online game with a friend connected, quitting through the menu (Game.quitToMenu). */
+function quittingHost(handOff) {
+  const exits = [];
+  const g = {
+    disposed: false,
+    leaving: false,
+    hud: null,
+    launch: { role: 'host' },
+    countLeave() {},
+    dispose() {
+      this.disposed = true;
+    },
+    onExit: (info) => exits.push(info),
+    session: { isHost: true, canHandOff: true, clients: new Map([[1, {}]]), heir: 1, playerName: (i) => ['Host', 'Ann'][i], handOff },
+  };
+  return { g, exits };
+}
+
+test('quitToMenu: a host whose game went on with the heir is told so on the title screen', async () => {
+  const { g, exits } = quittingHost(async () => true);
+  Game.prototype.quitToMenu.call(g);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(exits.length, 1);
+  assert.match(exits[0].notice, /Ann now hosts the game\. Rejoin Online Game takes your seat back\./);
+  // No hand-over went out: no such notice.
+  const failed = quittingHost(async () => false);
+  Game.prototype.quitToMenu.call(failed.g);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(failed.exits, [undefined]);
+});

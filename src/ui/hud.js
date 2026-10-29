@@ -519,6 +519,9 @@ export class Hud {
     this.pause = pause || null;
     setHidden(this.pauseBar, !this.pause);
     if (!this.pause) return;
+    // Resume is for the players still in the game: the host ignores a fallen player's (Game.togglePause).
+    const me = this.vs && this.vs.me;
+    setHidden(this.pauseBtn, !!(me && me.defeated));
     const s = this.game.session;
     setText(this.pauseText, pauseText(this.pause, (i) => (s ? s.playerName(i) : `Player ${i + 1}`)));
   }

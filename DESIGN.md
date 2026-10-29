@@ -1312,7 +1312,9 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     on; `ViewState.resetMotion` drops the motion history, as the game goes back to the backup's tick
     (at most 10 s; nothing when the host quits through the menu: `handOff` sends a fresh backup
     and waits up to 4 s for it to go out). The new host keeps an heir of its own in turn; the old
-    host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload.
+    host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload (a host who quit
+    through the menu is told on the title screen who hosts now). A player who cannot reach the heir in time ends as
+    after a lost link ('host-left': ticket kept, Rejoin offered), even when the host quit through the menu.
     Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
     A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
     the whole game and every token: a trade-off for friends' games. Anyone can open a room code, so
@@ -1323,7 +1325,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
     everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`
     (3) per player per game, any player still in the game may resume, a pause ends by itself after
-    `PAUSE_MAX_MS` (2 min), defeated players cannot pause, commands are dropped while paused. The
+    `PAUSE_MAX_MS` (2 min), defeated players can neither pause nor resume (their bar shows no Resume), commands are dropped while paused. The
     Pause key or the game menu's Pause Game for Everyone; a bar under the top bar says who paused
     and when it goes on, with Resume. Check: `tools/handoff-check.mjs` (two tabs: pause and resume,
     the host's tab closes, the client carries on as host, the old host rejoins).
