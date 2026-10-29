@@ -505,6 +505,7 @@ export class Overlays {
       el('div', 'hud-go-crest', survival ? '🐉' : result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
+      el('div', 'hud-go-ended'), // noteEnded: the host closed the game after it was over
       best,
       dailyLine(daily),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
@@ -584,6 +585,18 @@ export class Overlays {
         btn('Keep Watching', 'mw-btn--primary', () => this.hide()),
         btn('Return to Menu', 'mw-btn--ghost', leave)));
     this.show('defeated', node, () => this.hide());
+  }
+
+  /**
+   * The session ended while the game-over panel is open (the host closed the finished game): the
+   * panel says so near its top, where the HUD's message line under the panel cannot be seen.
+   * @returns {boolean} whether a panel showed it
+   */
+  noteEnded(text) {
+    const note = this.current && this.current.name === 'gameover' ? this.current.el.querySelector('.hud-go-ended') : null;
+    if (!note) return false;
+    note.textContent = text;
+    return true;
   }
 
   /** The session ended from outside (host left / quit / kicked). */
