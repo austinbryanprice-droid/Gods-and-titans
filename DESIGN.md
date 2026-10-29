@@ -872,11 +872,13 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
-  `{ owner, tag, units, at, march, target }`: units in a line in front of the owner's Town Center (none if the
-  owner is beaten), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
+  `{ owner, tag, units, at, march, target, always }`: units in a line in front of the owner's Town Center (none if the
+  owner is beaten, unless `always`: then from where that Town Center stood at the start, `cp.homes`), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
   nearest building; idle marchers are sent again each second.
 - The end (`gameOver.how: 'campaign'`): won when every objective that is neither optional nor a protect one is
-  done, or when every enemy player is beaten (a conquest always wins); lost when a protect objective fails or the
+  done, or when every enemy player is beaten (a conquest wins whatever is left undone, except what the
+  mission's `waitFor` names: a story beat that must still happen, so that win waits until those objectives are
+  done, and the mission plays on with no enemy left; `updateCampaign` then ends it); lost when a protect objective fails or the
   hero is beaten. The mission line-up (all checked by AI-only runs with a Normal AI as the hero, which wins all
   five; an Easy one wins the first three): Ashes on the Shore (build a Temple, summon a god, beat the raid that
   lands at 4:30), Burn the Longhouses (destroy three tagged Barracks of an Easy AI), The Narrow Pass (hold a
@@ -885,9 +887,12 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   an Egyptian ally; Surtr wakes at 14:00 and marches). Chapter II: The Wolf Winter (a Temple, a god, and a raid at
   4:30 that makes for the tagged winter stores, a Storehouse that must stand), The Last Link (destroy three tagged
   Shrines of an Easy AI within 15:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
-  minutes against six waves, Valkyries for the hero at 4:30), The Ship of Nails (muster twelve soldiers, which
+  minutes against six waves, Valkyries for the hero at 4:30; `waitFor: ['hold']`: razing Helheim's town early
+  does not win it, the clock still has to reach 9:00), The Ship of Nails (muster twelve soldiers, which
   reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
-  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00).
+  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00; `waitFor: ['loki']`: a host
+  broken before then does not win it, Loki still comes, an `always` spawn from his beaten host's old seat, and
+  must fall).
 
 ## 6. Simulation API (src/sim/)
 
