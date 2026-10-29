@@ -29,7 +29,11 @@ export const CLIENT_LIMITS = {
   ping: [4, 8],
   mark: MARK_RATE, // team pings and markers: a few a second is plenty to talk with
 };
-export const RESYNC_MIN_INTERVAL_MS = 1000; // at most one full snapshot per client per second
+export const RESYNC_MIN_INTERVAL_MS = 1000;
+// A player who rejoins builds the whole game (renderer, models) while the game runs on, and cannot
+// answer meanwhile: their new link may stay silent this long, until a few pings show they are playing.
+export const REJOIN_GRACE_MS = 120000;
+const REJOIN_GRACE_PINGS = 3; // at most one full snapshot per client per second
 const CLIENT_CHAT_LIMIT = [10, 30]; // chat lines a client shows per second (bad host flooding)
 const CLIENT_MARK_LIMIT = [8, 20]; // teammates' marks a client shows per second (bad host flooding)
 // Events and felled trees of snapshots held back from a congested client; past this the
@@ -37,6 +41,20 @@ const CLIENT_MARK_LIMIT = [8, 20]; // teammates' marks a client shows per second
 const MAX_HELD_ITEMS = 2000;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const DIFFICULTY_ORDER = ['easy', 'normal', 'hard', 'brutal'];
+const difficultyName = (d) => `${d[0].toUpperCase()}${d.slice(1)}`;
+
+/**
+ * How well the AI that holds a dropped player's seat plays: as well as the hardest computer player
+ * of the game, so a player who drops out of a Hard game is not left with an easy stand-in; Normal
+ * in a game of people only.
+ */
+export function standInDifficulty(setup) {
+  let best = -1;
+  for (const p of (setup && setup.players) || []) if (p && p.kind === 'ai') best = Math.max(best, DIFFICULTY_ORDER.indexOf(p.difficulty));
+  return best >= 0 ? DIFFICULTY_ORDER[best] : 'normal';
+}
 
 class SessionBase {
   constructor(setup, myIndex) {
@@ -169,6 +187,7 @@ export class HostSession extends SessionBase {
     }
     this.clients = new Map();
     this.leftPlayers = new Set();
+    this.standIns = new Set(); // players whose seat an AI holds until they rejoin
     this.felledAll = [];
     this.ticksSinceSnap = 0;
     this.snapshotsSent = 0;
@@ -212,6 +231,7 @@ export class HostSession extends SessionBase {
       },
       dropped: { cmd: 0, chat: 0, ping: 0, mark: 0, invalid: 0, resync: 0 },
       skipped: 0, // snapshots held back while this client's send queue was full
+      grace: null, // { pings } while a rejoined client may stay silent for REJOIN_GRACE_MS
     };
     if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(this.connTimeoutMs);
     this.clients.set(index, c);
@@ -280,6 +300,10 @@ export class HostSession extends SessionBase {
           c.dropped.ping++;
           return;
         }
+        if (c.grace && ++c.grace.pings >= REJOIN_GRACE_PINGS) {
+          c.grace = null;
+          if (typeof c.conn.setTimeoutMs === 'function') c.conn.setTimeoutMs(this.connTimeoutMs);
+        }
         c.conn.send({ t: MSG.PONG, ts: Number.isFinite(msg.ts) ? msg.ts : 0 });
         if (Number.isFinite(msg.rtt) && msg.rtt >= 0) c.rtt = Math.min(msg.rtt, 60000);
         break;
@@ -310,20 +334,60 @@ export class HostSession extends SessionBase {
     if (!this.ticker.running) this.sendSnapshot(c, this.lastSnap);
   }
 
-  handleDisconnect(c) {
-    if (this.stopped || this.clients.get(c.index) !== c) return;
+  /** Stop listening to a client's connection (it is gone, or replaced by a newer one). */
+  detach(c) {
     for (const off of c.offs) off();
     if (c.fullTimer) clearTimeout(c.fullTimer);
     this.clients.delete(c.index);
+  }
+
+  handleDisconnect(c) {
+    if (this.stopped || this.clients.get(c.index) !== c) return;
+    this.detach(c);
     this.leftPlayers.add(c.index);
     const name = this.playerName(c.index);
     const p = this.lastSnap && this.lastSnap.players && this.lastSnap.players[c.index];
     const over = this.lastSnap && this.lastSnap.gameOver;
     let text = `${name} has left the game.`;
     if (!over && !(p && p.defeated) && !this.ais.has(c.index)) {
-      if (this.addAI(c.index, 'normal')) text = `${name} has left the game. An AI (Normal) takes over.`;
+      const difficulty = standInDifficulty(this.setup);
+      if (this.addAI(c.index, difficulty)) {
+        this.standIns.add(c.index);
+        text = `${name} has left the game. An AI (${difficultyName(difficulty)}) plays for them until they rejoin.`;
+      }
     }
     this.broadcastChat({ from: -1, name: '', text, system: true });
+  }
+
+  /**
+   * A player of this game comes back on a new connection (a lost link, a reloaded page; the lobby
+   * has checked their rejoin token, DESIGN 7): the AI holding their seat hands it back, a link of
+   * theirs still open is replaced, and they get the setup (`start`) and then a full snapshot.
+   * @returns {string|null} why they cannot (a reason to show them), or null once they are back
+   */
+  rejoin(index, conn) {
+    const p = Number.isInteger(index) ? this.setup.players[index] : null;
+    if (this.stopped) return REASONS.HOST_QUIT;
+    if (!p || p.kind !== 'human' || index === this.myIndex || !conn) return REASONS.REJOIN_DENIED;
+    if (this.lastSnap && this.lastSnap.gameOver) return REASONS.REJOIN_OVER;
+    const old = this.clients.get(index);
+    if (old) {
+      this.detach(old);
+      old.conn.send({ t: MSG.KICK, reason: REASONS.REPLACED });
+      setTimeout(() => old.conn.close('replaced'), END_CLOSE_DELAY_MS);
+    }
+    this.leftPlayers.delete(index);
+    const tookOver = this.standIns.delete(index);
+    if (tookOver) this.ais.delete(index);
+    conn.send({ t: MSG.START, setup: this.setup, you: index, rejoin: true });
+    this.attach(index, conn);
+    const c = this.clients.get(index);
+    c.grace = { pings: 0 };
+    if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(Math.max(REJOIN_GRACE_MS, this.connTimeoutMs));
+    if (this.started) this.sendSnapshot(c, this.lastSnap);
+    const name = this.playerName(index);
+    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true });
+    return null;
   }
 
   /** The AIs' chat lines for these events (DESIGN 10.1), flagged `voice` so that a player can hide them. */

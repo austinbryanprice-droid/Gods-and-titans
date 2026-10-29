@@ -81,6 +81,17 @@ function slotOf(kind, extra = {}) {
   return { kind, name: '', pantheon: 'random', team: 1, color: 0, difficulty: 'normal', peerId: null, ...extra };
 }
 
+/** A secret a client keeps to win its seat back after a lost link or a reload (DESIGN 7). */
+function rejoinToken() {
+  const bytes = new Uint8Array(16);
+  const c = globalThis.crypto;
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+const MAX_TOKEN_LENGTH = 64;
+const cleanToken = (v) => (typeof v === 'string' && v.length > 0 && v.length <= MAX_TOKEN_LENGTH && /^[0-9a-f]+$/.test(v) ? v : null);
+
 function chatLine(from, name, text, system = false) {
   return { from, name, text, system };
 }
@@ -206,6 +217,9 @@ export class LobbyHost {
     this.started = false;
     this.closed = false;
     this.gameConns = null;
+    this.rejoinTokens = new Map(); // token → player index, for the humans of the started game
+    this.rejoining = new Set(); // connections after the start that have not said HELLO yet
+    this.rejoinHandler = null; // (index, conn) → reason | null, set by the game's HostSession
     this.state = {
       roomCode: this.roomCode,
       version,
@@ -261,11 +275,8 @@ export class LobbyHost {
   // ---------------------------------------------------------------- connections
 
   handleConnection(conn) {
-    if (this.started || this.closed) {
-      conn.send({ t: MSG.KICK, reason: this.started ? REASONS.STARTED : REASONS.HOST_CLOSED });
-      setTimeout(() => conn.close('kicked'), KICK_CLOSE_DELAY_MS);
-      return;
-    }
+    if (this.closed) return this.refuse(conn, REASONS.HOST_CLOSED);
+    if (this.started) return this.handleRejoin(conn);
     let waiting = 0;
     for (const x of this.members) if (!x.joined) waiting++;
     if (waiting >= MAX_WAITING_MEMBERS) {
@@ -286,6 +297,59 @@ export class LobbyHost {
     m.offs.push(conn.onClose(() => this.handleLeave(m)));
     m.helloTimer = setTimeout(() => {
       if (!m.joined && conn.open) conn.close('no-hello');
+    }, HELLO_TIMEOUT_MS);
+  }
+
+  refuse(conn, reason) {
+    conn.send({ t: MSG.KICK, reason });
+    setTimeout(() => conn.close('kicked'), KICK_CLOSE_DELAY_MS);
+  }
+
+  /**
+   * The game's session takes rejoining players: handler(index, conn) attaches them and returns
+   * null, or returns why it cannot. null stops taking them (the game is gone).
+   */
+  setRejoinHandler(handler) {
+    this.rejoinHandler = typeof handler === 'function' ? handler : null;
+  }
+
+  /**
+   * A connection after the start: a player of this game coming back (DESIGN 7). Its HELLO must
+   * carry the rejoin token its browser got with `start`; anyone else is told the game has started.
+   */
+  handleRejoin(conn) {
+    if (this.rejoining.size >= MAX_WAITING_MEMBERS) return this.refuse(conn, REASONS.BUSY);
+    const r = { conn, offs: [], timer: null, done: null };
+    const done = r.done = () => {
+      clearTimeout(r.timer);
+      for (const off of r.offs) off();
+      this.rejoining.delete(r);
+    };
+    this.rejoining.add(r);
+    r.offs.push(conn.onMessage((msg) => {
+      if (!isObject(msg) || msg.t !== MSG.HELLO) return;
+      done();
+      if (this.closed) return this.refuse(conn, REASONS.HOST_CLOSED);
+      if (msg.version !== this.version) {
+        const theirs = typeof msg.version === 'string' ? sanitizeName(msg.version, '?') : '?';
+        return this.refuse(conn, versionMismatchReason(this.version, theirs));
+      }
+      const token = cleanToken(msg.rejoin);
+      if (!token || !this.rejoinTokens.has(token)) return this.refuse(conn, REASONS.STARTED);
+      if (!this.rejoinHandler) return this.refuse(conn, REASONS.REJOIN_LATER);
+      let problem;
+      try {
+        problem = this.rejoinHandler(this.rejoinTokens.get(token), conn);
+      } catch (err) {
+        console.error('[net] rejoin failed', err);
+        problem = REASONS.REJOIN_DENIED;
+      }
+      if (problem) this.refuse(conn, problem);
+    }));
+    r.offs.push(conn.onClose(() => done()));
+    r.timer = setTimeout(() => {
+      done();
+      if (conn.open) conn.close('no-hello');
     }, HELLO_TIMEOUT_MS);
   }
 
@@ -591,21 +655,17 @@ export class LobbyHost {
       conns.set(index, m.conn);
       // In the game a client may be unable to send for many seconds (loading, building the renderer).
       if (typeof m.conn.setTimeoutMs === 'function') m.conn.setTimeoutMs(GAME_TIMEOUT_MS);
-      m.conn.send({ t: MSG.START, setup, you: index });
+      const token = rejoinToken();
+      this.rejoinTokens.set(token, index);
+      m.conn.send({ t: MSG.START, setup, you: index, rejoin: token });
     }
     this.members.clear();
     this.started = true;
     this.state.started = true;
     this.gameConns = conns;
     for (const cb of [...this.changeCbs]) cb(this.state);
-    // The endpoint (PeerJS peer) must outlive the game connections; drop it once they are all gone.
-    let live = conns.size;
-    if (live === 0) this.endpoint.close();
-    for (const conn of conns.values()) {
-      conn.onClose(() => {
-        if (--live === 0) this.endpoint.close();
-      });
-    }
+    // The endpoint (the PeerJS peer of the room code) stays open for the whole game, so that a player
+    // who drops out can come back (handleRejoin); close() drops it when the host leaves the game.
     return { setup, myIndex: slotToPlayer.get(0), conns };
   }
 
@@ -617,7 +677,12 @@ export class LobbyHost {
   close() {
     if (this.closed) return;
     this.closed = true;
+    this.rejoinHandler = null;
     if (this.started) {
+      for (const r of [...this.rejoining]) {
+        r.done();
+        this.refuse(r.conn, REASONS.HOST_CLOSED);
+      }
       setTimeout(() => this.endpoint.close(), GAME_CLOSE_DELAY_MS);
       return;
     }
@@ -661,6 +726,53 @@ export class LobbyClient {
       if (signal) signal.removeEventListener('abort', onAbort);
     }
     return client;
+  }
+
+  /**
+   * Go back into a game that has started (DESIGN 7): connect to the room again and show the token
+   * this browser got with `start`. Resolves with what `onStart` gives ({ setup, myIndex, conn }),
+   * the connection handed over to the game; rejects with a readable Error (the game is over, this
+   * browser was not in it, the room is gone, …), flagged `refused` when the host itself said no.
+   * @param {object} opts { transport, roomCode, token, name, params, timeoutMs, signal, version }
+   */
+  static async rejoin(opts = {}) {
+    const { signal } = opts;
+    const token = cleanToken(opts.token);
+    if (!token) throw new Error(REASONS.REJOIN_UNKNOWN);
+    const conn = await joinRoom({ transport: opts.transport || 'peer', roomCode: opts.roomCode, params: opts.params, timeoutMs: opts.timeoutMs, signal });
+    const offs = [];
+    try {
+      return await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('The host did not answer. The game may be over.')), opts.timeoutMs ?? JOIN_TIMEOUT_MS);
+        offs.push(() => clearTimeout(timer));
+        const onAbort = () => reject(abortError());
+        if (signal) {
+          signal.addEventListener('abort', onAbort, { once: true });
+          offs.push(() => signal.removeEventListener('abort', onAbort));
+        }
+        offs.push(conn.onMessage((msg) => {
+          if (!isObject(msg) || (msg.t !== MSG.KICK && msg.t !== MSG.START)) return;
+          // Let go of the link at once: the full snapshot right behind `start` waits in it for the game session.
+          for (const off of offs.splice(0)) off();
+          if (msg.t === MSG.KICK) reject(Object.assign(new Error(sanitizeReason(msg.reason, REASONS.REJOIN_DENIED)), { refused: true }));
+          else if (msg.t === MSG.START) {
+            const valid = validateSetup(msg.setup, msg.you);
+            if (!valid) reject(new Error('The host sent an invalid game setup. Make sure you both run the same version (reload the page).'));
+            else resolve({ setup: valid.setup, myIndex: valid.myIndex, conn, rejoin: token });
+          }
+        }));
+        offs.push(conn.onClose(() => reject(new Error(REASONS.LOST))));
+        conn.send({ t: MSG.HELLO, name: sanitizeName(opts.name), version: opts.version || PROTOCOL_VERSION, rejoin: token });
+      }).then((info) => {
+        if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(GAME_TIMEOUT_MS);
+        return info;
+      });
+    } catch (err) {
+      conn.close('rejoin-failed');
+      throw err;
+    } finally {
+      for (const off of offs.splice(0)) off();
+    }
   }
 
   constructor(conn, { name, version = PROTOCOL_VERSION } = {}) {
@@ -754,7 +866,7 @@ export class LobbyClient {
       for (const off of this.offs) off();
       this.flushNotify();
       if (typeof this.conn.setTimeoutMs === 'function') this.conn.setTimeoutMs(GAME_TIMEOUT_MS);
-      this.startInfo = { setup: valid.setup, myIndex: valid.myIndex, conn: this.conn };
+      this.startInfo = { setup: valid.setup, myIndex: valid.myIndex, conn: this.conn, rejoin: cleanToken(msg.rejoin) };
       this.state.started = true;
       for (const cb of [...this.startCbs]) cb(this.startInfo);
     }
