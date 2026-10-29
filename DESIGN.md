@@ -1849,7 +1849,10 @@ per-frame budget, so a revealed army appears over a few frames.
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
-  Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
+  Career (9.1), Settings; the big buttons in two columns, Play vs AI across both, or beside Continue when there is a
+  save, the Daily Challenge across both when there is no Quick Match, and Load Game, How to Play, Career and Settings
+  in one row of small buttons, so everything and the footer fit a 1280x720 window without scrolling; windows under
+  820 px high get a smaller crest and tighter spacing; a "New" tag sits on its button's top edge), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
   Random, team, AI difficulty; presets; map size; landscape (Wildlands, Highlands, Rivers, Islands, Great Forest or Random, 6.7, as chips with a one-line note; clients see it as text); game mode (Standard, Decade of Peace with
   30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
