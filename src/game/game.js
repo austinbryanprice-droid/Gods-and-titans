@@ -220,6 +220,8 @@ export class Game {
    * @param {object} [o.settings] getSettings()
    * @param {(info?: { notice?: string }) => void} [o.onExit] called after teardown (main.js shows the menu, and `notice` as a toast)
    * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
+   * @param {(to: object) => void} [o.onRematchOnline] an online game's Rematch (DESIGN 7), after this Game is torn down: the
+   *   host goes to its room's lobby ({ lobby }), a client joins it ({ join: { roomCode, token, transport, name } }) (main.js)
    * @param {(id: string) => void} [o.onNextMission] a campaign mission won: open the next one's briefing (main.js)
    * @param {() => void} [o.onRejoin] a client that lost its link: leave this Game and connect to the room again (main.js)
    * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
@@ -232,7 +234,7 @@ export class Game {
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onNextMission = null, onRejoin = null, onLoad = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onRematchOnline = null, onNextMission = null, onRejoin = null, onLoad = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.replay = replay && replay.record ? replay : null;
     this.onReplay = onReplay;
@@ -243,6 +245,10 @@ export class Game {
     this.settings = settings || getSettings();
     this.onExit = onExit;
     this.onRematch = onRematch;
+    this.onRematchOnline = onRematchOnline;
+    this.rematchRoom = null; // a client: the room the host opened again for the rematch
+    this.rematchAsked = false; // a client asked the host for a rematch and waits for its room
+    this.rematchClosed = false; // a client: the host left without a rematch
     this.onNextMission = onNextMission;
     this.onRejoin = onRejoin;
     this.onLoad = onLoad;
@@ -891,7 +897,10 @@ export class Game {
     else if (reason !== REASONS.HOST_LEFT) dropTicket(this.launch);
     if (!this.hud) return;
     if (this.overShown && (reason === 'game-over' || reason === 'host-quit')) {
+      if (this.rematchRoom) return; // the host went to the rematch's lobby, and said so
+      this.rematchClosed = true;
       this.hud.message('The host has closed the game.', 'system');
+      this.hud.overlays.refreshGameOver();
       return;
     }
     this.hud.overlays.showEnded(reason);
@@ -1516,14 +1525,95 @@ export class Game {
     c.centerOn(st.x, st.y);
   }
 
-  /** True when the game-over screen may offer Play Again (a game against the computer only). */
+  /** True when the game-over screen may offer Play Again (a game against the computer) or Rematch (online). */
   canRematch() {
-    return typeof this.onRematch === 'function' && !this.disposed;
+    return !this.disposed && (typeof this.onRematch === 'function' || this.onlineRematch() !== null);
+  }
+
+  /**
+   * An online game's rematch (DESIGN 7), once it is over: 'host' when this browser hosts a room that can be a
+   * lobby again (its own, or the one it opened taking the game over), 'client' while the host has not left
+   * without one; else null.
+   */
+  onlineRematch() {
+    const s = this.session;
+    const vs = this.viewState;
+    if (typeof this.onRematchOnline !== 'function' || this.replay || this.disposed || this.leaving || this.migrating || !s || !vs || !vs.gameOver) return null;
+    if (s.isHost) return this.rematchLobby() ? 'host' : null;
+    return this.myToken && !this.rematchClosed && (this.rematchRoom || typeof s.askRematch === 'function') ? 'client' : null;
+  }
+
+  /** The room that becomes the rematch's lobby: an online LobbyHost of this started game, or null. */
+  rematchLobby() {
+    const l = this.handoffLobby || (this.launch && this.launch.lobby);
+    return l && typeof l.reopen === 'function' && l.online && l.started && !l.closed ? l : null;
+  }
+
+  /** The game-over button's words: Play Again, or online Rematch (Join Rematch once the host's room is open, Waiting… after asking). */
+  rematchLabel() {
+    if (this.onlineRematch() !== 'client') return this.onlineRematch() === 'host' ? 'Rematch' : 'Play Again';
+    if (this.rematchRoom) return 'Join Rematch';
+    return this.rematchAsked ? 'Waiting for the host…' : 'Rematch';
+  }
+
+  /** A client that asked for a rematch waits for the host's room: the button says so and does nothing meanwhile. */
+  get rematchWaiting() {
+    return this.onlineRematch() === 'client' && this.rematchAsked && !this.rematchRoom;
+  }
+
+  /**
+   * Rematch online. The host turns its room back into the lobby (same players, sides and settings), tells the
+   * players still here and goes there. A client joins that room once it is open; before that it asks the host
+   * for one and goes as soon as the host opens it.
+   */
+  rematchOnline(kind) {
+    const s = this.session;
+    const go = this.onRematchOnline;
+    if (kind === 'host') {
+      const lobby = this.rematchLobby();
+      if (!lobby.reopen({ setup: s.setup, myIndex: s.myIndex, name: this.settings.name })) return this.quitToMenu();
+      s.inviteRematch(lobby.roomCode);
+      if (this.handoffLobby === lobby) this.handoffLobby = null; // the lobby lives on in the menu
+      this.countLeave();
+      this.dispose();
+      go({ lobby });
+      return;
+    }
+    if (!this.rematchRoom) {
+      if (this.rematchAsked) return;
+      this.rematchAsked = true;
+      if (!s.askRematch()) {
+        this.rematchAsked = false;
+        if (this.hud) this.hud.message('The host has left: there is no rematch to join.', 'system');
+        return;
+      }
+      if (this.hud) {
+        this.hud.message('You asked for a rematch. You go to the lobby when the host opens it.', 'system', { icon: '⚔' });
+        this.hud.overlays.refreshGameOver();
+      }
+      return;
+    }
+    const join = { roomCode: this.rematchRoom, token: this.myToken, transport: this.netTransport(), name: s.playerName(s.myIndex) };
+    this.countLeave();
+    this.dispose();
+    go({ join });
+  }
+
+  /** The session's word on a rematch: on a client, the host's room is open again (on the host the chat says who asked). */
+  onNetRematch(info) {
+    if (this.disposed || !info || !info.room || this.session.isHost) return;
+    this.rematchRoom = info.room;
+    if (this.rematchAsked) return this.rematch();
+    if (!this.hud) return;
+    this.hud.message('The host is back in the lobby for a rematch.', 'good', { icon: '⚔' });
+    this.hud.overlays.refreshGameOver(true);
   }
 
   /** Play Again: leave this match (counted like Return to Menu) and start the same lobby anew. */
   rematch() {
     if (!this.canRematch()) return;
+    const online = this.onlineRematch();
+    if (online) return this.rematchOnline(online);
     const next = this.onRematch;
     this.countLeave();
     this.dispose();
@@ -1617,6 +1707,7 @@ export class Game {
     this.sessionOffs.push(session.onChat((line) => this.onChat(line)));
     if (typeof session.onMark === 'function') this.sessionOffs.push(session.onMark((mark) => this.onMark(mark)));
     this.sessionOffs.push(session.onEnd((info) => this.onEnd(info)));
+    if (typeof session.onRematch === 'function') this.sessionOffs.push(session.onRematch((info) => this.onNetRematch(info)));
     if (typeof session.onPause === 'function') this.sessionOffs.push(session.onPause((p) => this.onNetPause(p)));
   }
 
