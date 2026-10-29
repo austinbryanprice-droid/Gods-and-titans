@@ -31,6 +31,23 @@ async function until(page, fn, what, ms = 120000, a = undefined) {
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 900, height: 560 } });
+// The tabs share one browser, so one localStorage, while players have a browser each: since the host keeps a
+// rejoin ticket too (DESIGN 7), a shared store would let one tab's ticket replace another's. Each tab (named by
+// sessionStorage 'who', which survives its reloads) gets its own keys.
+await ctx.addInitScript(() => {
+  try {
+    const who = sessionStorage.getItem('who');
+    if (!who) return;
+    const P = Storage.prototype;
+    const { getItem, setItem, removeItem } = P;
+    const key = (s, k) => (s === window.localStorage ? `${who}:${k}` : k);
+    P.getItem = function (k) { return getItem.call(this, key(this, k)); };
+    P.setItem = function (k, v) { return setItem.call(this, key(this, k), v); };
+    P.removeItem = function (k) { return removeItem.call(this, key(this, k)); };
+  } catch {
+    // ignore
+  }
+});
 await ctx.addInitScript(() => {
   try {
     const name = sessionStorage.getItem('who') || 'Player';
@@ -157,13 +174,11 @@ try {
   host = await ctx.newPage();
   watchPage(host, 'Hosta');
   await host.goto(`${BASE}/?transport=local`);
-  // Two tabs of one browser share localStorage: the new host's own ticket has replaced the old host's
-  // there. Players have a browser each, so put back the ticket the old host's browser kept.
-  await host.evaluate((t) => {
-    sessionStorage.setItem('who', 'Hosta');
-    localStorage.setItem('mythicwar-rejoin', JSON.stringify({ ...t, at: Date.now() }));
-  }, hostTicket);
+  // (Named Hosta again, the tab reads the store the old host's tab kept: its ticket into the heir's room.)
+  await host.evaluate(() => sessionStorage.setItem('who', 'Hosta'));
   await host.reload();
+  const kept = await host.evaluate(() => JSON.parse(localStorage.getItem('mythicwar-rejoin') || 'null'));
+  check(kept && kept.token === hostTicket.token && kept.roomCode === hostTicket.roomCode, 'the old host\'s browser still has its ticket into the heir\'s room');
   await until(host, () => !!document.querySelector('.mw-rejoin-btn'), 'Rejoin button on the old host\'s title', 60000);
   await host.locator('.mw-rejoin-btn').click();
   const t0 = Date.now();
