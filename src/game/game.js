@@ -32,7 +32,7 @@ import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason, makeRoomCode } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
-import { readTicket, saveTicket, clearTicket, saveTally } from '../net/rejoin-ticket.js';
+import { readTicket, saveTicket, clearTicket, saveTally, saveView, readView } from '../net/rejoin-ticket.js';
 import { CareerTracker } from './career-tracker.js';
 import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
@@ -49,7 +49,7 @@ import { ReplayRecorder } from './replay.js';
 import { saveReplay } from './replay-store.js';
 import { ReplaySession } from './replay-session.js';
 import { ReplayBar } from '../ui/hud-replay.js';
-import { MatchSaver, loadSaveGame, isSettled, settleMatch } from './game-saves.js';
+import { MatchSaver, loadSaveGame, isSettled, packView, restoreView, settleMatch } from './game-saves.js';
 import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
@@ -425,6 +425,7 @@ export class Game {
       this.offs.push(() => this.career.dispose());
       if (rejoinMatchId(this.launch)) this.keepTally();
     }
+    if (rejoinMatchId(this.launch)) this.keepView();
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
@@ -985,6 +986,40 @@ export class Game {
     this.offs.push(this.viewState.on('snapshot', () => {
       const ms = Date.now();
       if (ms - last < 3000) return;
+      last = ms;
+      keep();
+    }));
+    this.offs.push(keep);
+  }
+
+  /**
+   * A client of a game it can rejoin keeps what it has seen (the fog explored, enemy buildings and mines
+   * as last seen) with its ticket every few seconds and when it leaves; a rejoined Game starts from it
+   * instead of a black map (DESIGN 7).
+   */
+  keepView() {
+    const token = this.launch.rejoin;
+    const vs = this.viewState;
+    const kept = readView(token);
+    if (kept) {
+      try {
+        restoreView(vs, JSON.parse(kept));
+      } catch (err) {
+        console.warn('[game] the rejoin view could not be restored', err);
+      }
+    }
+    let last = 0;
+    const keep = () => {
+      if (this.replaced) return;
+      try {
+        saveView(token, JSON.stringify(packView(vs)));
+      } catch {
+        // too big or storage refused: a rejoin starts from what the side sees now
+      }
+    };
+    this.offs.push(vs.on('snapshot', () => {
+      const ms = Date.now();
+      if (ms - last < 10000) return;
       last = ms;
       keep();
     }));
