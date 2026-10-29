@@ -484,8 +484,10 @@ export class Overlays {
   }
 
   /** Victory / defeat / draw screen (or the Trial of the Titans' wave) with the chronicle and what the match unlocked (and the lesson's medal). */
-  showGameOver({ result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null, mission = null }) {
+  showGameOver(args) {
+    const { result, winningTeam, unlocked = null, how, medal = null, tutorial = false, wave = 0, record = null, daily = null, mission = null } = args;
     this.gameOverShown = true;
+    this.gameOverArgs = args;
     const vs = this.game.viewState;
     const survival = result === 'survival';
     const title = survival ? `Wave ${wave}`
@@ -505,6 +507,7 @@ export class Overlays {
       el('div', 'hud-go-crest', survival ? '🐉' : result === 'victory' ? '🏆' : result === 'defeat' ? '💀' : '⚖️'),
       el('h2', 'mw-h2 hud-go-title', title),
       el('div', 'hud-osub', sub),
+      el('div', 'hud-go-ended'), // noteEnded: the host closed the game after it was over
       best,
       dailyLine(daily),
       el('div', 'hud-go-time', `Game time ${formatClock(vs.time)}`),
@@ -513,8 +516,19 @@ export class Overlays {
       chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
       this.careerLine(),
-      el('div', 'hud-obtns', ...this.gameOverButtons(mission)));
+      this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission)));
     this.show('gameover', node, () => this.hide());
+  }
+
+  /**
+   * An online rematch changed (DESIGN 7): asked for, the host's room opened, or the host gone. The game-over
+   * screen's buttons follow; `bringBack` shows that screen again when it was put away (Keep Watching).
+   */
+  refreshGameOver(bringBack = false) {
+    if (!this.gameOverArgs) return;
+    if (this.current && this.current.name === 'gameover' && this.goBtns) {
+      this.goBtns.replaceChildren(...this.gameOverButtons(this.gameOverArgs.mission || null).filter(Boolean));
+    } else if (bringBack && !this.current) this.showGameOver(this.gameOverArgs);
   }
 
   /** Play Again (or a mission's Next Mission and Retry), Watch Replay, Return to Menu and Keep Watching. */
@@ -531,8 +545,13 @@ export class Overlays {
         watch,
       ];
     }
+    let again = null;
+    if (this.canRematch()) {
+      again = btn(typeof this.game.rematchLabel === 'function' ? this.game.rematchLabel() : 'Play Again', 'mw-btn--primary', () => this.game.rematch());
+      if (this.game.rematchWaiting) again.disabled = true;
+    }
     return [
-      this.canRematch() ? btn('Play Again', 'mw-btn--primary', () => this.game.rematch()) : null,
+      again,
       replay,
       btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
       watch,
@@ -584,6 +603,18 @@ export class Overlays {
         btn('Keep Watching', 'mw-btn--primary', () => this.hide()),
         btn('Return to Menu', 'mw-btn--ghost', leave)));
     this.show('defeated', node, () => this.hide());
+  }
+
+  /**
+   * The session ended while the game-over panel is open (the host closed the finished game): the
+   * panel says so near its top, where the HUD's message line under the panel cannot be seen.
+   * @returns {boolean} whether a panel showed it
+   */
+  noteEnded(text) {
+    const note = this.current && this.current.name === 'gameover' ? this.current.el.querySelector('.hud-go-ended') : null;
+    if (!note) return false;
+    note.textContent = text;
+    return true;
   }
 
   /** The session ended from outside (host left / quit / kicked). */

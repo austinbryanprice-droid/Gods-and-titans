@@ -1,7 +1,7 @@
 // Game sessions (DESIGN 7). The host runs the authoritative World and the AIs
 // on a fixed-rate ticker and streams delta snapshots; clients only decode them
 // into their ViewState and send commands. Both expose the same surface:
-//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark(mark), sendPause(on),
+//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text, { team? }), sendMark(mark), sendPause(on),
 //     onChat(cb), onMark(cb), onEnd(cb), onPause(cb), start(), stop(), pingMs, isHost, pause }
 // Everything that arrives over the network is untrusted: the host validates and
 // rate-limits each client's messages (sanitize.js); clients validate snapshots
@@ -14,7 +14,7 @@ import { encode, apply } from './delta.js';
 import {
   MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, STALL_NOTICE_MS, MAX_CLIENT_BUFFER_BYTES,
   HANDOFF_EVERY_MS, HANDOFF_FIRST_MS, HANDOFF_WAIT_MS, ONLINE_PAUSES, PAUSE_MAX_MS,
-  RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
+  RateLimiter, sanitizeChat, sanitizeName, sanitizeReason, normalizeRoomCode, isValidRoomCode,
 } from './protocol.js';
 import { sanitizeCommand, sanitizeMark, isValidSnapshot, sanitizeFelled } from './sanitize.js';
 import { sanitizePlan, sanitizeHandoff, randomProof } from './handoff.js';
@@ -69,6 +69,7 @@ class SessionBase {
     this.markCbs = new Set();
     this.endCbs = new Set();
     this.pauseCbs = new Set();
+    this.rematchCbs = new Set();
     this.pause = null; // { by, reason: 'player'|'handoff', endsAt (local ms), left } while an online game is paused
     this.chatLog = [];
     this.ended = false;
@@ -83,7 +84,7 @@ class SessionBase {
     return p ? p.name : `Player ${i + 1}`;
   }
 
-  /** cb({ from, name, text, system }) for every chat line, own lines included. */
+  /** cb({ from, name, text, system, voice?, team? }) for every chat line, own lines included (`team`: allies only). */
   onChat(cb) {
     this.chatCbs.add(cb);
     return () => this.chatCbs.delete(cb);
@@ -105,6 +106,25 @@ class SessionBase {
   onPause(cb) {
     this.pauseCbs.add(cb);
     return () => this.pauseCbs.delete(cb);
+  }
+
+  /**
+   * cb(info) about a rematch once the game is over (DESIGN 7). On the host: { from, name } when a player asks
+   * for one. On a client: { room } when the host has opened its room again for the rematch.
+   */
+  onRematch(cb) {
+    this.rematchCbs.add(cb);
+    return () => this.rematchCbs.delete(cb);
+  }
+
+  emitRematch(info) {
+    for (const cb of [...this.rematchCbs]) {
+      try {
+        cb(info);
+      } catch (err) {
+        console.error('[net] rematch listener failed', err);
+      }
+    }
   }
 
   emitPause() {
@@ -308,13 +328,17 @@ export class HostSession extends SessionBase {
         }
         break;
       }
-      case MSG.CHAT: {
+      case MSG.CHAT:
+      case MSG.TEAM_CHAT: {
         if (!c.limits.chat.take()) {
           c.dropped.chat++;
           return;
         }
         const text = sanitizeChat(msg.text);
-        if (text) this.broadcastChat({ from: c.index, name: this.playerName(c.index), text, system: false });
+        if (!text) return;
+        const line = { from: c.index, name: this.playerName(c.index), text, system: false }; // always the sender's own index
+        if (msg.t === MSG.TEAM_CHAT) this.relayTeamChat(line);
+        else this.broadcastChat(line);
         break;
       }
       case MSG.MARK: {
@@ -352,6 +376,13 @@ export class HostSession extends SessionBase {
           return;
         }
         this.setPause(c.index, msg.on === true);
+        break;
+      case MSG.REMATCH:
+        // Once per player, and only once the game is over: everyone hears who wants to play again.
+        if (c.askedRematch || !(this.lastSnap && this.lastSnap.gameOver)) return;
+        c.askedRematch = true;
+        this.broadcastChat({ from: -1, name: '', text: `${this.playerName(c.index)} wants a rematch.`, system: true });
+        this.emitRematch({ from: c.index, name: this.playerName(c.index) });
         break;
       default:
         break;
@@ -432,7 +463,8 @@ export class HostSession extends SessionBase {
     if (this.started) this.sendSnapshot(c, this.lastSnap);
     if (this.pause) conn.send(this.pauseMessage());
     const name = this.playerName(index);
-    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true });
+    // Everyone else hears it; the player who came back knows (no "<me> has rejoined" on their own screen).
+    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true }, index);
     if (this.plan) conn.send(this.planFor(index));
     this.updatePlan();
     // A new host waits for the players who were in the game when it moved (DESIGN 7), then plays on.
@@ -649,6 +681,8 @@ export class HostSession extends SessionBase {
   /**
    * Leave the game without ending it (DESIGN 7): the heir gets the game as it is now, and once it has gone
    * out (or after HANDOFF_FLUSH_MS) every client hears that the host quit; they carry on with the heir.
+   * @returns {Promise<boolean>} whether the clients carry the game on with the heir (from this copy, or the
+   *   one before when this one did not go out): the old host is told who hosts now (Game.quitToMenu)
    */
   async handOff() {
     if (!this.canHandOff) {
@@ -658,14 +692,14 @@ export class HostSession extends SessionBase {
     if (this.pause && this.pause.reason === 'player') this.setPause(-1, false);
     this.ticker.stop();
     const h = this.handoff;
-    const sent = await this.backup(true); // (after any backup still compressing)
+    await this.backup(true); // (after any backup still compressing)
     const c = this.plan && this.clients.get(this.plan.heir);
     const t0 = now();
     while (c && c.conn.open && c.conn.buffered > 0 && now() - t0 < HANDOFF_FLUSH_MS) await new Promise((r) => setTimeout(r, 50));
     // Even when the newest copy did not go out, the heir carries on from the one before.
     const carry = h.sent > 0 && !!(this.plan && this.clients.has(this.plan.heir));
     this.stop(REASONS.HOST_QUIT, { carry });
-    return carry && sent;
+    return carry;
   }
 
   /** The AIs' chat lines for these events (DESIGN 10.1), flagged `voice` so that a player can hide them. */
@@ -683,10 +717,28 @@ export class HostSession extends SessionBase {
     }
   }
 
-  broadcastChat(line) {
+  /** A chat line for everyone (but the player `except`, when given: a line about that player meant for the others). */
+  broadcastChat(line, except = null) {
     this.emitChat(line);
     const msg = { t: MSG.CHAT, ...line };
-    for (const c of this.clients.values()) c.conn.send(msg);
+    for (const c of this.clients.values()) if (c.index !== except) c.conn.send(msg);
+  }
+
+  /**
+   * A team chat line (DESIGN 7, "Team chat") goes the way a team mark does: to the connections of the
+   * sender's teammates and the sender itself (whose own line comes back from the host, as in all-chat),
+   * flagged `team`, and to the host's own screen when the host is on that team. Other teams' connections
+   * never receive it, and the host's replay records only what the host's screen showed.
+   */
+  relayTeamChat(line) {
+    const team = this.teamOf(line.from);
+    if (team === null) return;
+    const out = { ...line, team: true };
+    const msg = { t: MSG.CHAT, ...out };
+    for (const c of this.clients.values()) {
+      if (c.conn.open && this.teamOf(c.index) === team) c.conn.send(msg);
+    }
+    if (this.teamOf(this.myIndex) === team) this.emitChat(out);
   }
 
   /**
@@ -857,9 +909,13 @@ export class HostSession extends SessionBase {
     }
   }
 
-  sendChat(text) {
+  /** A chat line from the host's own player: to everyone, or with { team: true } to its teammates only. */
+  sendChat(text, { team = false } = {}) {
     const t = sanitizeChat(text);
-    if (t) this.broadcastChat({ from: this.myIndex, name: this.playerName(this.myIndex), text: t, system: false });
+    if (!t) return;
+    const line = { from: this.myIndex, name: this.playerName(this.myIndex), text: t, system: false };
+    if (team) this.relayTeamChat(line);
+    else this.broadcastChat(line);
   }
 
   /**
@@ -873,6 +929,17 @@ export class HostSession extends SessionBase {
     this.emitMark({ from: this.myIndex, name: this.playerName(this.myIndex), ...clean });
     this.relayMark(this.myIndex, clean);
     return clean;
+  }
+
+  /**
+   * The game is over and this host's room is a lobby again (LobbyHost.reopen): tell every player still
+   * here, so that their game-over screen can take them there. Sent right before `stop`.
+   * @param {string} room the room code to join
+   */
+  inviteRematch(room) {
+    if (this.stopped || !(this.lastSnap && this.lastSnap.gameOver)) return false;
+    for (const c of this.clients.values()) c.conn.send({ t: MSG.REMATCH, room });
+    return true;
   }
 
   /**
@@ -997,6 +1064,11 @@ export class ClientSession extends SessionBase {
         const from = Number.isInteger(msg.from) && msg.from >= -1 && msg.from < this.setup.players.length ? msg.from : -1;
         const line = { from, name: system ? '' : sanitizeName(msg.name, this.playerName(from)), text, system };
         if (msg.voice === true && !system) line.voice = true; // an AI's line (DESIGN 10.1)
+        if (msg.team === true && !system) {
+          // The host relays a team line to the sender's team only; one from another team is not shown.
+          if (from < 0 || this.teamOf(from) === null || this.teamOf(from) !== this.teamOf(this.myIndex)) return;
+          line.team = true;
+        }
         this.emitChat(line);
         break;
       }
@@ -1034,6 +1106,14 @@ export class ClientSession extends SessionBase {
           if (was) this.viewState.resetClock(); // sim time stood still meanwhile
         }
         this.emitPause();
+        break;
+      }
+      case MSG.REMATCH: {
+        // Only after the game is over, and only a room code: the host's room is a lobby again.
+        const room = typeof msg.room === 'string' && msg.room.length <= 16 ? normalizeRoomCode(msg.room) : '';
+        if (!(this.snap && this.snap.gameOver) || !isValidRoomCode(room)) return this.badMessage('rematch');
+        this.rematchRoom = room;
+        this.emitRematch({ room });
         break;
       }
       case MSG.KICK:
@@ -1136,9 +1216,10 @@ export class ClientSession extends SessionBase {
     this.conn.send({ t: MSG.CMD, cmd });
   }
 
-  sendChat(text) {
+  /** A chat line to everyone, or with { team: true } to my teammates only (the host relays it, DESIGN 7). */
+  sendChat(text, { team = false } = {}) {
     const t = sanitizeChat(text);
-    if (t && !this.stopped) this.conn.send({ t: MSG.CHAT, text: t });
+    if (t && !this.stopped) this.conn.send({ t: team ? MSG.TEAM_CHAT : MSG.CHAT, text: t });
   }
 
   /** Ask the host to pause (true) or resume (false) the game for everyone. */
@@ -1173,6 +1254,14 @@ export class ClientSession extends SessionBase {
   stopTimers() {
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
+  }
+
+  /** Ask the host for a rematch (once, after the game is over). */
+  askRematch() {
+    if (this.stopped || this.askedRematch || !(this.snap && this.snap.gameOver)) return false;
+    this.askedRematch = true;
+    this.conn.send({ t: MSG.REMATCH });
+    return true;
   }
 
   /** Leave the game (closes the connection; the host's AI takes over). */

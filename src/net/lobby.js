@@ -35,6 +35,7 @@ export const MAX_WAITING_MEMBERS = MAX_PLAYERS;
 // Per-member limits on the host (token buckets: rate per second, burst).
 export const MEMBER_LIMITS = { patch: [5, 10], chat: [1, 5], ping: [4, 8] };
 const CLIENT_CHAT_LIMIT = [10, 30]; // lobby chat lines a client shows per second
+const FULL_NOTICE_MS = 5000; // the host hears "someone was turned away, every seat is taken" at most this often
 const NOTIFY_MIN_MS = 50; // a client re-renders the lobby at most this often
 
 const isPlayerKind = (k) => k === 'host' || k === 'human' || k === 'ai';
@@ -239,6 +240,9 @@ export class LobbyHost {
     this.rejoining = new Set(); // connections after the start that have not said HELLO yet
     this.rejoinHandler = null; // (index, conn) → reason | null, set by the game's HostSession
     this.hostToken = null; // the host's own token: a new host (migration) seats this browser with it
+    this.playerSlots = null; // player index → slot index of the started game (the rematch seats its players again)
+    this.seats = new Map(); // after a rematch opens: rejoin token → { slot, pantheon, team, color } held for that player
+    this.lastFullNotice = -Infinity;
     this.state = {
       roomCode: this.roomCode,
       version,
@@ -252,7 +256,14 @@ export class LobbyHost {
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
     for (let i = 1; i < MAX_PLAYERS; i++) this.state.slots.push(slotOf('closed', { team: i + 1, color: i }));
+    // A game against the computer starts as one human against one AI. Online, every seat starts Open so that
+    // friends can come in, the rows taking turns between two sides: the first friend plays against the host,
+    // the next two make it 2v2 (in join order, top to bottom). The host picks a preset for anything else.
     this.applyPreset('1v1');
+    if (this.online) {
+      this.state.slots = this.state.slots.map((s, i) => (i === 0 ? s : slotOf('open', { team: i % 2 ? 2 : 1, color: i })));
+      this.state.preset = null;
+    }
     this.offConn = endpoint.onConnection((conn) => this.handleConnection(conn));
   }
 
@@ -353,6 +364,8 @@ export class LobbyHost {
         const theirs = typeof msg.version === 'string' ? sanitizeName(msg.version, '?') : '?';
         return this.refuse(conn, versionMismatchReason(this.version, theirs));
       }
+      // A player asking for the rematch before the host has opened it: they may try again in a moment.
+      if (!msg.rejoin && cleanToken(msg.rematch) && this.rejoinTokens.has(cleanToken(msg.rematch))) return this.refuse(conn, REASONS.REMATCH_LATER);
       const token = cleanToken(msg.rejoin);
       if (!token || !this.rejoinTokens.has(token)) return this.refuse(conn, REASONS.STARTED);
       if (!this.rejoinHandler) return this.refuse(conn, REASONS.REJOIN_LATER);
@@ -370,6 +383,37 @@ export class LobbyHost {
       done();
       if (conn.open) conn.close('no-hello');
     }, HELLO_TIMEOUT_MS);
+  }
+
+  /**
+   * The Open seat a newcomer takes, or -1: one on the side with the fewest players (so the first friend
+   * in a room of two teams plays against the host), the first such seat on a tie. Seats held for the
+   * last game's players (a rematch) go only when no other seat is open.
+   */
+  openSlotFor() {
+    const slots = this.state.slots;
+    const held = new Set([...this.seats.values()].map((x) => x.slot));
+    const count = new Map();
+    for (const s of slots) if (isPlayerKind(s.kind)) count.set(s.team, (count.get(s.team) || 0) + 1);
+    let best = -1;
+    let bestKey = Infinity;
+    slots.forEach((s, i) => {
+      if (s.kind !== 'open') return;
+      const key = (held.has(i) ? 100 : 0) + (count.get(s.team) || 0);
+      if (key < bestKey) {
+        best = i;
+        bestKey = key;
+      }
+    });
+    return best;
+  }
+
+  /** Tell the host (in the lobby chat) that someone was turned away because every seat is taken; at most every few seconds. */
+  fullNotice(name) {
+    const now = Date.now();
+    if (now - this.lastFullNotice < FULL_NOTICE_MS) return;
+    this.lastFullNotice = now;
+    this.chat(chatLine(-1, '', `${name} tried to join, but every seat is taken. Set a seat to Open to let them in.`, true));
   }
 
   slotIndexOf(peerId) {
@@ -407,11 +451,25 @@ export class LobbyHost {
         const theirs = typeof msg.version === 'string' ? sanitizeName(msg.version, '?') : '?';
         return this.kickMember(m, versionMismatchReason(this.version, theirs));
       }
-      const index = this.state.slots.findIndex((s) => s.kind === 'open');
-      if (index < 0) return this.kickMember(m, REASONS.FULL);
+      // A player of the last game coming back for the rematch gets their own seat (and side, pantheon, colour) again.
+      const token = cleanToken(msg.rematch);
+      const seat = token ? this.seats.get(token) : null;
+      const index = seat && this.state.slots[seat.slot].kind === 'open' ? seat.slot : this.openSlotFor();
+      if (index < 0) {
+        this.fullNotice(sanitizeName(msg.name, 'A player'));
+        return this.kickMember(m, REASONS.FULL);
+      }
+      if (seat) this.seats.delete(token);
       const prev = this.state.slots[index];
       const name = this.uniqueName(sanitizeName(msg.name, `Player ${index + 1}`));
-      this.state.slots[index] = slotOf('human', { name, team: prev.team, color: this.freeColor(prev.color, index), peerId: m.peerId });
+      const keep = seat && seat.slot === index;
+      this.state.slots[index] = slotOf('human', {
+        name,
+        team: keep ? seat.team : prev.team,
+        pantheon: keep ? seat.pantheon : 'random',
+        color: this.freeColor(keep ? seat.color : prev.color, index),
+        peerId: m.peerId,
+      });
       m.joined = true;
       m.name = name;
       m.conn.send({ t: MSG.WELCOME, slot: index, lobby: this.state });
@@ -571,7 +629,8 @@ export class LobbyHost {
 
   /**
    * Arrange slots: 'coop' (humans on team 1 vs AI Normal on team 2, medium map),
-   * '1v1' (2 slots, small map), '2v2' (teams 1,1,2,2), 'ffa' (everyone alone).
+   * '1v1' (2 slots, small map), '2v2' (teams 1,1,2,2), 'ffa' (everyone alone); online the
+   * seats for other players are Open, against the computer AI.
    * Connected players keep their settings (and are moved to the first slots).
    * Returns false if the preset cannot hold the connected players.
    */
@@ -580,21 +639,24 @@ export class LobbyHost {
     const slots = this.state.slots;
     const humans = slots.filter((s) => s.kind === 'host' || s.kind === 'human');
     const prevAi = slots.filter((s) => s.kind === 'ai');
+    // Online, the seats of the other players are Open for friends (the host sets one to AI if they want);
+    // against the computer they are AI. Co-op keeps its AI opponents either way.
+    const seat = this.online ? 'open' : 'ai';
     let layout; // [{ team, fill }]
     if (name === '1v1') {
       if (humans.length > 2) return false;
-      layout = [{ team: 1 }, { team: 2, fill: this.online ? 'open' : 'ai' }, { fill: 'closed' }, { fill: 'closed' }];
+      layout = [{ team: 1 }, { team: 2, fill: seat }, { fill: 'closed' }, { fill: 'closed' }];
     } else if (name === '2v2') {
-      layout = [1, 1, 2, 2].map((team) => ({ team, fill: 'ai' }));
+      layout = [1, 1, 2, 2].map((team) => ({ team, fill: seat }));
     } else if (name === 'ffa') {
-      layout = [1, 2, 3, 4].map((team) => ({ team, fill: 'ai' }));
+      layout = [1, 2, 3, 4].map((team) => ({ team, fill: seat }));
     } else {
       // coop
       if (humans.length >= MAX_PLAYERS) return false;
       layout = [];
       for (let i = 0; i < MAX_PLAYERS; i++) {
         if (i < humans.length) layout.push({ team: 1 });
-        else if (i === humans.length && humans.length < 2) layout.push({ team: 1, fill: this.online ? 'open' : 'ai' });
+        else if (i === humans.length && humans.length < 2) layout.push({ team: 1, fill: seat });
         else layout.push({ team: 2, fill: 'ai' });
       }
     }
@@ -662,6 +724,7 @@ export class LobbyHost {
     const seed = (Math.floor(Math.random() * 0x7ffffffe) + 1) >>> 0;
     const { setup, slotToPlayer } = buildSetup(this.state, seed, this.version);
     const conns = new Map();
+    this.playerSlots = new Map([...slotToPlayer].map(([slot, index]) => [index, slot]));
     for (const m of [...this.members]) {
       for (const off of m.offs) off();
       clearTimeout(m.helloTimer);
@@ -696,6 +759,70 @@ export class LobbyHost {
     const m = new Map();
     for (const [token, index] of this.rejoinTokens) m.set(index, token);
     return m;
+  }
+
+  /**
+   * Rematch (DESIGN 7): after the game is over, this room becomes a lobby again with the same players,
+   * sides and settings. The AI players are back as they were; each human seat is Open and held for its
+   * player, who gets it back by joining with the rejoin token of the last game (LobbyClient.join
+   * `rematch`). A room carried on by a new host (forGame) has no lobby of its own: its seats are built
+   * from the game's setup, the new host in the first.
+   * @param {object} [o] { setup, myIndex, name } of the game that ended (needed for a room from forGame)
+   * @returns {boolean} false when the room is closed or has no game to rematch
+   */
+  reopen({ setup = null, myIndex = 0, name = null } = {}) {
+    if (this.closed || !this.started) return false;
+    for (const r of [...this.rejoining]) {
+      r.done();
+      this.refuse(r.conn, REASONS.REJOIN_OVER);
+    }
+    this.rejoinHandler = null;
+    this.gameConns = null; // the game's links belong to its session, which closes them
+    let slots;
+    let playerSlots = this.playerSlots;
+    if (playerSlots) {
+      slots = this.state.slots.map((s) => ({ ...s }));
+    } else {
+      const players = setup && Array.isArray(setup.players) ? setup.players.slice(0, MAX_PLAYERS) : [];
+      if (!players[myIndex]) return false;
+      const order = [myIndex, ...players.map((p, i) => i).filter((i) => i !== myIndex)];
+      playerSlots = new Map(order.map((index, slot) => [index, slot]));
+      slots = order.map((index, slot) => {
+        const p = players[index];
+        const color = Math.max(0, PLAYER_COLORS.indexOf(p.color));
+        const extra = { team: intIn(p.team, 1, MAX_PLAYERS) ?? 1, color, pantheon: isPantheonChoice(p.pantheon) ? p.pantheon : 'random' };
+        if (slot === 0) return slotOf('host', { ...extra, name: sanitizeName(name || p.name, 'Host'), peerId: 'host' });
+        if (p.kind === 'ai') {
+          const difficulty = DIFFICULTIES.includes(p.difficulty) ? p.difficulty : 'normal';
+          return slotOf('ai', { ...extra, difficulty, name: aiName(difficulty) });
+        }
+        return slotOf('human', extra);
+      });
+      while (slots.length < MAX_PLAYERS) slots.push(slotOf('closed', { team: slots.length + 1, color: slots.length }));
+      this.state.mapSize = MAP_SIZE_NAMES.includes(setup.mapSize) ? setup.mapSize : 'small';
+      this.state.landscape = LANDSCAPE_CHOICES.includes(setup.landscape) ? setup.landscape : 'classic';
+      this.state.peace = PEACE_LENGTHS.includes(setup.peaceMinutes) ? setup.peaceMinutes : 0;
+      this.state.survival = setup.survival === true && !this.state.peace;
+      this.state.sacred = setup.sacredVictory === true;
+      this.state.preset = null;
+    }
+    // Each human seat of the last game is held for its player (by their token), Open meanwhile.
+    this.seats = new Map();
+    for (const [token, index] of this.rejoinTokens) {
+      const slot = playerSlots.get(index);
+      if (slot === undefined || !slots[slot] || slots[slot].kind !== 'human') continue;
+      const s = slots[slot];
+      this.seats.set(token, { slot, pantheon: s.pantheon, team: s.team, color: s.color });
+    }
+    slots = slots.map((s) => (s.kind === 'human' ? slotOf('open', { team: s.team, color: s.color }) : s));
+    this.state.slots = slots;
+    this.rejoinTokens = new Map();
+    this.hostToken = null;
+    this.playerSlots = null;
+    this.members.clear();
+    this.started = false;
+    this.changed();
+    return true;
   }
 
   /**
@@ -737,9 +864,23 @@ export class LobbyClient {
    * @param {number} [opts.timeoutMs]
    * @param {AbortSignal} [opts.signal] cancel the join: rejects with transport.abortError() and leaves nothing open
    * @param {string} [opts.version] protocol version (tests)
+   * @param {string} [opts.rematch] my rejoin token of the room's last game: the host's rematch gives me my seat back
+   * @param {number} [opts.laterTries] how many more times to try while the host has not opened the rematch yet (one every second)
    * @returns {Promise<LobbyClient>}
    */
   static async join(opts = {}) {
+    for (let left = opts.laterTries || 0; ; left--) {
+      try {
+        return await LobbyClient.joinOnce(opts);
+      } catch (err) {
+        if (left <= 0 || !err || err.message !== REASONS.REMATCH_LATER || (opts.signal && opts.signal.aborted)) throw err;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      if (opts.signal && opts.signal.aborted) throw abortError();
+    }
+  }
+
+  static async joinOnce(opts) {
     const { signal } = opts;
     const conn = await joinRoom({ transport: opts.transport || 'peer', roomCode: opts.roomCode, params: opts.params, timeoutMs: opts.timeoutMs, signal });
     const client = new LobbyClient(conn, opts);
@@ -811,8 +952,9 @@ export class LobbyClient {
     }
   }
 
-  constructor(conn, { name, version = PROTOCOL_VERSION } = {}) {
+  constructor(conn, { name, version = PROTOCOL_VERSION, rematch = null } = {}) {
     this.conn = conn;
+    this.rematch = cleanToken(rematch);
     this.name = sanitizeName(name);
     this.version = version;
     this.state = null;
@@ -862,7 +1004,7 @@ export class LobbyClient {
           reject(err);
         },
       };
-      this.conn.send({ t: MSG.HELLO, name: this.name, version: this.version });
+      this.conn.send(this.rematch ? { t: MSG.HELLO, name: this.name, version: this.version, rematch: this.rematch } : { t: MSG.HELLO, name: this.name, version: this.version });
     });
   }
 

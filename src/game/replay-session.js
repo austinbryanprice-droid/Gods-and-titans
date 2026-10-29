@@ -291,8 +291,9 @@ export class ReplaySession {
     const lines = this.record.chat || [];
     const t = this.world.tickCount;
     while (this.chatAt < lines.length && lines[this.chatAt][0] <= t) {
-      const [, from, text, voice, system] = lines[this.chatAt++];
+      const [, from, text, voice, system, team] = lines[this.chatAt++];
       const line = { from, name: system ? '' : this.playerName(from), text, system: !!system, voice: !!voice };
+      if (team && !system) line.team = true;
       this.chatLog.push(line);
       if (this.chatLog.length > 100) this.chatLog.shift();
       if (this.seeking) continue; // a jump skips the talk on the way

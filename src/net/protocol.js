@@ -7,8 +7,9 @@ import { PEER_ID_PREFIX, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.
 // wire-version.js: it needs the sanitizer and codec tables, which import this file.
 
 /**
- * Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC MARK PAUSE; host→client: the rest
- * (+ LOBBY, CHAT, PAUSE, and MARK, which the host relays to the sender's teammates only).
+ * Message `t` values. client→host: HELLO LOBBY CMD CHAT TEAM_CHAT PING RESYNC MARK PAUSE; host→client: the rest
+ * (+ LOBBY, CHAT, PAUSE, and MARK, which the host relays to the sender's teammates only). A TEAM_CHAT line
+ * comes back as CHAT with `team: true`, to the sender's teammates only (DESIGN 7, "Team chat").
  */
 export const MSG = {
   HELLO: 'hello',
@@ -18,6 +19,9 @@ export const MSG = {
   PING: 'ping',
   RESYNC: 'resync',
   MARK: 'mark',
+  // A chat line for the sender's team only ({ text }); a new name rather than a flag on CHAT, so that it changes the
+  // protocol fingerprint and a build that would broadcast it to everyone can never host a build that sends it.
+  TEAM_CHAT: 'teamchat',
   WELCOME: 'welcome',
   START: 'start',
   FULL: 'full',
@@ -31,6 +35,8 @@ export const MSG = {
   // ({ heir, room }, to every client); and the game itself for that heir ({ room, tick, state, tokens, present }).
   PLAN: 'plan',
   HANDOFF: 'handoff',
+  // Rematch, once the game is over (DESIGN 7): a client asks for one ({}), the host says its room is open again ({ room }).
+  REMATCH: 'rematch',
 };
 
 // Wire framing. A frame is a string: a JSON object ('{…}'), a chunk
@@ -93,6 +99,8 @@ export const REASONS = {
   REJOIN_UNKNOWN: 'That game has already started, and this browser was not one of its players.',
   REJOIN_LATER: 'The host is still loading the game. Try again in a moment.',
   REJOIN_OVER: 'That game is over.',
+  // Rematch (DESIGN 7): a player of the last game asked before the host opened the room again
+  REMATCH_LATER: 'The host has not opened the rematch yet.',
   REJOIN_DENIED: 'You cannot rejoin that game.',
   REPLACED: 'You rejoined this game from another window.',
   NOT_HOST: 'Someone who is not the game\'s host answered in its room.',
