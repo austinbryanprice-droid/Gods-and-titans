@@ -22,9 +22,9 @@ import { openPantheonPicker, pantheonLabel, pantheonEmblem, summaryFor, unitRow,
 import { renderHowToContent } from './menu-howto.js';
 import { renderCareerContent } from './menu-career.js';
 import { renderReplays } from './menu-replays.js';
-import { getCareer, markSeen } from '../game/career.js';
+import { getCareer, markSeen, hasBeatenComputer } from '../game/career.js';
 import { loadSkirmish, launchFrom, skirmishLabel } from '../game/rematch.js';
-import { AUTO_SLOT, listSaves, deleteSave, savedAgo } from '../game/save-store.js';
+import { AUTO_SLOT, listSaves, deleteSave, saveTitle, saveLine } from '../game/save-store.js';
 import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { campaignSetup } from '../sim/campaign.js';
@@ -205,7 +205,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     try {
       const mod = await loadLobby();
       const name = getSettings().name;
-      const lobby = await mod.LobbyHost.create({ transport: 'none', name });
+      // A first game is against an Easy AI; once the career has a win against the computer, Normal (DESIGN 9).
+      const difficulty = M.defaultAiDifficulty(hasBeatenComputer());
+      const lobby = await mod.LobbyHost.create({ transport: 'none', name, aiDifficulty: difficulty });
       // Co-op preset, trimmed to one human against one AI on a small map.
       const safe = (fn) => {
         try {
@@ -222,7 +224,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         if (i === me) return;
         if (!aiPlaced) {
           aiPlaced = true;
-          safe(() => lobby.setSlot(i, { kind: 'ai', difficulty: 'normal', team: 2 }));
+          safe(() => lobby.setSlot(i, { kind: 'ai', difficulty, team: 2 }));
         } else safe(() => lobby.setSlot(i, { kind: 'closed' }));
       });
       safe(() => lobby.setMapSize('small'));
@@ -295,11 +297,6 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     } finally {
       done();
     }
-  }
-
-  /** "Greek vs Norse (Hard) · small map · 23:10 · 5 min ago" for a save's info. */
-  function saveLine(info) {
-    return `${info.label || 'Saved game'} · ${clockText(Math.floor(info.time || 0))} · ${savedAgo(info.savedAt)}`;
   }
 
   function titleScreen() {
@@ -426,7 +423,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       }
       setChildren(list, saves.map((info) => h('div.mw-save-row',
         h('div.mw-save-text',
-          h('b', info.slot === AUTO_SLOT ? 'Autosave' : `Slot ${info.slot}`),
+          h('b', saveTitle(info)),
           h('span', saveLine(info))),
         h('button.mw-btn.mw-btn--primary.mw-btn--small', { type: 'button', onclick: () => loadSlot(info.slot) }, 'Load'),
         h('button.mw-btn.mw-btn--ghost.mw-btn--small', { type: 'button', title: 'Delete this saved game', onclick: async () => {
@@ -478,6 +475,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       }
     };
     const canEditPantheon = (i, s) => (i === myIndex()) || (isHost && s.kind === 'ai');
+    // Before the first win against the computer, Easy is marked as suggested in a game against the computer.
+    const suggested = !online && isHost && !hasBeatenComputer() ? 'easy' : null;
+    const diffNote = h('p.mw-hint.mw-diff-note', { hidden: true });
     const canEditTeam = (i, s) => M.isFilled(s) && (isHost || i === myIndex());
 
     // ---- slot rows ----
@@ -557,7 +557,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       // kind / name
       let who;
       if (isHost && i !== me && s.kind !== 'host') {
-        const opts = M.slotKindOptions(s, i, { myIndex: me, online });
+        const opts = M.slotKindOptions(s, i, { myIndex: me, online, suggested });
         const value = M.slotKindValue(s, i, me);
         who = h('select.mw-select.mw-select--who', {
           'aria-label': `Slot ${i + 1}`,
@@ -926,6 +926,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     function renderAll() {
       if (!alive) return;
       for (let i = 0; i < M.SLOT_COUNT; i++) renderRow(i);
+      const note = M.difficultyNote(st(), { online, suggested });
+      diffNote.textContent = note;
+      diffNote.hidden = !note;
       renderOptions();
       renderPreview();
       renderFooter();
@@ -1026,6 +1029,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
               h('span'), h('span'), h('span.mw-label', 'Player'), h('span.mw-label', 'Pantheon'), h('span.mw-label', 'Team'), h('span'),
             ),
             slotList,
+            diffNote,
           ),
           h('section.mw-panel.mw-options-panel', options),
         ),

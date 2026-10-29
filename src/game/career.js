@@ -16,6 +16,7 @@ const listeners = new Set();
 export function emptyCareer() {
   return {
     games: 0, wins: 0, losses: 0, draws: 0,
+    aiWins: 0, // wins against a team with a computer player in it (Play vs AI then starts on Normal, not Easy)
     seconds: 0, // game time played, in seconds
     kills: 0, gathered: 0,
     pantheons: {}, // id -> { games, wins }
@@ -32,7 +33,8 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math
 export function sanitizeCareer(raw) {
   const out = emptyCareer();
   if (!raw || typeof raw !== 'object') return out;
-  for (const k of ['games', 'wins', 'losses', 'draws', 'seconds', 'kills', 'gathered']) out[k] = num(raw[k]);
+  for (const k of ['games', 'wins', 'losses', 'draws', 'aiWins', 'seconds', 'kills', 'gathered']) out[k] = num(raw[k]);
+  out.aiWins = Math.min(out.aiWins, out.wins);
   if (raw.pantheons && typeof raw.pantheons === 'object') {
     for (const p of PANTHEON_LIST) {
       const r = raw.pantheons[p.id];
@@ -143,8 +145,10 @@ export function recordMatch(m, now = Date.now()) {
   const c = getCareer();
   const t = num(m.time);
   c.games++;
-  if (m.result === 'victory') c.wins++;
-  else if (m.result === 'defeat') c.losses++;
+  if (m.result === 'victory') {
+    c.wins++;
+    if (Array.isArray(m.enemies) && m.enemies.some((e) => e && e.kind === 'ai')) c.aiWins++;
+  } else if (m.result === 'defeat') c.losses++;
   else if (m.result === 'draw') c.draws++;
   c.seconds += t;
   c.kills += num(m.kills);
@@ -177,6 +181,14 @@ export function recordTutorial(rank, now = Date.now()) {
   const got = checkAchievements({ tutorial: true, medal: r, result: null }, c, now);
   persist();
   return got;
+}
+
+// Achievements that can only be won against the computer: a career from before aiWins was kept still shows its wins.
+const BEAT_AI_ACHIEVEMENTS = ['proving_ground', 'hard_won', 'undaunted'];
+
+/** Has this device's player ever won against the computer (any difficulty)? */
+export function hasBeatenComputer(c = getCareer()) {
+  return c.aiWins > 0 || BEAT_AI_ACHIEVEMENTS.some((id) => Object.hasOwn(c.unlocked, id));
 }
 
 /** The career screen was opened: nothing is new any more. */
