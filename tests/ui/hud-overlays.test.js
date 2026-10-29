@@ -89,3 +89,20 @@ test('the game-over screen shows the achievements the match unlocked and a line 
   assert.doesNotMatch(second.root.textContent, /unlocked/);
   resetCareer({});
 });
+
+test('the host closes a finished game: the open game-over panel says so (the message line is under it)', async () => {
+  const { Game } = await import('../../src/game/game.js');
+  const { ov, root } = setup({ host: false, clients: 0 });
+  ov.statsTable = () => null;
+  ov.showGameOver({ result: 'victory', winningTeam: 1, unlocked: [] });
+  assert.doesNotMatch(root.textContent, /host has closed/);
+  const messages = [];
+  const g = { disposed: false, overShown: true, launch: { role: 'client' }, setLoading() {}, hud: { overlays: ov, message: (t) => messages.push(t) } };
+  Game.prototype.onEnd.call(g, { reason: 'game-over' });
+  assert.equal(ov.name, 'gameover', 'the panel stays');
+  assert.match(root.textContent, /The host has closed the game\./);
+  assert.deepEqual(messages, ['The host has closed the game.'], 'and the chat line, for after Keep Watching');
+  // No game-over panel open (Keep Watching): nothing to note on.
+  ov.hide();
+  assert.equal(ov.noteEnded('The host has closed the game.'), false);
+});

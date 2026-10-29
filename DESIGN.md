@@ -1342,6 +1342,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
     `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
     'host-left' (connection lost), 'host-quit', 'game-over', or the host's sanitized reason.
+    Once the game is over, the host closing it ('game-over' / 'host-quit') leaves the game-over panel up:
+    the panel itself says "The host has closed the game." (`Overlays.noteEnded`), as does the chat.
   - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark({ kind, x, y }), onChat(cb), onMark(cb), onEnd(cb), start(), stop() }`
     (`sendMark` returns the clean mark or null; `onMark(cb({ from, name, kind, x, y }))` hears teammates' marks and my own).
 - `ViewState` (`src/game/view-state.js`, used identically on host and client):

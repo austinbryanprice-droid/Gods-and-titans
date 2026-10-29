@@ -891,7 +891,9 @@ export class Game {
     else if (reason !== REASONS.HOST_LEFT) dropTicket(this.launch);
     if (!this.hud) return;
     if (this.overShown && (reason === 'game-over' || reason === 'host-quit')) {
+      // The game-over panel covers the message line: it says so itself while open.
       this.hud.message('The host has closed the game.', 'system');
+      if (this.hud.overlays) this.hud.overlays.noteEnded('The host has closed the game.');
       return;
     }
     this.hud.overlays.showEnded(reason);
