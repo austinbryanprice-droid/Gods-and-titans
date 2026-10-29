@@ -348,6 +348,7 @@ export class Hud {
     // No player of mine (a replay seen by everyone): no resources to show, so no empty boxes either.
     setHidden(this.topRight, !me);
     setText(this.clock, formatClock(vs.time));
+    if (!this.taunt.hidden && this.endScreenUp()) this.hideTaunt();
     this.updatePeace();
     this.updateRelics();
     this.updateWaves();
@@ -704,7 +705,7 @@ export class Hud {
    * their name in their colour and the words, larger than the feed. A new taunt replaces the one up.
    */
   showTaunt(line) {
-    if (!line || typeof line !== 'object') return false;
+    if (!line || typeof line !== 'object' || this.endScreenUp()) return false;
     const text = sanitizeChat(line.text);
     if (!text) return false;
     const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
@@ -725,6 +726,19 @@ export class Hud {
       this.tauntTimer = setTimeout(() => (t.hidden = true), 500);
     }, tauntDwell(text));
     return true;
+  }
+
+  /** The taunt goes at once (an end screen came up over it). */
+  hideTaunt() {
+    clearTimeout(this.tauntTimer);
+    this.taunt.classList.remove('is-on');
+    this.taunt.hidden = true;
+  }
+
+  /** The end-of-match screens (game over, defeated, ended) stand at the top centre: no taunt behind them. */
+  endScreenUp() {
+    const n = this.overlays && this.overlays.name;
+    return n === 'gameover' || n === 'defeated' || n === 'ended';
   }
 
   /** Big centred announcement under the top bar. */

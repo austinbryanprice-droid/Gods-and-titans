@@ -2455,7 +2455,9 @@ default on): `showChatLine` in `src/game/game.js` filters them, live chat and th
 A shown line is not a feed card but a taunt at the top centre (`Hud.showTaunt`, `.hud-taunt` in hud.css),
 under the banners: the speaker's pantheon emblem in a ring, their name in their colour, the words in
 quotes at 1.6em (the feed's cards are 1.18em), slamming in with a short shake (none under reduced
-motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. It comes with the
+motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. The end screens (game over,
+defeated, ended) take the top centre: the taunt up goes when one opens, and none is shown (nor heard) while
+one is up (`Hud.endScreenUp`). It comes with the
 `taunt` sound (sfx-alerts.js): two war-drum blows under a low brass fifth that bends down into the
 note with a growl, measured at peak -3.6 dB / loudest 400 ms -13.1 dB RMS, next to the war horn's -5.2 / -14.0.
 
