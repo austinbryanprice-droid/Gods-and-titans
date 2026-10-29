@@ -1344,6 +1344,11 @@ export class InputController {
         if (!rep) overlays.escape();
       } else if (key === 'Enter' && overlays.name === 'menu') {
         // let Enter activate the focused button
+      } else if (key === 'Enter' && !(e.target && e.target.tagName === 'BUTTON') && typeof hud.canChatOverPanel === 'function' && hud.canChatOverPanel()) {
+        // An online game's end panel: Enter (Shift+Enter: the allies) opens the chat over it, to say gg or agree on
+        // a rematch (DESIGN 7). A focused button keeps Enter; Esc in the box closes the box, not the panel.
+        e.preventDefault();
+        if (!rep) hud.openChat({ allies: !!e.shiftKey });
       } else if (/^F[1-3]$/.test(key)) e.preventDefault(); // browser help / search; F5, F11, F12 keep working
       return;
     }
