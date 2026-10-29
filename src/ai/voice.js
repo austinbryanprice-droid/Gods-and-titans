@@ -1,5 +1,5 @@
 // AI chat voices (DESIGN 10.1): computer players say a short in-character line at the moments
-// that matter: a greeting, first contact, the first blow struck against them, the end of a
+// that matter: a greeting (to allies when there is no enemy player), first contact, the first blow struck against them, the end of a
 // Decade of Peace, summoning a god or a Titan, losing a god, being nearly beaten, defeat and
 // victory. Runs on the host only, beside the AIs; it reads the World and the snapshot events
 // and returns chat lines (it never changes the World). Rate-limited so that the feed stays a
@@ -103,7 +103,8 @@ export class AIVoices {
     for (const v of this.voices.values()) {
       if (!v.greeted && now >= v.greetAt) {
         v.greeted = true;
-        if (this.rng.chance(VOICE.greetChance)) this.say(v, 'greet', {}, now, out);
+        // With no enemy player (the Trial of the Titans) a greeting to rivals would be wrong: greet the allies.
+        if (this.rng.chance(VOICE.greetChance)) this.say(v, this.hasEnemyPlayer(v.index) ? 'greet' : 'greetAlly', {}, now, out);
       }
     }
     if (now >= this.nextScan) {
@@ -178,6 +179,12 @@ export class AIVoices {
       }
       default:
     }
+  }
+
+  /** Whether any other player is this AI's enemy (none in the Trial of the Titans, where the monsters belong to no one). */
+  hasEnemyPlayer(me) {
+    const world = this.world;
+    return world.players.some((p, i) => p && i !== me && world.areEnemies(me, i));
   }
 
   /** An AI still in the game, chosen at random (for a line about the whole match). */

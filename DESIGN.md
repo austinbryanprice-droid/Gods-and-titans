@@ -2427,7 +2427,8 @@ Computer players talk, the way AoE II's AIs do: a short in-character chat line a
 matter, each pantheon in its own voice (Olympian hubris, Norse sagas and mead, Egyptian eternity, karma
 and the wheel, the kami's honour, the Mandate of Heaven, the hungry Fifth Sun, the wild Celtic woods,
 Sumerian scribes and clay tablets, West African drums and ancestors). The moments (`VOICE_TRIGGERS`):
-a greeting a few seconds in (70 % of AIs, staggered), first contact with another player (an enemy
+a greeting a few seconds in (70 % of AIs, staggered; in a match with no enemy player, the Trial of the Titans,
+a greeting to allies instead, `greetAlly`, as one to rivals would be wrong there), first contact with another player (an enemy
 player's unit within 14 tiles of one of its units or buildings, scanned every 2 game seconds; the
 line names that player), the first blow a player strikes against it (the `underAttack` event, with
 the nearest enemy player's unit as the attacker; wild creatures do not count), the end of a Decade
