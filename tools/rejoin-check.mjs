@@ -29,6 +29,23 @@ async function until(page, fn, what, ms = 120000, arg = undefined) {
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: 900, height: 560 } });
+// The tabs share one browser, so one localStorage, while players have a browser each: since the host keeps a
+// rejoin ticket too (DESIGN 7), a shared store would let one tab's ticket replace another's. Each tab (named by
+// sessionStorage 'who', which survives its reloads) gets its own keys.
+await ctx.addInitScript(() => {
+  try {
+    const who = sessionStorage.getItem('who');
+    if (!who) return;
+    const P = Storage.prototype;
+    const { getItem, setItem, removeItem } = P;
+    const key = (s, k) => (s === window.localStorage ? `${who}:${k}` : k);
+    P.getItem = function (k) { return getItem.call(this, key(this, k)); };
+    P.setItem = function (k, v) { return setItem.call(this, key(this, k), v); };
+    P.removeItem = function (k) { return removeItem.call(this, key(this, k)); };
+  } catch {
+    // ignore
+  }
+});
 await ctx.addInitScript(() => {
   try {
     const name = sessionStorage.getItem('who') || 'Player';
