@@ -37,6 +37,7 @@ import { CareerTracker } from './career-tracker.js';
 import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
 import { TutorialDirector } from './tutorial.js';
+import { SlowFrameWatch } from './slow-hint.js';
 import { isTutorial } from '../sim/tutorial.js';
 import { recordDaily, dailyChallenge } from './daily.js';
 import { scoreOf } from '../data/score.js';
@@ -480,6 +481,8 @@ export class Game {
     const tr = performance.now();
     this.renderer = new RendererClass(this.canvas, { viewState: this.viewState, setup: session.setup, quality: this.settings.quality, timeOfDay: queryTimeOfDay() || this.settings.timeOfDay });
     this.stats.rendererInitMs = performance.now() - tr;
+    // A match that keeps running slowly above Low quality says once (per device) where to lower it (src/game/slow-hint.js).
+    this.slowWatch = this.replay ? null : new SlowFrameWatch();
     this.setLoading(false);
     this.resize();
     this.applyShowAllBars();
@@ -681,6 +684,8 @@ export class Game {
         this.input.update(dt);
         this.renderer.update(this.paused || this.netPause ? 0 : dt);
         this.renderer.render(now);
+        const slow = this.slowWatch ? this.slowWatch.frame(now, this.settings.quality) : null;
+        if (slow && this.hud) this.hud.message(slow, 'system', { icon: '🐢' });
       }
     } catch (err) {
       this.frameFault(err);

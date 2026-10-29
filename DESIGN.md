@@ -2718,7 +2718,11 @@ creates the `AlertEngine` and the `TabAttention` (section 9, "Alerts, tips and s
 line, a sound, a minimap ping, the spot Space jumps to and a tab flash, and tells the HUD to hold its tips
 while the player is under pressure. It also makes the `MusicDirector` (section 9, "Music"):
 `update(dt)` each frame turns the match's fighting into the score's intensity, and the director plays the player's
-pantheon theme.
+pantheon theme. The `SlowFrameWatch` (`src/game/slow-hint.js`, not in replays) takes the frame intervals of the
+drawn frames: when their median over a 10 s stretch is above 33 ms at a Graphics quality above Low (a change of
+quality, a pause or a hidden tab starts the stretch over), the HUD says once "The game is running slowly. Lower
+Graphics quality in the F10 menu (now: Medium)." It changes nothing itself, and it is said once per device
+(localStorage `mythicwar-slow-hint`; with storage blocked, once per page).
 
 ### 11.1 Intro film (src/intro/, src/ui/intro.js)
 
