@@ -1005,6 +1005,8 @@ Short keys keep network deltas small. Numbers: positions rounded to 0.01, hp to 
               tier, defeated, gods: [typeIds alive], fallen: { typeId: level }, titan: bool,
               up: [upgradeIds researched, in order], ar: bool (Auto-Repair on),
               rl?: [relic types resting in their Temples] (5.15; omitted when none),
+              sur?: true (fell by surrendering; 9.1), away?: true (added by the online host, not the sim:
+              a stand-in AI holds the seat, 7; 9.1),
               stats: { gathered, gold, wood, faith, unitsTrained, kills, losses, buildings, razed, killValue, lostValue, army }, // 5.12
               gp, gb? }],               // god powers (4.11): gp bit i = the tier i+1 power is spent; gb = boons running [[stat, pct, seconds left]]
   entities: [EntityView],
@@ -1290,7 +1292,14 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link
     offers Rejoin Game. The host gets a token too (`lobby.hostToken`), for a game carried on by its
-    heir. Check: `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
+    heir. A client's ticket also keeps `next` (`saveNext`, from the host's PLAN every 2 s: the heir's room and
+    the seat's proof there; null when this browser is the heir; tickets without it still read). Rejoin
+    (`seekGame`) tries the ticket's room, then `next`, and while nobody answers at either ("not found") or the
+    host says "not yet", keeps looking for `REJOIN_SEEK_MS` (20 s, "Looking for the game…"): a host moving the
+    game leaves a gap between its room closing and the heir's opening, and an old host who reopens quickly or
+    a client who reloads just then must not lose the ticket. Only then "The game in room X is gone" (ticket
+    dropped); a host's refusal or a network error comes back at once as before. Found at the heir's, the
+    ticket moves there. Check: `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
   - Host migration (`src/net/handoff.js`, `HostSession.enableHandoff`, `Game.migrate`): a host that
     leaves no longer ends an online game. The host names an heir (`pickHeir`: the connected player
     still playing with the lowest index) and a room code for them, and tells every client
@@ -2328,7 +2337,17 @@ achievements with the time, and the ones not yet seen.
   buildings lost (`death`), `tierUp`, `levelUp`, `rankUp`, and once a game second the player record
   (gods on the field, kills, gathered) and own entities (best god level and rank, a finished Manor or
   stone wall). The sides come from the setup: own pantheon, team size, enemies with kind and AI difficulty,
-  and whether the Decade of Peace is on.
+  and whether the Decade of Peace is on. Per enemy the tracker also follows the snapshot's `away` (a stand-in AI
+  holds the seat, 7) and `sur` (surrendered) until that enemy falls, and keeps what they were then.
+- Stand-ins: a human enemy counts as a person (Mortal Rival, the only achievement about human enemies) only
+  if a person held the seat when that enemy fell; for a win that is the end of their part of the game (simple,
+  and a rival who dropped out and was beaten by proxy is the farmed case). A seat a stand-in held counts as
+  neither a person nor a computer player (no Proving Ground, no `aiWins`).
+- Early surrenders: a victory that ended before `EARNED_WIN_SECONDS` (5 game minutes) with an enemy who
+  surrendered is not earned (`earnedWin`): the game counts as played and shows as a victory in the history,
+  but adds no win (career or pantheon) and unlocks nothing that needs a win (Lightning War, Not One Stone,
+  First Victory, the pantheon wins…). Five minutes because the earliest computer attack wave comes at 6.5
+  (Brutal), so before then nobody can have been beaten in a fight. A win before then without a surrender counts.
 - An achievement is `{ id, group, name, icon, desc, test(m, c), progress?(c) }`: `m` the match's facts,
   `c` the career with the match counted. Mid-match the tracker checks with `m.result` null, so the ones
   that need no result (Summon a Titan, a Champion, a Manor...) unlock at once: a feed line "Achievement

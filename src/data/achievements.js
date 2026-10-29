@@ -17,7 +17,25 @@ export const ACHIEVEMENT_GROUPS = [
   ['challenge', 'Challenges'],
 ];
 
-const won = (m) => m.result === 'victory';
+/**
+ * A win handed over before this much game time (seconds) by an enemy's surrender is not an earned one: it unlocks
+ * no achievement about winning and is not counted among the career's wins (DESIGN 9.1). Five minutes: the
+ * earliest attack wave of any computer player comes at 6.5 minutes (Brutal, src/ai/profiles.js), so before
+ * then no side can have been beaten in a fight, and a surrender can only be a gift.
+ */
+export const EARNED_WIN_SECONDS = 5 * 60;
+
+/** Did this match end in a win that counts: a victory, not handed over by an early surrender? */
+export function earnedWin(m) {
+  if (!m || m.result !== 'victory') return false;
+  const gift = Array.isArray(m.enemies) && m.enemies.some((e) => e && e.surrendered);
+  return !(gift && (Number(m.time) || 0) < EARNED_WIN_SECONDS);
+}
+
+/** An enemy seat a person held when that enemy fell (not a stand-in AI playing for one who dropped out). */
+const humanRival = (e) => e.kind === 'human' && !e.away;
+
+const won = (m) => earnedWin(m);
 const count = (n, need) => [Math.min(n, need), need];
 const winsWith = (c, id) => (c.pantheons[id] && c.pantheons[id].wins) || 0;
 const pantheonsWon = (c) => PANTHEON_LIST.filter((p) => winsWith(c, p.id) > 0).length;
@@ -103,7 +121,7 @@ export const ACHIEVEMENTS = [
   { id: 'undaunted', group: 'challenge', name: 'Undaunted', icon: '💀', desc: 'Win against a Brutal AI.',
     test: (m) => won(m) && m.enemies.some((e) => e.kind === 'ai' && e.difficulty === 'brutal') },
   { id: 'mortal_rival', group: 'challenge', name: 'Mortal Rival', icon: '🤝', desc: 'Win against a human player.',
-    test: (m) => won(m) && m.enemies.some((e) => e.kind === 'human') },
+    test: (m) => won(m) && m.enemies.some(humanRival) },
   { id: 'shoulder_to_shoulder', group: 'challenge', name: 'Shoulder to Shoulder', icon: '👥', desc: 'Win with an ally at your side.',
     test: (m) => won(m) && m.teamSize >= 2 },
   { id: 'decade_of_peace', group: 'challenge', name: 'Peace, Then War', icon: '🕊️', desc: 'Win a Decade of Peace game.',

@@ -3,7 +3,7 @@
 // and the tracker reading facts from events and snapshots.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID } from '../../src/data/achievements.js';
+import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID, EARNED_WIN_SECONDS, earnedWin } from '../../src/data/achievements.js';
 import { PANTHEON_LIST } from '../../src/data/pantheon-list.js';
 import { getCareer, recordMatch, checkLive, resetCareer, sanitizeCareer, careerSummary, markSeen } from '../../src/game/career.js';
 import { CareerTracker } from '../../src/game/career-tracker.js';
@@ -175,7 +175,7 @@ test('the tracker reads summons, ranks, lost buildings and the snapshot record, 
   assert.equal(m.kills, 7);
   assert.equal(m.pantheon, 'norse');
   assert.equal(m.peace, true);
-  assert.deepEqual(m.enemies, [{ kind: 'ai', difficulty: 'hard' }]);
+  assert.deepEqual(m.enemies, [{ index: 1, kind: 'ai', difficulty: 'hard', away: false, surrendered: false, out: false }]);
   const all = t.finish('victory');
   assert.deepEqual(all.map((a) => a.id), ['titan_unleashed', 'first_victory']);
   assert.equal(calls.record.length, 1);
@@ -184,6 +184,71 @@ test('the tracker reads summons, ranks, lost buildings and the snapshot record, 
   vs.fire('spawn', { type: 'spawn', o: 0, t: 'norse_odin' });
   assert.equal(t.m.godsSummoned, 1, 'nothing more after the end');
   t.dispose();
+});
+
+test('Mortal Rival: a win over a seat counts as one over a person only if a person held it when it fell', () => {
+  const human = (over = {}) => ({ index: 1, kind: 'human', difficulty: null, ...over });
+  // The rival dropped out and a stand-in AI was beaten in their seat: no Mortal Rival, and no AI challenge either.
+  let got = recordMatch(match({ enemies: [human({ away: true })] })).map((a) => a.id);
+  assert.ok(!got.includes('mortal_rival'), got.join());
+  assert.ok(!got.includes('proving_ground'));
+  assert.equal(getCareer().aiWins, 0);
+  assert.ok(got.includes('first_victory'), 'still a win');
+  // Two rivals, one of them there to the end: it counts.
+  got = recordMatch(match({ enemies: [human({ away: true }), human({ index: 2 })] })).map((a) => a.id);
+  assert.ok(got.includes('mortal_rival'));
+});
+
+test('a win handed over by a surrender in the first five minutes is not a win for the career', () => {
+  const enemies = [{ index: 1, kind: 'human', difficulty: null, surrendered: true }];
+  // The 0:36 surrender of the audit: a game played, shown as a victory, but no win and no achievement about winning.
+  const got = recordMatch(match({ time: 36, buildingsLost: 0, teamSize: 2, enemies })).map((a) => a.id);
+  assert.deepEqual(got, []);
+  const c = getCareer();
+  assert.equal(c.games, 1);
+  assert.equal(c.wins, 0);
+  assert.deepEqual(c.pantheons.greek, { games: 1, wins: 0 });
+  assert.equal(c.history[0].r, 'victory');
+  assert.equal(EARNED_WIN_SECONDS, 300);
+  assert.equal(earnedWin(match({ time: 299, enemies })), false);
+  // After five minutes a surrender is a real one: the win counts, Lightning War with it.
+  const later = recordMatch(match({ time: 6 * 60, buildingsLost: 0, enemies })).map((a) => a.id);
+  for (const id of ['first_victory', 'win_greek', 'lightning_war', 'untouched', 'mortal_rival']) assert.ok(later.includes(id), id);
+  assert.equal(getCareer().wins, 1);
+  // A quick win nobody surrendered (all beaten in a fight) is earned, however fast.
+  assert.equal(earnedWin(match({ time: 200, enemies: [{ kind: 'ai', difficulty: 'easy' }] })), true);
+  assert.equal(earnedWin(match({ result: 'defeat', time: 1000 })), false);
+});
+
+test('the tracker reads stand-ins and surrenders from the snapshots, as they were when each enemy fell', () => {
+  const vs = fakeView();
+  vs.players.push({ i: 2, team: 2 });
+  const setup = { players: [{ index: 0, team: 1, pantheon: 'norse', kind: 'human' }, { index: 1, team: 2, kind: 'human' }, { index: 2, team: 2, kind: 'human' }] };
+  const calls = [];
+  const t = new CareerTracker({ viewState: vs, setup, career: { checkLive: () => [], recordMatch: (m) => { calls.push(JSON.parse(JSON.stringify(m))); return []; } } }).attach();
+  vs.fire('snapshot', {});
+  // Player 1 drops out (a stand-in holds the seat) and comes back; player 2 drops out.
+  vs.players[1].away = true;
+  vs.players[2].away = true;
+  vs.fire('snapshot', {});
+  delete vs.players[1].away;
+  vs.fire('snapshot', {});
+  // Player 1 is beaten while there, then leaves: still beaten as a person. Player 2's seat falls to a surrender while a stand-in holds it.
+  vs.players[1].defeated = true;
+  vs.fire('snapshot', {});
+  vs.players[1].away = true; // (a defeated player who leaves gets no stand-in, but even a mark later changes nothing)
+  vs.players[2].defeated = true;
+  vs.players[2].sur = true;
+  vs.time = 40;
+  vs.fire('snapshot', {});
+  t.finish('victory');
+  const [m] = calls;
+  assert.deepEqual(m.enemies.map((e) => [e.index, e.away, e.surrendered, e.out]), [[1, false, false, true], [2, true, true, true]]);
+  // A rejoined game's tally from before enemies had an index is read again from the setup.
+  const t2 = new CareerTracker({ viewState: vs, setup, career: { checkLive: () => [], recordMatch: () => [] } });
+  Object.assign(t2.m, { pantheon: 'norse', enemies: [{ kind: 'human', difficulty: null }] });
+  t2.observe();
+  assert.deepEqual(t2.m.enemies.map((e) => e.index), [1, 2]);
 });
 
 test('a spectator has no career to count', () => {

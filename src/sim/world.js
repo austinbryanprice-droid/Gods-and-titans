@@ -735,6 +735,7 @@ export class World {
     const p = this.players[i];
     if (!p || p.defeated) return;
     p.defeated = true;
+    if (surrender) p.surrendered = true; // the career does not count a win handed over this way early (DESIGN 9.1)
     for (const u of this.unitList) if (!u.dead && u.owner === i) this.killEntity(u, null);
     // A surrendering player's buildings fall with them. Otherwise only wall segments can be left (they
     // do not keep a player in the game): they come down too, or no teammate could ever open them.
