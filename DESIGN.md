@@ -2448,7 +2448,13 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
   choose the Worshippers (a selection with one), three mining (`tk` gold; the text sends the whole selection and
   asks to keep at least three on it), two chopping (any two, a miner will do: click one, Shift+click a second), a finished House,
   a Shrine, two praying, a Temple, a god on the field, a Barracks, four Barracks soldiers alive, and the
-  victory. A step once done stays done, and several finish at once when the player ran ahead.
+  victory. Steps are latched, not read live: a step is met (`TutorialDirector.met`) the first time its
+  `done(c)` holds, in turn or out of turn, and stays met when the Worshippers move on to other work; the
+  director then walks past every met step, several at once when the player ran ahead. A step with
+  `impliedFrom` also counts as met once that step or any later one is: choosing the Worshippers from
+  mining on, and mining, chopping and praying from a god on the field on (a learner holding a god and an
+  army is never held at "Chop wood"; a House alone skips nothing). The director lives in the Game, not the
+  sim, so nothing goes over the wire or into a replay, and the lesson is never saved (`canSaveSetup` refuses a tutorial setup).
 - HUD: the objective panel takes the getting-started checklist's corner (no checklist and no gameplay tips
   in this match): step n of 11, icon, title, the text with `[[Key]]` caps, the progress ("2/3", "Faith 140/200",
   "Their Town Center: 64%"), a row of step bars, a green glow for a moment when a step is finished. A gold
