@@ -360,3 +360,47 @@ test('The Mother of Monsters: breaking Akkad early does not win it; Tiamat still
   run(w, 2);
   assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' }, 'won while her brood still crawls');
 });
+
+/** The `campaignSay` events a world emits from now on, as event ids. */
+function said(w) {
+  const out = [];
+  const emit = w.emit.bind(w);
+  w.emit = (ev) => {
+    if (ev && ev.type === 'campaignSay') out.push(MISSION_BY_ID[w.setup.campaign].events[ev.e].after || ev.e);
+    return emit(ev);
+  };
+  return out;
+}
+
+test('a line about what to do next is not said as the mission ends with that objective, only while it goes on', () => {
+  // Eridu, Akkad already broken: Tiamat's fall wins, and "Now finish the king of Akkad" stays unsaid.
+  const w = world('eridu');
+  for (const b of w.buildingList.filter((x) => x.owner === 1 || x.owner === 3)) w.killEntity(b, null);
+  w.time = 779.5;
+  run(w, 3);
+  const lines = said(w);
+  w.killEntity(tagged(w, 'tiamat')[0], null);
+  run(w, 2);
+  assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' });
+  assert.deepEqual(lines, []);
+  // With Akkad still standing, the same fall says it.
+  const w2 = world('eridu');
+  w2.time = 779.5;
+  run(w2, 3);
+  const lines2 = said(w2);
+  w2.killEntity(tagged(w2, 'tiamat')[0], null);
+  run(w2, 2);
+  assert.equal(w2.gameOver, null);
+  assert.deepEqual(lines2, ['tiamat']);
+  // Sails on the Nile: the Temple and a god up, the raid broken wins without "Finish what you started".
+  const w3 = world('delta');
+  run(w3, 271);
+  const tc = w3.buildingList.find((b) => b.cTag === 'home');
+  w3.createBuilding(0, 'temple', Math.floor(tc.x) + 6, Math.floor(tc.y) + 6, true, true);
+  w3.spawnUnit(0, 'egyptian_ra', tc.x + 3, tc.y + 3);
+  const lines3 = said(w3);
+  for (const u of tagged(w3, 'raid')) w3.killEntity(u, null);
+  run(w3, 2);
+  assert.deepEqual(w3.gameOver, { winningTeam: 1, how: 'campaign' });
+  assert.deepEqual(lines3, []);
+});

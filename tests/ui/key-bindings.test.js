@@ -149,3 +149,18 @@ test('panel: click a key, press a new one, it is saved; Esc keeps the old one; r
   assert.equal(win.handlers.length, 0);
   saveSettings({ keyBindings: {} });
 });
+
+test('panel: a key of the digit row is refused whatever it types (AZERTY\'s 2 is "É"): it selects a control group', () => {
+  const win = fakeWin();
+  const panel = buildKeyPanel({ win });
+  const up = find(panel.el, (n) => n.dataset && n.dataset.action === 'cam_up');
+  up.fire('click', { stopPropagation() {} });
+  win.press('é', { code: 'Digit2' });
+  assert.equal(panel.waiting, 'cam_up', 'still waiting');
+  assert.deepEqual({ ...getSettings().keyBindings }, {});
+  win.press('-', { code: 'NumpadSubtract' }); // the keypad's minus is fine (zoom out takes ↑ in exchange)
+  assert.equal(panel.waiting, null);
+  assert.equal(getSettings().keyBindings.cam_up, '-');
+  panel.dispose();
+  saveSettings({ keyBindings: {} });
+});

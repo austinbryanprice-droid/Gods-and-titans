@@ -108,8 +108,8 @@ export function buildKeyPanel({ win = typeof window !== 'undefined' ? window : n
     if (key === 'Escape') {
       waiting = null;
       note = '';
-    } else if (!isBindableKey(key)) {
-      note = refusedText(key);
+    } else if (!isBindableKey(key) || /^Digit[0-9]$/.test(e.code || '')) {
+      note = refusedText(/^Digit/.test(e.code || '') ? '1' : key); // the digit row is the control groups' on every layout
     } else {
       const action = waiting;
       const before = bindingsOf(getSettings().keyBindings);

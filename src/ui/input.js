@@ -1374,8 +1374,10 @@ export class InputController {
     }
     // The camera's keys (rebindable, key-bindings.js): checked before the command card, so a letter
     // bound here wins over a command of that letter.
+    // The digit row stays the control groups' whatever a layout types there (AZERTY's 6 is '-', the zoom-out key).
     const name = normKey(e);
-    const cam = name.length === 1 && (e.ctrlKey || e.metaKey) ? null : actionOf(this.bindings(), name, 'camera');
+    const groupRow = /^Digit[1-9]$/.test(e.code || '');
+    const cam = groupRow || (name.length === 1 && (e.ctrlKey || e.metaKey)) ? null : actionOf(this.bindings(), name, 'camera');
     if (cam) {
       e.preventDefault();
       if (PAN_ACTIONS[cam]) this.keys.add(cam);

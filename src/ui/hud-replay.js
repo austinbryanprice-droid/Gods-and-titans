@@ -9,6 +9,7 @@ import { REPLAY_SPEEDS } from '../game/replay-session.js';
 import { fromOtherBuild } from '../game/replay.js';
 import { PANTHEON_EMBLEMS } from './menu-model.js';
 import { TICK_RATE } from '../config.js';
+import { displayColor } from '../team-colors.js';
 
 export const JUMP_SECONDS = 30;
 const TURN_STEP = 15; // degrees a press of Q / E turns the view
@@ -73,7 +74,7 @@ export class ReplayBar {
     this.vision.appendChild(new Option('👁 Everyone', '-1'));
     s.record.players.forEach((p, i) => {
       const o = new Option(`${PANTHEON_EMBLEMS[p.pantheon] || '✦'} ${p.name}`, String(i));
-      o.style.color = safeColor(p.color);
+      o.style.color = displayColor(safeColor(p.color));
       this.vision.appendChild(o);
     });
     this.vision.addEventListener('change', () => this.setViewer(Number(this.vision.value)));
