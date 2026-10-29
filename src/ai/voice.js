@@ -304,5 +304,7 @@ export class AIVoices {
  * @param {number[]} players the AI players that speak
  */
 export function createVoices(world, players) {
+  // A campaign mission's enemies stay in character: no skirmish banter, its narrator tells the story (DESIGN 5.16).
+  if (world.setup && typeof world.setup.campaign === 'string') return null;
   return new AIVoices(world, players);
 }

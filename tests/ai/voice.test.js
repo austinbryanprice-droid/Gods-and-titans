@@ -322,3 +322,14 @@ test('a loaded game: no second greeting or first contact, and gods already out a
     VOICE.greetChance = 0.7;
   }
 });
+
+test('a campaign mission has no skirmish banter: its enemies stay in character and the narrator tells the story', async () => {
+  const { campaignSetup } = await import('../../src/sim/campaign.js');
+  const mission = createWorld(campaignSetup('vigrid', { name: 'Ada' }));
+  assert.equal(createVoices(mission, [1, 2]), null);
+  const skirmish = createWorld({
+    version: '0.1.0', seed: 1, mapSize: 'small',
+    players: ['greek', 'norse'].map((p, i) => ({ index: i, name: `AI ${i + 1}`, team: i + 1, pantheon: p, kind: 'ai', difficulty: 'normal' })),
+  });
+  assert.ok(createVoices(skirmish, [0, 1]) instanceof AIVoices);
+});

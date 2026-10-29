@@ -2556,7 +2556,8 @@ matters is anti-air against flyers, which every AI already does.
 Computer players talk, the way AoE II's AIs do: a short in-character chat line at the moments that
 matter, each pantheon in its own voice (Olympian hubris, Norse sagas and mead, Egyptian eternity, karma
 and the wheel, the kami's honour, the Mandate of Heaven, the hungry Fifth Sun, the wild Celtic woods,
-Sumerian scribes and clay tablets, West African drums and ancestors). The moments (`VOICE_TRIGGERS`):
+Sumerian scribes and clay tablets, West African drums and ancestors). A campaign mission has none
+(`createVoices` returns null): its enemies are story characters, and its narrator speaks instead. The moments (`VOICE_TRIGGERS`):
 a greeting a few seconds in (70 % of AIs, staggered; in a match with no enemy player, the Trial of the Titans,
 a greeting to allies instead, `greetAlly`, as one to rivals would be wrong there), first contact with another player (an enemy
 player's unit within 14 tiles of one of its units or buildings, scanned every 2 game seconds; the
