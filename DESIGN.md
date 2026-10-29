@@ -1251,7 +1251,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     for the whole game. A connection after the start that says HELLO with a known token is handed to
     the game's session (`lobby.setRejoinHandler`, set by the Game): the stand-in AI gives the seat
     back (or a link of that player still open is replaced, its window told `REPLACED`), and the
-    client gets `start` again and a full snapshot; its new link may stay silent for
+    client gets `start` again and a full snapshot (the client keeps its career tally with the ticket,
+    `saveTally`, and a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
     `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. Anyone else is told
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link

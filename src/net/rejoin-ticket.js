@@ -54,6 +54,37 @@ export function clearTicket(store = storage(), token = null) {
   }
 }
 
+const MAX_TALLY_CHARS = 8000;
+
+/**
+ * Keep the career's running tally of this game (CareerTracker.m: buildings lost, gods summoned, …) with its
+ * ticket, so that a rejoined game carries on counting instead of starting from nothing. Only for that token.
+ */
+export function saveTally(token, tally, store = storage()) {
+  if (!store || !token || !tally || typeof tally !== 'object') return false;
+  try {
+    const raw = store.getItem(REJOIN_KEY);
+    const t = raw ? JSON.parse(raw) : null;
+    if (!t || typeof t !== 'object' || t.token !== token) return false;
+    const json = JSON.stringify(tally);
+    if (json.length > MAX_TALLY_CHARS) return false;
+    t.tally = JSON.parse(json);
+    store.setItem(REJOIN_KEY, JSON.stringify(t));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cleanTally(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  try {
+    return JSON.stringify(v).length <= MAX_TALLY_CHARS ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function cleanTicket(t, nowMs) {
   if (!t || typeof t !== 'object') return null;
   const roomCode = normalizeRoomCode(t.roomCode);
@@ -67,5 +98,6 @@ function cleanTicket(t, nowMs) {
     name: sanitizeName(t.name, 'Player'),
     transport: TRANSPORTS.includes(t.transport) ? t.transport : 'peer',
     at,
+    tally: cleanTally(t.tally), // the career's running tally (saveTally), or null
   };
 }

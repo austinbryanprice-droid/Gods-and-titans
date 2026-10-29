@@ -32,7 +32,7 @@ import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
-import { readTicket, clearTicket } from '../net/rejoin-ticket.js';
+import { readTicket, clearTicket, saveTally } from '../net/rejoin-ticket.js';
 import { CareerTracker } from './career-tracker.js';
 import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
@@ -405,6 +405,7 @@ export class Game {
     if (!this.tutorial && !this.mission && !this.replay && !settled) {
       this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
       this.offs.push(() => this.career.dispose());
+      if (rejoinMatchId(this.launch)) this.keepTally();
     }
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
@@ -940,6 +941,27 @@ export class Game {
     const l = this.launch;
     const t = l && l.role === 'client' && l.rejoin ? readTicket() : null;
     return t && t.token === l.rejoin ? t : null;
+  }
+
+  /**
+   * A client of a game it can rejoin (DESIGN 7) keeps the career's running tally with its ticket, every few
+   * seconds and when it leaves: a rejoined Game carries on from it (buildings lost, gods summoned, …), so that
+   * a reload neither forgets progress nor earns an achievement the match did not.
+   */
+  keepTally() {
+    const token = this.launch.rejoin;
+    const t = this.rejoinTicket();
+    const career = this.career;
+    if (t && t.tally) Object.assign(career.m, t.tally);
+    let last = 0;
+    const keep = () => saveTally(token, career.m);
+    this.offs.push(this.viewState.on('snapshot', () => {
+      const ms = Date.now();
+      if (ms - last < 3000) return;
+      last = ms;
+      keep();
+    }));
+    this.offs.push(keep);
   }
 
   /** Rejoin on the Game Ended screen: leave this Game and connect to the room again. */

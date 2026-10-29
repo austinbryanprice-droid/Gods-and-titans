@@ -5,7 +5,7 @@ import { LobbyHost, LobbyClient } from '../../src/net/lobby.js';
 import { MSG, REASONS } from '../../src/net/protocol.js';
 import { createLoopbackPair } from '../../src/net/transport.js';
 import { fakeWorldFactory, makeFakeMap } from '../../src/net/fake-world.js';
-import { saveTicket, readTicket, clearTicket, REJOIN_KEY, TICKET_MAX_AGE_MS } from '../../src/net/rejoin-ticket.js';
+import { saveTicket, readTicket, clearTicket, saveTally, REJOIN_KEY, TICKET_MAX_AGE_MS } from '../../src/net/rejoin-ticket.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(cond, ms = 3000, what = 'condition') {
@@ -208,7 +208,12 @@ test('rejoin ticket: kept for one game, a few hours, and cleared once that game 
   const t0 = 1_000_000;
   const token = 'c0ffee'.repeat(4);
   assert.equal(saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local' }, store, t0).roomCode, 'ABCDE');
-  assert.deepEqual(readTicket(store, t0 + 1000), { roomCode: 'ABCDE', token, myIndex: 2, name: 'Ann', transport: 'local', at: t0 });
+  assert.deepEqual(readTicket(store, t0 + 1000), { roomCode: 'ABCDE', token, myIndex: 2, name: 'Ann', transport: 'local', at: t0, tally: null });
+  // The career's running tally rides with the ticket of that game only.
+  assert.equal(saveTally('beef'.repeat(8), { buildingsLost: 3 }, store), false);
+  assert.equal(saveTally(token, { buildingsLost: 3, godsSummoned: 1 }, store), true);
+  assert.deepEqual(readTicket(store, t0 + 1000).tally, { buildingsLost: 3, godsSummoned: 1 });
+  assert.equal(saveTally(token, { junk: 'x'.repeat(9000) }, store), false, 'too big');
   assert.equal(readTicket(store, t0 + TICKET_MAX_AGE_MS + 1), null, 'too old');
   clearTicket(store, 'beef'.repeat(8)); // another game's token leaves it alone
   assert.ok(mem.has(REJOIN_KEY));
