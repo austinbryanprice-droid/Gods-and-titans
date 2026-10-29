@@ -70,3 +70,21 @@ test('the career screen lists the best medal of the guided first match', async (
   for (const n of renderCareerContent(sanitizeCareer({}), new Set())) none.appendChild(n);
   assert.doesNotMatch(none.textContent, /Guided first match/);
 });
+
+test('after the lesson, the skirmish screen opens a Play vs AI lobby on Easy with the lesson\'s pantheon', async () => {
+  resetCareer({ games: 5, wins: 5, aiWins: 5 }); // even a player who would get Normal by default
+  const { LobbyHost } = await import('../../src/net/lobby.js');
+  const create = LobbyHost.create;
+  let lobby = null;
+  LobbyHost.create = async (...args) => (lobby = await create.apply(LobbyHost, args));
+  after(() => (LobbyHost.create = create));
+  const root = document.createElement('div');
+  menu.createMenu({ root, onStart() {} });
+  menu.showMenu('skirmish', { difficulty: 'easy', pantheon: 'greek' });
+  for (let i = 0; i < 100 && !/Prepare for Battle/i.test(root.textContent); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.match(root.textContent, /Prepare for Battle/i);
+  const slots = lobby.state.slots;
+  assert.equal(slots.find((s) => s.kind === 'host').pantheon, 'greek');
+  assert.deepEqual(slots.filter((s) => s.kind === 'ai').map((s) => s.difficulty), ['easy']);
+  menu.showMenu('title');
+});

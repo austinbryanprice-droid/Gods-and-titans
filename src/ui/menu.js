@@ -202,13 +202,17 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
 
   // ------------------------------------------------------------ actions
 
-  async function playVsAI() {
+  /**
+   * Play vs AI: a lobby of one player against one computer player on a small map. `opts` may set the AI's
+   * difficulty and the player's pantheon (the guided first match's Play vs AI (Easy) sets both).
+   */
+  async function playVsAI(opts = {}) {
     const done = busy('Preparing the battlefield…');
     try {
       const mod = await loadLobby();
       const name = getSettings().name;
       // A first game is against an Easy AI; once the career has a win against the computer, Normal (DESIGN 9).
-      const difficulty = M.defaultAiDifficulty(hasBeatenComputer());
+      const difficulty = M.DIFFICULTIES.includes(opts.difficulty) ? opts.difficulty : M.defaultAiDifficulty(hasBeatenComputer());
       const lobby = await mod.LobbyHost.create({ transport: 'none', name, aiDifficulty: difficulty });
       // Co-op preset, trimmed to one human against one AI on a small map.
       const safe = (fn) => {
@@ -229,6 +233,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
           safe(() => lobby.setSlot(i, { kind: 'ai', difficulty, team: 2 }));
         } else safe(() => lobby.setSlot(i, { kind: 'closed' }));
       });
+      if (opts.pantheon) safe(() => lobby.setSlot(me, { pantheon: opts.pantheon }));
       safe(() => lobby.setMapSize('small'));
       done();
       go('lobby', { lobby, role: 'host', transport: 'none' });
@@ -286,6 +291,12 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     load: loadScreen,
     rejoin: rejoinScreen,
     rematch: rematchScreen,
+    // Straight into a Play vs AI lobby (the guided first match's game-over screen): the title shows while it is made.
+    skirmish: (opts) => {
+      const screen = titleScreen();
+      playVsAI(opts);
+      return screen;
+    },
   };
 
   /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
@@ -311,7 +322,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
-    const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', () => playVsAI(), 'mw-btn--primary');
     // Quick Match: the last game against the computer again, in one click (src/game/rematch.js). Shown once the lobby
     // module has read it back; none on a first visit.
     const quickSub = h('span.mw-btn-sub', '');

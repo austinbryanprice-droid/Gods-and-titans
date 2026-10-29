@@ -222,6 +222,7 @@ export class Game {
    * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
    * @param {(to: object) => void} [o.onRematchOnline] an online game's Rematch (DESIGN 7), after this Game is torn down: the
    *   host goes to its room's lobby ({ lobby }), a client joins it ({ join: { roomCode, token, transport, name } }) (main.js)
+   * @param {() => void} [o.onPlayVsAI] the guided first match's next step: a Play vs AI lobby on Easy (main.js)
    * @param {(id: string) => void} [o.onNextMission] a campaign mission won: open the next one's briefing (main.js)
    * @param {() => void} [o.onRejoin] a client that lost its link: leave this Game and connect to the room again (main.js)
    * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
@@ -234,7 +235,7 @@ export class Game {
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onRematchOnline = null, onNextMission = null, onRejoin = null, onLoad = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onRematchOnline = null, onPlayVsAI = null, onNextMission = null, onRejoin = null, onLoad = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.replay = replay && replay.record ? replay : null;
     this.onReplay = onReplay;
@@ -246,6 +247,7 @@ export class Game {
     this.onExit = onExit;
     this.onRematch = onRematch;
     this.onRematchOnline = onRematchOnline;
+    this.onPlayVsAI = onPlayVsAI;
     this.rematchRoom = null; // a client: the room the host opened again for the rematch
     this.rematchAsked = false; // a client asked the host for a rematch and waits for its room
     this.rematchClosed = false; // a client: the host left without a rematch
@@ -1618,6 +1620,15 @@ export class Game {
     const online = this.onlineRematch();
     if (online) return this.rematchOnline(online);
     const next = this.onRematch;
+    this.countLeave();
+    this.dispose();
+    next();
+  }
+
+  /** The guided first match's Play vs AI (Easy): leave the lesson (counted like Return to Menu) for a Play vs AI lobby. */
+  playVsAI() {
+    const next = this.onPlayVsAI;
+    if (this.disposed || typeof next !== 'function') return;
     this.countLeave();
     this.dispose();
     next();

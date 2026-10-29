@@ -86,6 +86,8 @@ export async function startGame(launch) {
   const skirmish = !daily && isSoloLaunch(launch) ? launch.skirmish || (launch.lobby && launch.lobby.state) || null : null;
   // A campaign mission (DESIGN 5.16): Retry starts it again, Next Mission and leaving go to the chapter screen.
   const mission = launch && launch.setup && typeof launch.setup.campaign === 'string' ? launch.setup.campaign : null;
+  // The guided first match (DESIGN 9.2): its game-over screen leads on to a Play vs AI lobby on Easy, with the lesson's pantheon.
+  const lesson = launch && launch.setup && launch.setup.tutorial === true ? launch.setup.players.find((p) => p.index === launch.myIndex) : null;
   if (skirmish) import('./net/lobby.js').then((mod) => saveSkirmish(mod, skirmish)).catch(() => {});
   try {
     await paintedFrame();
@@ -108,6 +110,10 @@ export async function startGame(launch) {
       onRejoin: launch && launch.role === 'client' ? () => {
         if (current === game) current = null;
         backToMenu('rejoin');
+      } : null,
+      onPlayVsAI: lesson ? () => {
+        if (current === game) current = null;
+        backToMenu('skirmish', { difficulty: 'easy', pantheon: lesson.pantheon });
       } : null,
       onNextMission: mission ? (id) => {
         if (current === game) current = null;

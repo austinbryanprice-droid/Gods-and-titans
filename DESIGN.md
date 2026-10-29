@@ -2447,6 +2447,9 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
   A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
+  Won or lost, the lesson's game-over screen leads with **Play vs AI (Easy)** (`Game.onPlayVsAI` from main.js,
+  `Game.playVsAI`): it leaves the lesson for the menu's `skirmish` screen, which makes the Play vs AI lobby with its
+  AI on Easy and the lesson's pantheon (Greek) in the player's slot, whatever the career would default to.
 
 ### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
 One game against the computer per local calendar day, the same on every device: everything comes from the day's

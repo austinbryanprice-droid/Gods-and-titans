@@ -501,7 +501,7 @@ export class Overlays {
       : mission && result !== 'draw' ? (result === 'victory' ? mission.m.victory : mission.m.defeat)
       : how === 'sacred'
         ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
-        : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
+        : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on Easy.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
           : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const best = survival && record ? el('div', `hud-go-best${record.isNew ? ' is-new' : ''}`, record.isNew
       ? (record.previous > 0 ? `A new best! Your old best was wave ${record.previous}.` : 'Your first trial: the bar is set.')
@@ -519,7 +519,7 @@ export class Overlays {
       chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
       this.careerLine(),
-      this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission)));
+      this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission, tutorial)));
     this.show('gameover', node, () => this.hide());
   }
 
@@ -530,12 +530,15 @@ export class Overlays {
   refreshGameOver(bringBack = false) {
     if (!this.gameOverArgs) return;
     if (this.current && this.current.name === 'gameover' && this.goBtns) {
-      this.goBtns.replaceChildren(...this.gameOverButtons(this.gameOverArgs.mission || null).filter(Boolean));
+      this.goBtns.replaceChildren(...this.gameOverButtons(this.gameOverArgs.mission || null, !!this.gameOverArgs.tutorial).filter(Boolean));
     } else if (bringBack && !this.current) this.showGameOver(this.gameOverArgs);
   }
 
-  /** Play Again (or a mission's Next Mission and Retry), Watch Replay, Return to Menu and Keep Watching. */
-  gameOverButtons(mission) {
+  /**
+   * Play Again (or a mission's Next Mission and Retry, or the lesson's Play vs AI (Easy)), Watch Replay, Return to
+   * Menu and Keep Watching.
+   */
+  gameOverButtons(mission, tutorial = false) {
     const watch = btn('Keep Watching', 'mw-btn--ghost', () => this.hide());
     const replay = this.canWatchReplay() ? btn('Watch Replay', 'mw-btn--ghost', () => this.game.watchReplay()) : null;
     if (mission) {
@@ -549,14 +552,15 @@ export class Overlays {
       ];
     }
     let again = null;
-    if (this.canRematch()) {
+    if (tutorial && typeof this.game.onPlayVsAI === 'function') again = btn('Play vs AI (Easy)', 'mw-btn--primary', () => this.game.playVsAI());
+    else if (this.canRematch()) {
       again = btn(typeof this.game.rematchLabel === 'function' ? this.game.rematchLabel() : 'Play Again', 'mw-btn--primary', () => this.game.rematch());
       if (this.game.rematchWaiting) again.disabled = true;
     }
     return [
       again,
       replay,
-      btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
+      btn('Return to Menu', again ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
       watch,
     ];
   }
