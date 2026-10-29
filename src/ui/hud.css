@@ -845,6 +845,8 @@
   font: 1.05em/1 var(--mw-emoji);
 }
 .hud-mark.is-help .hud-mark-chip { animation: hud-mark-pulse 0.7s ease-in-out infinite; }
+/* Near the top bar the pin hangs below its spot, the stem pointing up at it, so nothing of it goes under the bar. */
+.hud-mark.is-below .hud-mark-pin { bottom: auto; top: 0; flex-direction: column-reverse; }
 .hud-mark-arrow {
   display: none;
   position: absolute;

@@ -2041,7 +2041,8 @@ per-frame budget, so a revealed army appears over a few frames.
   (the kind's colour on the badge, the sender's colour on the ring), a stem and a ring on the ground. A mark out
   of view or under the top bar or bottom console becomes a chip on the edge of the play area with an arrow towards
   it (a spot behind the camera is aimed by where it lies on the ground, since it projects mirrored), and a click
-  on the chip centres the camera on the mark. Chips of marks in one direction can overlap (accepted). **On the
+  on the chip centres the camera on the mark. A spot in view but just under the top bar (less than `PIN_EM`, 5.6 em,
+  below it) gets its pin hanging below it, stem up (`is-below`), so the pin never goes under the bar. Chips of marks in one direction can overlap (accepted). **On the
   minimap** (`Minimap.drawMarks`): two rings spreading in the sender's colour and a badge with the icon, kept
   inside the map. Every mark fades over its last 0.8 s. **Sound and text**: `ping`, or `ping_urgent` for Help,
   not positional; my own mark plays quieter; a teammate's marker (not a ping) also writes its words ("Attack
@@ -2221,7 +2222,8 @@ Learn to Play (title screen, under Play vs AI; a gold "New? Start here" tag whil
 no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the match:
 - `TutorialDirector` (Game, host only) reads the ViewState and the selection twice a second and walks
   `TUTORIAL_STEPS` in order, each `{ id, icon, title, text(c), done(c), progress?(c), target?(c), guide?(c) }`:
-  choose the Worshippers (a selection with one), three mining (`tk` gold), two chopping, a finished House,
+  choose the Worshippers (a selection with one), three mining (`tk` gold; the text sends the whole selection and
+  asks to keep at least three on it), two chopping (any two, a miner will do: click one, Shift+click a second), a finished House,
   a Shrine, two praying, a Temple, a god on the field, a Barracks, four Barracks soldiers alive, and the
   victory. A step once done stays done, and several finish at once when the player ran ahead.
 - HUD: the objective panel takes the getting-started checklist's corner (no checklist and no gameplay tips
