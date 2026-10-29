@@ -250,6 +250,8 @@ export function createProjectileBatches(root, scale = 1) {
   const glowWall = new THREE.MeshBasicMaterial({
     vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
   });
+  // additive, no depth writes: one pass draws what three.js's back-then-front two passes would
+  glowWall.forceSinglePass = true;
   const cap = (n) => Math.max(8, Math.round(n * scale));
   const batches = {
     arrow: new InstancedBatch(root, arrowGeo(), solid, cap(256), 'vfx-arrows'),

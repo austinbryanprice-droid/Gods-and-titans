@@ -46,9 +46,11 @@ test('every player starts with their pantheon blessings in p.mods, and researchi
   assert.deepEqual(w.players[1].mods, computeMods([], 'greek'), 'the opponent keeps their own');
 });
 
-test('blessing effects: "*" reaches every building, kin soldiers share their mortal\'s upgrades, speed and revive', () => {
+test('blessing effects: building damage, kin soldiers share their mortal\'s upgrades, speed and revive', () => {
   const egypt = computeMods([], 'egyptian');
-  for (const id of Object.keys(BUILDINGS)) assert.equal(buildingMods(egypt, id).armor, 2, id);
+  assert.equal(buildingMods(egypt, 'tower').damage, 0.25);
+  assert.equal(buildingMods(egypt, 'town_center').damage, 0, 'a Town Center does not shoot');
+  for (const id of Object.keys(BUILDINGS)) assert.equal(buildingMods(egypt, id).armor, 0, `${id}: no armor, so the Eye of Horus does not stack`);
   assert.equal(egypt.perks.buildSpeed, 0.35);
 
   const greek = computeMods(['barracks_bronze_weapons', 'barracks_hoplite_shields'], 'greek');
@@ -90,8 +92,8 @@ test('blessings change the stats of new units and buildings: Greek infantry, Cel
   assert.equal(spawn(c, 0, 'worshipper', 17, 20).baseSpeed, MORTALS.worshipper.speed);
 
   const e = duel('egyptian');
-  assert.equal(place(e, 0, 'house', 14, 14).armor, BUILDINGS.house.armor + 2);
-  assert.equal(place(e, 0, 'barracks', 20, 14).armor, BUILDINGS.barracks.armor + 2);
+  assert.equal(place(e, 0, 'tower', 14, 14).dmgMult, 1.25);
+  assert.equal(place(e, 0, 'barracks', 20, 14).dmgMult, 1);
 
   const ch = duel('chinese');
   const tower = place(ch, 0, 'tower', 18, 10);
