@@ -205,7 +205,7 @@ export class InfoView {
     portrait.title = 'Center the camera (Space)';
     portrait.addEventListener('click', () => this.o.onPortrait && this.o.onPortrait());
     setStyle(portrait, '--team', teamColor(vs, e.o));
-    const picon = el('span', 'hi-portrait-icon', iconOf(e));
+    const picon = el('span', 'hi-portrait-icon', iconOf(e, vs));
     const lvl = el('span', 'hi-level');
     portrait.append(picon, lvl);
     const hpBar = el('div', 'hi-bar is-hp', el('i', 'hi-bar-fill'), el('i', 'hi-bar-shield'));
@@ -516,7 +516,7 @@ export class InfoView {
       c.title = `${nameOf(e)} — click: select · Shift: remove · Ctrl: select all of this type`;
       setStyle(c, '--team', teamColor(vs, e.o));
       const bar = el('div', 'hi-cell-bar', el('i', 'hi-bar-fill'));
-      c.append(el('span', 'hi-cell-icon', iconOf(e)), bar);
+      c.append(el('span', 'hi-cell-icon', iconOf(e, vs)), bar);
       // a soldier's rank numeral (filled in by updateMulti, which follows promotions)
       const rankBadge = !e.lv && e.k === 'u' && canRank(UNITS[e.t]) ? el('span', 'hi-cell-lv is-rank') : null;
       if (e.lv) c.appendChild(el('span', 'hi-cell-lv', String(e.lv)));

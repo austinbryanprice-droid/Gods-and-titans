@@ -106,6 +106,11 @@ test('the pin stands over the objective, or rides the edge toward it, and takes 
   assert.match(pins()[0].textContent, /Here/);
   assert.match(pins()[0].textContent, /⛏️/);
   assert.equal(pins()[0].classList.contains('is-edge'), false);
+  assert.equal(pins()[0].classList.contains('is-below'), false, 'room above the spot: the pin stands over it');
+  target = { x: 30, y: 4 }; // 10 px under the top bar: a standing pin would reach under the bar
+  pointer.update(500);
+  assert.equal(pins()[0].classList.contains('is-edge'), false);
+  assert.equal(pins()[0].classList.contains('is-below'), true, 'just under the top bar the pin hangs below its spot');
   target = { x: 200, y: 30 };
   pointer.update(1000);
   assert.equal(pins()[0].classList.contains('is-edge'), true, 'out of view: an arrow at the edge');

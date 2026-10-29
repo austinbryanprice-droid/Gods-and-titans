@@ -238,6 +238,9 @@ gold, glowing bits, `skin` = skin / fur / scales. Every unit also gets a **team 
 `style.wall`: `marble | timber | sandstone | stone | mudbrick | brick | lacquer`
 `style.ornament`: `columns | carvings | obelisks | torii | lanterns | serpents | knots | winged_bulls | spikes | banners`
 `colors`: `wall`, `roof`, `trim`, `accent`. Team color appears on banners/flags.
+A building may carry `pantheonIcons` (pantheon id → emoji, Emoji 11 at most): the Temple does, so its portrait, build
+button and "completed" note show the builder's own (Greek 🦉, Norse 🌈, Egyptian 👁️, Hindu 🕉️, Japanese ⛩️, Chinese 🏯,
+Aztec 🌞, Celtic 🌿, Mesopotamian 🌙, West African 🥁) instead of everyone's torii (`buildingIcon(type, pantheon)`).
 
 ### 4.8 Pantheon roster (fixed — content files must use these)
 | id | name | gods (4) | titan | creatures T1 / T2 / T3 | style |
@@ -1864,16 +1867,22 @@ per-frame budget, so a revealed army appears over a few frames.
 ## 9. UI (src/ui/) — HTML/CSS overlay
 
 - `menu.js` (+ `style.css`): title screen (Play vs AI, Host Online, Join Online, How to Play,
-  Career (9.1), Settings), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
+  Career (9.1), Settings; the big buttons in two columns, Play vs AI across both, or beside Continue when there is a
+  save, the Daily Challenge across both when there is no Quick Match, and Load Game, How to Play, Career and Settings
+  in one row of small buttons, so everything and the footer fit a 1280x720 window without scrolling; windows under
+  820 px high get a smaller crest and tighter spacing; a "New" tag sits on its button's top edge), lobby screen (4 slot rows: color, name/kind dropdown, pantheon picker with
   Random, team, AI difficulty; presets; map size; landscape (Wildlands, Highlands, Rivers, Islands, Great Forest or Random, 6.7, as chips with a one-line note; clients see it as text); game mode (Standard, Decade of Peace with
   30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
-  `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
+  `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
+  above it, never over it), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
-  emblem and name, and its tooltip lists the blessings and the elite soldier.
+  emblem and name, and its tooltip lists the blessings and the elite soldier. The top bar's left group stops short of
+  the centre banner: when its chips (Market, clock, sites, peace or wave, ping, pantheon, relics) run long, the
+  pantheon's name gives way and ends in an ellipsis (the name alone is hidden under 1100 px wide).
 - `hud.js` (+ `hud.css`): WC3-like layout. Top bar: gold, wood, faith (+rate), population,
   game clock, menu button. Bottom panel: minimap (left), selection (center: single unit
   portrait/icon, name, hp, armor, damage, level/xp bar, statuses, queue with progress and
@@ -2052,7 +2061,8 @@ per-frame budget, so a revealed army appears over a few frames.
   (the kind's colour on the badge, the sender's colour on the ring), a stem and a ring on the ground. A mark out
   of view or under the top bar or bottom console becomes a chip on the edge of the play area with an arrow towards
   it (a spot behind the camera is aimed by where it lies on the ground, since it projects mirrored), and a click
-  on the chip centres the camera on the mark. Chips of marks in one direction can overlap (accepted). **On the
+  on the chip centres the camera on the mark. A spot in view but just under the top bar (less than `PIN_EM`, 5.6 em,
+  below it) gets its pin hanging below it, stem up (`is-below`), so the pin never goes under the bar. Chips of marks in one direction can overlap (accepted). **On the
   minimap** (`Minimap.drawMarks`): two rings spreading in the sender's colour and a badge with the icon, kept
   inside the map. Every mark fades over its last 0.8 s. **Sound and text**: `ping`, or `ping_urgent` for Help,
   not positional; my own mark plays quieter; a teammate's marker (not a ping) also writes its words ("Attack
@@ -2221,7 +2231,8 @@ achievements with the time, and the ones not yet seen.
   (Normal, Hard and Brutal AI, a human enemy, an ally, the Decade of Peace, waves 10 and 20 of the Trial of the Titans, an hour-long game).
 - Game-over screen: under the statistics, a card per achievement the match unlocked and a line
   "Career: W wins in G games (P%) · U of 40 achievements". Title screen: a Career button (a red count of
-  unseen unlocks) opens the Career screen: profile tiles, wins by pantheon, the last games as chips and
+  unseen unlocks) opens the Career screen: profile tiles, wins by pantheon (at most five cards to a row, each
+  name on one line), the last games as chips and
   the gallery (locked ones dimmed, progress bars for counted ones, "New" on the unseen, cleared on opening).
 - The guided first match (9.2) is not a game of the career: no tracker runs in it. Its victory keeps the best
   medal (`best.medal`, 1 bronze … 3 gold, `recordTutorial`) and unlocks First Lessons (any medal) and Top of
@@ -2232,7 +2243,8 @@ Learn to Play (title screen, under Play vs AI; a gold "New? Start here" tag whil
 no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the match:
 - `TutorialDirector` (Game, host only) reads the ViewState and the selection twice a second and walks
   `TUTORIAL_STEPS` in order, each `{ id, icon, title, text(c), done(c), progress?(c), target?(c), guide?(c) }`:
-  choose the Worshippers (a selection with one), three mining (`tk` gold), two chopping, a finished House,
+  choose the Worshippers (a selection with one), three mining (`tk` gold; the text sends the whole selection and
+  asks to keep at least three on it), two chopping (any two, a miner will do: click one, Shift+click a second), a finished House,
   a Shrine, two praying, a Temple, a god on the field, a Barracks, four Barracks soldiers alive, and the
   victory. A step once done stays done, and several finish at once when the player ran ahead.
 - HUD: the objective panel takes the getting-started checklist's corner (no checklist and no gameplay tips
@@ -2259,7 +2271,9 @@ twist. The nine twists come round in a seeded shuffle of nine days, so every twi
 
 Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
 today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
-while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist,
+and a chip in the top bar's left group (`Hud.showTwist`: the twist's icon and name, its rule as the tooltip) keeps it
+in view for the whole match, a loaded one too.
 It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
 loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
 with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in
@@ -2331,7 +2345,8 @@ its ticks, and checksums.
   nor can the trees regrow), keeping speed, eyes and camera. A checksum that does not match marks the
   moment the replay parted from the recorded game (a replay from an earlier build, whose rules have
   changed): the timeline gets a red mark and the bar says so; one from another build says it may differ.
-- Eyes: everyone (`myIndex` -1, no fog) or one player (`ViewState.setViewer`: their fog of war and top bar;
+- Eyes: everyone (`myIndex` -1, no fog; the top bar hides its resource boxes and the pantheon chip, there being
+  no player of mine to show) or one player (`ViewState.setViewer`: their fog of war and top bar;
   the map counts as explored, as no memory of it was kept). The free camera turns round its target and
   tilts (`CameraController.rotate`, `tiltBy`, `resetAngle`: pan and edge scroll turn with it; the pitch
   stays 22° to 68°).
@@ -2442,7 +2457,8 @@ Computer players talk, the way AoE II's AIs do: a short in-character chat line a
 matter, each pantheon in its own voice (Olympian hubris, Norse sagas and mead, Egyptian eternity, karma
 and the wheel, the kami's honour, the Mandate of Heaven, the hungry Fifth Sun, the wild Celtic woods,
 Sumerian scribes and clay tablets, West African drums and ancestors). The moments (`VOICE_TRIGGERS`):
-a greeting a few seconds in (70 % of AIs, staggered), first contact with another player (an enemy
+a greeting a few seconds in (70 % of AIs, staggered; in a match with no enemy player, the Trial of the Titans,
+a greeting to allies instead, `greetAlly`, as one to rivals would be wrong there), first contact with another player (an enemy
 player's unit within 14 tiles of one of its units or buildings, scanned every 2 game seconds; the
 line names that player), the first blow a player strikes against it (the `underAttack` event, with
 the nearest enemy player's unit as the attacker; wild creatures do not count), the end of a Decade
@@ -2467,7 +2483,9 @@ default on): `showChatLine` in `src/game/game.js` filters them, live chat and th
 A shown line is not a feed card but a taunt at the top centre (`Hud.showTaunt`, `.hud-taunt` in hud.css),
 under the banners: the speaker's pantheon emblem in a ring, their name in their colour, the words in
 quotes at 1.6em (the feed's cards are 1.18em), slamming in with a short shake (none under reduced
-motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. It comes with the
+motion), up for `tauntDwell` (6 to 9.5 s by length); the next taunt replaces it. The end screens (game over,
+defeated, ended) take the top centre: the taunt up goes when one opens, and none is shown (nor heard) while
+one is up (`Hud.endScreenUp`). It comes with the
 `taunt` sound (sfx-alerts.js): two war-drum blows under a low brass fifth that bends down into the
 note with a growl, measured at peak -3.6 dB / loudest 400 ms -13.1 dB RMS, next to the war horn's -5.2 / -14.0.
 
