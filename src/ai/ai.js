@@ -33,10 +33,14 @@ export class AIPlayer {
    * @param {object} world authoritative World
    * @param {number} me player index
    * @param {'easy'|'normal'|'hard'|'brutal'} difficulty
+   * @param {{ standIn?: boolean }} [opts] standIn: this AI holds the seat of a player who dropped out
+   *   (src/net/session.js) until they rejoin: it fights, gathers, builds and trains for them, but
+   *   keeps their once-per-game god powers and their resources (no casts, no gifts to allies)
    */
-  constructor(world, me, difficulty = 'normal') {
+  constructor(world, me, difficulty = 'normal', opts = {}) {
     this.world = world;
     this.me = me;
+    this.standIn = !!(opts && opts.standIn);
     this.difficulty = DIFFICULTIES.has(difficulty) ? difficulty : 'normal';
     this.prof = profileFor(this.difficulty);
     const seed = world.setup ? world.setup.seed : 1;
@@ -116,7 +120,7 @@ export class AIPlayer {
     lap('econ');
     runRaids(this, s);
     runMilitary(this, s);
-    if (this.thinks % 3 === 0) runPowers(this, s);
+    if (this.thinks % 3 === 0 && !this.standIn) runPowers(this, s);
     lap('military');
     runRelics(this, s);
     runSacred(this, s);
@@ -129,7 +133,7 @@ export class AIPlayer {
     planProduction(this, s, wants);
     planResearch(this, s, wants);
     const left = this.spend(s, wants);
-    runAid(this, left);
+    if (!this.standIn) runAid(this, left);
     this.updateRallies(s);
     lap('plan');
     runMicro(this, s);
@@ -412,11 +416,12 @@ export class AIPlayer {
  * @param {object} world the authoritative World
  * @param {number} playerIndex
  * @param {'easy'|'normal'|'hard'|'brutal'|'tutorial'} [difficulty] ('tutorial': the sleeping camp of the guided first match)
+ * @param {{ standIn?: boolean }} [opts] standIn: it plays for a player who dropped out (no god powers, no gifts; AIPlayer)
  * @returns {{ tick(): void, ai?: AIPlayer }}
  */
-export function createAI(world, playerIndex, difficulty = 'normal') {
+export function createAI(world, playerIndex, difficulty = 'normal', opts = {}) {
   if (difficulty === 'tutorial') return createTutorialAI(world, playerIndex);
-  const ai = new AIPlayer(world, playerIndex, difficulty);
+  const ai = new AIPlayer(world, playerIndex, difficulty, opts);
   return {
     ai,
     tick() {

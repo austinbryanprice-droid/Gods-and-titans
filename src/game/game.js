@@ -342,7 +342,7 @@ export class Game {
         this.session = new HostSession({
           setup: loaded.world.setup, myIndex: l.myIndex ?? 0, conns: new Map(), resumed: true, createVoices: voiceFactory,
           createWorld: () => loaded.world,
-          createAI: (world, index, difficulty) => loaded.ais.get(index) || aiFactory(world, index, difficulty),
+          createAI: (world, index, difficulty, opts) => loaded.ais.get(index) || aiFactory(world, index, difficulty, opts),
         });
       } else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
     }
