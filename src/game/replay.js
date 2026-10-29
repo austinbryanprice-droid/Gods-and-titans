@@ -192,7 +192,8 @@ export class ReplayRecorder {
     const text = sanitizeChat(line.text);
     if (!text) return;
     const row = [this.world.tickCount, Number.isInteger(line.from) ? line.from : -1, text];
-    if (line.voice || line.system) row.push(line.voice ? 1 : 0, line.system ? 1 : 0);
+    if (line.voice || line.system || line.team) row.push(line.voice ? 1 : 0, line.system ? 1 : 0);
+    if (line.team) row.push(1); // a line to the host's allies only (only the host's own team's lines ever reach it)
     this.chatLines.push(row);
   }
 
@@ -285,7 +286,9 @@ export function sanitizeReplay(rec) {
     if (!Array.isArray(row) || !Number.isSafeInteger(row[0]) || !Number.isInteger(row[1])) continue;
     const text = sanitizeChat(row[2]);
     if (!text || row[1] >= n) continue;
-    chat.push(row[3] || row[4] ? [row[0], row[1], text, row[3] ? 1 : 0, row[4] ? 1 : 0] : [row[0], row[1], text]);
+    const flags = [row[3] ? 1 : 0, row[4] ? 1 : 0];
+    if (row[5] && !row[4]) flags.push(1); // team (allies-only) line
+    chat.push(flags.some(Boolean) ? [row[0], row[1], text, ...flags] : [row[0], row[1], text]);
   }
   chat.sort((a, b) => a[0] - b[0]);
   const sums = [];

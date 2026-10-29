@@ -89,6 +89,7 @@ export class FakeElement {
     this.fire('click');
   }
   focus() {}
+  blur() {}
   appendChild(n) {
     if (n.parentNode) n.remove();
     this.childNodes.push(n);

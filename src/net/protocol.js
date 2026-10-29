@@ -7,8 +7,9 @@ import { PEER_ID_PREFIX, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.
 // wire-version.js: it needs the sanitizer and codec tables, which import this file.
 
 /**
- * Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC MARK PAUSE; host→client: the rest
- * (+ LOBBY, CHAT, PAUSE, and MARK, which the host relays to the sender's teammates only).
+ * Message `t` values. client→host: HELLO LOBBY CMD CHAT TEAM_CHAT PING RESYNC MARK PAUSE; host→client: the rest
+ * (+ LOBBY, CHAT, PAUSE, and MARK, which the host relays to the sender's teammates only). A TEAM_CHAT line
+ * comes back as CHAT with `team: true`, to the sender's teammates only (DESIGN 7, "Team chat").
  */
 export const MSG = {
   HELLO: 'hello',
@@ -18,6 +19,9 @@ export const MSG = {
   PING: 'ping',
   RESYNC: 'resync',
   MARK: 'mark',
+  // A chat line for the sender's team only ({ text }); a new name rather than a flag on CHAT, so that it changes the
+  // protocol fingerprint and a build that would broadcast it to everyone can never host a build that sends it.
+  TEAM_CHAT: 'teamchat',
   WELCOME: 'welcome',
   START: 'start',
   FULL: 'full',

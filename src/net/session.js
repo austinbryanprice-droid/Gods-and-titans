@@ -1,7 +1,7 @@
 // Game sessions (DESIGN 7). The host runs the authoritative World and the AIs
 // on a fixed-rate ticker and streams delta snapshots; clients only decode them
 // into their ViewState and send commands. Both expose the same surface:
-//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark(mark), sendPause(on),
+//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text, { team? }), sendMark(mark), sendPause(on),
 //     onChat(cb), onMark(cb), onEnd(cb), onPause(cb), start(), stop(), pingMs, isHost, pause }
 // Everything that arrives over the network is untrusted: the host validates and
 // rate-limits each client's messages (sanitize.js); clients validate snapshots
@@ -84,7 +84,7 @@ class SessionBase {
     return p ? p.name : `Player ${i + 1}`;
   }
 
-  /** cb({ from, name, text, system }) for every chat line, own lines included. */
+  /** cb({ from, name, text, system, voice?, team? }) for every chat line, own lines included (`team`: allies only). */
   onChat(cb) {
     this.chatCbs.add(cb);
     return () => this.chatCbs.delete(cb);
@@ -328,13 +328,17 @@ export class HostSession extends SessionBase {
         }
         break;
       }
-      case MSG.CHAT: {
+      case MSG.CHAT:
+      case MSG.TEAM_CHAT: {
         if (!c.limits.chat.take()) {
           c.dropped.chat++;
           return;
         }
         const text = sanitizeChat(msg.text);
-        if (text) this.broadcastChat({ from: c.index, name: this.playerName(c.index), text, system: false });
+        if (!text) return;
+        const line = { from: c.index, name: this.playerName(c.index), text, system: false }; // always the sender's own index
+        if (msg.t === MSG.TEAM_CHAT) this.relayTeamChat(line);
+        else this.broadcastChat(line);
         break;
       }
       case MSG.MARK: {
@@ -721,6 +725,23 @@ export class HostSession extends SessionBase {
   }
 
   /**
+   * A team chat line (DESIGN 7, "Team chat") goes the way a team mark does: to the connections of the
+   * sender's teammates and the sender itself (whose own line comes back from the host, as in all-chat),
+   * flagged `team`, and to the host's own screen when the host is on that team. Other teams' connections
+   * never receive it, and the host's replay records only what the host's screen showed.
+   */
+  relayTeamChat(line) {
+    const team = this.teamOf(line.from);
+    if (team === null) return;
+    const out = { ...line, team: true };
+    const msg = { t: MSG.CHAT, ...out };
+    for (const c of this.clients.values()) {
+      if (c.conn.open && this.teamOf(c.index) === team) c.conn.send(msg);
+    }
+    if (this.teamOf(this.myIndex) === team) this.emitChat(out);
+  }
+
+  /**
    * A team mark (DESIGN 7, 9) goes to the sender's teammates and nobody else: the other teams'
    * connections never see it, so it cannot tell an enemy where an attack is called. The host's own
    * screen shows it when the host is on the team; the sender has shown it to itself already.
@@ -888,9 +909,13 @@ export class HostSession extends SessionBase {
     }
   }
 
-  sendChat(text) {
+  /** A chat line from the host's own player: to everyone, or with { team: true } to its teammates only. */
+  sendChat(text, { team = false } = {}) {
     const t = sanitizeChat(text);
-    if (t) this.broadcastChat({ from: this.myIndex, name: this.playerName(this.myIndex), text: t, system: false });
+    if (!t) return;
+    const line = { from: this.myIndex, name: this.playerName(this.myIndex), text: t, system: false };
+    if (team) this.relayTeamChat(line);
+    else this.broadcastChat(line);
   }
 
   /**
@@ -1039,6 +1064,11 @@ export class ClientSession extends SessionBase {
         const from = Number.isInteger(msg.from) && msg.from >= -1 && msg.from < this.setup.players.length ? msg.from : -1;
         const line = { from, name: system ? '' : sanitizeName(msg.name, this.playerName(from)), text, system };
         if (msg.voice === true && !system) line.voice = true; // an AI's line (DESIGN 10.1)
+        if (msg.team === true && !system) {
+          // The host relays a team line to the sender's team only; one from another team is not shown.
+          if (from < 0 || this.teamOf(from) === null || this.teamOf(from) !== this.teamOf(this.myIndex)) return;
+          line.team = true;
+        }
         this.emitChat(line);
         break;
       }
@@ -1186,9 +1216,10 @@ export class ClientSession extends SessionBase {
     this.conn.send({ t: MSG.CMD, cmd });
   }
 
-  sendChat(text) {
+  /** A chat line to everyone, or with { team: true } to my teammates only (the host relays it, DESIGN 7). */
+  sendChat(text, { team = false } = {}) {
     const t = sanitizeChat(text);
-    if (t && !this.stopped) this.conn.send({ t: MSG.CHAT, text: t });
+    if (t && !this.stopped) this.conn.send({ t: team ? MSG.TEAM_CHAT : MSG.CHAT, text: t });
   }
 
   /** Ask the host to pause (true) or resume (false) the game for everyone. */

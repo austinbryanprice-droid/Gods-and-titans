@@ -15,7 +15,7 @@ function refusedText(key) {
   if (/^[0-9]$/.test(key)) return 'The number keys select control groups.';
   if (/^F[0-9]+$/.test(key)) return `${key} keeps its job (gods, the menu, or the browser's own).`;
   if (key === 'Delete' || key === 'Backspace') return 'Delete and Backspace destroy the selected units.';
-  if (key === 'Enter') return 'Enter opens the chat.';
+  if (key === 'Enter') return 'Enter opens the chat (Shift+Enter: to your allies).';
   if (key === 'Tab') return 'Tab cycles through the selected unit types.';
   if (key === 'Pause') return 'Pause pauses the game.';
   if (['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock'].includes(key)) return 'Shift, Ctrl and Alt work with other keys.';
