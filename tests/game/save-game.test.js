@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { packGraph, unpackGraph, staticTable, toBase64, fromBase64 } from '../../src/sim/save-graph.js';
 import { packMatch, unpackMatch, canSaveSetup } from '../../src/game/save-game.js';
 import { writeSave, readSave, listSaves, deleteSave, saveInfo, AUTO_SLOT, savedAgo } from '../../src/game/save-store.js';
-import { matchLabel, MatchSaver } from '../../src/game/game-saves.js';
+import { matchLabel, MatchSaver, isSettled, settleMatch } from '../../src/game/game-saves.js';
+import { ReplayRecorder } from '../../src/game/replay.js';
 import { createWorld } from '../../src/sim/world.js';
 import { createAI } from '../../src/ai/ai.js';
 import { HostSession } from '../../src/net/session.js';
@@ -251,4 +252,49 @@ test('MatchSaver: saves solo games only, autosaves on the game clock, forgets it
   const tut = new HostSession({ setup: tutorialSetup({ name: 'Me', version: '0.1.0' }), myIndex: 0, autoTick: false, useWorker: false, createWorld, createAI });
   assert.equal(new MatchSaver({ ...game, session: tut, viewState: tut.viewState }, { store }).canSave(), false);
   tut.stop();
+});
+
+test('a new game with its replay being recorded can be saved, and loads without the recorder', async () => {
+  const setup = aiSetup({ players: [
+    { index: 0, name: 'Me', team: 1, pantheon: 'greek', kind: 'human' },
+    { index: 1, name: 'B', team: 2, pantheon: 'norse', kind: 'ai', difficulty: 'easy' },
+  ] });
+  const session = new HostSession({ setup, myIndex: 0, autoTick: false, useWorker: false, createWorld, createAI });
+  // Game.init hangs a ReplayRecorder on every new hosted match (World.onCommand, a function).
+  const recorder = new ReplayRecorder({ world: session.world, setup, myIndex: 0 }).attach();
+  assert.equal(typeof session.world.onCommand, 'function');
+  const writes = [];
+  const store = { writeSave: async (slot, save, info) => (writes.push(save), { ...info, slot }), saveInfo: () => null, deleteSave: async () => {} };
+  const game = {
+    session, viewState: session.viewState, myIndex: 0, paused: false, disposed: false,
+    hud: { message() {} }, renderer: null, selection: { groups: new Map() }, chronicle: null, career: null, launch: {},
+  };
+  await new MatchSaver(game, { store }).save('1');
+  const loaded = unpackMatch(JSON.parse(JSON.stringify(writes[0])));
+  assert.equal(loaded.world.onCommand, null);
+  loaded.world.tick();
+  recorder.detach();
+  session.stop();
+});
+
+test('a match counted in the career (quit or ended) is remembered, so a save of it carried on counts nothing again', () => {
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  try {
+    assert.equal(isSettled('m1'), false);
+    settleMatch('m1');
+    assert.equal(isSettled('m1'), true);
+    assert.equal(isSettled(null), false);
+    for (let i = 0; i < 60; i++) settleMatch(`x${i}`);
+    assert.equal(isSettled('m1'), false, 'only the last few dozen are kept');
+    assert.equal(isSettled('x59'), true);
+    // MatchSaver.onGameOver (game over, or a quit counted as a loss) settles its match.
+    const saver = new MatchSaver({ session: null }, { resume: { matchId: 'quit-me' }, store: { saveInfo: () => null, deleteSave: async () => {} } });
+    saver.onGameOver();
+    assert.equal(isSettled('quit-me'), true);
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'localStorage', had);
+    else delete globalThis.localStorage;
+  }
 });

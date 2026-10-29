@@ -33,7 +33,8 @@ export const SAVE_FORMAT = 1;
 const PATHFINDER_SCRATCH = ['g', 'parent', 'openGen', 'closedGen', 'goalGen', 'heapIdx', 'heapF'];
 
 const CLASSES = {
-  World,
+  // onCommand is the replay recorder's hook (src/game/replay.js), a function: the loaded game has none.
+  World: { cls: World, skip: ['onCommand'], revive(w) { w.onCommand = null; } },
   MapState,
   PathService,
   Pathfinder: {

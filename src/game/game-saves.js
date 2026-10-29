@@ -46,6 +46,37 @@ export function matchLabel(world, myIndex) {
   return `${mine} vs ${foes.map((p) => `${pantheonName(p.pantheon)}${ai(p)}`).join(' & ') || 'nobody'}${map}`;
 }
 
+// Matches already counted in the career (a quit counts as a loss): a save of one carried on later
+// counts nothing again. Newest last, a few dozen kept, on this device only.
+const SETTLED_KEY = 'mythicwar-settled';
+const SETTLED_MAX = 40;
+
+function settledList() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? JSON.parse(localStorage.getItem(SETTLED_KEY) || '[]') : [];
+    return Array.isArray(raw) ? raw.filter((id) => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Was this match counted already (it ended, or the player quit it)? */
+export function isSettled(matchId) {
+  return !!matchId && settledList().includes(matchId);
+}
+
+/** This match has been counted: a save of it carried on later must not count it again. */
+export function settleMatch(matchId) {
+  if (!matchId) return;
+  const list = settledList().filter((id) => id !== matchId);
+  list.push(matchId);
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(SETTLED_KEY, JSON.stringify(list.slice(-SETTLED_MAX)));
+  } catch {
+    // storage full or blocked: at worst the match counts twice
+  }
+}
+
 function newMatchId() {
   return `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
 }
@@ -143,8 +174,9 @@ export class MatchSaver {
     }, (err) => console.warn('[save] autosave failed', err && err.message ? err.message : err));
   }
 
-  /** The match is over: its autosave would only bring back a finished game, so Continue forgets it. */
+  /** The match is over (or the player quit it, a loss): its autosave would only bring it back to count again, so Continue forgets it. */
   onGameOver() {
+    settleMatch(this.matchId);
     try {
       const auto = this.store.saveInfo(AUTO_SLOT);
       if (auto && auto.matchId === this.matchId) this.store.deleteSave(AUTO_SLOT).catch(() => {});

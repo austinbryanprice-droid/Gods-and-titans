@@ -162,6 +162,7 @@ export class HostSession extends SessionBase {
     if (createVoices && voiced.length) {
       try {
         this.voices = createVoices(this.world, voiced);
+        if (resumed && this.voices && typeof this.voices.resume === 'function') this.voices.resume();
       } catch (err) {
         this.reportError('voice-create', err);
       }

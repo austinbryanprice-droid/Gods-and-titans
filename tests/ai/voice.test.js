@@ -281,3 +281,20 @@ test('the host sends AI lines flagged `voice`, the client keeps the flag, the se
   assert.equal(getSettings().aiChat, false, 'a bad value is ignored');
   _resetSettingsForTests({ clearStorage: true });
 });
+
+test('a loaded game: no second greeting or first contact, and gods already out are not announced again', () => {
+  const world = fakeWorld(['norse', 'greek']);
+  world.buildingList.push(building(0, 'town_center', 10, 10));
+  VOICE.greetChance = 1;
+  try {
+    const god = godsFor('norse')[0];
+    world.time = VOICE.greetAt + 200;
+    world.unitList.push({ ...unit(0, 10, 10), type: god.id }, unit(1, 14, 14));
+    const v = new AIVoices(world, [0]);
+    v.resume();
+    assert.deepEqual(run(v, world, VOICE.contactEvery * 3), []);
+    assert.deepEqual(v.step([{ type: 'spawn', o: 0, t: god.id }]), [], 'a revived god comes back quietly');
+  } finally {
+    VOICE.greetChance = 0.7;
+  }
+});

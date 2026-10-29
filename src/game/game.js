@@ -48,7 +48,7 @@ import { ReplayRecorder } from './replay.js';
 import { saveReplay } from './replay-store.js';
 import { ReplaySession } from './replay-session.js';
 import { ReplayBar } from '../ui/hud-replay.js';
-import { MatchSaver, loadSaveGame } from './game-saves.js';
+import { MatchSaver, loadSaveGame, isSettled } from './game-saves.js';
 import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
@@ -374,7 +374,10 @@ export class Game {
     // The career and achievements on this device (src/game/career-tracker.js): nothing goes over the wire.
     // The guided first match is not a game of the career: its medal is kept instead (checkEnd); nor is a
     // campaign mission, whose wins and best times the campaign keeps (src/game/campaign-progress.js).
-    if (!this.tutorial && !this.mission && !this.replay) {
+    // A loaded game the career has already counted (quit as a loss, then carried on from a save) counts nothing more.
+    const settled = !!(resumed && isSettled(resumed.matchId));
+    if (settled) this.dailyCounted = true;
+    if (!this.tutorial && !this.mission && !this.replay && !settled) {
       this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
       this.offs.push(() => this.career.dispose());
     }
@@ -1171,6 +1174,7 @@ export class Game {
         console.warn('[game] career record failed', err);
       }
       this.countDaily(false);
+      if (this.saver) this.saver.onGameOver(); // counted: its autosave would bring it back to count again
     }
   }
 

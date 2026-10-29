@@ -69,6 +69,26 @@ export class AIVoices {
   }
 
   /**
+   * A loaded game (DESIGN 9.4) carries on where it was saved: the greetings and first contacts of the
+   * time before are not said again, nor the arrival of the gods already on the field.
+   */
+  resume() {
+    const world = this.world;
+    const now = world.time;
+    for (const v of this.voices.values()) {
+      if (now < v.greetAt) continue;
+      v.greeted = true;
+      v.met = true;
+    }
+    for (const u of world.unitList || []) {
+      const v = !u.dead && this.voices.get(u.owner);
+      const def = v && getUnitType(u.type);
+      if (def && def.class === 'god') v.gods.add(u.type);
+    }
+    this.nextScan = now + VOICE.contactEvery;
+  }
+
+  /**
    * Look at the events since the last call and at the World; returns the lines to send.
    * @param {object[]} [events] the snapshot's events
    * @returns {{ from: number, text: string }[]}
