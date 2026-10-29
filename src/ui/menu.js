@@ -13,7 +13,8 @@ import { PANTHEON_LIST } from '../data/index.js';
 import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
-import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, optionNote } from './speed-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS, optionNote } from './speed-options.js';
+import { buildKeyPanel } from './key-panel.js';
 import { sfx } from '../audio/sfx.js';
 import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
 import { h, setChildren, copyText } from './menu-dom.js';
@@ -37,6 +38,7 @@ import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
 import * as M from './menu-model.js';
 import { saveTicket, readTicket, clearTicket } from '../net/rejoin-ticket.js';
+import { displayColor } from '../team-colors.js';
 
 let instance = null;
 
@@ -502,7 +504,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         PLAYER_COLORS.map((c, ci) => h('button.mw-color-opt', {
           type: 'button',
           class: [ci === s.color ? 'is-current' : '', taken.has(ci) ? 'is-taken' : ''].join(' '),
-          style: { '--c': c },
+          style: { '--c': displayColor(c) },
           title: taken.has(ci) ? 'Taken by another player' : 'Choose this color',
           'aria-label': taken.has(ci) ? 'Color taken' : 'Choose this color',
           disabled: taken.has(ci),
@@ -1455,6 +1457,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       const input = h('input', { type: 'checkbox', checked: invert ? !getSettings()[key] : !!getSettings()[key], onchange: () => saveSettings({ [key]: invert ? !input.checked : input.checked }) });
       return h('label.mw-toggle', input, h('span.mw-toggle-track', { 'aria-hidden': 'true' }, h('span.mw-toggle-knob')), h('span.mw-toggle-text', h('span', label), note ? h('small', note) : null));
     };
+    const keyPanel = buildKeyPanel(); // the camera and command card keys (src/ui/key-panel.js)
     const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => go('title') }, '‹ Back');
     const el = h('div.mw-center-screen',
       h('section.mw-panel.mw-form-panel.mw-settings',
@@ -1470,6 +1473,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('div.mw-field', h('span.mw-label', 'Time of day'), h('div.mw-segmented', tBtns), tDesc),
         h('div.mw-field', h('span.mw-label', 'Game speed'), ...segField('gameSpeed', GAME_SPEED_OPTIONS)),
         h('div.mw-field', h('span.mw-label', 'Interface size'), ...segField('uiScale', UI_SCALE_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Team colours'), ...segField('teamColors', TEAM_COLOR_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Command keys'), ...segField('cardKeys', CARD_KEY_OPTIONS)),
+        h('div.mw-field', h('span.mw-label', 'Keys'), keyPanel.el),
         h('div.mw-field', h('span.mw-label', 'Intro film'),
           toggle('intro', 'Play it when the game opens', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
           toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),
@@ -1486,7 +1492,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('p.mw-hint.mw-saved-note', '✓ Settings are saved automatically in this browser.'),
       ),
     );
-    return { el, focus: backBtn, onEscape: () => go('title') };
+    return { el, focus: backBtn, onEscape: () => go('title'), cleanup: () => keyPanel.dispose() };
   }
 
   // ------------------------------------------------------------ public

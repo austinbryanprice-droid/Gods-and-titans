@@ -13,7 +13,8 @@ import { MARKS, DEFAULT_MARK } from '../data/marks.js';
 import { getSettings } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { checkPlacement, checkWallLine, footprintAt, peaceAnchors } from '../game/placement.js';
-import { getCommandCard, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
+import { getCommandCard, withCardKeys, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
+import { normKey, bindingsOf, actionOf, cardKeysOf, PAN_ACTIONS } from './key-bindings.js';
 import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 import { deletePlan, DELETE_CONFIRM_MS } from './delete-key.js';
@@ -32,7 +33,6 @@ const ALERT_JUMP_MS = 20000;
 const WHEEL_STEP_PX = 100; // wheel delta that zooms one step
 const WHEEL_MAX_STEPS = 3; // cap for one event
 
-const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
 // Inputs that take no typed text: a focused menu toggle or the volume slider must not swallow Esc / F10.
 const NON_TEXT_INPUTS = new Set(['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'file', 'image']);
@@ -1311,6 +1311,22 @@ export class InputController {
 
   // ---------------------------------------------------------------- keyboard
 
+  /** Every rebindable action's key (the settings' changes over the defaults), rebuilt when they change. */
+  bindings() {
+    const changes = getSettings().keyBindings;
+    if (this.bindingsFrom !== changes || !this.bindingsCache) {
+      this.bindingsFrom = changes;
+      this.bindingsCache = bindingsOf(changes);
+    }
+    return this.bindingsCache;
+  }
+
+  /** Home (rebindable): the camera to your Town Center. */
+  jumpHome() {
+    const tc = [...this.vs.entities.values()].find((x) => x.k === 'b' && x.o === this.vs.myIndex && x.t === 'town_center');
+    if (tc && this.renderer) this.renderer.camera.centerOn(tc.x, tc.y);
+  }
+
   onKeyDown(e) {
     if (this.disposed) return;
     const hud = this.hud;
@@ -1356,9 +1372,17 @@ export class InputController {
       }
       return;
     }
-    if (ARROWS[key]) {
+    // The camera's keys (rebindable, key-bindings.js): checked before the command card, so a letter
+    // bound here wins over a command of that letter.
+    const name = normKey(e);
+    const cam = name.length === 1 && (e.ctrlKey || e.metaKey) ? null : actionOf(this.bindings(), name, 'camera');
+    if (cam) {
       e.preventDefault();
-      this.keys.add(key);
+      if (PAN_ACTIONS[cam]) this.keys.add(cam);
+      else if (cam === 'cam_zoom_in' || cam === 'cam_zoom_out') {
+        if (this.renderer) this.renderer.camera.zoomBy(cam === 'cam_zoom_in' ? 1 : -1);
+      } else if (!rep && cam === 'cam_jump') this.spaceJump();
+      else if (!rep && cam === 'cam_home') this.jumpHome();
       return;
     }
     if (key === 'Tab') {
@@ -1369,21 +1393,9 @@ export class InputController {
       }
       return;
     }
-    if (key === ' ' || e.code === 'Space') {
-      e.preventDefault();
-      if (!rep) this.spaceJump();
-      return;
-    }
     if (key === 'F1' || key === 'F2' || key === 'F3') {
       e.preventDefault();
       if (!rep) this.selectGod(Number(key[1]) - 1, false, e.shiftKey);
-      return;
-    }
-    if (key === 'Home') {
-      e.preventDefault();
-      if (rep) return;
-      const tc = [...this.vs.entities.values()].find((x) => x.k === 'b' && x.o === this.vs.myIndex && x.t === 'town_center');
-      if (tc) this.renderer.camera.centerOn(tc.x, tc.y);
       return;
     }
     // Control groups: Digit1..9 (also with shift, whose key is a symbol).
@@ -1447,12 +1459,13 @@ export class InputController {
       }
       return;
     }
-    if (key.length === 1) {
-      let b = buttonForKey(hud.currentCard(), key);
+    const gridKeys = cardKeysOf(getSettings());
+    if (key.length === 1 || (gridKeys && gridKeys.includes(name))) {
+      let b = buttonForKey(hud.currentCard(), name);
       // While targeting or placing the card is only Cancel: another command hotkey
       // replaces the pending order (WC3), so A then S stops instead of doing nothing.
       const pending = this.mode.kind !== 'normal';
-      if (!b && pending) b = buttonForKey(getCommandCard(this.sel.forCard(), this.vs, this.menu), key);
+      if (!b && pending) b = buttonForKey(withCardKeys(getCommandCard(this.sel.forCard(), this.vs, this.menu), gridKeys), name);
       if (b) {
         e.preventDefault();
         if (rep && !(b.enabled && b.action && b.action.kind === 'train')) return;
@@ -1464,7 +1477,8 @@ export class InputController {
   }
 
   onKeyUp(e) {
-    if (ARROWS[e.key]) this.keys.delete(e.key);
+    const cam = actionOf(this.bindings(), normKey(e), 'camera');
+    if (PAN_ACTIONS[cam]) this.keys.delete(cam);
     if (e.key === 'Shift') {
       this.shiftHeld = false;
       this.endShiftMode();
@@ -1511,8 +1525,8 @@ export class InputController {
     let dx = 0;
     let dy = 0;
     for (const k of this.keys) {
-      dx += ARROWS[k][0];
-      dy += ARROWS[k][1];
+      dx += PAN_ACTIONS[k][0];
+      dy += PAN_ACTIONS[k][1];
     }
     if (!overlay && getSettings().edgeScroll && this.mouseInWindow && !this.leftDown && !this.midDown && (typeof document.hasFocus !== 'function' || document.hasFocus())) {
       const w = window.innerWidth;

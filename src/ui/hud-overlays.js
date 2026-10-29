@@ -9,7 +9,8 @@ import { el } from './hud-dom.js';
 import { chronicleView } from './hud-chronicle.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
-import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS } from './speed-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS } from './speed-options.js';
+import { buildKeyPanel } from './key-panel.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
@@ -173,6 +174,9 @@ export class Overlays {
     // Game speed only in a match against the computer: an online game runs at one pace for everyone.
     const speed = game.solo ? choiceRow('Game speed', GAME_SPEED_OPTIONS, s.gameSpeed, (v) => saveSettings({ gameSpeed: v })) : null;
     const uiScale = choiceRow('Interface size', UI_SCALE_OPTIONS, s.uiScale, (v) => saveSettings({ uiScale: v }));
+    const teamColors = choiceRow('Team colours', TEAM_COLOR_OPTIONS, s.teamColors, (v) => saveSettings({ teamColors: v }));
+    const cardKeys = choiceRow('Command keys', CARD_KEY_OPTIONS, s.cardKeys, (v) => saveSettings({ cardKeys: v }));
+    const keysBtn = btn('Change keys…', 'mw-btn--small mw-btn--ghost hud-keys-btn', () => this.openKeys());
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
     const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
@@ -273,6 +277,9 @@ export class Overlays {
         speed && speed.row,
         sky.row,
         uiScale.row,
+        teamColors.row,
+        cardKeys.row,
+        keysBtn,
         bars.row,
         edge.row,
         tips.row,
@@ -332,6 +339,21 @@ export class Overlays {
     }
     this.show('saves', node, () => this.openMenu());
     setTimeout(() => rows[0].focus({ preventScroll: true }), 0);
+  }
+
+  /** The key rebinding panel (src/ui/key-panel.js); Back or Esc returns to the game menu, still paused. */
+  openKeys() {
+    const keys = buildKeyPanel();
+    const back = btn('Back', 'mw-btn--ghost', () => this.openMenu());
+    const node = this.panel('Keys', 'Click a key, then press the new one.', keys.el, el('div', 'hud-obtns', back));
+    if (this.current) {
+      // Swap panels without running the menu's onHide (keeps the pause).
+      this.current.el.remove();
+      this.current = null;
+    }
+    this.show('keys', node, () => this.openMenu());
+    this.current.onHide = () => keys.dispose();
+    setTimeout(() => back.focus({ preventScroll: true }), 0);
   }
 
   /**
@@ -397,14 +419,14 @@ export class Overlays {
   }
 
   closeMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads') {
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys') {
       this.hide();
       this.game.setPaused(false);
     }
   }
 
   toggleMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads') this.closeMenu();
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys') this.closeMenu();
     else this.openMenu();
   }
 

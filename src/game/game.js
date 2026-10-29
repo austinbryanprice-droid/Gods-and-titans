@@ -843,6 +843,8 @@ export class Game {
       this.renderer.setTimeOfDay(s.timeOfDay);
       this.needsRender = true;
     }
+    // (the renderer rebuilt its models in the new team colours when the palette changed, src/team-colors.js)
+    if (changed.includes('teamColors')) this.needsRender = true;
   }
 
   // ---------------------------------------------------------------- events

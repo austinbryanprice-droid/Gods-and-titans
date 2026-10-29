@@ -12,7 +12,8 @@
 // Only the panels take pointer events; everything else falls through to the canvas.
 import { UNITS, PANTHEONS } from '../data/index.js';
 import { PANTHEON_EMBLEMS } from './menu-model.js';
-import { getCommandCard } from './command-card.js';
+import { getCommandCard, withCardKeys } from './command-card.js';
+import { cardKeysOf } from './key-bindings.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
 import { formatClock, tierName, nameOf, leadText, stallText, pauseText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip } from './hud-data.js';
@@ -34,6 +35,7 @@ import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { POP_MAX, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_BOSS_EVERY } from '../config.js';
+import { displayColor } from '../team-colors.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -302,6 +304,7 @@ export class Hud {
     this.tips = null;
     if (!getSettings().tipsDismissed && !guided()) this.showTips();
     this.offs.push(onSettingsChange((st, changed) => {
+      if (changed.includes('cardKeys') || changed.includes('keyBindings')) this.refreshCard(); // the keys on the card
       if (!changed.includes('tipsDismissed') || guided()) return;
       if (st.tipsDismissed) this.hideTips();
       else this.showTips();
@@ -411,7 +414,7 @@ export class Hud {
     if (sig !== this.cardSig || now - this.lastCard >= CARD_REFRESH_MS) {
       this.cardSig = sig;
       this.lastCard = now;
-      this.card = getCommandCard(game.selection.forCard(), vs, mode);
+      this.card = withCardKeys(getCommandCard(game.selection.forCard(), vs, mode), cardKeysOf(getSettings()));
       this.cardView.render(this.card);
     }
     if (this.tutorial) {
@@ -528,7 +531,7 @@ export class Hud {
     if (sig !== this.cardSig) {
       this.cardSig = sig;
       this.lastCard = performance.now();
-      this.card = getCommandCard(this.game.selection.forCard(), this.vs, mode);
+      this.card = withCardKeys(getCommandCard(this.game.selection.forCard(), this.vs, mode), cardKeysOf(getSettings()));
       this.cardView.render(this.card);
     }
     return this.card;
@@ -729,7 +732,7 @@ export class Hud {
     const who = el('b', 'hud-chat-from', `${sanitizeName(line.name || (p && p.name), 'Player')}:`);
     const card = this.feedCard('chat', null, [who, ' ', el('span', null, text)]);
     if (p) {
-      const color = safeColor(p.color, '#f1e8d4');
+      const color = displayColor(safeColor(p.color, '#f1e8d4'));
       who.style.color = color;
       card.style.setProperty('--msg-accent', color); // the card's edge and emblem take the player's colour
     }
@@ -751,7 +754,7 @@ export class Hud {
     const t = this.taunt;
     t.replaceChildren(who, quote);
     t.dataset.icon = (p && PANTHEON_EMBLEMS[p.pantheon]) || '⚔️';
-    t.style.setProperty('--taunt-accent', safeColor(p && p.color, '#ff7a4a'));
+    t.style.setProperty('--taunt-accent', displayColor(safeColor(p && p.color, '#ff7a4a')));
     t.hidden = false;
     t.classList.remove('is-on');
     void t.offsetWidth; // restart the slam-in for a taunt that replaces another

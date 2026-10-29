@@ -9,6 +9,7 @@ import { TRADE_TAX_PCT, TRADE_MIN } from '../config.js';
 import { tradeReceived, tradePartners, tradeError } from '../sim/trade.js';
 import { sanitizeName } from '../net/protocol.js';
 import { el, setText, setClass, setHidden, fmt, safeColor } from './hud-dom.js';
+import { displayColor } from '../team-colors.js';
 
 export const MARKET_RESOURCES = [
   { id: 'gold', icon: '💰', label: 'Gold' },
@@ -151,7 +152,7 @@ export class MarketView {
         const p = vs.players[i];
         const stock = el('small', 'hud-market-stock');
         const swatch = el('i', 'hud-market-swatch');
-        swatch.style.background = safeColor(p.color);
+        swatch.style.background = displayColor(safeColor(p.color));
         const b = el('button', 'hud-market-partner',
           swatch,
           el('span', 'hud-market-name', sanitizeName(p.name, `Player ${i + 1}`)),

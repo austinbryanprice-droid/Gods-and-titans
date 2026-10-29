@@ -5,6 +5,7 @@
 import { MARKS, MARK_KINDS } from '../data/marks.js';
 import { sanitizeName } from '../net/protocol.js';
 import { el, setClass, setStyle, safeColor } from './hud-dom.js';
+import { displayColor } from '../team-colors.js';
 
 const EDGE_PAD_EM = 3.2; // distance from the border of the play area to the chip of an edge arrow
 const ARROW_EM = 1.9; // distance from that chip's middle to its arrowhead
@@ -78,7 +79,7 @@ export class MarksLayer {
     node.type = 'button';
     node.tabIndex = -1;
     node.title = `${name}: ${def.text} Click to go there.`;
-    node.style.setProperty('--c', safeColor(p && p.color, '#f1e8d4'));
+    node.style.setProperty('--c', displayColor(safeColor(p && p.color, '#f1e8d4')));
     node.style.setProperty('--k', def.color);
     // Only an edge arrow takes clicks; it takes the camera to the mark.
     node.addEventListener('mousedown', (e) => e.preventDefault());

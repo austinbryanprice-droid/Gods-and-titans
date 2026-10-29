@@ -17,6 +17,18 @@ export const UI_SCALE_OPTIONS = [
   ['larger', 'Larger', 'The largest interface.'],
 ];
 
+// The "Team colours" and "Command keys" choices (settings `teamColors`, src/team-colors.js, and
+// `cardKeys`, src/ui/key-bindings.js).
+export const TEAM_COLOR_OPTIONS = [
+  ['standard', 'Standard', 'The colours chosen in the lobby.'],
+  ['colorblind', 'Colour-blind safe', 'Team colours, selection rings and order markers drawn in colours that stay apart with red-green or blue-yellow colour blindness. Only your screen changes.'],
+];
+
+export const CARD_KEY_OPTIONS = [
+  ['classic', 'Classic', 'Each command has its own letter: M Move, A Attack, B Build, W Warrior…'],
+  ['grid', 'Grid', 'The keys follow the card\'s 4 × 3 layout (Q W E R, A S D F, Z X C V by default), whatever is selected. Tips and How to Play still name the Classic letters.'],
+];
+
 /** The explanation of one option id ('' for an unknown one). */
 export function optionNote(options, id) {
   const o = options.find((x) => x[0] === id);

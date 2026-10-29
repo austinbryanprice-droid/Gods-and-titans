@@ -2027,6 +2027,24 @@ per-frame budget, so a revealed army appears over a few frames.
   `GameRenderer.setSpeed` scales the animations' dt but not the camera's. Online games always run at Normal and their
   F10 menu leaves the row out. The interface size multiplies the HUD's base font size (`--hud-scale` on #hud-root):
   Small 0.85, Normal 1, Large 1.15, Larger 1.3; every HUD panel is sized in em, so all of it follows.
+  **Team colours, keys and readable text** (settings `teamColors`, `cardKeys`, `keyBindings`; all per device, in
+  Settings and the F10 menu). *Colour-blind safe* (`src/team-colors.js`) draws each lobby colour as a stand-in from a set
+  that stays apart under protanopia, deuteranopia and tritanopia (Machado 2009 simulation: the worst of the 28 pairs is
+  about 21 CIELAB units, against 2 for the lobby set's blue and purple), and trades the selection rings' and order
+  markers' green and red for blue and orange (own blue, ally white, enemy orange, neutral yellow). Only the drawing
+  changes: the setup, the snapshots and every other player keep the lobby colours, so nothing reaches the wire.
+  `displayColor` is applied where a team is drawn (renderer `colorOf`, the minimap, the HUD's portraits, chat, taunts,
+  markers, market, chronicle, alerts, the lobby swatches); a change mid-match rebuilds every unit and building model
+  (`GameRenderer.setTeamPalette`, without the fog fade-in, so it shows even while paused). *Keys*
+  (`src/ui/key-bindings.js`, panel `src/ui/key-panel.js`): the camera's eight keys (pan ↑ ↓ ← →, zoom = and -, Space,
+  Home) can be rebound, and the command card has two layouts: Classic, each command's own letter, or Grid, the keys
+  by position (Q W E R / A S D F / Z X C V, each rebindable; a Cancel button still answers Esc). Binding a key another
+  action had swaps the two, so no action is left without a key; Esc, Pause, F1-F12, Enter, Tab, the digits, Delete,
+  Backspace, `.`, `` ` `` and the modifiers keep their jobs. The camera is checked first, so a letter bound to it stops
+  reaching the Classic card (the panel says so). Tips and How to Play name the default keys. *Text*: no text is
+  drawn under 10 px (`--mw-min-text`; at 1280 × 720 the HUD's base is 11 px and its small print was 6.6 to 9.9 px), and
+  the muted ink (`--mw-ink-mute`) is #a39983, 4.5:1 or better on the panels. `tools/shot-access.mjs` measures every
+  visible text's size and contrast on each screen at a window size and stills a battle in both palettes.
 - Getting-started tips (`src/ui/hud-tips.js`): a checklist in the top-right corner (mine gold →
   build → pray at a Shrine → summon a god → Titan Gate). Steps tick themselves from the
   ViewState and stay ticked; ✕ or finishing every step saves `tipsDismissed: true`

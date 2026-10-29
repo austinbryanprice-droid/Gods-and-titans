@@ -8,6 +8,7 @@ import { TERRAIN, NEUTRAL_COLOR } from '../config.js';
 import { BUILDINGS, UNITS } from '../data/index.js';
 import { MARKS } from '../data/marks.js';
 import { safeColor } from './hud-dom.js';
+import { displayColor, teamPalette } from '../team-colors.js';
 
 const DRAW_INTERVAL_MS = 100; // entities + fog layer (10 Hz); the camera quad redraws every frame
 const TERRAIN_REPAINT_MS = 700;
@@ -166,10 +167,14 @@ export class Minimap {
   }
 
   colorOf(owner) {
+    if (this.colorPalette !== teamPalette()) {
+      this.colorPalette = teamPalette(); // the team palette changed (team-colors.js)
+      this.colorCache.clear();
+    }
     let c = this.colorCache.get(owner);
     if (!c) {
       const p = this.vs.players[owner] || (this.vs.setup && this.vs.setup.players[owner]);
-      c = owner < 0 ? '#d8c890' : safeColor(p && p.color, NEUTRAL_COLOR);
+      c = owner < 0 ? '#d8c890' : displayColor(safeColor(p && p.color, NEUTRAL_COLOR));
       this.colorCache.set(owner, c);
     }
     return c;

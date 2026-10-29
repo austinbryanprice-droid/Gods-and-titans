@@ -3,6 +3,8 @@
 // (tests) simply fall back to in-memory settings.
 
 import { GAME_SPEEDS, UI_SCALES } from './config.js';
+import { TEAM_PALETTES } from './team-colors.js';
+import { CARD_LAYOUTS, cleanBindings } from './ui/key-bindings.js';
 
 const STORAGE_KEY = 'mythicwar-settings';
 const QUALITIES = ['low', 'medium', 'high', 'ultra'];
@@ -43,9 +45,12 @@ function cleanName(name) {
  * (src/intro/narrator.js). `aiChat` shows the computer players' in-character chat lines (src/ai/voice.js). `volume` is the sound effects; `musicVolume` (0..1) and `musicMuted`
  * are the background music's own (src/audio/music.js). `gameSpeed` is the pace of a match against the
  * computer (online games always run at normal speed) and `uiScale` the size of the in-game interface.
+ * `teamColors` draws the teams in the lobby's colours or a colour-blind-safe set (src/team-colors.js),
+ * `cardKeys` is the command card's key layout ('classic' letters or 'grid' by position) and `keyBindings`
+ * the keys changed from their defaults (src/ui/key-bindings.js), kept per device like the rest.
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal' };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: Object.freeze({}) };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -69,6 +74,13 @@ function sanitize(raw, base) {
   if (typeof raw.musicMuted === 'boolean') out.musicMuted = raw.musicMuted;
   if (SPEEDS.includes(raw.gameSpeed)) out.gameSpeed = raw.gameSpeed;
   if (SCALES.includes(raw.uiScale)) out.uiScale = raw.uiScale;
+  if (TEAM_PALETTES.includes(raw.teamColors)) out.teamColors = raw.teamColors;
+  if (CARD_LAYOUTS.includes(raw.cardKeys)) out.cardKeys = raw.cardKeys;
+  if (raw.keyBindings && typeof raw.keyBindings === 'object' && raw.keyBindings !== base.keyBindings) {
+    const kb = cleanBindings(raw.keyBindings);
+    const same = JSON.stringify(kb) === JSON.stringify(base.keyBindings || {});
+    out.keyBindings = same ? base.keyBindings : Object.freeze(kb);
+  }
   return out;
 }
 
@@ -110,7 +122,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger' }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger', teamColors: 'standard'|'colorblind', cardKeys: 'classic'|'grid', keyBindings: Object<string, string> }}
  */
 export function getSettings() {
   return load();
@@ -169,3 +181,5 @@ export const ALERT_LEVEL_IDS = ALERT_LEVELS;
 export const TAB_ALERT_MODES = TAB_ALERTS;
 export const GAME_SPEED_IDS = SPEEDS;
 export const UI_SCALE_IDS = SCALES;
+export const TEAM_COLOR_IDS = TEAM_PALETTES;
+export const CARD_KEY_LAYOUTS = CARD_LAYOUTS;

@@ -27,6 +27,7 @@ import { safeColor } from '../ui/hud-dom.js';
 import { SITE_ICON, SACRED_WARNINGS, sacredWhen } from '../ui/hud-sites.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_FAITH, SACRED_NAME } from '../config.js';
+import { displayColor } from '../team-colors.js';
 
 const SCAN_EVERY = 0.5; // seconds of game time between two surveys
 const SOUND_GAP = 2; // seconds between two alert sounds, unless the new one matters more
@@ -331,7 +332,7 @@ export class AlertEngine {
     const site = vs.sites[ev.site];
     const where = site ? { x: site.x, y: site.y } : null;
     const p = vs.players[ev.player];
-    const color = safeColor(p && p.color, '#ffe9b0');
+    const color = displayColor(safeColor(p && p.color, '#ffe9b0'));
     const name = this.playerName(ev.player);
     const mine = ev.player === vs.myIndex;
     const friend = mine || vs.isAlly(ev.player);
@@ -406,7 +407,7 @@ export class AlertEngine {
       text: `${name} is under attack!`,
       sound: 'drums',
       volume: 0.6,
-      ping: where && { ...where, color: safeColor(p && p.color, '#7fd0ff') },
+      ping: where && { ...where, color: displayColor(safeColor(p && p.color, '#7fd0ff')) },
       jump: where && t - this.lastDanger > 15 ? where : null,
       attention: `${name} is under attack!`,
     });

@@ -75,7 +75,7 @@
   align-items: center;
   gap: 0.7em;
   padding: 0.5em 0.9em 0.5em 0.6em;
-  font: 600 0.8em / 1 var(--mw-font-ui);
+  font: 600 max(0.8em, var(--mw-min-text)) / 1 var(--mw-font-ui);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--mw-ink-dim);
@@ -97,7 +97,7 @@
   left: 1.4em;
   margin: 0;
   padding: 0.5em 0.9em;
-  font: 600 0.8em / 1 var(--mw-font-ui);
+  font: 600 max(0.8em, var(--mw-min-text)) / 1 var(--mw-font-ui);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--mw-ink-dim);
@@ -175,7 +175,7 @@
 }
 .mw-intro-begin:focus-visible { outline: none; box-shadow: var(--mw-focus); }
 .mw-intro-begin-note {
-  font-size: 0.72em;
+  font-size: max(0.72em, var(--mw-min-text));
   letter-spacing: 0.16em;
   color: var(--mw-ink-dim);
 }
