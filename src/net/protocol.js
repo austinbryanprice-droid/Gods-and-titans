@@ -7,8 +7,8 @@ import { PEER_ID_PREFIX, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '../config.
 // wire-version.js: it needs the sanitizer and codec tables, which import this file.
 
 /**
- * Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC MARK; host→client: the rest
- * (+ LOBBY, CHAT, and MARK, which the host relays to the sender's teammates only).
+ * Message `t` values. client→host: HELLO LOBBY CMD CHAT PING RESYNC MARK PAUSE; host→client: the rest
+ * (+ LOBBY, CHAT, PAUSE, and MARK, which the host relays to the sender's teammates only).
  */
 export const MSG = {
   HELLO: 'hello',
@@ -25,6 +25,12 @@ export const MSG = {
   PONG: 'pong',
   KICK: 'kick',
   END: 'end',
+  // Pausing an online game (DESIGN 7): a client asks ({ on }), the host says how it stands ({ on, by, … }).
+  PAUSE: 'pause',
+  // Host migration (DESIGN 7): who takes the game over if the host leaves, and the room they will open
+  // ({ heir, room }, to every client); and the game itself for that heir ({ room, tick, state, tokens, present }).
+  PLAN: 'plan',
+  HANDOFF: 'handoff',
 };
 
 // Wire framing. A frame is a string: a JSON object ('{…}'), a chunk
@@ -47,6 +53,17 @@ export const STALL_NOTICE_MS = 3000;
 // A client whose send queue to the host's connection holds more than this is skipped
 // when deltas go out (see HostSession.broadcastSnapshot): queueing more only makes it lag.
 export const MAX_CLIENT_BUFFER_BYTES = 128 * 1024;
+// Host migration (DESIGN 7): the host sends its heir the whole game this often (the first one sooner),
+// so a host who leaves costs the others at most that much play. The new host waits for the players a
+// while, paused; the others keep trying to reach the new host's room for HANDOFF_JOIN_MS.
+export const HANDOFF_EVERY_MS = 10000;
+export const HANDOFF_FIRST_MS = 2000;
+export const HANDOFF_WAIT_MS = 30000;
+export const HANDOFF_JOIN_MS = 45000;
+// Pausing an online game: each player may pause this many times a game, and a pause ends by itself
+// after PAUSE_MAX_MS (anyone may end it sooner).
+export const ONLINE_PAUSES = 3;
+export const PAUSE_MAX_MS = 120000;
 export const JOIN_TIMEOUT_MS = 15000; // waiting for the signaling server / the host to answer a join
 export const CONNECT_TIMEOUT_MS = 15000; // waiting for the WebRTC data channel to open
 export const MAX_CHAT_LENGTH = 200;
@@ -78,6 +95,7 @@ export const REASONS = {
   REJOIN_OVER: 'That game is over.',
   REJOIN_DENIED: 'You cannot rejoin that game.',
   REPLACED: 'You rejoined this game from another window.',
+  NOT_HOST: 'Someone who is not the game\'s host answered in its room.',
 };
 
 /** Kick reason for a client running a different build than the host. */

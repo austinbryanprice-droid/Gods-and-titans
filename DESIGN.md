@@ -1289,8 +1289,44 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. Anyone else is told
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link
-    offers Rejoin Game. A host that leaves ends the game (nothing to rejoin). Check:
-    `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
+    offers Rejoin Game. The host gets a token too (`lobby.hostToken`), for a game carried on by its
+    heir. Check: `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
+  - Host migration (`src/net/handoff.js`, `HostSession.enableHandoff`, `Game.migrate`): a host that
+    leaves no longer ends an online game. The host names an heir (`pickHeir`: the connected player
+    still playing with the lowest index) and a room code for them, and tells every client
+    (`{t:'plan', heir, room, host, at, proof}`, again whenever the heir changes). Every `HANDOFF_EVERY_MS` (10 s;
+    the first after 2 s) the heir gets the whole game: the save-game graph of the World and the
+    setup's computer players' minds (`packMatch`, DESIGN 9.4), gzip + base64 where the browser has
+    CompressionStream (about 90 KB for four players at 25 minutes; packing takes about 20 ms), with
+    every player's rejoin token and who is connected (`{t:'handoff', room, tick, state, tokens,
+    present, pauses, proofs}`). When the host's link closes (or its END says `host-quit`) and the game is not over,
+    the client's `onEnd` carries `handoff: { plan, backup }`. Unless the host said it hands over (END
+    `carry`), each player first tries the room the game is in now (`plan.at`, `reachHost`, 5 s): when
+    only their own link dropped, the host takes them back and nothing moves (no split game). The heir rebuilds the game from the
+    backup (`takeOver`: `unpackMatch`, a HostSession on the heir's own ViewState, the planned room
+    through `LobbyHost.forGame`, which seats players by token only), AIs hold every other human's
+    seat (`seatAbsent`), pauses already used stay used (the backup carries them), and the game waits, paused, for the players who were connected (not the old
+    host) for at most `HANDOFF_WAIT_MS` (30 s). The others connect there with their own token
+    (`followHeir`, retrying for `HANDOFF_JOIN_MS`, 45 s) and get a ClientSession on their ViewState.
+    The Game swaps the session in place (`adopt`): the renderer, HUD, alerts, chronicle and career go
+    on; `ViewState.resetMotion` drops the motion history, as the game goes back to the backup's tick
+    (at most 10 s; nothing when the host quits through the menu: `handOff` sends a fresh backup
+    and waits up to 4 s for it to go out). The new host keeps an heir of its own in turn; the old
+    host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload.
+    Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
+    A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
+    the whole game and every token: a trade-off for friends' games. Anyone can open a room code, so
+    each seat has a proof (`HostSession.proofs`, random, in that seat's own `plan` and in the heir's
+    `handoff`): the host shows it in the `start` it sends that seat on a rejoin, and `reachHost` and
+    `followHeir` refuse a `start` without it (`REASONS.NOT_HOST`); the rejoin ticket keeps it, so Rejoin from the title checks it too. A player sitting on the planned
+    room can then stop the move (the game ends) but cannot pass for the host and take the others in.
+  - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
+    everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`
+    (3) per player per game, any player still in the game may resume, a pause ends by itself after
+    `PAUSE_MAX_MS` (2 min), defeated players cannot pause, commands are dropped while paused. The
+    Pause key or the game menu's Pause Game for Everyone; a bar under the top bar says who paused
+    and when it goes on, with Resume. Check: `tools/handoff-check.mjs` (two tabs: pause and resume,
+    the host's tab closes, the client carries on as host, the old host rejoins).
   - `ClientSession({ setup, myIndex, conn })`: decodes full/delta into its `ViewState`;
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
     `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:

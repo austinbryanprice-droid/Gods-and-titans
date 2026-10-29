@@ -1,8 +1,8 @@
 // Game sessions (DESIGN 7). The host runs the authoritative World and the AIs
 // on a fixed-rate ticker and streams delta snapshots; clients only decode them
 // into their ViewState and send commands. Both expose the same surface:
-//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark(mark),
-//     onChat(cb), onMark(cb), onEnd(cb), start(), stop(), pingMs, isHost }
+//   { setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark(mark), sendPause(on),
+//     onChat(cb), onMark(cb), onEnd(cb), onPause(cb), start(), stop(), pingMs, isHost, pause }
 // Everything that arrives over the network is untrusted: the host validates and
 // rate-limits each client's messages (sanitize.js); clients validate snapshots
 // and drop what they cannot use (a bad host can end the game, not crash it).
@@ -13,9 +13,11 @@ import * as mapgen from '../sim/mapgen.js';
 import { encode, apply } from './delta.js';
 import {
   MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, STALL_NOTICE_MS, MAX_CLIENT_BUFFER_BYTES,
+  HANDOFF_EVERY_MS, HANDOFF_FIRST_MS, HANDOFF_WAIT_MS, ONLINE_PAUSES, PAUSE_MAX_MS,
   RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
 } from './protocol.js';
 import { sanitizeCommand, sanitizeMark, isValidSnapshot, sanitizeFelled } from './sanitize.js';
+import { sanitizePlan, sanitizeHandoff, randomProof } from './handoff.js';
 import { Ticker } from './ticker.js';
 
 export const HOST_VIEW_DELAY_MS = 50;
@@ -28,6 +30,7 @@ export const CLIENT_LIMITS = {
   chat: [1, 5],
   ping: [4, 8],
   mark: MARK_RATE, // team pings and markers: a few a second is plenty to talk with
+  pause: [1, 5],
 };
 export const RESYNC_MIN_INTERVAL_MS = 1000;
 // A player who rejoins builds the whole game (renderer, models) while the game runs on, and cannot
@@ -39,6 +42,8 @@ const CLIENT_MARK_LIMIT = [8, 20]; // teammates' marks a client shows per second
 // Events and felled trees of snapshots held back from a congested client; past this the
 // client gets a full snapshot instead (it repairs everything).
 const MAX_HELD_ITEMS = 2000;
+// A graceful hand-over (the host quits through the menu) waits at most this long for the fresh backup to leave.
+const HANDOFF_FLUSH_MS = 4000;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -63,6 +68,8 @@ class SessionBase {
     this.chatCbs = new Set();
     this.markCbs = new Set();
     this.endCbs = new Set();
+    this.pauseCbs = new Set();
+    this.pause = null; // { by, reason: 'player'|'handoff', endsAt (local ms), left } while an online game is paused
     this.chatLog = [];
     this.ended = false;
     this.stopped = false;
@@ -92,6 +99,22 @@ class SessionBase {
   onMark(cb) {
     this.markCbs.add(cb);
     return () => this.markCbs.delete(cb);
+  }
+
+  /** cb(pause) whenever an online game is paused (pause: { by, reason, endsAt, left }) or goes on (null). */
+  onPause(cb) {
+    this.pauseCbs.add(cb);
+    return () => this.pauseCbs.delete(cb);
+  }
+
+  emitPause() {
+    for (const cb of [...this.pauseCbs]) {
+      try {
+        cb(this.pause);
+      } catch (err) {
+        console.error('[net] pause listener failed', err);
+      }
+    }
   }
 
   emitMark(mark) {
@@ -156,10 +179,11 @@ export class HostSession extends SessionBase {
    * @param {number} [o.connTimeoutMs] silence after which a client counts as gone (GAME_TIMEOUT_MS)
    * @param {boolean} [o.resumed] createWorld hands back a loaded game (DESIGN 9.4): the trees felled before the
    *   save come down at once, and events left over from the saved tick are dropped
+   * @param {object} [o.viewState] the ViewState to show this game in (a client that takes the game over keeps its own)
    */
   constructor({
     setup, myIndex = 0, conns = new Map(), createWorld, createAI = null, createVoices = null, autoTick = true, useWorker = true, viewDelayMs = HOST_VIEW_DELAY_MS,
-    connTimeoutMs = GAME_TIMEOUT_MS, resumed = false,
+    connTimeoutMs = GAME_TIMEOUT_MS, resumed = false, viewState = null,
   }) {
     super(setup, myIndex);
     this.connTimeoutMs = connTimeoutMs;
@@ -170,7 +194,8 @@ export class HostSession extends SessionBase {
     this.world = createWorld(setup);
     this.mapData = this.world.mapData
       || mapgen.generateMap(mapgen.mapOptions(setup));
-    this.viewState = new ViewState({ setup, mapData: this.mapData, myIndex, interpDelayMs: viewDelayMs });
+    this.viewState = viewState || new ViewState({ setup, mapData: this.mapData, myIndex, interpDelayMs: viewDelayMs });
+    if (viewState) viewState.interpDelayMs = viewDelayMs; // the game runs here now: no network delay to cover
     this.pingMs = 0;
     this.ais = new Map();
     for (const p of setup.players) if (p.kind === 'ai') this.addAI(p.index, p.difficulty || 'normal');
@@ -193,6 +218,15 @@ export class HostSession extends SessionBase {
     this.snapshotsSent = 0;
     this.lastSnap = null;
     this.netStats = { encodes: 0, encodeMs: 0, encodeMaxMs: 0, skipped: 0 };
+    // Host migration (enableHandoff): { room, tokens, pack, heir, at, busy, sent }
+    this.handoff = null;
+    // Host migration: a secret per seat (index → hex) that only the game's host knows and shows in `start` to that seat,
+    // so a player who reaches its room can tell the host from someone else sitting on the room's code (DESIGN 7).
+    this.proofs = new Map();
+    // Online pauses: each player's pauses left, the timer that ends a pause, and the players a new host waits for.
+    this.pausesLeft = new Map();
+    this.pauseTimer = null;
+    this.waiting = new Set();
     if (resumed) {
       this.world.events = [];
       this.world.felled = [];
@@ -229,8 +263,9 @@ export class HostSession extends SessionBase {
         chat: new RateLimiter(...CLIENT_LIMITS.chat),
         ping: new RateLimiter(...CLIENT_LIMITS.ping),
         mark: new RateLimiter(...CLIENT_LIMITS.mark),
+        pause: new RateLimiter(...CLIENT_LIMITS.pause),
       },
-      dropped: { cmd: 0, chat: 0, ping: 0, mark: 0, invalid: 0, resync: 0 },
+      dropped: { cmd: 0, chat: 0, ping: 0, mark: 0, pause: 0, invalid: 0, resync: 0 },
       skipped: 0, // snapshots held back while this client's send queue was full
       grace: null, // { pings } while a rejoined client may stay silent for REJOIN_GRACE_MS
     };
@@ -256,7 +291,7 @@ export class HostSession extends SessionBase {
     if (this.stopped || !msg || typeof msg !== 'object') return;
     switch (msg.t) {
       case MSG.CMD: {
-        if (!this.started) return; // nothing to command before the game runs
+        if (!this.started || this.pause) return; // nothing to command before the game runs, or while it stands still
         if (!c.limits.cmd.take()) {
           c.dropped.cmd++;
           return;
@@ -311,6 +346,13 @@ export class HostSession extends SessionBase {
       case MSG.RESYNC:
         this.requestFull(c);
         break;
+      case MSG.PAUSE:
+        if (!c.limits.pause.take()) {
+          c.dropped.pause++;
+          return;
+        }
+        this.setPause(c.index, msg.on === true);
+        break;
       default:
         break;
     }
@@ -358,6 +400,7 @@ export class HostSession extends SessionBase {
       }
     }
     this.broadcastChat({ from: -1, name: '', text, system: true });
+    this.updatePlan();
   }
 
   /**
@@ -380,15 +423,249 @@ export class HostSession extends SessionBase {
     this.leftPlayers.delete(index);
     const tookOver = this.standIns.delete(index);
     if (tookOver) this.ais.delete(index);
-    conn.send({ t: MSG.START, setup: this.setup, you: index, rejoin: true });
+    const proof = this.proofs.get(index);
+    conn.send({ t: MSG.START, setup: this.setup, you: index, rejoin: true, ...(proof ? { proof } : {}) });
     this.attach(index, conn);
     const c = this.clients.get(index);
     c.grace = { pings: 0 };
     if (typeof conn.setTimeoutMs === 'function') conn.setTimeoutMs(Math.max(REJOIN_GRACE_MS, this.connTimeoutMs));
     if (this.started) this.sendSnapshot(c, this.lastSnap);
+    if (this.pause) conn.send(this.pauseMessage());
     const name = this.playerName(index);
     this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true });
+    if (this.plan) conn.send(this.planFor(index));
+    this.updatePlan();
+    // A new host waits for the players who were in the game when it moved (DESIGN 7), then plays on.
+    if (this.waiting.delete(index) && !this.waiting.size && this.pause && this.pause.reason === 'handoff') this.setPause(-1, false);
     return null;
+  }
+
+  /**
+   * Players who are not here (yet): an AI holds each seat until they come (back), as when a link drops.
+   * A new host does this for everyone else of the game it took over (DESIGN 7).
+   */
+  seatAbsent(indices) {
+    const difficulty = standInDifficulty(this.setup);
+    const snapPlayers = (this.lastSnap && this.lastSnap.players) || [];
+    for (const i of indices) {
+      const p = this.setup.players[i];
+      if (!p || p.kind !== 'human' || i === this.myIndex || this.clients.has(i) || this.ais.has(i)) continue;
+      this.leftPlayers.add(i);
+      if (snapPlayers[i] && snapPlayers[i].defeated) continue;
+      if (this.addAI(i, difficulty, { standIn: true })) this.standIns.add(i);
+    }
+  }
+
+  /**
+   * Hold the game, paused, until these players have come back (a new host, DESIGN 7), or HANDOFF_WAIT_MS at most.
+   * Anyone may go on sooner.
+   */
+  waitFor(indices) {
+    this.waiting = new Set(indices.filter((i) => i !== this.myIndex && !this.clients.has(i)));
+    if (this.waiting.size && this.started) this.setPause(-1, true, 'handoff');
+  }
+
+  // ---------------------------------------------------------------- pause (online games)
+
+  /** The PAUSE message telling a client how the game stands. */
+  pauseMessage() {
+    const p = this.pause;
+    if (!p) return { t: MSG.PAUSE, on: false };
+    return { t: MSG.PAUSE, on: true, by: p.by, reason: p.reason, ms: Math.max(0, Math.round(p.endsAt - now())), left: p.left };
+  }
+
+  /**
+   * Pause or resume the game for everyone (DESIGN 7): a player may pause ONLINE_PAUSES times a game, and a
+   * pause ends after PAUSE_MAX_MS; any player still in the game may resume it. by -1 is the game itself
+   * (a new host waiting for the players). Returns true if something changed.
+   */
+  setPause(by, on, reason = 'player') {
+    if (this.stopped || !this.started || (this.lastSnap && this.lastSnap.gameOver)) return false;
+    const me = by >= 0 && this.lastSnap && this.lastSnap.players ? this.lastSnap.players[by] : null;
+    if (by >= 0 && me && me.defeated) return false; // a fallen player watches; they do not hold up the game
+    if (on) {
+      if (this.pause) return false;
+      let left = null;
+      if (by >= 0) {
+        left = this.pausesLeft.has(by) ? this.pausesLeft.get(by) : ONLINE_PAUSES;
+        if (left <= 0) {
+          this.tellPlayer(by, `You have no pauses left in this game (${ONLINE_PAUSES} each).`);
+          return false;
+        }
+        this.pausesLeft.set(by, --left);
+      }
+      const ms = reason === 'handoff' ? HANDOFF_WAIT_MS : PAUSE_MAX_MS;
+      this.pause = { by, reason, endsAt: now() + ms, left };
+      this.ticker.stop();
+      this.pauseTimer = setTimeout(() => {
+        this.pauseTimer = null;
+        this.setPause(-1, false);
+      }, ms);
+      if (this.pauseTimer && typeof this.pauseTimer.unref === 'function') this.pauseTimer.unref();
+      if (by >= 0) {
+        const n = left === 1 ? '1 pause' : `${left} pauses`;
+        this.broadcastChat({ from: -1, name: '', text: `${this.playerName(by)} paused the game (${n} left).`, system: true });
+      } else if (reason === 'handoff') {
+        const names = [...this.waiting].map((i) => this.playerName(i)).join(', ');
+        this.broadcastChat({ from: -1, name: '', text: `${this.playerName(this.myIndex)} now hosts the game. Waiting for ${names || 'the other players'} to reconnect…`, system: true });
+      }
+    } else {
+      if (!this.pause) return false;
+      this.pause = null;
+      this.waiting.clear();
+      if (this.pauseTimer) clearTimeout(this.pauseTimer);
+      this.pauseTimer = null;
+      // Sim time stood still: the view re-anchors its clock on the next snapshot.
+      this.viewState.resetClock();
+      if (this.autoTick) this.ticker.start();
+      this.broadcastChat({ from: -1, name: '', text: by >= 0 ? `${this.playerName(by)} resumed the game.` : 'The game goes on.', system: true });
+    }
+    const msg = this.pauseMessage();
+    for (const c of this.clients.values()) c.conn.send(msg);
+    this.emitPause();
+    return true;
+  }
+
+  /** Pause (true) or resume (false) as the host's own player. */
+  sendPause(on) {
+    return this.setPause(this.myIndex, !!on);
+  }
+
+  /** A system line for one player only. */
+  tellPlayer(index, text) {
+    const line = { from: -1, name: '', text, system: true };
+    if (index === this.myIndex) this.emitChat(line);
+    else {
+      const c = this.clients.get(index);
+      if (c) c.conn.send({ t: MSG.CHAT, ...line });
+    }
+  }
+
+  // ---------------------------------------------------------------- host migration (DESIGN 7)
+
+  /**
+   * Keep an heir ready to take the game over if this host leaves: the connected player picked by pickHeir
+   * hears the plan (with every other client) and gets the whole game every HANDOFF_EVERY_MS.
+   * @param {object} o
+   * @param {string} o.room the room code the heir will open
+   * @param {string} [o.here] this host's own room code, where everyone is now: a player who loses only their own link finds the host still there (Game.migrate)
+   * @param {Map<number, string>} o.tokens every player's rejoin token (the heir seats them with these)
+   * @param {(world: object, ais: Map) => Promise<{ enc, data }>|{ enc, data }} o.pack the game as handoff.encodeState gives it
+   *   (packs the world when called; may compress after)
+   */
+  enableHandoff({ room, here = null, tokens, pack }) {
+    if (typeof pack !== 'function' || !room) return;
+    this.handoff = { room, here, tokens: tokens || new Map(), pack, at: -Infinity, busy: null, sent: 0 };
+    // (A game carried on keeps the proofs it came with: the players got theirs from the host before.)
+    // (Mine too: when I come back after leaving, the next host shows it to me.)
+    for (const p of this.setup.players) if (p.kind === 'human' && !this.proofs.has(p.index)) this.proofs.set(p.index, randomProof());
+    this.plan = null;
+    this.updatePlan();
+  }
+
+  /**
+   * The player who takes the game over: the connected one who is still playing (not defeated) with the
+   * lowest index, else any connected one; null when nobody is.
+   */
+  pickHeir() {
+    const players = (this.lastSnap && this.lastSnap.players) || [];
+    let best = null;
+    for (const c of this.clients.values()) {
+      if (!c.conn.open || this.setup.players[c.index]?.kind !== 'human') continue;
+      const out = !!(players[c.index] && players[c.index].defeated);
+      if (!best || (best.out && !out) || (best.out === out && c.index < best.index)) best = { index: c.index, out };
+    }
+    return best ? best.index : null;
+  }
+
+  /** Tell every client who the heir is now (when that changed), and send a new heir the game soon. */
+  updatePlan() {
+    const h = this.handoff;
+    if (!h || this.stopped) return;
+    const heir = this.pickHeir();
+    if (this.plan && this.plan.heir === heir) return;
+    this.plan = heir === null ? null : { heir, room: h.room, host: this.myIndex, ...(h.here ? { at: h.here } : {}) };
+    h.at = -Infinity;
+    h.sent = 0;
+    if (!this.plan) return;
+    for (const c of this.clients.values()) c.conn.send(this.planFor(c.index));
+  }
+
+  /** The PLAN for one client: with that seat's proof, which only it and the heir get. */
+  planFor(index) {
+    const proof = this.proofs.get(index);
+    return { t: MSG.PLAN, ...this.plan, ...(proof ? { proof } : {}) };
+  }
+
+  /** Send the heir the game when it is due (or now, with force). Resolves once it is handed to the link. */
+  backup(force = false) {
+    const h = this.handoff;
+    if (!h || !this.plan || this.stopped || !this.started) return Promise.resolve(false);
+    if (h.busy) return force ? h.busy.then(() => this.backup(true)) : Promise.resolve(false); // one at a time; a forced one goes next
+    const t = now();
+    if (!force && t - h.at < (h.sent ? HANDOFF_EVERY_MS : HANDOFF_FIRST_MS)) return Promise.resolve(false);
+    const c = this.clients.get(this.plan.heir);
+    if (!c || !c.conn.open || (!force && c.conn.buffered > MAX_CLIENT_BUFFER_BYTES)) return Promise.resolve(false);
+    h.at = t;
+    const heir = this.plan.heir;
+    const tick = this.world.tickCount ?? (this.lastSnap ? this.lastSnap.tick : 0);
+    const present = [this.myIndex, ...this.clients.keys()];
+    const minds = new Map([...this.ais].filter(([i]) => !this.standIns.has(i)));
+    const pauses = Object.fromEntries(this.pausesLeft); // pauses used stay used with the next host
+    let packed;
+    try {
+      packed = h.pack(this.world, minds); // the world as it is now; the compression may finish later
+    } catch (err) {
+      this.reportError('handoff-pack', err);
+      return Promise.resolve(false);
+    }
+    // While it compresses, h.busy is the promise of this backup (handOff waits for it).
+    const done = h.busy = Promise.resolve(packed).then((state) => {
+      if (this.stopped && !force) return false;
+      const cc = this.clients.get(heir);
+      if (!cc || !cc.conn.open || !this.plan || this.plan.heir !== heir) return false;
+      cc.conn.send({ t: MSG.HANDOFF, room: h.room, tick, state, tokens: Object.fromEntries(h.tokens), present, pauses, proofs: Object.fromEntries(this.proofs) });
+      h.sent++;
+      return true;
+    }, (err) => {
+      this.reportError('handoff-pack', err);
+      return false;
+    }).finally(() => {
+      if (h.busy === done) h.busy = null;
+    });
+    return done;
+  }
+
+  /** Can this host hand the game over if it leaves now (someone is there to take it)? */
+  get canHandOff() {
+    return !!(this.handoff && this.plan && this.handoff.sent > 0 && !(this.lastSnap && this.lastSnap.gameOver) && !this.stopped);
+  }
+
+  /** The player who would take the game over, or null. */
+  get heir() {
+    return this.plan ? this.plan.heir : null;
+  }
+
+  /**
+   * Leave the game without ending it (DESIGN 7): the heir gets the game as it is now, and once it has gone
+   * out (or after HANDOFF_FLUSH_MS) every client hears that the host quit; they carry on with the heir.
+   */
+  async handOff() {
+    if (!this.canHandOff) {
+      this.stop();
+      return false;
+    }
+    if (this.pause && this.pause.reason === 'player') this.setPause(-1, false);
+    this.ticker.stop();
+    const h = this.handoff;
+    const sent = await this.backup(true); // (after any backup still compressing)
+    const c = this.plan && this.clients.get(this.plan.heir);
+    const t0 = now();
+    while (c && c.conn.open && c.conn.buffered > 0 && now() - t0 < HANDOFF_FLUSH_MS) await new Promise((r) => setTimeout(r, 50));
+    // Even when the newest copy did not go out, the heir carries on from the one before.
+    const carry = h.sent > 0 && !!(this.plan && this.clients.has(this.plan.heir));
+    this.stop(REASONS.HOST_QUIT, { carry });
+    return carry && sent;
   }
 
   /** The AIs' chat lines for these events (DESIGN 10.1), flagged `voice` so that a player can hide them. */
@@ -447,7 +724,12 @@ export class HostSession extends SessionBase {
 
   afterTicks() {
     if (this.stopped || this.ticksSinceSnap < SNAPSHOT_EVERY_TICKS) return;
-    this.takeSnapshot();
+    const snap = this.takeSnapshot();
+    if (this.handoff && snap) {
+      // A defeated heir passes the turn to one still playing.
+      if (this.plan && snap.players && snap.players[this.plan.heir] && snap.players[this.plan.heir].defeated) this.updatePlan();
+      this.backup();
+    }
   }
 
   takeSnapshot() {
@@ -549,7 +831,8 @@ export class HostSession extends SessionBase {
     if (this.started || this.stopped) return;
     this.started = true;
     for (const c of this.clients.values()) this.sendSnapshot(c, this.lastSnap);
-    if (this.autoTick) this.ticker.start();
+    if (this.waiting.size) this.setPause(-1, true, 'handoff');
+    if (this.autoTick && !this.pause) this.ticker.start();
   }
 
   /** Run `n` ticks now and send the resulting snapshot (tests, or a paused ticker). */
@@ -561,7 +844,7 @@ export class HostSession extends SessionBase {
 
   /** Issue a command for the host's own player. */
   sendCommand(cmd) {
-    if (this.stopped || !cmd || typeof cmd.type !== 'string') return;
+    if (this.stopped || this.pause || !cmd || typeof cmd.type !== 'string') return;
     const clean = { ...cmd };
     delete clean.player;
     delete clean.playerIndex;
@@ -593,16 +876,19 @@ export class HostSession extends SessionBase {
   /**
    * Stop the game: clients get `end` and their connections close.
    * @param {string} [reason] defaults to 'game-over' after a victory, else 'host-quit'
+   * @param {object} [o] { carry: true } when the heir has the game and carries it on (handOff)
    */
-  stop(reason) {
+  stop(reason, { carry = false } = {}) {
     if (this.stopped) return;
     this.stopped = true;
     this.ticker.stop();
+    if (this.pauseTimer) clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
     const why = reason || (this.lastSnap && this.lastSnap.gameOver ? 'game-over' : REASONS.HOST_QUIT);
     for (const c of this.clients.values()) {
       for (const off of c.offs) off();
       if (c.fullTimer) clearTimeout(c.fullTimer);
-      c.conn.send({ t: MSG.END, reason: why });
+      c.conn.send(carry ? { t: MSG.END, reason: why, carry: true } : { t: MSG.END, reason: why });
       setTimeout(() => c.conn.close('end'), END_CLOSE_DELAY_MS);
     }
     this.clients.clear();
@@ -619,10 +905,11 @@ export class ClientSession extends SessionBase {
    * @param {number} [o.interpDelayMs]
    * @param {number} [o.pingIntervalMs]
    * @param {number} [o.connTimeoutMs] silence after which the host counts as gone (GAME_TIMEOUT_MS)
+   * @param {object} [o.viewState] the ViewState to show the game in (a player following a new host keeps theirs)
    */
   constructor({
     setup, myIndex, conn, generateMap = mapgen.generateMap, interpDelayMs = INTERP_DELAY_MS, pingIntervalMs = PING_INTERVAL_MS, mapData = null,
-    connTimeoutMs = GAME_TIMEOUT_MS,
+    connTimeoutMs = GAME_TIMEOUT_MS, viewState = null,
   }) {
     super(setup, myIndex);
     this.isHost = false;
@@ -637,8 +924,10 @@ export class ClientSession extends SessionBase {
         console.error(`[net] Map mismatch: the host generated map ${setup.mapHash} but this browser generated ${mine}. Reload the page (Ctrl+Shift+R) so both players run the same version.`);
       }
     }
-    this.viewState = new ViewState({ setup, mapData: this.mapData, myIndex, interpDelayMs });
+    this.viewState = viewState || new ViewState({ setup, mapData: this.mapData, myIndex, interpDelayMs });
     this.snap = null;
+    this.plan = null; // { heir, room }: who takes the game over if the host leaves (DESIGN 7)
+    this.backup = null; // the game itself, when I am that heir (sanitizeHandoff)
     this.awaitingFull = false;
     this.resyncAt = -Infinity;
     this.resyncs = 0;
@@ -653,7 +942,7 @@ export class ClientSession extends SessionBase {
     this.offs = [
       conn.onMessage((msg) => this.handleMessage(msg)),
       conn.onClose(() => {
-        if (!this.stopped) this.finish({ reason: REASONS.HOST_LEFT });
+        if (!this.stopped) this.finish(this.endInfo(REASONS.HOST_LEFT));
       }),
     ];
   }
@@ -721,13 +1010,58 @@ export class ClientSession extends SessionBase {
       case MSG.PONG:
         if (Number.isFinite(msg.ts) && msg.ts <= now()) this.pingMs = Math.max(0, Math.round(now() - msg.ts));
         break;
+      case MSG.PLAN: {
+        const plan = sanitizePlan(msg, this.setup);
+        if (plan) this.plan = plan;
+        break;
+      }
+      case MSG.HANDOFF: {
+        const b = sanitizeHandoff(msg, this.setup);
+        if (b) this.backup = b;
+        else this.badMessage('handoff');
+        break;
+      }
+      case MSG.PAUSE: {
+        const was = this.pause;
+        if (msg.on === true) {
+          const by = Number.isInteger(msg.by) && msg.by >= -1 && msg.by < this.setup.players.length ? msg.by : -1;
+          const ms = Number.isFinite(msg.ms) ? Math.min(Math.max(0, msg.ms), 10 * 60000) : 0;
+          this.pause = { by, reason: msg.reason === 'handoff' ? 'handoff' : 'player', endsAt: now() + ms, left: Number.isInteger(msg.left) ? msg.left : null };
+        } else {
+          this.pause = null;
+          if (was) this.viewState.resetClock(); // sim time stood still meanwhile
+        }
+        this.emitPause();
+        break;
+      }
       case MSG.KICK:
-      case MSG.END:
         this.finish({ reason: sanitizeReason(msg.reason, REASONS.HOST_QUIT) });
         break;
+      case MSG.END: {
+        const reason = sanitizeReason(msg.reason, REASONS.HOST_QUIT);
+        // A host who quits a game still being played leaves it to the heir (DESIGN 7), when it says so.
+        this.finish(reason === REASONS.HOST_QUIT && msg.carry === true ? this.endInfo(reason) : { reason });
+        break;
+      }
       default:
         break;
     }
+  }
+
+  /**
+   * What this player needs to carry the game on without the host (DESIGN 7), or null: { plan, backup } (the
+   * backup only for the heir). Nothing once the game is over: there is nothing left to carry on.
+   */
+  handoffInfo() {
+    if (!this.plan || (this.snap && this.snap.gameOver)) return null;
+    if (this.plan.heir === this.myIndex && !this.backup) return null;
+    return { plan: this.plan, backup: this.plan.heir === this.myIndex ? this.backup : null };
+  }
+
+  /** The end callback's info for the host leaving: { reason }, with { handoff } when the game can go on. */
+  endInfo(reason) {
+    const handoff = this.handoffInfo();
+    return handoff ? { reason, handoff } : { reason };
   }
 
   /** Accept a decoded snapshot; false (and a resync) if the view could not take it. */
@@ -803,6 +1137,13 @@ export class ClientSession extends SessionBase {
   sendChat(text) {
     const t = sanitizeChat(text);
     if (t && !this.stopped) this.conn.send({ t: MSG.CHAT, text: t });
+  }
+
+  /** Ask the host to pause (true) or resume (false) the game for everyone. */
+  sendPause(on) {
+    if (this.stopped) return false;
+    this.conn.send({ t: MSG.PAUSE, on: !!on });
+    return true;
   }
 
   /**

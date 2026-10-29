@@ -1006,7 +1006,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         sfx.play('horn');
         // The ticket back into this game if the link drops or the page reloads (src/net/rejoin-ticket.js).
         if (info.rejoin) saveTicket({ roomCode: lobby.roomCode || st().roomCode, token: info.rejoin, myIndex: info.myIndex, name: getSettings().name, transport: onlineTransport });
-        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby, rejoin: info.rejoin || null });
+        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby, rejoin: info.rejoin || null, transport: onlineTransport });
       });
       safeOn('onKicked', (why) => {
         if (!alive) return;
@@ -1225,14 +1225,14 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         if (!alive || ctrl !== my) return;
         const mod = await loadLobby();
         if (!mod.LobbyClient || typeof mod.LobbyClient.rejoin !== 'function') throw Object.assign(new Error('Rejoining is not available here.'), { refused: true });
-        const info = await mod.LobbyClient.rejoin({ transport: ticket.transport, roomCode: ticket.roomCode, token: ticket.token, name: ticket.name, signal: my ? my.signal : undefined });
+        const info = await mod.LobbyClient.rejoin({ transport: ticket.transport, roomCode: ticket.roomCode, token: ticket.token, name: ticket.name, proof: ticket.proof || undefined, signal: my ? my.signal : undefined });
         if (!alive || ctrl !== my) {
           info.conn.close('left');
           return;
         }
         alive = false;
         sfx.play('horn');
-        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby: null, rejoin: ticket.token });
+        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby: null, rejoin: ticket.token, transport: ticket.transport });
       } catch (err) {
         if (!alive || ctrl !== my || (err && err.type === 'aborted')) return;
         const msg = M.cleanMessage(err && err.message, 'Could not rejoin the game.');
