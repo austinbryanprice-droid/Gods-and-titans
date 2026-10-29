@@ -355,7 +355,7 @@ export class Game {
       // ...and should this browser leave, the game goes on in another player's (host migration).
       if (lobby.online && lobby.started && typeof lobby.gameTokens === 'function' && lobby.hostToken) {
         this.myToken = lobby.hostToken;
-        this.prepareHandoff(session, lobby.gameTokens());
+        this.prepareHandoff(session, lobby.gameTokens(), lobby.roomCode);
       }
     }
     this.viewState = session.viewState;
@@ -1268,6 +1268,7 @@ export class Game {
       this.countDaily(false);
       if (this.saver) this.saver.onGameOver(); // counted: its autosave would bring it back to count again
       settleMatch(rejoinMatchId(this.launch)); // and so would rejoining it (DESIGN 7)
+      if (this.myToken) settleMatch(`rejoin:${this.myToken}`); // a host's too: it can rejoin the game its heir carries on
     }
   }
 
@@ -1584,7 +1585,7 @@ export class Game {
    * As host of an online game, keep an heir ready (DESIGN 7): the session sends them the whole game every
    * few seconds. This browser keeps a ticket into the heir's room, so that after a reload it can take its seat back there.
    */
-  async prepareHandoff(session, tokens) {
+  async prepareHandoff(session, tokens, here) {
     const humans = session.setup.players.filter((p) => p.kind === 'human').length;
     if (humans < 2 || isTutorial(session.setup) || this.mission) return;
     let mods;
@@ -1597,7 +1598,7 @@ export class Game {
     if (this.disposed || session !== this.session || session.stopped) return;
     const [saveGame, net] = mods;
     const room = makeRoomCode();
-    session.enableHandoff({ room, tokens, pack: (world, ais) => net.encodeState(JSON.stringify(saveGame.packMatch(world, ais))) });
+    session.enableHandoff({ room, here, tokens, pack: (world, ais) => net.encodeState(JSON.stringify(saveGame.packMatch(world, ais))) });
     if (this.myToken) saveTicket({ roomCode: room, token: this.myToken, myIndex: session.myIndex, name: session.playerName(session.myIndex), transport: this.netTransport() });
   }
 
@@ -1618,13 +1619,22 @@ export class Game {
     }
     const transport = this.netTransport();
     const name = old.playerName(this.myIndex);
-    // If this does not work out, Rejoin (and the title screen's) tries the new room.
-    if (this.myToken && !mine) saveTicket({ roomCode: plan.room, token: this.myToken, myIndex: this.myIndex, name, transport });
     try {
       const net = await import('../net/handoff.js');
       let session;
       let lobby = null;
-      if (mine) {
+      // Only my own link may have gone: if the host takes me back, nothing moves (a split game would be worse).
+      // (A host who quit through the menu said it hands over: no need to ask.)
+      const back = reason === REASONS.HOST_QUIT ? null : await net.reachHost({ plan, token: this.myToken, name, transport });
+      if (this.disposed) {
+        if (back) back.conn.close('left');
+        return;
+      }
+      // If what follows does not work out, Rejoin (and the title screen's) tries the new room.
+      if (!back && this.myToken && !mine) saveTicket({ roomCode: plan.room, token: this.myToken, myIndex: this.myIndex, name, transport });
+      if (back) {
+        session = new ClientSession({ setup: back.setup, myIndex: back.myIndex, conn: back.conn, mapData: old.mapData, viewState: this.viewState });
+      } else if (mine) {
         const [ai, saveGame] = await Promise.all([loadAI(), loadSaveGame()]);
         const aiFactory = (ai && ai.createAI) || idleAI;
         ({ session, lobby } = await net.takeOver({
@@ -1648,7 +1658,7 @@ export class Game {
         if (lobby) lobby.close();
         return;
       }
-      this.adopt(session, lobby);
+      this.adopt(session, lobby, !!back);
     } catch (err) {
       console.warn('[game] the game could not move to a new host', err);
       this.migrating = false;
@@ -1658,8 +1668,8 @@ export class Game {
     }
   }
 
-  /** Carry on with the session of the game's new host (DESIGN 7): this browser's own, or the heir's. */
-  adopt(session, lobby) {
+  /** Carry on with the session of the game's new host (DESIGN 7): this browser's own, or the heir's (or the old host's, reached again). */
+  adopt(session, lobby, reconnected = false) {
     this.listenTo(session);
     this.session = session;
     if (this.handoffLobby) this.handoffLobby.close();
@@ -1671,12 +1681,13 @@ export class Game {
     session.start();
     if (this.hud) {
       this.hud.overlays.hideWaiting();
-      this.hud.message(session.isHost ? 'You now host the game. It goes on from a few seconds before the host left.' : 'The game goes on with its new host, from a few seconds before the host left.', 'system', { icon: '🔁' });
+      if (reconnected) this.hud.message('Reconnected to the host.', 'system', { icon: '🔁' });
+      else this.hud.message(session.isHost ? 'You now host the game. It goes on from a few seconds before the host left.' : 'The game goes on with its new host, from a few seconds before the host left.', 'system', { icon: '🔁' });
       if (typeof this.hud.setPause === 'function') this.hud.setPause(session.pause);
     }
     this.netPause = session.pause ? { ...session.pause } : null;
     // A new host keeps an heir ready in turn (and a ticket into that heir's room).
-    if (session.isHost && lobby) this.prepareHandoff(session, lobby.gameTokens());
+    if (session.isHost && lobby) this.prepareHandoff(session, lobby.gameTokens(), lobby.roomCode);
   }
 
 }

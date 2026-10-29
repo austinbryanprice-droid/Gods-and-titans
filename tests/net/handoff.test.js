@@ -9,7 +9,7 @@ import { LobbyHost, LobbyClient } from '../../src/net/lobby.js';
 import { MSG, REASONS, ONLINE_PAUSES, PAUSE_MAX_MS, makeRoomCode } from '../../src/net/protocol.js';
 import { createLoopbackPair } from '../../src/net/transport.js';
 import { fakeWorldFactory, makeFakeMap } from '../../src/net/fake-world.js';
-import { encodeState, decodeState, sanitizePlan, sanitizeHandoff, takeOver, followHeir } from '../../src/net/handoff.js';
+import { encodeState, decodeState, sanitizePlan, sanitizeHandoff, takeOver, followHeir, reachHost } from '../../src/net/handoff.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(cond, ms = 3000, what = 'condition') {
@@ -66,7 +66,8 @@ test('handoff: the state travels compressed and comes back the same; plans and b
 
   const setup = setupWith(['human', 'human', 'hard']);
   const code = makeRoomCode();
-  assert.deepEqual(sanitizePlan({ heir: 1, room: code.toLowerCase(), host: 0 }, setup), { heir: 1, room: code, host: 0 });
+  assert.deepEqual(sanitizePlan({ heir: 1, room: code.toLowerCase(), host: 0 }, setup), { heir: 1, room: code, host: 0, at: null });
+  assert.equal(sanitizePlan({ heir: 1, room: code, at: 'zz' }, setup).at, null);
   assert.equal(sanitizePlan({ heir: 1, room: code, host: 1 }, setup).host, -1);
   assert.equal(sanitizePlan({ heir: 2, room: code }, setup), null, 'a computer player is never the heir');
   assert.equal(sanitizePlan({ heir: 1, room: '??' }, setup), null);
@@ -87,8 +88,8 @@ test('handoff: the host names the lowest connected player still playing as heir 
   ben.start();
   await ann.ready;
   await ben.ready;
-  assert.deepEqual(ann.plan, { heir: 1, room, host: 0 });
-  assert.deepEqual(ben.plan, { heir: 1, room, host: 0 });
+  assert.deepEqual(ann.plan, { heir: 1, room, host: 0, at: null });
+  assert.deepEqual(ben.plan, { heir: 1, room, host: 0, at: null });
   assert.equal(host.canHandOff, false, 'no copy sent yet');
   await host.backup(true);
   await waitFor(() => ann.backup, 2000, 'backup at the heir');
@@ -115,9 +116,11 @@ test('handoff: when the host vanishes, the heir carries the game on and the othe
   ann.start();
   ben.start();
   await ben.ready;
+  host.pausesLeft.set(2, 1); // Ben has paused twice
   host.step(6);
   await host.backup(true);
-  await waitFor(() => ann.backup, 2000, 'backup');
+  await waitFor(() => ann.backup && ann.backup.tick === host.world.tickCount, 2000, 'backup');
+  assert.equal(ann.backup.pauses.get(2), 1);
   const savedTick = host.world.tickCount;
   host.step(6); // play the backup never saw
 
@@ -130,7 +133,7 @@ test('handoff: when the host vanishes, the heir carries the game on and the othe
   for (const c of host.clients.values()) c.conn.close('gone');
   await waitFor(() => ends.size === 2, 2000, 'both ends');
   assert.equal(ends.get(1).reason, REASONS.HOST_LEFT);
-  assert.deepEqual(ends.get(1).handoff.plan, { heir: 1, room, host: 0 });
+  assert.deepEqual(ends.get(1).handoff.plan, { heir: 1, room, host: 0, at: null });
   assert.ok(ends.get(1).handoff.backup, 'the heir has the game');
   assert.equal(ends.get(2).handoff.backup, null, 'the others only know where to go');
 
@@ -145,6 +148,7 @@ test('handoff: when the host vanishes, the heir carries the game on and the othe
     },
   });
   assert.equal(built.tick, savedTick, 'built from the newest copy');
+  assert.equal(annHost.pausesLeft.get(2), 1, 'pauses used stay used with the new host');
   assert.equal(annHost.viewState, ann.viewState, 'shown in the view the player already has');
   assert.deepEqual([...annHost.standIns].sort(), [0, 2], 'AIs hold the absent seats');
   annHost.enableHandoff({ room: makeRoomCode(), tokens, pack: packFake }); // ready to move on again
@@ -191,6 +195,59 @@ test('handoff: a host quitting through the menu sends a fresh copy first, then t
   await waitFor(() => end, 2000, 'end');
   assert.equal(end.reason, REASONS.HOST_QUIT);
   assert.equal(end.handoff.backup.tick, tick, 'the copy is as the host left it');
+});
+
+test('handoff: a host quitting while a backup is still compressing waits for it and still hands over', async () => {
+  const setup = setupWith(['human', 'human', 'hard']);
+  const { host, clients } = makeGame(setup);
+  const ann = clients.get(1);
+  host.start();
+  ann.start();
+  await ann.ready;
+  await host.backup(true);
+  let release;
+  const slow = new Promise((r) => (release = r));
+  host.handoff.pack = (world) => slow.then(() => packFake(world));
+  host.step(3);
+  const inFlight = host.backup(true); // compressing...
+  assert.ok(host.handoff.busy);
+  let end = null;
+  ann.onEnd((info) => (end = info));
+  const quitting = host.handOff();
+  setTimeout(release, 20);
+  await inFlight;
+  await quitting;
+  await waitFor(() => end, 2000, 'end');
+  assert.ok(end.handoff, 'the game goes on with the heir');
+  assert.equal(end.handoff.backup.tick, host.world.tickCount);
+});
+
+test('handoff: a player whose own link dropped finds the host still there and simply rejoins', async () => {
+  const lobby = await LobbyHost.create({ transport: 'loopback', name: 'Host' });
+  const ann = await LobbyClient.join({ transport: 'loopback', roomCode: lobby.roomCode, name: 'Ann' });
+  const starts = [];
+  ann.onStart((i) => starts.push(i));
+  const res = lobby.start();
+  await waitFor(() => starts.length === 1, 2000, 'start');
+  const host = new HostSession({ setup: res.setup, myIndex: res.myIndex, conns: res.conns, createWorld: fakeWorldFactory({ units: 10 }), createAI: () => ({ tick() {} }), autoTick: false });
+  lobby.setRejoinHandler((i, conn) => host.rejoin(i, conn));
+  host.enableHandoff({ room: makeRoomCode(), here: lobby.roomCode, tokens: lobby.gameTokens(), pack: packFake });
+  host.start();
+  const client = new ClientSession({ setup: { ...starts[0].setup, mapHash: undefined }, myIndex: starts[0].myIndex, conn: starts[0].conn, generateMap: fakeMap, pingIntervalMs: 20 });
+  client.start();
+  await client.ready;
+  await waitFor(() => client.plan, 2000, 'plan');
+  assert.equal(client.plan.at, lobby.roomCode, 'the plan says where the game is now');
+  res.conns.get(starts[0].myIndex).close('lost'); // only Ann's link goes
+  await waitFor(() => host.standIns.has(starts[0].myIndex), 2000, 'stand-in');
+  const back = await reachHost({ plan: client.plan, token: starts[0].rejoin, name: 'Ann', transport: 'loopback' });
+  assert.ok(back && back.myIndex === starts[0].myIndex, 'the host takes Ann back: no takeover');
+  await waitFor(() => !host.standIns.has(starts[0].myIndex), 2000, 'seat back');
+  back.conn.close('done');
+  host.stop();
+  lobby.close();
+  await sleep(400);
+  assert.equal(await reachHost({ plan: client.plan, token: starts[0].rejoin, name: 'Ann', transport: 'loopback', timeoutMs: 500 }), null, 'gone host: carry on');
 });
 
 test('handoff: nothing to carry on after the game is over, or without a copy', async () => {

@@ -1286,10 +1286,12 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     CompressionStream (about 90 KB for four players at 25 minutes; packing takes about 20 ms), with
     every player's rejoin token and who is connected (`{t:'handoff', room, tick, state, tokens,
     present}`). When the host's link closes (or its END says `host-quit`) and the game is not over,
-    the client's `onEnd` carries `handoff: { plan, backup }`. The heir rebuilds the game from the
+    the client's `onEnd` carries `handoff: { plan, backup }`. Unless the host said it hands over (END
+    `carry`), each player first tries the room the game is in now (`plan.at`, `reachHost`, 5 s): when
+    only their own link dropped, the host takes them back and nothing moves (no split game). The heir rebuilds the game from the
     backup (`takeOver`: `unpackMatch`, a HostSession on the heir's own ViewState, the planned room
     through `LobbyHost.forGame`, which seats players by token only), AIs hold every other human's
-    seat (`seatAbsent`), and the game waits, paused, for the players who were connected (not the old
+    seat (`seatAbsent`), pauses already used stay used (the backup carries them), and the game waits, paused, for the players who were connected (not the old
     host) for at most `HANDOFF_WAIT_MS` (30 s). The others connect there with their own token
     (`followHeir`, retrying for `HANDOFF_JOIN_MS`, 45 s) and get a ClientSession on their ViewState.
     The Game swaps the session in place (`adopt`): the renderer, HUD, alerts, chronicle and career go
@@ -1298,7 +1300,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     and waits up to 4 s for it to go out). The new host keeps an heir of its own in turn; the old
     host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload.
     Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
-    A modified heir sees the whole game and every token: a trade-off for friends' games.
+    A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
+    the whole game and every token: a trade-off for friends' games.
   - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
     everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`
     (3) per player per game, any player still in the game may resume, a pause ends by itself after

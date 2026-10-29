@@ -543,13 +543,14 @@ export class HostSession extends SessionBase {
    * hears the plan (with every other client) and gets the whole game every HANDOFF_EVERY_MS.
    * @param {object} o
    * @param {string} o.room the room code the heir will open
+   * @param {string} [o.here] this host's own room code, where everyone is now: a player who loses only their own link finds the host still there (Game.migrate)
    * @param {Map<number, string>} o.tokens every player's rejoin token (the heir seats them with these)
    * @param {(world: object, ais: Map) => Promise<{ enc, data }>|{ enc, data }} o.pack the game as handoff.encodeState gives it
    *   (packs the world when called; may compress after)
    */
-  enableHandoff({ room, tokens, pack }) {
+  enableHandoff({ room, here = null, tokens, pack }) {
     if (typeof pack !== 'function' || !room) return;
-    this.handoff = { room, tokens: tokens || new Map(), pack, at: -Infinity, busy: false, sent: 0 };
+    this.handoff = { room, here, tokens: tokens || new Map(), pack, at: -Infinity, busy: null, sent: 0 };
     this.plan = null;
     this.updatePlan();
   }
@@ -575,7 +576,7 @@ export class HostSession extends SessionBase {
     if (!h || this.stopped) return;
     const heir = this.pickHeir();
     if (this.plan && this.plan.heir === heir) return;
-    this.plan = heir === null ? null : { heir, room: h.room, host: this.myIndex };
+    this.plan = heir === null ? null : { heir, room: h.room, host: this.myIndex, ...(h.here ? { at: h.here } : {}) };
     h.at = -Infinity;
     h.sent = 0;
     if (!this.plan) return;
@@ -586,38 +587,40 @@ export class HostSession extends SessionBase {
   /** Send the heir the game when it is due (or now, with force). Resolves once it is handed to the link. */
   backup(force = false) {
     const h = this.handoff;
-    if (!h || !this.plan || h.busy || this.stopped || !this.started) return Promise.resolve(false);
+    if (!h || !this.plan || this.stopped || !this.started) return Promise.resolve(false);
+    if (h.busy) return force ? h.busy.then(() => this.backup(true)) : Promise.resolve(false); // one at a time; a forced one goes next
     const t = now();
     if (!force && t - h.at < (h.sent ? HANDOFF_EVERY_MS : HANDOFF_FIRST_MS)) return Promise.resolve(false);
     const c = this.clients.get(this.plan.heir);
     if (!c || !c.conn.open || (!force && c.conn.buffered > MAX_CLIENT_BUFFER_BYTES)) return Promise.resolve(false);
-    h.busy = true;
     h.at = t;
     const heir = this.plan.heir;
     const tick = this.world.tickCount ?? (this.lastSnap ? this.lastSnap.tick : 0);
     const present = [this.myIndex, ...this.clients.keys()];
     const minds = new Map([...this.ais].filter(([i]) => !this.standIns.has(i)));
+    const pauses = Object.fromEntries(this.pausesLeft); // pauses used stay used with the next host
     let packed;
     try {
       packed = h.pack(this.world, minds); // the world as it is now; the compression may finish later
     } catch (err) {
-      h.busy = false;
       this.reportError('handoff-pack', err);
       return Promise.resolve(false);
     }
-    return Promise.resolve(packed).then((state) => {
-      h.busy = false;
+    // While it compresses, h.busy is the promise of this backup (handOff waits for it).
+    const done = h.busy = Promise.resolve(packed).then((state) => {
       if (this.stopped && !force) return false;
       const cc = this.clients.get(heir);
       if (!cc || !cc.conn.open || !this.plan || this.plan.heir !== heir) return false;
-      cc.conn.send({ t: MSG.HANDOFF, room: h.room, tick, state, tokens: Object.fromEntries(h.tokens), present });
+      cc.conn.send({ t: MSG.HANDOFF, room: h.room, tick, state, tokens: Object.fromEntries(h.tokens), present, pauses });
       h.sent++;
       return true;
     }, (err) => {
-      h.busy = false;
       this.reportError('handoff-pack', err);
       return false;
+    }).finally(() => {
+      if (h.busy === done) h.busy = null;
     });
+    return done;
   }
 
   /** Can this host hand the game over if it leaves now (someone is there to take it)? */
@@ -641,12 +644,15 @@ export class HostSession extends SessionBase {
     }
     if (this.pause && this.pause.reason === 'player') this.setPause(-1, false);
     this.ticker.stop();
-    const sent = await this.backup(true);
+    const h = this.handoff;
+    const sent = await this.backup(true); // (after any backup still compressing)
     const c = this.plan && this.clients.get(this.plan.heir);
     const t0 = now();
-    while (sent && c && c.conn.open && c.conn.buffered > 0 && now() - t0 < HANDOFF_FLUSH_MS) await new Promise((r) => setTimeout(r, 50));
-    this.stop(REASONS.HOST_QUIT, { carry: sent });
-    return sent;
+    while (c && c.conn.open && c.conn.buffered > 0 && now() - t0 < HANDOFF_FLUSH_MS) await new Promise((r) => setTimeout(r, 50));
+    // Even when the newest copy did not go out, the heir carries on from the one before.
+    const carry = h.sent > 0 && !!(this.plan && this.clients.has(this.plan.heir));
+    this.stop(REASONS.HOST_QUIT, { carry });
+    return carry && sent;
   }
 
   /** The AIs' chat lines for these events (DESIGN 10.1), flagged `voice` so that a player can hide them. */

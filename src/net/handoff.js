@@ -8,7 +8,7 @@
 // quits through the menu (the host sends a fresh one first, HostSession.handOff).
 import { toBase64, fromBase64 } from '../sim/save-graph.js';
 import { MAX_PLAYERS } from '../config.js';
-import { HANDOFF_JOIN_MS, MAX_HOST_MESSAGE_CHARS, isValidRoomCode, normalizeRoomCode } from './protocol.js';
+import { HANDOFF_JOIN_MS, MAX_HOST_MESSAGE_CHARS, ONLINE_PAUSES, REASONS, isValidRoomCode, normalizeRoomCode } from './protocol.js';
 import { hostRoom } from './transport.js';
 import { LobbyHost, LobbyClient } from './lobby.js';
 
@@ -42,7 +42,10 @@ export async function decodeState(state) {
   return new TextDecoder().decode(bytes);
 }
 
-/** A PLAN from the host, checked against the setup: { heir, room, host } or null (host: the host's index, -1 if unknown). */
+/**
+ * A PLAN from the host, checked against the setup: { heir, room, host, at } or null (host: the host's index, -1 if
+ * unknown; at: the room the game is in now, null if unknown).
+ */
 export function sanitizePlan(msg, setup) {
   if (!isObject(msg) || !setup || !Array.isArray(setup.players)) return null;
   const heir = msg.heir;
@@ -50,7 +53,8 @@ export function sanitizePlan(msg, setup) {
   const room = normalizeRoomCode(msg.room);
   if (!p || p.kind !== 'human' || !isValidRoomCode(room)) return null;
   const host = Number.isInteger(msg.host) && setup.players[msg.host] && msg.host !== heir ? msg.host : -1;
-  return { heir, room, host };
+  const at = msg.at === undefined ? '' : normalizeRoomCode(msg.at);
+  return { heir, room, host, at: isValidRoomCode(at) && at !== room ? at : null };
 }
 
 /**
@@ -74,7 +78,14 @@ export function sanitizeHandoff(msg, setup) {
   const present = Array.isArray(msg.present)
     ? [...new Set(msg.present.filter((i) => Number.isInteger(i) && setup.players[i] && setup.players[i].kind === 'human'))].slice(0, MAX_PLAYERS)
     : [];
-  return { room, tick: msg.tick, state: { enc: s.enc, data: s.data }, tokens, present };
+  const pauses = new Map();
+  if (isObject(msg.pauses)) {
+    for (const [k, v] of Object.entries(msg.pauses)) {
+      const i = Number(k);
+      if (Number.isInteger(i) && setup.players[i] && Number.isInteger(v) && v >= 0 && v <= ONLINE_PAUSES) pauses.set(i, v);
+    }
+  }
+  return { room, tick: msg.tick, state: { enc: s.enc, data: s.data }, tokens, present, pauses };
 }
 
 /**
@@ -94,6 +105,7 @@ export async function takeOver({ plan, backup, makeSession, transport = 'peer', 
   const text = await decodeState(backup.state);
   const save = JSON.parse(text);
   const session = makeSession(save);
+  session.pausesLeft = new Map(backup.pauses || []);
   let endpoint;
   try {
     endpoint = await hostRoom({ transport, roomCode: plan.room, params });
@@ -114,6 +126,23 @@ export async function takeOver({ plan, backup, makeSession, transport = 'peer', 
   session.seatAbsent(absent);
   session.waitFor(backup.present.filter((i) => i !== session.myIndex && i !== plan.host)); // not for the host who left
   return { session, lobby };
+}
+
+/**
+ * Before anything moves: is the host still there? Only my own link may have dropped (the host's AI holds my
+ * seat meanwhile), and taking the game over then would split it in two. Tries the room the game is in now
+ * (plan.at) with my token for a few seconds: resolves with LobbyClient.rejoin's { setup, myIndex, conn } when the
+ * host takes me back, null when nobody answers there (or a room closing says so); rejects when the host is there and
+ * the game is over.
+ */
+export async function reachHost({ plan, token, name, transport = 'peer', params, version, timeoutMs = 5000, rejoin = LobbyClient.rejoin }) {
+  if (!plan || !plan.at || !token) return null;
+  try {
+    return await rejoin({ transport, roomCode: plan.at, token, name, params, version, timeoutMs });
+  } catch (err) {
+    if (err && err.refused && err.message === REASONS.REJOIN_OVER) throw err;
+    return null;
+  }
 }
 
 /**
