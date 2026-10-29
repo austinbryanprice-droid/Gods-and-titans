@@ -2,6 +2,7 @@
 import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
 import { MAX_PLAYERS, PLAYER_COLORS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, PEACE_LENGTHS, PEACE_NAME, SURVIVAL_NAME, SACRED_NAME, SACRED_HOLD } from '../config.js';
 import { sanitizeName, sanitizeChat, sanitizeReason } from '../net/protocol.js';
+import { displayColor } from '../team-colors.js';
 
 /** Emblem shown for each pantheon in slot rows and the picker. */
 export const PANTHEON_EMBLEMS = {
@@ -199,7 +200,7 @@ export function blockedColors(state, index, isHost) {
 /** CSS color for a slot's color index. */
 export function slotColor(slot) {
   const i = slot && Number.isInteger(slot.color) ? slot.color : 0;
-  return PLAYER_COLORS[((i % PLAYER_COLORS.length) + PLAYER_COLORS.length) % PLAYER_COLORS.length];
+  return displayColor(PLAYER_COLORS[((i % PLAYER_COLORS.length) + PLAYER_COLORS.length) % PLAYER_COLORS.length]);
 }
 
 /** Teams in use: Map<team, slot index[]>. */

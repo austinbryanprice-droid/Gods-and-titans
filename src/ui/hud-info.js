@@ -18,6 +18,7 @@ import {
   workText, mineTripText, relicIcon, relicLine, relicCarryText, templeRelicsText,
 } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
+import { displayColor, teamPalette } from '../team-colors.js';
 
 const STATUS = {
   stun: ['💫', 'Stunned'],
@@ -47,7 +48,7 @@ function playerOf(vs, owner) {
 function teamColor(vs, owner) {
   if (owner < 0) return '#8a7a5a';
   const p = playerOf(vs, owner);
-  return safeColor(p && p.color, '#888888');
+  return displayColor(safeColor(p && p.color, '#888888'));
 }
 
 function ownerName(vs, owner) {
@@ -148,7 +149,7 @@ export function queueRuns(q, from = 1) {
 function shapeOf(e, vs) {
   if (!e) return '-';
   const q = e.q ? e.q.map((it) => it.u).join(',') : '';
-  return `${e.id}|${e.t}|${e.o}|${e.k === 'b' ? (isComplete(e) ? 1 : 0) : ''}|${q}|${e.lv || ''}|${e.tr || ''}|${vs.relation(e.o)}`;
+  return `${e.id}|${e.t}|${e.o}|${e.k === 'b' ? (isComplete(e) ? 1 : 0) : ''}|${q}|${e.lv || ''}|${e.tr || ''}|${vs.relation(e.o)}|${teamPalette()}`;
 }
 
 /** "wooden_wall×20,stone_wall×10": how many of each type are selected. It changes when walls are upgraded in place. */

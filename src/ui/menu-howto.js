@@ -77,6 +77,8 @@ const HOTKEYS = [
     [kbd('F10'), 'Game menu (pauses a game against the AI)'],
     [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera'],
     [kbd('Mouse wheel'), 'Zoom in and out (smoothly on a trackpad)'],
+    [keys('=', '-'), 'Zoom in (=) and out (-) from the keyboard'],
+    [['Settings · Keys'], 'Change the camera keys, or switch the command card to the Grid layout: Q W E R · A S D F · Z X C V by position, whatever is selected. The keys above are the defaults'],
   ]],
   ['Team signals', [
     [kbd('Alt', 'Click'), 'Ping your team at that spot on the map or the minimap (not while aiming an order or placing a building)'],

@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { InputController } from '../../src/ui/input.js';
-import { getCommandCard } from '../../src/ui/command-card.js';
+import { getCommandCard, withCardKeys } from '../../src/ui/command-card.js';
+import { cardKeysOf } from '../../src/ui/key-bindings.js';
+import { getSettings, saveSettings, _resetSettingsForTests } from '../../src/settings.js';
 import { makeWorld, spawn } from '../sim/helpers.js';
 import { installFakeDom } from './fake-dom.js';
 
@@ -152,4 +154,57 @@ test('the build menu closes when the active subgroup is not a worker', () => {
   assert.equal(input.cardMode(), 'root');
   assert.equal(input.menu, 'root');
   input.dispose();
+});
+
+test('camera keys are rebindable: a letter bound to the camera pans and stops reaching the card; zoom keys', () => {
+  _resetSettingsForTests();
+  const { sel, input, sent, zooms, warrior, key } = setup();
+  sel.set([warrior.id]);
+  key('ArrowUp');
+  assert.deepEqual([...input.keys], ['cam_up']);
+  input.onKeyUp({ key: 'ArrowUp', preventDefault() {} });
+  assert.deepEqual([...input.keys], []);
+  key('=');
+  key('-', { repeat: true }); // held: keeps zooming
+  assert.deepEqual(zooms, [1, -1]);
+  saveSettings({ keyBindings: { cam_up: 'S', card_5: 'ArrowUp' } });
+  key('s');
+  assert.deepEqual([...input.keys], ['cam_up'], 'S pans now');
+  assert.deepEqual(sent, [], 'and no longer stops');
+  input.onKeyUp({ key: 'S', preventDefault() {} }); // let go with Shift held: the same key
+  assert.deepEqual([...input.keys], []);
+  key('ArrowUp'); // the arrow is free in the Classic layout: nothing happens
+  assert.deepEqual([...input.keys], []);
+  key('s', { ctrlKey: true }); // Ctrl+S is the browser's, not the camera's
+  assert.deepEqual([...input.keys], []);
+  input.dispose();
+  _resetSettingsForTests();
+});
+
+test('Grid layout: keys press buttons by position, Esc still cancels, held Train repeats', () => {
+  _resetSettingsForTests();
+  saveSettings({ cardKeys: 'grid' });
+  const { world, sel, input, sent, warrior, key, vs } = setup();
+  const hud = input.game.hud;
+  hud.currentCard = () => withCardKeys(getCommandCard(sel.forCard(), vs, input.cardMode()), cardKeysOf(getSettings()));
+  sel.set([warrior.id]);
+  const card = hud.currentCard();
+  const stop = card.find((b) => b && b.id === 'stop');
+  const gridKey = ['Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F', 'Z', 'X', 'C', 'V'][stop.slot];
+  assert.equal(stop.key, gridKey);
+  key(gridKey.toLowerCase());
+  assert.deepEqual(sent.map((c) => c.type), ['stop']);
+  const attack = card.find((b) => b && b.id === 'attack');
+  key(attack.key);
+  assert.equal(input.mode.kind, 'target');
+  key('Escape');
+  assert.equal(input.mode.kind, 'normal');
+  const tc = world.buildingsOf(0).find((b) => b.type === 'town_center');
+  sel.set([tc.id]);
+  const train = hud.currentCard().find((b) => b && b.action && b.action.kind === 'train');
+  key(train.key);
+  key(train.key, { repeat: true });
+  assert.equal(sent.filter((c) => c.type === 'train').length, 2);
+  input.dispose();
+  _resetSettingsForTests();
 });

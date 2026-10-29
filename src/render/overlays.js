@@ -3,6 +3,7 @@
 // flags. Rings, bars and markers are single InstancedMeshes refilled every
 // frame (a few draw calls for hundreds of units, no per-frame allocations).
 import * as THREE from 'three';
+import { markerColors } from '../team-colors.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _m = new THREE.Matrix4();
@@ -511,7 +512,7 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-export const MARKER_COLORS = { move: '#4dff5a', attack: '#ff3a2a', gather: '#ffd23a' };
+export const MARKER_COLORS = markerColors('standard');
 const MARKER_KIND = { move: 0, attack: 1, gather: 2 };
 const MARKER_LIFE = 0.75;
 
@@ -544,8 +545,13 @@ export class MarkerLayer {
     parent.add(this.mesh);
     this.items = [];
     for (let i = 0; i < max; i++) this.items.push({ live: false, t: 0, x: 0, y: 0, z: 0, kind: 0, nx: 0, ny: 1, nz: 0 });
-    this.colors = Object.fromEntries(Object.entries(MARKER_COLORS).map(([k, v]) => [k, new THREE.Color(v)]));
+    this.setPalette();
     this.next = 0;
+  }
+
+  /** The order colours of the team palette (team-colors.js); markers already on the ground keep theirs. */
+  setPalette(pal) {
+    this.colors = Object.fromEntries(Object.entries(markerColors(pal)).map(([k, v]) => [k, new THREE.Color(v)]));
   }
 
   spawn(x, y, z, kind, normal) {

@@ -9,6 +9,7 @@ import { introWanted, playIntro } from './ui/intro.js';
 import { isSoloLaunch, saveSkirmish, launchFrom } from './game/rematch.js';
 import { readSave, saveInfo } from './game/save-store.js';
 import { dailyLaunch } from './game/daily.js';
+import { setTeamPalette } from './team-colors.js';
 
 export { showMenu, hideMenu };
 
@@ -272,6 +273,14 @@ function boot() {
   const settings = getSettings();
   initAudio(settings); // the sound effects and the music: one audio context, started now where the browser allows it and otherwise at the first key press or click
   onSettingsChange(syncAudio);
+  // The team palette (colour-blind-safe or the lobby's colours): everything that draws a team reads it.
+  setTeamPalette(settings.teamColors);
+  document.documentElement.classList.toggle('cb-teams', settings.teamColors === 'colorblind');
+  onSettingsChange((s, changed) => {
+    if (!changed.includes('teamColors')) return;
+    document.documentElement.classList.toggle('cb-teams', s.teamColors === 'colorblind');
+    setTeamPalette(s.teamColors);
+  });
   menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onLoad: loadGame, onIntro: () => watchIntro('settings', false), onReplay: (what) => startReplay(what) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();

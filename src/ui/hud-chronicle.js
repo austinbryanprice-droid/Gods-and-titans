@@ -9,6 +9,7 @@ import { sfx } from '../audio/sfx.js';
 import { METRICS, awardsFor } from '../game/chronicle.js';
 import { el, fmt, safeColor } from './hud-dom.js';
 import { formatClock } from './hud-data.js';
+import { displayColor } from '../team-colors.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const TABS = [
@@ -43,7 +44,7 @@ const nameOf = (p) => sanitizeName(p.name, `Player ${(p.i ?? 0) + 1}`);
 /** A table cell with the player's colour dot, name and the crown / "(you)" marks. */
 function nameCell(p, vs, winningTeam) {
   const dot = el('i', 'hud-st-dot');
-  dot.style.background = safeColor(p.color);
+  dot.style.background = displayColor(safeColor(p.color));
   const cell = el('td', 'hud-st-name', dot, nameOf(p));
   if (winningTeam !== null && winningTeam !== undefined && p.team === winningTeam) cell.appendChild(el('span', 'hud-st-crown', ' 👑'));
   if (p.i === vs.myIndex) cell.appendChild(el('span', 'hud-st-you', ' (you)'));
@@ -83,7 +84,7 @@ function summaryTab(vs, winningTeam, peak) {
       const who = a.winners.map((i) => byIndex.get(i)).filter(Boolean);
       const names = el('span', 'hud-ch-award-who', ...who.map((p, k) => {
         const s = el('span', null, (k ? ', ' : '') + nameOf(p));
-        s.style.color = safeColor(p.color);
+        s.style.color = displayColor(safeColor(p.color));
         return s;
       }));
       const card = el('div', `hud-ch-award${who.some((p) => p.i === vs.myIndex) ? ' is-mine' : ''}`,
@@ -161,7 +162,7 @@ export function chartSvg(vs, chronicle, metric) {
   for (const { p, pts } of lines) {
     if (!pts.length) continue;
     const d = pts.map(([t, v], k) => `${k ? 'L' : 'M'}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    const path = svg('path', { d, class: `hud-ch-line${p.i === vs.myIndex ? ' is-mine' : ''}`, fill: 'none', stroke: safeColor(p.color) });
+    const path = svg('path', { d, class: `hud-ch-line${p.i === vs.myIndex ? ' is-mine' : ''}`, fill: 'none', stroke: displayColor(safeColor(p.color)) });
     path.dataset.player = String(p.i);
     root.appendChild(path);
   }
@@ -177,7 +178,7 @@ function timelineTab(vs, winningTeam, chronicle) {
   }));
   const legend = el('div', 'hud-ch-legend', ...(vs.players || []).map((p) => {
     const dot = el('i', 'hud-st-dot');
-    dot.style.background = safeColor(p.color);
+    dot.style.background = displayColor(safeColor(p.color));
     return el('span', null, dot, nameOf(p));
   }));
   const few = !chronicle || chronicle.samples.length < 2;

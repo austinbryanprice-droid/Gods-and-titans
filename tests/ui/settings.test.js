@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal' });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: {} });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -221,4 +221,34 @@ test('gameSpeed and uiScale: normal by default, only known ids accepted, remembe
   _resetSettingsForTests();
   assert.equal(getSettings().gameSpeed, 'faster');
   assert.equal(getSettings().uiScale, 'large');
+});
+
+test('team colours, command keys and key bindings: saved, cleaned, unknown values ignored', () => {
+  assert.equal(getSettings().teamColors, 'standard');
+  assert.equal(getSettings().cardKeys, 'classic');
+  assert.deepEqual({ ...getSettings().keyBindings }, {});
+  saveSettings({ teamColors: 'colorblind', cardKeys: 'grid', keyBindings: { cam_up: 'K', card_0: 'Escape', nope: 'J', cam_home: 'W', card_1: 'Home' } });
+  const s = getSettings();
+  assert.equal(s.teamColors, 'colorblind');
+  assert.equal(s.cardKeys, 'grid');
+  // Escape is reserved and an unknown action is dropped; Home and W swapped between two actions is kept
+  assert.deepEqual({ ...s.keyBindings }, { cam_up: 'K', cam_home: 'W', card_1: 'Home' });
+  saveSettings({ keyBindings: { cam_up: 'K', cam_down: 'K' } }); // K doing two things: both go back
+  assert.deepEqual({ ...getSettings().keyBindings }, {});
+  saveSettings({ keyBindings: { cam_up: 'W' } }); // W still the grid's: refused
+  assert.deepEqual({ ...getSettings().keyBindings }, {});
+  saveSettings({ keyBindings: { cam_up: 'K' } });
+  _resetSettingsForTests();
+  assert.deepEqual({ ...getSettings().keyBindings }, { cam_up: 'K' }); // kept in this browser
+  saveSettings({ teamColors: 'pastel', cardKeys: 'qwerty', keyBindings: 'W' });
+  assert.equal(getSettings().teamColors, 'colorblind');
+  assert.equal(getSettings().cardKeys, 'grid');
+  assert.deepEqual({ ...getSettings().keyBindings }, { cam_up: 'K' });
+  // an equal map is not a change (listeners hear nothing)
+  const heard = [];
+  onSettingsChange((_, changed) => heard.push(...changed));
+  saveSettings({ keyBindings: { cam_up: 'K' } });
+  assert.deepEqual(heard, []);
+  saveSettings({ keyBindings: {} });
+  assert.deepEqual(heard, ['keyBindings']);
 });

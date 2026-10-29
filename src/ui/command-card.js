@@ -27,6 +27,7 @@ import {
 import { UNITS, BUILDINGS, BUILD_MENU, producibleAt, eliteFor, buildingIcon } from '../data/index.js';
 import { offeredUpgrades, lineOf, getUpgrade, reviveMult } from '../data/upgrades.js';
 import { MANOR, MERGE_TEXT, mergeRule, planMerges } from '../data/houses.js';
+import { keyLabel } from './key-bindings.js';
 import { selectionIds, subgroups, isComplete, isMergingEntity, ownBuildings, tierName, upgradesOf, modsOf, pantheonOf, mineTripText } from './hud-data.js';
 
 export const CARD_SLOTS = 12;
@@ -774,10 +775,24 @@ export function getCommandCard(selection, vs, mode = 'root') {
   return card;
 }
 
-/** Find the button bound to a key (case-insensitive letter or 'Escape'). */
+/**
+ * The card with the Grid layout's keys (key-bindings.js gridKeys: one key per slot) in place of each
+ * command's own letter, or the card as it is for the Classic layout (`keys` null). A Cancel button
+ * keeps answering Esc as well (`esc`).
+ */
+export function withCardKeys(card, keys) {
+  if (!keys) return card;
+  return card.map((b) => {
+    if (!b || b.passive) return b;
+    const key = keys[b.slot] || null;
+    return { ...b, key, keyLabel: keyLabel(key), esc: b.key === 'Escape' };
+  });
+}
+
+/** Find the button bound to a key (case-insensitive letter, a key name, or 'Escape'). */
 export function buttonForKey(card, key) {
   if (!key) return null;
-  const k = key.length === 1 ? key.toUpperCase() : key;
-  for (const b of card) if (b && b.key === k && !b.passive) return b;
+  const k = key === ' ' ? 'Space' : key.length === 1 ? key.toUpperCase() : key;
+  for (const b of card) if (b && (b.key === k || (b.esc && k === 'Escape')) && !b.passive) return b;
   return null;
 }

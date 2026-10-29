@@ -36,6 +36,7 @@ import { RelicLayer } from './relics.js';
 import { PostFX, RESIZE_SETTLE_MS, DEFAULT_LOOK } from './post.js';
 import { createEnvironment, setCloudShadows, applyAtmosphere, setLampSpots, LAMP_SPOTS, SUN_DIR, WORLD_UNIFORMS } from './shading.js';
 import { Atmosphere } from './atmosphere.js';
+import { displayColor, relationColor, onTeamPaletteChange } from '../team-colors.js';
 
 /** World units above the ground the shadow box keeps in view (roofs, heads, gods, hills): see updateShadowCamera. */
 const SHADOW_LIFT = 8;
@@ -86,12 +87,12 @@ const FOLLOW_SHAPES = new Set(['buff', 'shield', 'heal']);
 const STATUS_SLOW = new THREE.Color('#8fd4ff');
 const STATUS_INVULN = new THREE.Color('#ffd76a');
 
-const RELATION_COLORS = {
-  own: new THREE.Color('#3dff4a'),
-  ally: new THREE.Color('#c4f23a'),
-  enemy: new THREE.Color('#ff3a2a'),
-  neutral: new THREE.Color('#ffd83a'),
-};
+// Selection rings by relation, in the team palette (team-colors.js); filled in by setTeamPalette.
+const RELATION_COLORS = { own: new THREE.Color(), ally: new THREE.Color(), enemy: new THREE.Color(), neutral: new THREE.Color() };
+function paintRelationColors() {
+  for (const k of Object.keys(RELATION_COLORS)) RELATION_COLORS[k].set(relationColor(k));
+}
+paintRelationColors();
 const PROGRESS_COLOR = new THREE.Color('#e9c64a');
 const TRAIN_COLOR = new THREE.Color('#58b8ff');
 
@@ -331,6 +332,7 @@ export class GameRenderer {
     // ---- events
     this.unsub = [
       this.vs.on('*', (ev) => this.onEvent(ev)),
+      onTeamPaletteChange(() => this.setTeamPalette()),
     ];
     for (const [tx, ty] of this.vs.felledAll || []) this.forest.fell(tx, ty);
 
@@ -618,7 +620,39 @@ export class GameRenderer {
   colorOf(owner) {
     if (owner === undefined || owner === null || owner < 0) return NEUTRAL_COLOR;
     const p = (this.vs.players && this.vs.players[owner]) || (this.setup.players && this.setup.players[owner]);
-    return (p && p.color) || PLAYER_COLORS[owner % PLAYER_COLORS.length];
+    return displayColor((p && p.color) || PLAYER_COLORS[owner % PLAYER_COLORS.length]);
+  }
+
+  /**
+   * The team palette changed (the `teamColors` setting, team-colors.js): rings and markers take the
+   * new colours at once, and every unit and building model is rebuilt in them (units on the next
+   * frame, as after a detail change; buildings swap their model where they stand).
+   */
+  setTeamPalette() {
+    paintRelationColors();
+    this.markers.setPalette();
+    for (const v of this.units.values()) v.dispose();
+    this.units.clear();
+    for (const v of this.dying) v.dispose();
+    this.dying.length = 0;
+    this.rebuiltViews = true; // the next frame builds them all, at once and without a fade
+    for (const b of this.buildings.values()) {
+      const model = this.makeBuildingModel(b.e);
+      if (!model) continue;
+      const old = b.model;
+      model.root.position.copy(old.root.position);
+      model.root.traverse((o) => {
+        if (o.isMesh) o.receiveShadow = true;
+      });
+      this.entityRoot.add(model.root);
+      old.dispose();
+      b.model = model;
+      b.height = model.height || 1.5;
+      b.bp = -1; // touchBuilding sets the progress and the wall's joins on the new model
+      b.tr = b.e.tr || 1;
+      b.mask = 0;
+    }
+    this.preload();
   }
 
   pantheonOf(owner) {
@@ -723,6 +757,7 @@ export class GameRenderer {
     this.units.clear();
     for (const v of this.dying) v.dispose();
     this.dying.length = 0;
+    this.rebuiltViews = true;
     this.preload();
   }
 
@@ -1361,7 +1396,8 @@ export class GameRenderer {
         if (!vis) continue;
         // enemies and creeps coming into sight fade in (not at load, never own / allied units)
         const rel = vs.relation(e.o);
-        const fadeIn = frame > 1 && rel !== 'own' && rel !== 'ally';
+        // (nor when every view was rebuilt, for a new detail or team palette: they were on screen already)
+        const fadeIn = frame > 1 && !this.rebuiltViews && rel !== 'own' && rel !== 'ally';
         if (fadeIn && createMs > NEW_VIEW_MS) continue; // over budget: next frame
         const t0 = fadeIn ? now() : 0;
         v = this.createUnitView(e);
@@ -1501,6 +1537,7 @@ export class GameRenderer {
       this.animCost += (c - this.animCost) * 0.1;
     }
     onScreen.length = 0;
+    this.rebuiltViews = false;
     // gone from the view state: death animation or removal
     for (const v of this.units.values()) {
       if (v.seen === frame) continue;
