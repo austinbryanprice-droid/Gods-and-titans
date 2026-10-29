@@ -134,6 +134,7 @@ export function buildSnapshot(world) {
       ...powerView(p),
     };
     if (p.relics.length) out.rl = p.relics.slice(); // relic types resting in their Temples
+    if (p.surrendered) out.sur = true; // fell by surrendering, not in a fight (the career, DESIGN 9.1)
     return out;
   });
   const snap = {

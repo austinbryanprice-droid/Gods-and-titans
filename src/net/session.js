@@ -741,6 +741,8 @@ export class HostSession extends SessionBase {
       return null;
     }
     this.ticksSinceSnap = 0;
+    // Seats a stand-in AI holds for a player who dropped out are marked, for everyone's career (DESIGN 9.1).
+    if (this.standIns.size && Array.isArray(snap.players)) for (const i of this.standIns) if (snap.players[i]) snap.players[i].away = true;
     if (this.voices && this.lastSnap) this.speak(snap.events);
     // The first snapshot of a loaded game brings down the trees felled before the save.
     this.viewState.pushSnapshot(snap, now(), !this.lastSnap && this.felledAll.length ? { felledAll: this.felledAll } : null);
