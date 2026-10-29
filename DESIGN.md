@@ -1862,7 +1862,9 @@ per-frame budget, so a revealed army appears over a few frames.
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
-  emblem and name, and its tooltip lists the blessings and the elite soldier.
+  emblem and name, and its tooltip lists the blessings and the elite soldier. The top bar's left group stops short of
+  the centre banner: when its chips (Market, clock, sites, peace or wave, ping, pantheon, relics) run long, the
+  pantheon's name gives way and ends in an ellipsis (the name alone is hidden under 1100 px wide).
 - `hud.js` (+ `hud.css`): WC3-like layout. Top bar: gold, wood, faith (+rate), population,
   game clock, menu button. Bottom panel: minimap (left), selection (center: single unit
   portrait/icon, name, hp, armor, damage, level/xp bar, statuses, queue with progress and

@@ -1488,6 +1488,12 @@
 .hud-res.is-pantheon { cursor: help; }
 .hud-res.is-pantheon .hud-res-v { font: 600 0.9em/1 var(--mw-font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mw-gold-hi, #ffe39a); }
 @media (max-width: 1100px) { .hud-res.is-pantheon .hud-res-v { display: none; } .hud-res.is-pantheon { padding-right: 0.25em; } }
+/* The left group stops short of the centre banner (16em wide): its chips keep their size and the pantheon's name
+   gives way, ending in an ellipsis (the whole name is in the chip's tooltip). */
+.hud-top-left { min-width: 0; max-width: calc(50% - 8.4em); }
+.hud-top-left > * { flex-shrink: 0; }
+.hud-top-left > .hud-res.is-pantheon { flex-shrink: 1; min-width: 2.2em; }
+.hud-res.is-pantheon .hud-res-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.1em 0; }
 .hud-res.is-relic { cursor: help; }
 .hud-res.is-relic .hud-res-v { color: var(--mw-gold-hi, #ffe39a); }
 
