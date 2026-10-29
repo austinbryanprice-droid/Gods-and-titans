@@ -2271,7 +2271,10 @@ A match against the computer (one human, the rest AI; not the guided first match
   buffers are rebuilt, not saved; `World.onCommand`, the replay recorder's hook, is left out); unit and building data, config and the generated map are stored by name and
   looked up again (the map is generated again from the setup's seed). A function in the state throws with its
   path, so a test catches new state that cannot be saved. Also kept: the fog explored, enemy buildings and mines
-  as last seen, the camera, control groups, the chronicle's samples and the career tracker's tally.
+  as last seen, the camera, control groups, the chronicle's samples, the career tracker's tally, and the match's
+  replay recorded so far (`ReplayRecorder.carry`: the setup, commands, chat and checksums, 9.5), so a game carried
+  on still gets a replay of the whole match. A recording over `MAX_CARRIED_COMMANDS` (150,000 commands, about
+  3 hours of a 4-player game) or one cut short is not carried: that game, once loaded, records no replay.
 - Determinism: the loaded game plays the same ticks exactly as the saved one would have (the packed state of both,
   compared after 90 more seconds of AI-vs-AI play, is identical: tests/game/save-game.test.js, also for the Trial of
   the Titans, the Decade of Peace and Sacred Victory). A loaded game's `HostSession` (`resumed: true`) drops the
@@ -2290,8 +2293,12 @@ its ticks, and checksums.
   from a player who left too), as the compact form of `normalizeCommand`'s copy (empty fields dropped;
   normalizing it again gives the same command). On each host snapshot, at most every 10 s of game time,
   it keeps `worldChecksum` (the tick, every player's resources, every living unit's id, place and health,
-  every building's health), and one on the last tick. The guided first match is not recorded, nor is a game
-  carried on from a save (9.4: a replay starts from the setup, and that game's start is not kept).
+  every building's health), and one on the last tick. The guided first match is not recorded. A saved game
+  carries the recording so far in its extra (9.4); on load, `ReplayRecorder.resume` hangs a recorder on the
+  loaded World that goes on from it (it must be from the same tick and seed, its rows well formed), so the
+  replay kept at the end plays the whole match from the setup, across any number of saves and loads (the
+  loaded game plays on exactly as the saved one would have). It keeps the match's start date. A save without
+  a recording (from an earlier build, or one too long to carry) gives no replay.
 - Kept: at the game-over screen (with the result) or on leaving (result null, "Left early"), when the game
   ran 30 s or more. `saveReplay` stores it in IndexedDB (`mythicwar-replays`: a `meta` list row and the
   `data`, gzip-compressed by CompressionStream; a 2-player 15-minute game is about 26 KB, a 4-player

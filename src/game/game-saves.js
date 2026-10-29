@@ -8,6 +8,8 @@
 //   saver.canSave()            // a solo match against the computer, still being played
 //   await saver.save('1')      // or AUTO_SLOT
 //   saver.tick()               // every frame: autosaves when it is due
+// A save also carries the match's replay so far (the recorder's commands, chat and checksums), so a
+// game carried on still gets a replay of the whole match at its end (game.js re-attaches it).
 import { PANTHEONS } from '../data/index.js';
 import { packGraph, unpackGraph } from '../sim/save-graph.js';
 import { isTutorial } from '../sim/tutorial.js';
@@ -128,6 +130,8 @@ export class MatchSaver {
       groups: sel && sel.groups ? [...sel.groups].map(([k, ids]) => [k, [...ids]]) : [],
       chronicle: g.chronicle ? { samples: g.chronicle.samples, peakArmy: g.chronicle.peakArmy, next: g.chronicle.next } : null,
       career: career ? { m: career.m, unlockedHere: career.unlockedHere } : null,
+      // The replay recorded so far (replay.js ReplayRecorder.carry): the loaded game records on from it.
+      replay: g.recorder && typeof g.recorder.carry === 'function' ? g.recorder.carry() : null,
     };
   }
 

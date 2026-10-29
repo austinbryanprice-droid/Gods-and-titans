@@ -35,6 +35,7 @@ import { campaignOn, missionOf, campaignStart, createCampaign, updateCampaign, c
 import { startOf } from '../data/twists.js';
 import { createSites, updateSites, accrueSiteFaith, sacredVictoryOn, siteBlocksFootprint } from './sacred.js';
 import { hyp, distPointRect } from './common.js';
+import { buildingsNear } from './building-grid.js';
 
 const ERRORS_GOLD = 'Not enough gold.';
 const ERRORS_WOOD = 'Not enough wood.';
@@ -72,7 +73,10 @@ export class World {
     this.onCommand = null; // (tick, player, command) for every command accepted: the replay recorder (src/game/replay.js)
     this.hash = new SpatialHash(this.map.width, this.map.height, 2);
     this.paths = new PathService(this.map);
+    // The largest radius among living units (at least 0.5): spatial-hash queries widen by it so they find
+    // every unit whose edge is in reach. It shrinks again when the last unit that big is gone (dropDead).
     this.maxRadius = 0.5;
+    this._bgrid = null; // building-grid.js, rebuilt on demand (not saved)
     this._tmpQuery = [];
     this._tmpTarget = [];
     this._tmpSteer = [];
@@ -439,7 +443,10 @@ export class World {
       if (hyp(u.x - x, u.y - y) - u.radius > r) continue;
       if (!filter || filter(u)) out.push(u);
     }
-    for (const b of this.buildingList) {
+    tmp.length = 0;
+    const near = buildingsNear(this, x, y, r, tmp);
+    for (let i = 0; i < near.length; i++) {
+      const b = near[i];
       if (b.dead) continue;
       if (distPointRect(x, y, b.tx, b.ty, b.tx + b.size, b.ty + b.size) > r) continue;
       if (!filter || filter(b)) out.push(b);
@@ -874,10 +881,17 @@ export class World {
 
   cleanup() {
     let removed = false;
-    for (const e of this.unitList) if (e.dead) { this.entities.delete(e.id); removed = true; }
+    let bigGone = false;
+    for (const e of this.unitList) {
+      if (!e.dead) continue;
+      this.entities.delete(e.id);
+      removed = true;
+      if (e.radius >= this.maxRadius) bigGone = true;
+    }
     if (removed) {
       this.unitList = this.unitList.filter((u) => !u.dead);
       this.auraHolders = this.auraHolders.filter((u) => !u.dead);
+      if (bigGone) this.recomputeMaxRadius();
     }
     if (this.buildingList.some((b) => b.dead)) {
       for (const b of this.buildingList) if (b.dead) this.entities.delete(b.id);
@@ -908,7 +922,15 @@ export class World {
     if (this.unitList.some((u) => u.dead)) {
       for (const e of this.unitList) if (e.dead) this.entities.delete(e.id);
       this.unitList = this.unitList.filter((u) => !u.dead);
+      this.recomputeMaxRadius();
     }
+  }
+
+  /** maxRadius from the units still in unitList (after the largest one died). */
+  recomputeMaxRadius() {
+    let r = 0.5;
+    for (const u of this.unitList) if (!u.dead && u.radius > r) r = u.radius;
+    this.maxRadius = r;
   }
 
   /** ViewSnapshot (DESIGN 6.3); includes and clears pending events and felled trees. */

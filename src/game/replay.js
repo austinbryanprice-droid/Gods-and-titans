@@ -21,7 +21,12 @@ export const REPLAY_FORMAT = 1;
 export const SUM_EVERY_TICKS = 10 * TICK_RATE; // a checksum every 10 s of game time (at most)
 export const MIN_REPLAY_TICKS = 30 * TICK_RATE; // a game left in its first 30 s is not kept
 export const MAX_REPLAY_COMMANDS = 600000; // far past any real game (a 4-AI game gives ~750 a minute)
+// A saved game carries its recording so far (DESIGN 9.4), up to this many commands (about 3 hours of a
+// 4-player game, a few MB of JSON before the save is gzipped); a longer one is saved without it and
+// gets no replay once carried on.
+export const MAX_CARRIED_COMMANDS = 150000;
 const MAX_CHAT = 2000;
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** 32-bit FNV-1a step over an integer (as 4 bytes). */
 function mix(h, v) {
@@ -114,6 +119,54 @@ export class ReplayRecorder {
     this.prevHook = null;
   }
 
+  /**
+   * The recording so far, as plain data that rides in a saved game's extra (game-saves.js), or null when
+   * there is none worth carrying (finished, cut short, or too long). Copies: the save is written later.
+   */
+  carry() {
+    if (this.done || this.truncated || this.cmds.length > MAX_CARRIED_COMMANDS) return null;
+    return {
+      format: REPLAY_FORMAT,
+      setup: this.setup,
+      myIndex: this.myIndex,
+      started: this.started,
+      tick: this.world.tickCount,
+      cmds: this.cmds.slice(),
+      chat: this.chatLines.slice(),
+      sums: this.sums.slice(),
+      lastSum: Number.isFinite(this.lastSum) ? this.lastSum : null,
+    };
+  }
+
+  /**
+   * A recorder that carries on a saved game's recording (carry()) on its loaded World, so the replay
+   * kept at the end plays the whole match from the setup. Null when the data does not fit this world.
+   * @param {object} o
+   * @param {object} o.world the loaded World
+   * @param {object} o.carried what carry() gave when the game was saved
+   * @param {() => number} [o.now]
+   */
+  static resume({ world, carried, now = Date.now }) {
+    const c = carried;
+    if (!isObj(c) || c.format !== REPLAY_FORMAT || !isObj(c.setup) || !world || !world.setup) return null;
+    if (c.tick !== world.tickCount || c.setup.seed !== world.setup.seed || !Array.isArray(c.cmds) || c.cmds.length > MAX_CARRIED_COMMANDS) return null;
+    const n = world.players.length;
+    let last = 0;
+    for (const row of c.cmds) {
+      if (!Array.isArray(row) || row.length !== 3 || !Number.isSafeInteger(row[0]) || row[0] < last || row[0] > c.tick) return null;
+      if (!Number.isInteger(row[1]) || row[1] < 0 || row[1] >= n || !isObj(row[2])) return null;
+      last = row[0];
+    }
+    const myIndex = Number.isInteger(c.myIndex) ? c.myIndex : 0;
+    const rec = new ReplayRecorder({ world, setup: c.setup, myIndex, now });
+    if (Number.isFinite(c.started)) rec.started = c.started;
+    rec.cmds = c.cmds.slice();
+    rec.chatLines = (Array.isArray(c.chat) ? c.chat : []).filter((r) => Array.isArray(r) && Number.isSafeInteger(r[0]) && r[0] <= c.tick).slice(0, MAX_CHAT);
+    rec.sums = (Array.isArray(c.sums) ? c.sums : []).filter((r) => Array.isArray(r) && Number.isSafeInteger(r[0]) && r[0] <= c.tick && Number.isSafeInteger(r[1]));
+    rec.lastSum = Number.isSafeInteger(c.lastSum) ? c.lastSum : rec.sums.length ? rec.sums[rec.sums.length - 1][0] : -Infinity;
+    return rec;
+  }
+
   attach() {
     const w = this.world;
     this.prevHook = w.onCommand;
@@ -198,7 +251,6 @@ export function replayMeta(rec) {
 }
 
 const RESULTS = new Set(['victory', 'defeat', 'draw', 'survival']);
-const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * Check a replay read from storage or from a file (untrusted: a file may come from anyone). Returns
