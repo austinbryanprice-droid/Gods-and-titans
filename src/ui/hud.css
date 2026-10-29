@@ -524,6 +524,9 @@
   user-select: text;
 }
 .hud-chat-input:focus { border-color: var(--mw-gold); box-shadow: 0 0 0.6em rgba(227, 184, 79, 0.3); }
+/* An online game's end panel (DESIGN 7): the feed and the chat box stand over the overlay layer (.hud-overlays, 10),
+   so the players can read and say gg and agree on a rematch without Keep Watching. The feed still ignores the pointer. */
+.hud.is-panel-chat .hud-msgs, .hud.is-panel-chat .hud-chat { z-index: 11; }
 
 /* ------------------------------------------------------------ getting-started tips */
 
