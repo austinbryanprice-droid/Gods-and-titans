@@ -871,7 +871,8 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   ones are a bonus; `hidden` ones show once an event reveals them. Any but a protect one may carry a `limit` in
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
-- Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
+- Events, in data order: `{ at: seconds }` or `{ after: objective id }` (whose `say` is left unsaid when that objective ends
+  the mission: no "Now finish the king" over Mission Complete), with `say` (a line), `reveal`, and `spawn`
   `{ owner, tag, units, at, march, target, guard, always }`: units in a line in front of the owner's Town Center (none if the
   owner is beaten, unless `always`: then from where that Town Center stood at the start, `cp.homes`), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
   nearest building; idle marchers are sent again each second. A `guard` spawn stays where it stands (`u.cGuard`):

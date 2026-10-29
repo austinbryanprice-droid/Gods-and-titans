@@ -201,7 +201,7 @@ function march(world, units, targetTag) {
   if (t) groupOrder(world, units, t.x, t.y, 'attackMove', false);
 }
 
-function fire(world, cp, i) {
+function fire(world, cp, i, sayLater = null) {
   const e = cp.m.events[i];
   cp.fired[i] = true;
   if (e.reveal) {
@@ -230,7 +230,10 @@ function fire(world, cp, i) {
       if (s.march) march(world, units, s.target);
     }
   }
-  if (e.say) world.emit({ type: 'campaignSay', e: i });
+  if (e.say) {
+    if (sayLater) sayLater.push(i);
+    else world.emit({ type: 'campaignSay', e: i });
+  }
 }
 
 /** Is an objective done now (for the sticky kinds), and its number for the panel. */
@@ -397,6 +400,7 @@ export function updateCampaign(world) {
     cp.held = n >= hold.count ? cp.held + 1 : 0;
   }
   let failed = false;
+  const says = []; // the lines of events fired by an objective done now: said unless the mission ends with it
   for (let i = 0; i < m.objectives.length; i++) {
     const o = m.objectives[i];
     const [ok, v] = judge(world, cp, o);
@@ -413,7 +417,7 @@ export function updateCampaign(world) {
       cp.state[i] = DONE;
       world.emit({ type: 'objective', i, s: DONE });
       m.events.forEach((e, k) => {
-        if (!cp.fired[k] && e.after === o.id) fire(world, cp, k);
+        if (!cp.fired[k] && e.after === o.id) fire(world, cp, k, says);
       });
     } else if (Number.isFinite(o.limit) && world.time >= o.limit - 1e-9) {
       // Out of time: not done by its limit, the objective fails, and the mission with it.
@@ -428,11 +432,14 @@ export function updateCampaign(world) {
   for (const u of world.unitList) if (!u.dead && u.cMarch && !u.order && !u.forced && !u.orders.length) idle.push(u);
   for (const u of idle) march(world, [u], u.cMarch === true ? null : u.cMarch);
   cp.at = pointAt(world, cp);
-  if (failed) return end(world, false);
-  const won = m.objectives.every((o, i) => o.optional || o.kind === 'protect' || cp.state[i] === DONE);
-  if (won) end(world, true);
+  const won = !failed && m.objectives.every((o, i) => o.optional || o.kind === 'protect' || cp.state[i] === DONE);
   // Every enemy beaten while the mission waited for a story objective: that wait is over now.
-  else if (m.waitFor && !waiting(cp) && enemiesLeft(world) === 0) campaignVictory(world);
+  const waitOver = !failed && !won && m.waitFor && !waiting(cp) && enemiesLeft(world) === 0;
+  // "Now finish the king of Akkad" is not said over Mission Complete (or Mission Failed).
+  if (!failed && !won && !waitOver) for (const k of says) world.emit({ type: 'campaignSay', e: k });
+  if (failed) return end(world, false);
+  if (won) end(world, true);
+  else if (waitOver) campaignVictory(world);
 }
 
 /** Snapshot record: { o: per objective [state, value, shown 0/1], h: seconds held, at: [x, y] | null }. */
