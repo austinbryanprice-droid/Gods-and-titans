@@ -79,7 +79,7 @@ test('rejoin: a dropped player in a Hard game gets a Hard stand-in, and takes th
   const standIn = aiCalls[2];
   assert.equal(standIn.index, 1);
   assert.equal(standIn.difficulty, 'hard');
-  assert.match(hostLines.at(-1).text, /^Ann has left the game\. An AI \(Hard\) plays for them until they rejoin\.$/);
+  assert.match(hostLines.at(-1).text, /^Ann has left the game\. An AI \(Hard\) plays for them until they rejoin, and keeps their god powers for them\.$/);
   host.step(3);
   assert.equal(standIn.ticks, 3, 'the stand-in plays while Ann is away');
 

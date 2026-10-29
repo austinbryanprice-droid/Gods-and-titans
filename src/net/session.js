@@ -147,7 +147,7 @@ export class HostSession extends SessionBase {
    * @param {number} [o.myIndex] the host's player index (0)
    * @param {Map<number, object>} [o.conns] player index → connection (from LobbyHost.start)
    * @param {(setup: object) => object} o.createWorld e.g. createWorld from src/sim/world.js
-   * @param {(world: object, index: number, difficulty: string) => { tick(): void }} [o.createAI]
+   * @param {(world: object, index: number, difficulty: string, opts?: { standIn?: boolean }) => { tick(): void }} [o.createAI]
    * @param {(world: object, players: number[]) => { step(events: object[]): { from: number, text: string }[] }} [o.createVoices]
    *   the AI players' chat lines (src/ai/voice.js); only the setup's own AI slots speak
    * @param {boolean} [o.autoTick] run the ticker on start() (tests step manually with step())
@@ -203,14 +203,15 @@ export class HostSession extends SessionBase {
     this.ticker = new Ticker({ onTick: () => this.tickOnce(), onBatch: () => this.afterTicks(), useWorker });
   }
 
-  addAI(index, difficulty) {
+  /** @param {{ standIn?: boolean }} [opts] standIn: it holds the seat of a player who dropped out (createAI's 4th argument) */
+  addAI(index, difficulty, opts = {}) {
     if (!this.createAI) {
       if (!this.warnedNoAI) console.warn('[net] HostSession has no createAI; AI players will stand still.');
       this.warnedNoAI = true;
       return null;
     }
     try {
-      const ai = this.createAI(this.world, index, difficulty);
+      const ai = this.createAI(this.world, index, difficulty, opts);
       if (ai && typeof ai.tick === 'function') this.ais.set(index, ai);
       return ai;
     } catch (err) {
@@ -351,9 +352,9 @@ export class HostSession extends SessionBase {
     let text = `${name} has left the game.`;
     if (!over && !(p && p.defeated) && !this.ais.has(c.index)) {
       const difficulty = standInDifficulty(this.setup);
-      if (this.addAI(c.index, difficulty)) {
+      if (this.addAI(c.index, difficulty, { standIn: true })) {
         this.standIns.add(c.index);
-        text = `${name} has left the game. An AI (${difficultyName(difficulty)}) plays for them until they rejoin.`;
+        text = `${name} has left the game. An AI (${difficultyName(difficulty)}) plays for them until they rejoin, and keeps their god powers for them.`;
       }
     }
     this.broadcastChat({ from: -1, name: '', text, system: true });

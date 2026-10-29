@@ -598,7 +598,8 @@ cannot be sent to; there is no cooldown. Each transfer emits
 `{ type: 'trade', from, to, res, amt, got }`. Rules live in `src/sim/trade.js` (shared with
 the HUD). AI players send part of their spare gold / wood (above 700 / 450, after the
 think's purchases) to the poorest teammate who is nearly broke (under 120 gold / 60 wood),
-from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid).
+from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid). A stand-in AI holding the seat of
+a player who dropped out (7) sends nothing: it does not give away an absent player's resources.
 
 ### 5.8 Victory
 A player is **defeated** when they own no buildings (finished or not; wall segments do not count).
@@ -871,11 +872,13 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
-  `{ owner, tag, units, at, march, target }`: units in a line in front of the owner's Town Center (none if the
-  owner is beaten), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
+  `{ owner, tag, units, at, march, target, always }`: units in a line in front of the owner's Town Center (none if the
+  owner is beaten, unless `always`: then from where that Town Center stood at the start, `cp.homes`), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
   nearest building; idle marchers are sent again each second.
 - The end (`gameOver.how: 'campaign'`): won when every objective that is neither optional nor a protect one is
-  done, or when every enemy player is beaten (a conquest always wins); lost when a protect objective fails or the
+  done, or when every enemy player is beaten (a conquest wins whatever is left undone, except what the
+  mission's `waitFor` names: a story beat that must still happen, so that win waits until those objectives are
+  done, and the mission plays on with no enemy left; `updateCampaign` then ends it); lost when a protect objective fails or the
   hero is beaten. The mission line-up (all checked by AI-only runs with a Normal AI as the hero, which wins all
   five; an Easy one wins the first three): Ashes on the Shore (build a Temple, summon a god, beat the raid that
   lands at 4:30), Burn the Longhouses (destroy three tagged Barracks of an Easy AI), The Narrow Pass (hold a
@@ -884,9 +887,12 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   an Egyptian ally; Surtr wakes at 14:00 and marches). Chapter II: The Wolf Winter (a Temple, a god, and a raid at
   4:30 that makes for the tagged winter stores, a Storehouse that must stand), The Last Link (destroy three tagged
   Shrines of an Easy AI within 15:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
-  minutes against six waves, Valkyries for the hero at 4:30), The Ship of Nails (muster twelve soldiers, which
+  minutes against six waves, Valkyries for the hero at 4:30; `waitFor: ['hold']`: razing Helheim's town early
+  does not win it, the clock still has to reach 9:00), The Ship of Nails (muster twelve soldiers, which
   reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
-  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00).
+  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00; `waitFor: ['loki']`: a host
+  broken before then does not win it, Loki still comes, an `always` spawn from his beaten host's old seat, and
+  must fall).
 
 ## 6. Simulation API (src/sim/)
 
@@ -1263,7 +1269,10 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `world.issueCommand(slotOfConn, cmd)`, ticks AIs, pushes each snapshot into its local
     `ViewState`, sends deltas. A client that disconnects is played by a stand-in AI at the game's
     difficulty (`standInDifficulty`: the hardest computer player of the setup, Normal in a game of
-    people only) and a system chat line says so. Single-player = HostSession with no conns.
+    people only), created with `{ standIn: true }` so that it fights, gathers, builds and trains but
+    casts none of the player's god powers and sends none of their resources to allies (10), and a
+    system chat line says so ("An AI (Hard) plays for them until they rejoin, and keeps their god
+    powers for them."). Single-player = HostSession with no conns.
   - Rejoining (`src/net/rejoin-ticket.js`, `LobbyHost.handleRejoin`, `HostSession.rejoin`,
     `LobbyClient.rejoin`): the lobby's `start` gives each client a secret `rejoin` token, which the
     client's browser keeps (localStorage `mythicwar-rejoin`: room code, token, seat, transport; six
@@ -2457,6 +2466,10 @@ God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing onc
 health or more within the rain; a strike on the enemy unit whose surroundings (the power's area) hold the most
 enemy health, at least 1,800 (a cataclysm 3,600, where an enemy building counts a quarter of its health), and only
 where its team can see (the sim's own `powerRefusal` decides). Easy's `castThreshold` raises every bar.
+A stand-in AI (`createAI(world, index, difficulty, { standIn: true })`, `AIPlayer.standIn`: the AI
+`HostSession` seats for an online player who dropped out, 7) casts none: each power is once per game and stays
+the absent player's to spend when they rejoin. It sends no gifts either (5.7), and otherwise plays in full
+(gathers, builds, trains, fights). Computer players' own AIs are not flagged.
 
 **Difficulties** (`src/ai/profiles.js`): Easy, Normal, Hard and Brutal, every number in one profile each. All
 four play fair: the same resources, rules and units as a player, with no bonus at any level. (They all
