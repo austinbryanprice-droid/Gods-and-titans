@@ -74,6 +74,20 @@ export function launchFrom(lobbyMod, state, name, seed = (Math.floor(Math.random
   return { role: 'host', setup, myIndex: slotToPlayer.get(host), conns: new Map(), lobby: null, skirmish: st };
 }
 
+/**
+ * "Ready for Normal?" after a win on Easy (DESIGN 9): the same lobby with its computer players on Normal, or null
+ * when it is not a game against Easy computer players only (a Trial of the Titans, another level, no AI).
+ */
+export function stepUpSkirmish(state) {
+  if (!state || state.survival || !Array.isArray(state.slots)) return null;
+  const ais = state.slots.filter((s) => s && s.kind === 'ai');
+  if (!ais.length || ais.some((s) => s.difficulty !== 'easy')) return null;
+  return {
+    ...state,
+    slots: state.slots.map((s) => (s && s.kind === 'ai' ? { ...s, difficulty: 'normal', name: s.name === 'AI (Easy)' ? 'AI (Normal)' : s.name } : s)),
+  };
+}
+
 /** "1 vs 1 · Normal AI · small map", and the game mode, for the Quick Match button. */
 export function skirmishLabel(state) {
   if (!state) return '';

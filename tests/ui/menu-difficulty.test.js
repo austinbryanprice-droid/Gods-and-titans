@@ -32,6 +32,11 @@ test('the default difficulty: Easy before the first win against the computer, No
   assert.equal(M.defaultAiDifficulty(hasBeatenComputer()), 'normal');
 });
 
+test('the default pantheon: Greek (as in the lesson) before the first win against the computer, Random after', () => {
+  assert.equal(M.defaultPantheon(false), 'greek');
+  assert.equal(M.defaultPantheon(true), 'random');
+});
+
 test('a career kept before aiWins existed: an achievement only won against the computer stands for a win', () => {
   assert.equal(hasBeatenComputer(sanitizeCareer({ games: 3, wins: 2, unlocked: { proving_ground: 1 } })), true);
   assert.equal(hasBeatenComputer(sanitizeCareer({ games: 3, wins: 2, unlocked: { first_victory: 1 } })), false);

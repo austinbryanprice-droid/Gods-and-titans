@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
-import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, researchCheck, CARD_SLOTS } from '../../src/ui/command-card.js';
+import { getCommandCard, unitStats, buttonForKey, trainCheck, pickTrainBuilding, godCount, researchCheck, CARD_SLOTS } from '../../src/ui/command-card.js';
 import { subgroups, iconOf } from '../../src/ui/hud-data.js';
 import { POP_MAX, MAX_QUEUE } from '../../src/config.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
-import { PANTHEON_LIST, godsFor, BUILDINGS } from '../../src/data/index.js';
+import { PANTHEON_LIST, godsFor, BUILDINGS, UNITS } from '../../src/data/index.js';
 import { modsOf } from '../../src/ui/hud-data.js';
 
 let clock = 0;
@@ -328,6 +328,24 @@ test('every pantheon trains its own soldier at the Barracks with E once it is a 
     assert.equal(card[4].state, 'ready', pantheon.id);
     assert.deepEqual(card[4].cost, { gold: elite.cost.gold, wood: elite.cost.wood, faith: 0, pop: elite.pop, time: elite.buildTime }, pantheon.id);
   }
+});
+
+test('train and summon tooltips carry the unit\'s combat stats, compactly', () => {
+  const U = (id) => UNITS[id];
+  assert.deepEqual(unitStats(U('warrior')), ['420 HP · 13 melee damage · 2 armor · speed 2.7', 'Cannot hit flyers']);
+  assert.deepEqual(unitStats(U('archer')), ['290 HP · 16 ranged damage, range 6 · 0 armor · speed 2.7', 'Hits flyers']);
+  assert.deepEqual(unitStats(U('battering_ram'))[1], 'Attacks buildings only · ×3 damage vs buildings');
+  assert.match(unitStats(U('greek_cyclops'))[1], /×2 damage vs buildings · splash 1\.5 tiles/);
+  assert.match(unitStats(U('greek_pegasus'))[1], /^Flying · hits flyers$/);
+  assert.equal(unitStats(U('greek_hoplite'))[2], 'Phalanx: Shields overlap: allies within 4 tiles gain +1 armor.', 'passives too');
+  const world = makeWorld();
+  const barracks = place(world, 0, 'barracks', 6, 13);
+  const shrine = place(world, 0, 'shrine', 11, 13);
+  rich(world);
+  const vs = viewOf(world);
+  assert.deepEqual(byId(getCommandCard([barracks.id], vs), 'train:archer').stats, unitStats(U('archer')));
+  assert.deepEqual(byId(getCommandCard([shrine.id], vs), 'train:greek_centaur').stats, unitStats(U('greek_centaur')));
+  assert.equal(byId(getCommandCard([barracks.id], vs), 'rally').stats, null, 'only units have stats');
 });
 
 test('Shrine creatures Q W E with tier locks; Titan Gate titan T', () => {

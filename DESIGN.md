@@ -2037,7 +2037,9 @@ per-frame budget, so a revealed army appears over a few frames.
   `hasBeatenComputer`, 9.1), then on **Normal**. While Easy is the default, that slot's dropdown reads
   "AI — Easy (suggested)" and a hint line under the players says the computer plays on Easy for a first game
   (hidden once no AI is on Easy). Online lobbies keep Normal and show neither; Quick Match keeps reusing the last
-  lobby as it was. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
+  lobby as it was. Until that same first win the player's slot starts on the Greeks, the pantheon the lesson teaches
+  (`defaultPantheon`), then on Random. The lobby preview of Random lists the ten pantheons, each emblem with its name
+  under it, and a click on one chooses it. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier. The top bar's left group stops short of
   the centre banner: when its chips (Market, clock, sites, peace or wave, ping, pantheon, relics) run long, the
   pantheon's name gives way and ends in an ellipsis (the name alone is hidden under 1100 px wide).
@@ -2088,6 +2090,10 @@ per-frame budget, so a revealed army appears over a few frames.
   random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
   AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
   Online games are not remembered; their game-over screen offers Rematch instead, back to the same room's lobby (7).
+  A won game whose computer players were all on Easy (not a trial: `stepUpSkirmish`, main.js `onStepUp`) says
+  "Ready for Normal?" on its game-over screen, and **Play on Normal** leads the buttons (`Game.stepUp`): the same
+  lobby with those players on Normal (an "AI (Easy)" name becomes "AI (Normal)"), remembered for Quick Match in
+  its turn; Play Again (on Easy) comes second.
   **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
   choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
   (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the
@@ -2112,7 +2118,10 @@ per-frame budget, so a revealed army appears over a few frames.
   by position (Q W E R / A S D F / Z X C V, each rebindable; a Cancel button still answers Esc). Binding a key another
   action had swaps the two, so no action is left without a key; Esc, Pause, F1-F12, Enter, Tab, the digits, Delete,
   Backspace, `.`, `` ` `` and the modifiers keep their jobs. The camera is checked first, so a letter bound to it stops
-  reaching the Classic card (the panel says so). Tips and How to Play name the default keys. *Text*: no text is
+  reaching the Classic card (the panel says so). Tips and How to Play name the default keys. The F10 menu's
+  *Controls* (beside Change keys…) shows How to Play's mouse and hotkey tables read only (`renderControls` in
+  `menu-howto.js`, whose tables are data shared by both), with the player's own camera keys in the rebindable rows,
+  and in the Grid layout a line naming the card's twelve keys. *Text*: no text is
   drawn under 10 px (`--mw-min-text`; at 1280 × 720 the HUD's base is 11 px and its small print was 6.6 to 9.9 px), and
   the muted ink (`--mw-ink-mute`) is #a39983, 4.5:1 or better on the panels. `tools/shot-access.mjs` measures every
   visible text's size and contrast on each screen at a window size and stills a battle in both palettes.
@@ -2289,6 +2298,9 @@ per-frame budget, so a revealed army appears over a few frames.
   abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:
   Worshipper W, Grow U; Barracks: Warrior W, Archer A, Priest P, Ram R, pantheon elite E; Shrine: creatures Q W E;
   Temple: gods Q W E R + revive; Titan Gate: titan T), rally Y, cancel construction Esc.
+  A train or summon button's tooltip carries the unit's base stats under its cost (`unitStats`, `stats` on the
+  button): "HP · melee damage, or ranged damage and range · armor · speed", a line on what it is good or bad against
+  (flying, hits flyers or not, buildings only, ×n damage vs buildings, splash) and one line per passive.
   Wall segments: U upgrade to stone (every idle segment of the active subgroup, as many as the purse
   allows), D dismantle finished segments, C cancel unfinished segments or upgrades.
   Houses: U combine into a Manor (5.3), C cancel the combining. The button reads the same rule as the
@@ -2447,6 +2459,9 @@ no medal, then "your best: <medal>") starts the setup of 5.13 at once. In the ma
   A finished step puts "Done: <title>." in the feed with a chime and pings the next spot on the minimap.
 - The end: a victory is "Lesson Complete" with a medal card by its game time (`MEDALS`: gold within 12:00,
   silver within 18:00, bronze after) and what the next better medal needs; it is saved with `recordTutorial`.
+  Won or lost, the lesson's game-over screen leads with **Play vs AI (Easy)** (`Game.onPlayVsAI` from main.js,
+  `Game.playVsAI`): it leaves the lesson for the menu's `skirmish` screen, which makes the Play vs AI lobby with its
+  AI on Easy and the lesson's pantheon (Greek) in the player's slot, whatever the career would default to.
 
 ### 9.3 Daily challenge (src/game/daily.js, src/data/twists.js)
 One game against the computer per local calendar day, the same on every device: everything comes from the day's
@@ -2707,7 +2722,11 @@ creates the `AlertEngine` and the `TabAttention` (section 9, "Alerts, tips and s
 line, a sound, a minimap ping, the spot Space jumps to and a tab flash, and tells the HUD to hold its tips
 while the player is under pressure. It also makes the `MusicDirector` (section 9, "Music"):
 `update(dt)` each frame turns the match's fighting into the score's intensity, and the director plays the player's
-pantheon theme.
+pantheon theme. The `SlowFrameWatch` (`src/game/slow-hint.js`, not in replays) takes the frame intervals of the
+drawn frames: when their median over a 10 s stretch is above 33 ms at a Graphics quality above Low (a change of
+quality, a pause or a hidden tab starts the stretch over), the HUD says once "The game is running slowly. Lower
+Graphics quality in the F10 menu (now: Medium)." It changes nothing itself, and it is said once per device
+(localStorage `mythicwar-slow-hint`; with storage blocked, once per page).
 
 ### 11.1 Intro film (src/intro/, src/ui/intro.js)
 

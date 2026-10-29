@@ -202,13 +202,17 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
 
   // ------------------------------------------------------------ actions
 
-  async function playVsAI() {
+  /**
+   * Play vs AI: a lobby of one player against one computer player on a small map. `opts` may set the AI's
+   * difficulty and the player's pantheon (the guided first match's Play vs AI (Easy) sets both).
+   */
+  async function playVsAI(opts = {}) {
     const done = busy('Preparing the battlefield…');
     try {
       const mod = await loadLobby();
       const name = getSettings().name;
       // A first game is against an Easy AI; once the career has a win against the computer, Normal (DESIGN 9).
-      const difficulty = M.defaultAiDifficulty(hasBeatenComputer());
+      const difficulty = M.DIFFICULTIES.includes(opts.difficulty) ? opts.difficulty : M.defaultAiDifficulty(hasBeatenComputer());
       const lobby = await mod.LobbyHost.create({ transport: 'none', name, aiDifficulty: difficulty });
       // Co-op preset, trimmed to one human against one AI on a small map.
       const safe = (fn) => {
@@ -229,6 +233,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
           safe(() => lobby.setSlot(i, { kind: 'ai', difficulty, team: 2 }));
         } else safe(() => lobby.setSlot(i, { kind: 'closed' }));
       });
+      // A first game: Greek, as in the lesson, until a win against the computer; then Random (DESIGN 9).
+      const pantheon = opts.pantheon || M.defaultPantheon(hasBeatenComputer());
+      if (pantheon !== 'random') safe(() => lobby.setSlot(me, { pantheon }));
       safe(() => lobby.setMapSize('small'));
       done();
       go('lobby', { lobby, role: 'host', transport: 'none' });
@@ -286,6 +293,12 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     load: loadScreen,
     rejoin: rejoinScreen,
     rematch: rematchScreen,
+    // Straight into a Play vs AI lobby (the guided first match's game-over screen): the title shows while it is made.
+    skirmish: (opts) => {
+      const screen = titleScreen();
+      playVsAI(opts);
+      return screen;
+    },
   };
 
   /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
@@ -311,7 +324,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       h('span.mw-orn.is-l', { 'aria-hidden': 'true' }, '◆'),
       h('span.mw-btn-label', label), h('span.mw-btn-sub', sub),
       h('span.mw-orn.is-r', { 'aria-hidden': 'true' }, '◆'));
-    const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', playVsAI, 'mw-btn--primary');
+    const playBtn = mainBtn('Play vs AI', 'Skirmish or co-op against the computer', () => playVsAI(), 'mw-btn--primary');
     // Quick Match: the last game against the computer again, in one click (src/game/rematch.js). Shown once the lobby
     // module has read it back; none on a first visit.
     const quickSub = h('span.mw-btn-sub', '');
@@ -841,8 +854,11 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       if (!sum) {
         setChildren(preview,
           h('div.mw-preview-head', h('span.mw-preview-emblem', pantheonEmblem('random')), h('div', h('div.mw-preview-name', 'Random'), h('div.mw-preview-culture', 'Let the Fates decide'))),
-          h('p.mw-preview-desc', 'A pantheon will be drawn by lot when the battle begins. Click your pantheon in the player list to choose one of the ten mythologies.'),
-          h('div.mw-random-icons', PANTHEON_LIST.map((p) => pantheonEmblem(p.id)).join(' ')),
+          h('p.mw-preview-desc', 'A pantheon will be drawn by lot when the battle begins. Choose one of the ten mythologies below, or click your pantheon in the player list.'),
+          // each pantheon by emblem and name; a click chooses it
+          h('div.mw-random-list', PANTHEON_LIST.map((p) => h('button.mw-random-pick', { type: 'button', title: `Play the ${p.name} pantheon`, onclick: () => patchSlot(myIndex(), { pantheon: p.id }) },
+            h('span.mw-random-emblem', { 'aria-hidden': 'true' }, pantheonEmblem(p.id)),
+            h('span.mw-random-name', p.name)))),
         );
         return;
       }

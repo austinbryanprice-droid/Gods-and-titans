@@ -139,6 +139,29 @@ test('the game-over screen of the lesson shows its medal and what the next medal
   assert.match(second.textContent, /Victory/);
 });
 
+test('the game-over screen of the lesson leads on to Play vs AI (Easy), won or lost', () => {
+  for (const result of ['victory', 'defeat']) {
+    const root = document.createElement('div');
+    const calls = [];
+    const game = { session: { isHost: true, clients: new Map() }, viewState: { myIndex: 0, myTeam: 1, time: 900, players: [] }, quitToMenu() {}, setPaused: () => false, canRematch: () => false, onPlayVsAI() {}, playVsAI: () => calls.push(result) };
+    const ov = new Overlays(root, game);
+    ov.statsTable = () => null;
+    ov.showGameOver({ result, winningTeam: result === 'victory' ? 1 : 2, unlocked: [], tutorial: true });
+    const play = root.button('Play vs AI (Easy)');
+    assert.ok(play, result);
+    assert.ok(play.className.includes('mw-btn--primary'));
+    assert.ok(!root.button('Return to Menu').className.includes('mw-btn--primary'), 'the menu is the second choice');
+    play.click();
+    assert.deepEqual(calls, [result]);
+  }
+  // Not in an ordinary match, nor without the hand-over.
+  const root = document.createElement('div');
+  const ov = new Overlays(root, { session: { isHost: true, clients: new Map() }, viewState: { myIndex: 0, myTeam: 1, time: 9, players: [] }, quitToMenu() {}, setPaused: () => false, canRematch: () => false });
+  ov.statsTable = () => null;
+  ov.showGameOver({ result: 'victory', winningTeam: 1, unlocked: [], tutorial: true });
+  assert.equal(root.button('Play vs AI (Easy)'), null);
+});
+
 test('a medal is kept as the best, is not a game of the career, and unlocks the lesson achievements', () => {
   resetCareer({});
   const first = recordTutorial(1).map((a) => a.id);
