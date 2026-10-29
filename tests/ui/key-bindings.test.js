@@ -36,7 +36,7 @@ test('normKey names keys the way bindings store them', () => {
 });
 
 test('reserved keys cannot be bound', () => {
-  for (const k of ['Escape', 'F10', 'F1', 'Enter', 'Tab', 'Shift', 'Delete', 'Backspace', '1', '9', '.', '`', '', 'q', null]) assert.equal(isBindableKey(k), false, String(k));
+  for (const k of ['Escape', 'Pause', 'F10', 'F1', 'Enter', 'Tab', 'Shift', 'Delete', 'Backspace', '1', '9', '.', '`', '', 'q', null]) assert.equal(isBindableKey(k), false, String(k));
   for (const k of ['W', '=', 'Space', 'PageUp', 'ArrowUp', 'Insert']) assert.equal(isBindableKey(k), true, k);
 });
 

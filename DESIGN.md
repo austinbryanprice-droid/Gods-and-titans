@@ -2039,7 +2039,7 @@ per-frame budget, so a revealed army appears over a few frames.
   (`src/ui/key-bindings.js`, panel `src/ui/key-panel.js`): the camera's eight keys (pan ↑ ↓ ← →, zoom = and -, Space,
   Home) can be rebound, and the command card has two layouts: Classic, each command's own letter, or Grid, the keys
   by position (Q W E R / A S D F / Z X C V, each rebindable; a Cancel button still answers Esc). Binding a key another
-  action had swaps the two, so no action is left without a key; Esc, F1-F12, Enter, Tab, the digits, Delete,
+  action had swaps the two, so no action is left without a key; Esc, Pause, F1-F12, Enter, Tab, the digits, Delete,
   Backspace, `.`, `` ` `` and the modifiers keep their jobs. The camera is checked first, so a letter bound to it stops
   reaching the Classic card (the panel says so). Tips and How to Play name the default keys. *Text*: no text is
   drawn under 10 px (`--mw-min-text`; at 1280 × 720 the HUD's base is 11 px and its small print was 6.6 to 9.9 px), and

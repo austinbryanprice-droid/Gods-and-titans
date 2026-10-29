@@ -17,6 +17,7 @@ function refusedText(key) {
   if (key === 'Delete' || key === 'Backspace') return 'Delete and Backspace destroy the selected units.';
   if (key === 'Enter') return 'Enter opens the chat.';
   if (key === 'Tab') return 'Tab cycles through the selected unit types.';
+  if (key === 'Pause') return 'Pause pauses the game.';
   if (['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock'].includes(key)) return 'Shift, Ctrl and Alt work with other keys.';
   return `${keyLabel(key) || 'That key'} cannot be used here.`;
 }

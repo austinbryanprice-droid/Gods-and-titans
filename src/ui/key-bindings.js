@@ -34,7 +34,7 @@ export const PAN_ACTIONS = { cam_left: [-1, 0], cam_right: [1, 0], cam_up: [0, -
 // modifiers, and the browser's own (F5, F11, F12).
 const RESERVED = new Set([
   'Escape', 'F10', 'Enter', 'Tab', 'Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'ContextMenu', 'OS',
-  'Delete', 'Backspace', '.', '`', 'Dead', 'Unidentified', 'Process',
+  'Delete', 'Backspace', 'Pause', '.', '`', 'Dead', 'Unidentified', 'Process',
   ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
   ...'0123456789',
 ]);
