@@ -1702,7 +1702,10 @@ export class Game {
       this.migrating = false;
       if (this.disposed) return;
       if (this.hud) this.hud.overlays.hideWaiting();
-      this.onEnd({ reason });
+      // The heir may still carry the game on (it may just be slow to open its room): a player who could not
+      // follow keeps the ticket into that room and is offered Rejoin, as after a lost link, even when the host
+      // quit through the menu (whose 'host-quit' would drop the ticket and say the game was closed).
+      this.onEnd({ reason: mine ? reason : REASONS.HOST_LEFT });
     }
   }
 
