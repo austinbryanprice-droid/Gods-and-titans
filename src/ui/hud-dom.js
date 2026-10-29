@@ -50,9 +50,20 @@ export function setHidden(n, hidden) {
   if (n.hidden !== !!hidden) n.hidden = !!hidden;
 }
 
-/** Format a resource amount: 12345 → "12,345". */
+/**
+ * Format a resource amount: 12345 → "12,345" (what toLocaleString('en-US') gives). The top bar formats every
+ * resource every frame, and Intl's toLocaleString cost about 0.15 ms a frame there, so whole numbers get their
+ * commas here; anything odd (huge or not finite) still goes through toLocaleString.
+ */
 export function fmt(n) {
-  return Math.floor(n || 0).toLocaleString('en-US');
+  const v = Math.floor(n || 0);
+  if (!Number.isSafeInteger(v)) return v.toLocaleString('en-US');
+  if (v > -1000 && v < 1000) return String(v);
+  const digits = String(v < 0 ? -v : v);
+  const head = digits.length % 3 || 3;
+  let out = (v < 0 ? '-' : '') + digits.slice(0, head);
+  for (let i = head; i < digits.length; i += 3) out += `,${digits.slice(i, i + 3)}`;
+  return out;
 }
 
 /** Percent string for widths. */
