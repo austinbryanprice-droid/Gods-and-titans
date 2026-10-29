@@ -1346,6 +1346,27 @@ kbd {
 
 .mw-campaign-panel { width: min(64em, 100%); }
 .mw-campaign-body { display: grid; grid-template-columns: minmax(15em, 21em) minmax(0, 1fr); gap: 1.4em; align-items: start; }
+.mw-chapter-tabs { display: flex; flex-wrap: wrap; gap: 0.5em; margin: 0 0 1em; }
+.mw-chapter-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1em;
+  min-width: 11em;
+  padding: 0.45em 0.85em;
+  text-align: left;
+  color: var(--mw-ink);
+  background: linear-gradient(180deg, rgba(42, 50, 70, 0.7), rgba(20, 24, 36, 0.85));
+  border: 1px solid var(--mw-line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.mw-chapter-tab:hover:not(:disabled), .mw-chapter-tab:focus-visible { border-color: var(--mw-gold); box-shadow: var(--mw-focus); outline: none; }
+.mw-chapter-tab.is-selected { border-color: var(--mw-gold); background: linear-gradient(180deg, rgba(120, 90, 40, 0.45), rgba(40, 30, 18, 0.85)); }
+.mw-chapter-tab.is-locked { cursor: not-allowed; opacity: 0.55; }
+.mw-chapter-tab-n { font: 600 0.72em/1.2 var(--mw-font-ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--mw-ink-mute); }
+.mw-chapter-tab.is-won .mw-chapter-tab-n { color: var(--mw-ok); }
+.mw-chapter-tab-title { font: 600 0.95em/1.25 var(--mw-font-display); letter-spacing: 0.04em; }
 .mw-campaign-blurb { margin: 0 0 0.9em; font: italic 0.95em/1.45 var(--mw-font-body); color: var(--mw-ink-dim); }
 .mw-mission-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45em; }
 .mw-mission {

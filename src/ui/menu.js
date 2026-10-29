@@ -29,8 +29,8 @@ import { dailyStatus, dailyLabel, dailyLaunch } from '../game/daily.js';
 import { tutorialSetup } from '../sim/tutorial.js';
 import { campaignSetup } from '../sim/campaign.js';
 import { campaignScreen as buildCampaignScreen } from './menu-campaign.js';
-import { CAMPAIGN, MISSIONS } from '../data/campaign.js';
-import { wonCount } from '../game/campaign-progress.js';
+import { chapterOf } from '../data/campaign.js';
+import { nextToPlay, wonCount } from '../game/campaign-progress.js';
 import { medalLabel } from '../data/medals.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
@@ -371,8 +371,11 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     // A guided first match; a player who has never finished a game or the lesson is pointed at it.
     const learnBtn = mainBtn('Learn to Play', career.best.medal ? `A guided first match · your best: ${medalLabel(career.best.medal)}` : 'A guided first match: gather, build, pray, summon and fight', startTutorial, 'mw-learn-btn');
     if (!career.games && !career.best.medal) learnBtn.appendChild(h('span.mw-new-badge.mw-start-badge', 'New? Start here'));
-    const won = wonCount();
-    const campaignBtn = mainBtn('Campaign', `${CAMPAIGN.chapter}: ${CAMPAIGN.title} · ${won ? `${won} of ${MISSIONS.length} missions won` : `${MISSIONS.length} story missions for the Greeks`}`, () => go('campaign'), 'mw-campaign-btn');
+    // The chapter being played: the one of the next mission to play (Chapter II once Chapter I is won).
+    const chapter = chapterOf(nextToPlay());
+    const won = wonCount(undefined, chapter.id);
+    const total = chapter.missions.length;
+    const campaignBtn = mainBtn('Campaign', `${chapter.chapter}: ${chapter.title} · ${won ? `${won} of ${total} missions won` : `${total} story missions for ${chapter.people}`}`, () => go('campaign'), 'mw-campaign-btn');
     const nameEl = h('strong', getSettings().name);
     const off = onSettingsChange((s) => (nameEl.textContent = s.name));
     const el = h('div.mw-title-screen',

@@ -195,3 +195,50 @@ test('the enemy AI leaves a scripted raid on its march at the hero', () => {
     assert.ok(Math.hypot(o.x - home.x, o.y - home.y) < 15, `${u.type} heads for the hero's base`);
   }
 });
+
+test('an objective with a limit fails the mission when time runs out, and counts if done in time', () => {
+  const w = world('lyngvi');
+  const i = MISSION_BY_ID.lyngvi.objectives.findIndex((o) => o.id === 'shrines');
+  const limit = MISSION_BY_ID.lyngvi.objectives[i].limit;
+  w.time = limit - 2;
+  w.tickCount = Math.round(w.time * 20);
+  run(w, 1);
+  assert.equal(w.gameOver, null, 'still in time');
+  run(w, 3);
+  assert.deepEqual(w.gameOver, { winningTeam: 2, how: 'campaign' });
+  assert.equal(w.campaign.state[i], FAILED);
+  const b = world('lyngvi');
+  for (const s of tagged(b, 'serpent')) b.killEntity(s, null);
+  run(b, 2);
+  assert.deepEqual(b.gameOver, { winningTeam: 1, how: 'campaign' });
+  assert.equal(b.campaign.state[i], DONE);
+});
+
+test('Chapter II: the raid makes for the winter stores, and losing them fails the mission', () => {
+  const w = world('hordaland');
+  const stores = tagged(w, 'stores');
+  assert.equal(stores.length, 1);
+  assert.equal(stores[0].type, 'storehouse');
+  assert.equal(stores[0].owner, 0);
+  run(w, 271);
+  const raid = tagged(w, 'raid');
+  assert.equal(raid.length, 6);
+  for (const u of raid) assert.ok(u.order && Math.hypot(u.order.x - stores[0].x, u.order.y - stores[0].y) < 6, 'aimed at the stores');
+  w.killEntity(stores[0], null);
+  run(w, 2);
+  assert.equal(w.gameOver.winningTeam, 2);
+});
+
+test('Chapter II ends with Loki on Vigrid: he walks for the north at 13:00, the Greeks beside the hero against two northern players', () => {
+  const s = campaignSetup('vigrid', {});
+  assert.deepEqual(s.players.map((p) => [p.team, p.pantheon]), [[1, 'norse'], [2, 'norse'], [1, 'greek'], [2, 'norse']]);
+  const w = world('vigrid');
+  const e = w.campaign.m.events.find((x) => x.spawn && x.spawn.tag === 'loki');
+  w.time = e.at - 0.5;
+  run(w, 1);
+  const loki = tagged(w, 'loki');
+  assert.equal(loki.filter((u) => u.type === 'norse_loki').length, 1);
+  assert.ok(loki.every((u) => u.owner === 1));
+  const k = w.campaign.m.objectives.findIndex((o) => o.id === 'loki');
+  assert.equal(w.campaign.shown[k], true);
+});
