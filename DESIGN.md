@@ -1197,7 +1197,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   - client→host: `hello {name, version}` (`version` is `PROTOCOL_VERSION` from
     src/net/wire-version.js: `GAME_VERSION` plus an 8-digit fingerprint of the message names,
     `EVENT_SHAPES`, the command whitelist, the team mark kinds and the unit / building / ability /
-    pantheon ids, so a stale tab after a deploy is refused with the "Version mismatch" text; it is
+    pantheon ids, and of the rules themselves (every value in the data tables and config, so a balance
+    change alone also marks older replays as from another build), so a stale tab after a deploy is refused with the "Version mismatch" text; it is
     only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`,
     `mark {kind, x, y}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
@@ -1271,7 +1272,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     the game's session (`lobby.setRejoinHandler`, set by the Game): the stand-in AI gives the seat
     back (or a link of that player still open is replaced, its window told `REPLACED`), and the
     client gets `start` again and a full snapshot (the client keeps its career tally with the ticket,
-    `saveTally`, and a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
+    `saveTally`, and what it has seen, the fog explored and enemy buildings and mines as last seen, every
+    10 s under `mythicwar-rejoin-view` with `saveView`, put back on rejoin; a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
     `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. Anyone else is told
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link

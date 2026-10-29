@@ -49,8 +49,40 @@ export function clearTicket(store = storage(), token = null) {
       if (t && typeof t === 'object' && t.token !== token) return; // another game's ticket
     }
     store.removeItem(REJOIN_KEY);
+    store.removeItem(REJOIN_VIEW_KEY);
   } catch {
     // ignore
+  }
+}
+
+// What the player had seen (the fog explored, enemy buildings and mines as last seen), kept under its own
+// key with the token so a rejoined game does not come back with a black map. Packed by the game (a string).
+export const REJOIN_VIEW_KEY = 'mythicwar-rejoin-view';
+const MAX_VIEW_CHARS = 600000;
+
+/** Keep this game's view memory (a packed string) for a rejoin. False when too big or storage refuses. */
+export function saveView(token, packed, store = storage()) {
+  if (!store || !token || typeof packed !== 'string' || packed.length > MAX_VIEW_CHARS) return false;
+  try {
+    const raw = store.getItem(REJOIN_KEY);
+    const t = raw ? JSON.parse(raw) : null;
+    if (!t || typeof t !== 'object' || t.token !== token) return false; // the game is over (or another one's)
+    store.setItem(REJOIN_VIEW_KEY, JSON.stringify({ token, view: packed }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The view memory kept for this token, or null. */
+export function readView(token, store = storage()) {
+  if (!store || !token) return null;
+  try {
+    const raw = store.getItem(REJOIN_VIEW_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && v.token === token && typeof v.view === 'string' ? v.view : null;
+  } catch {
+    return null;
   }
 }
 
