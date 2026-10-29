@@ -278,6 +278,9 @@ function auraMaterial(color) {
       );
     };
     m.customProgramCacheKey = () => 'unit-aura-hdr2';
+    // additive and no depth writes: the faces add up in any order, so one pass draws what three.js's two-pass
+    // back-then-front draw of a transparent double-sided material does, without its extra draw and its two program lookups a frame
+    m.forceSinglePass = true;
     m.name = `unit-aura-${key}`;
     AURA_MATS.set(key, m);
   }

@@ -92,3 +92,12 @@ test('sacred sites and Sacred Victory are explained', () => {
   assert.match(text, /captures it in 15 seconds/);
   assert.match(text, /holds every site for 8 minutes in a row also wins/);
 });
+
+test('the newer features each get a line: god powers, relics, saved games, replays and the daily challenge', () => {
+  assert.match(text, /Call on your god powers/);
+  assert.match(text, /guard a relic from world myth/);
+  assert.match(text, /Save Game in the menu \(F10\)/);
+  assert.match(text, /Load Game in the F10 menu/);
+  assert.match(text, /kept as replays/);
+  assert.match(text, /Daily Challenge on the title screen/);
+});

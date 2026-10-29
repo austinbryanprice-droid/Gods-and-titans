@@ -47,16 +47,16 @@ export const GOD_POWERS = {
       description: 'Demeter blesses the fields: every load of gold and wood your Worshippers bring in counts 50% more for 60 seconds.',
     }),
     power('greek', 'lightning_storm', 2, {
-      name: "Zeus's Lightning Storm", icon: '⛈️', effects: [barrage(12, 110, 0.3, { stun: 0.6 })],
+      name: "Zeus's Lightning Storm", icon: '⛈️', effects: [barrage(14, 125, 0.25, { stun: 0.6 })],
       vfx: { element: 'lightning', shape: 'strike' }, ai: { use: 'damage' },
-      description: 'Twelve thunderbolts fall on the area, each blasting and stunning what it hits. The target must be in sight.',
+      description: 'Fourteen thunderbolts fall on the area, each blasting and stunning what it hits. The target must be in sight.',
     }),
     power('greek', 'earthquake', 3, {
       name: "Poseidon's Earthquake", icon: '🌋',
       effects: [
         { type: 'damage', amount: 120, radius: 8, delay: 0.5 },
         { type: 'stun', duration: 1, radius: 8, delay: 0.5 },
-        { type: 'field', duration: 10, radius: 8, dps: 55, slowPct: 0.3 },
+        { type: 'field', duration: 10, radius: 8, dps: 58, slowPct: 0.3 },
       ],
       vfx: { element: 'earth', shape: 'quake' }, ai: { use: 'damage' },
       description: 'The Earth-Shaker splits the ground: a wide quake stuns and shakes every enemy unit and building in it for 10 seconds.',
@@ -71,9 +71,9 @@ export const GOD_POWERS = {
     power('norse', 'hammerfall', 2, {
       name: "Thor's Hammerfall", icon: '🔨',
       effects: [
-        { type: 'damage', amount: 300, radius: 3.2, delay: 0.6 },
-        { type: 'stun', duration: 2, radius: 3.2, delay: 0.6 },
-        { type: 'knockback', distance: 2.5, radius: 4, delay: 0.6 },
+        { type: 'damage', amount: 320, radius: 3.8, delay: 0.6 },
+        { type: 'stun', duration: 2, radius: 3.8, delay: 0.6 },
+        { type: 'knockback', distance: 2.5, radius: 4.6, delay: 0.6 },
       ],
       vfx: { element: 'lightning', shape: 'meteor' }, ai: { use: 'damage' },
       description: 'Mjölnir falls from the sky: a crushing blow that stuns everything at the spot and hurls the rest aside. The target must be in sight.',
@@ -81,11 +81,12 @@ export const GOD_POWERS = {
     power('norse', 'fimbulwinter', 3, {
       name: 'Fimbulwinter', icon: '❄️',
       effects: [
+        { type: 'damage', amount: 100, radius: 9 },
         { type: 'stun', duration: 1.5, radius: 9 },
         { type: 'field', duration: 15, radius: 9, dps: 32, slowPct: 0.5 },
       ],
       vfx: { element: 'ice', shape: 'storm' }, ai: { use: 'damage' },
-      description: 'The great winter before Ragnarök: a blizzard freezes every enemy in a wide area, then chills and slows them for 15 seconds.',
+      description: 'The great winter before Ragnarök: a blizzard batters and freezes every enemy in a wide area, then chills and slows them for 15 seconds.',
     }),
   ],
   egyptian: [
@@ -97,11 +98,11 @@ export const GOD_POWERS = {
     power('egyptian', 'plague_of_locusts', 2, {
       name: 'Plague of Locusts', icon: '🦗',
       effects: [
-        { type: 'dot', dps: 30, duration: 12, radius: 5 },
-        { type: 'slow', pct: 0.35, duration: 12, radius: 5 },
+        { type: 'dot', dps: 22, duration: 10, radius: 5 },
+        { type: 'slow', pct: 0.35, duration: 10, radius: 5 },
       ],
       vfx: { element: 'sand', shape: 'storm' }, ai: { use: 'damage' },
-      description: 'A black swarm descends: enemies in the area are eaten away and slowed for 12 seconds. The target must be in sight.',
+      description: 'A black swarm descends: enemies in the area are eaten away and slowed for 10 seconds. The target must be in sight.',
     }),
     power('egyptian', 'eclipse', 3, {
       name: 'Apep Swallows the Sun', icon: '🌑',
@@ -109,10 +110,12 @@ export const GOD_POWERS = {
         { type: 'buff', stat: 'damage', amount: 0.3, duration: 30, radius: 12, affects: 'allies' },
         { type: 'buff', stat: 'damage', amount: -0.3, duration: 30, radius: 12, affects: 'enemies' },
         { type: 'reveal', radius: 12, duration: 30 },
+        { type: 'damage', amount: 150, radius: 9, delay: 0.5 },
+        { type: 'field', duration: 12, radius: 9, dps: 32 },
         { type: 'summon', unit: 'egyptian_mummy', count: 4, duration: 45 },
       ],
       vfx: { element: 'shadow', shape: 'nova' }, ai: { use: 'damage' },
-      description: 'Darkness at noon: for 30 seconds your units in a wide area strike 30% harder and enemies 30% weaker, and four mummies rise to fight.',
+      description: 'Darkness at noon: for 30 seconds your units in a wide area strike 30% harder and enemies 30% weaker, the dark eats at every enemy at its heart for 12 seconds, and four mummies rise to fight.',
     }),
   ],
   hindu: [
@@ -122,14 +125,14 @@ export const GOD_POWERS = {
       description: 'Every home lights its lamps for Lakshmi: prayer gives twice the faith for 60 seconds.',
     }),
     power('hindu', 'agnis_rain', 2, {
-      name: "Agni's Fire Rain", icon: '☄️', effects: [barrage(8, 150, 0.45, { radius: 2 })],
+      name: "Agni's Fire Rain", icon: '☄️', effects: [barrage(8, 135, 0.45, { radius: 2 })],
       vfx: { element: 'fire', shape: 'meteor' }, ai: { use: 'damage' },
       description: 'The fire god pours burning stones on the area: eight blasts, one after another. The target must be in sight.',
     }),
     power('hindu', 'tandava', 3, {
       name: "Shiva's Tandava", icon: '🔱',
       effects: [
-        { type: 'damage', amount: 320, radius: 7, delay: 1 },
+        { type: 'damage', amount: 260, radius: 7, delay: 1 },
         { type: 'field', duration: 8, radius: 7, dps: 40 },
       ],
       vfx: { element: 'fire', shape: 'nova' }, ai: { use: 'damage' },
@@ -145,7 +148,7 @@ export const GOD_POWERS = {
     power('japanese', 'divine_wind', 2, {
       name: 'Divine Wind', icon: '🌀',
       effects: [
-        { type: 'damage', amount: 180, radius: 5 },
+        { type: 'damage', amount: 200, radius: 5 },
         { type: 'knockback', distance: 3, radius: 5 },
         { type: 'slow', pct: 0.5, duration: 6, radius: 5 },
       ],
@@ -155,12 +158,13 @@ export const GOD_POWERS = {
     power('japanese', 'tsunami', 3, {
       name: "Ryūjin's Tsunami", icon: '🌊',
       effects: [
-        { type: 'damage', amount: 240, radius: 8 },
-        { type: 'knockback', distance: 4, radius: 8 },
+        { type: 'damage', amount: 220, radius: 8 },
+        { type: 'knockback', distance: 3, radius: 8 },
         { type: 'slow', pct: 0.4, duration: 8, radius: 8 },
+        { type: 'damage', amount: 200, radius: 11, delay: 1.5 },
       ],
       vfx: { element: 'water', shape: 'wave' }, ai: { use: 'damage' },
-      description: 'The dragon king of the sea sends a great wave that smashes and sweeps away everything in a wide area.',
+      description: 'The dragon king of the sea sends a great wave that smashes and sweeps away everything in a wide area, and its backwash strikes them again.',
     }),
   ],
   chinese: [
@@ -176,7 +180,7 @@ export const GOD_POWERS = {
     }),
     power('chinese', 'great_flood', 3, {
       name: 'The Great Flood', icon: '🌊',
-      effects: [{ type: 'field', duration: 18, radius: 9, dps: 45, slowPct: 0.45 }],
+      effects: [{ type: 'field', duration: 18, radius: 9, dps: 32, slowPct: 0.45 }],
       vfx: { element: 'water', shape: 'wave' }, ai: { use: 'damage' },
       description: 'The flood Yu the Great had to tame: a wide area drowns for 18 seconds, hurting and slowing every enemy in it.',
     }),
@@ -201,7 +205,7 @@ export const GOD_POWERS = {
       effects: [
         { type: 'damage', amount: 100, radius: 8 },
         { type: 'stun', duration: 1, radius: 8 },
-        { type: 'field', duration: 10, radius: 8, dps: 65 },
+        { type: 'field', duration: 10, radius: 8, dps: 44 },
       ],
       vfx: { element: 'earth', shape: 'quake' }, ai: { use: 'damage' },
       description: 'Four Movement, the earthquake fated to end the Fifth Sun: a wide quake stuns and shakes every enemy unit and building for 10 seconds.',
@@ -216,16 +220,22 @@ export const GOD_POWERS = {
     power('celtic', 'morrigans_crows', 2, {
       name: "The Morrígan's Crows", icon: '🐦',
       effects: [
-        { type: 'summon', unit: 'celtic_battle_crow', count: 4, duration: 40 },
+        { type: 'damage', amount: 70, radius: 5 },
+        { type: 'dot', dps: 6, duration: 10, radius: 5 },
+        { type: 'summon', unit: 'celtic_battle_crow', count: 6, duration: 40 },
         { type: 'buff', stat: 'damage', amount: -0.25, duration: 12, radius: 5, affects: 'enemies' },
       ],
       vfx: { element: 'shadow', shape: 'summon' }, ai: { use: 'damage' },
-      description: 'The phantom queen sends four battle crows for 40 seconds, and enemies near them lose heart: 25% less damage for 12 seconds. The target must be in sight.',
+      description: 'The phantom queen\'s flock tears at every enemy in the area and keeps pecking for 10 seconds, six battle crows stay to fight for 40 seconds, and the enemies lose heart: 25% less damage for 12 seconds. The target must be in sight.',
     }),
     power('celtic', 'taranis_wrath', 3, {
-      name: "Taranis's Wrath", icon: '⛈️', effects: [barrage(16, 110, 0.22, { spread: 7, radius: 1.8, stun: 0.5 })],
+      name: "Taranis's Wrath", icon: '⛈️',
+      effects: [
+        barrage(20, 160, 0.18, { spread: 7, radius: 2.2, stun: 0.6 }),
+        { type: 'field', duration: 8, radius: 7, dps: 20 },
+      ],
       vfx: { element: 'lightning', shape: 'strike' }, ai: { use: 'damage' },
-      description: 'The wheel-god of thunder unleashes a storm: sixteen thunderbolts over a wide area, each blasting and stunning.',
+      description: 'The wheel-god of thunder unleashes a storm: twenty thunderbolts over a wide area, each blasting and stunning, and the storm rages on for 8 seconds.',
     }),
   ],
   mesopotamian: [
@@ -238,34 +248,34 @@ export const GOD_POWERS = {
       name: 'Imhullu, the Evil Wind', icon: '🌪️',
       effects: [
         { type: 'damage', amount: 160, radius: 5 },
-        { type: 'field', duration: 8, radius: 5, dps: 25, slowPct: 0.4 },
+        { type: 'field', duration: 8, radius: 5, dps: 10, slowPct: 0.4 },
       ],
       vfx: { element: 'wind', shape: 'storm' }, ai: { use: 'damage' },
       description: 'The wind Marduk loosed on Tiamat: it batters enemies in the area, then howls on, hurting and slowing them for 8 seconds. The target must be in sight.',
     }),
     power('mesopotamian', 'deluge', 3, {
       name: 'The Deluge', icon: '🌊',
-      effects: [{ type: 'field', duration: 15, radius: 10, dps: 50, slowPct: 0.4 }],
+      effects: [{ type: 'field', duration: 15, radius: 10, dps: 35, slowPct: 0.4 }],
       vfx: { element: 'water', shape: 'wave' }, ai: { use: 'damage' },
       description: 'The flood the gods sent in the days of Atrahasis: a very wide area drowns for 15 seconds, hurting and slowing every enemy in it.',
     }),
   ],
   west_african: [
     power('west_african', 'gold_road', 1, {
-      name: 'Caravan of the Gold Road', icon: '🐪', target: 'none', effects: [{ type: 'resource', gold: 300, wood: 150 }],
+      name: 'Caravan of the Gold Road', icon: '🐪', target: 'none', effects: [{ type: 'resource', gold: 400, wood: 200 }],
       vfx: { element: 'sun', shape: 'buff' }, ai: { use: 'economy' },
-      description: 'A caravan arrives laden with gifts: 300 gold and 150 wood at once.',
+      description: 'A caravan arrives laden with gifts: 400 gold and 200 wood at once.',
     }),
     power('west_african', 'thunderstones', 2, {
-      name: "Shango's Thunderstones", icon: '⚡', effects: [barrage(10, 120, 0.35, { stun: 0.5 })],
+      name: "Shango's Thunderstones", icon: '⚡', effects: [barrage(12, 130, 0.3, { stun: 0.5 })],
       vfx: { element: 'lightning', shape: 'strike' }, ai: { use: 'damage' },
-      description: 'Shango hurls his thunderstones: ten bolts, each blasting and stunning what it hits. The target must be in sight.',
+      description: 'Shango hurls his thunderstones: twelve bolts, each blasting and stunning what it hits. The target must be in sight.',
     }),
     power('west_african', 'oyas_tempest', 3, {
       name: "Oya's Tempest", icon: '🌪️',
       effects: [
-        { type: 'field', duration: 12, radius: 8, dps: 35, slowPct: 0.3 },
-        barrage(10, 100, 0.35, { spread: 7 }),
+        { type: 'field', duration: 12, radius: 8, dps: 48, slowPct: 0.3 },
+        barrage(14, 140, 0.25, { spread: 7 }),
       ],
       vfx: { element: 'wind', shape: 'storm' }, ai: { use: 'damage' },
       description: 'The queen of storms sweeps over a wide area: a gale hurts and slows enemies for 12 seconds while lightning falls.',

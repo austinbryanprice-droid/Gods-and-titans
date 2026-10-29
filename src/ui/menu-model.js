@@ -21,6 +21,29 @@ export const PANTHEON_EMBLEMS = {
 export const DIFFICULTIES = ['easy', 'normal', 'hard', 'brutal'];
 const DIFF_LABEL = { easy: 'Easy', normal: 'Normal', hard: 'Hard', brutal: 'Brutal' };
 
+/**
+ * The difficulty Play vs AI gives its computer players (DESIGN 9): Easy until this device's career has a
+ * win against the computer, then Normal. Online lobbies keep Normal.
+ * @param {boolean} beatenComputer career.hasBeatenComputer()
+ */
+export function defaultAiDifficulty(beatenComputer) {
+  return beatenComputer ? 'normal' : 'easy';
+}
+
+/** The lobby's line under the players while Easy is suggested (a solo lobby, no win against the computer yet). */
+export const EASY_SUGGESTED_NOTE = 'The computer plays on Easy for your first game. Once you have beaten it, new games start on Normal; pick a level in its slot any time.';
+
+/**
+ * The hint line under the players, or '' for none: only in a game against the computer while Easy is
+ * suggested and an AI is still on Easy.
+ * @param {object} state lobby state
+ * @param {{ online: boolean, suggested: string|null }} ctx suggested: the difficulty marked as suggested
+ */
+export function difficultyNote(state, { online, suggested }) {
+  if (online || suggested !== 'easy') return '';
+  return (state?.slots || []).some((s) => s && s.kind === 'ai' && s.difficulty === 'easy') ? EASY_SUGGESTED_NOTE : '';
+}
+
 /** Network params carried over into invite links (so test servers / TURN keep working). */
 const NET_PARAMS = ['transport', 'net', 'peerHost', 'peerPort', 'peerPath', 'peerSecure', 'turn', 'turnUser', 'turnPass', 'relay'];
 
@@ -126,15 +149,16 @@ export function slotKindValue(slot, index, myIndex) {
  * Options for a slot's kind/name dropdown (host view).
  * @param {object} slot
  * @param {number} index
- * @param {{ myIndex: number, online: boolean }} ctx
+ * @param {{ myIndex: number, online: boolean, suggested?: string|null }} ctx suggested: a difficulty to mark
+ *   "(suggested)" (Easy before the first win against the computer, in a game against the computer only)
  * @returns {{ value: string, label: string }[]}
  */
-export function slotKindOptions(slot, index, { myIndex, online }) {
+export function slotKindOptions(slot, index, { myIndex, online, suggested = null }) {
   if (index === myIndex) return [{ value: 'you', label: `${slot?.name || 'You'} (You)` }];
   const opts = [];
   if (slot && (slot.kind === 'human' || slot.kind === 'host')) opts.push({ value: 'human', label: slot.name || 'Player' });
   if (online) opts.push({ value: 'open', label: slot && slot.kind === 'human' ? 'Open (remove player)' : 'Open' });
-  for (const d of DIFFICULTIES) opts.push({ value: `ai:${d}`, label: `AI — ${DIFF_LABEL[d]}` });
+  for (const d of DIFFICULTIES) opts.push({ value: `ai:${d}`, label: `AI — ${DIFF_LABEL[d]}${d === suggested && !online ? ' (suggested)' : ''}` });
   opts.push({ value: 'closed', label: 'Closed' });
   return opts;
 }

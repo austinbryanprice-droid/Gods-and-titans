@@ -167,6 +167,7 @@ class SiteView {
     this.glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(NEUTRAL_GLOW).multiplyScalar(0.6) });
     this.crystalMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: NEUTRAL_GLOW, emissiveIntensity: 1.6, roughness: 0.25, metalness: 0.1, flatShading: true });
     this.beamMat = new THREE.MeshBasicMaterial({ color: NEUTRAL_GLOW, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    this.beamMat.forceSinglePass = true; // additive, no depth writes: one pass draws what two would
     this.arcUniforms = { uColor: { value: new THREE.Color(NEUTRAL_GLOW) }, uProg: { value: 0 }, uPulse: { value: 0 }, uTime: { value: 0 } };
     this.arcMat = new THREE.ShaderMaterial({
       uniforms: this.arcUniforms, vertexShader: ARC_VS, fragmentShader: ARC_FS,

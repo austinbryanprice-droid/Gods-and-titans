@@ -156,7 +156,10 @@ export function renderHowToContent() {
     step(8, '🔱', 'Know your pantheon',
       'Every pantheon plays its own way. Each has two blessings that work from the first second, an elite soldier trained at the Barracks, its own look, and its own creatures, gods and Titan. Hover the pantheon chip at the top left of the battlefield, or open Pantheons on the menu, to read yours.'),
     h('p.mw-tip', h('strong', 'New here? '), 'Learn to Play on the title screen walks you through a whole first match, one objective at a time, against a sleeping camp of raiders, and gives a medal for the time you win in.'),
-    h('p.mw-tip', h('strong', 'A story to play: '), 'the Campaign on the title screen is five linked missions for the Greeks, each with its own objectives and a narrated briefing. Win one to open the next.'),
+    h('p.mw-tip', h('strong', 'A story to play: '), 'the Campaign on the title screen is two chapters of five linked missions, the first for the Greeks and the second for the Norse, each mission with its own objectives and a narrated briefing. Win one to open the next.'),
+    h('p.mw-tip', h('strong', 'Every day: '), 'the Daily Challenge on the title screen is one game against the computer, the same for everyone today, with a twist such as a Golden Age or a Worthy Foe. Your best score of the day is kept, and playing on the next day builds a streak.'),
+    h('p.mw-tip', h('strong', 'Save and carry on: '), 'in a game against the computer, Save Game in the menu (F10) keeps the battle in one of three slots, and it is autosaved every three minutes. Continue and Load Game on the title screen, or Load Game in the F10 menu, bring it back.'),
+    h('p.mw-tip', h('strong', 'Watch it again: '), 'the newest twelve games you played against the computer or hosted are kept as replays. Watch Replay on the game-over screen, or Replays on the Career screen, plays it from any player\'s eyes at up to eight times the speed.'),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
   );
   const controls = h('div.mw-howto-controls',

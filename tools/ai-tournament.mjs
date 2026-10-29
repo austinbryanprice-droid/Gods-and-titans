@@ -18,6 +18,7 @@
 // --teams=ffa plays 4-player free-for-all games (one game per listed pantheon).
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import { createWorld } from '../src/sim/world.js';
 import { createAI } from '../src/ai/ai.js';
 import { PANTHEON_LIST, getUnitType } from '../src/data/index.js';
@@ -254,7 +255,7 @@ function tables(results) {
 async function main() {
   const opt = parseArgs(process.argv.slice(2));
   const games = buildGames(opt);
-  const nWorkers = Math.max(1, Math.min(2, +(opt.workers || 2), games.length));
+  const nWorkers = Math.max(1, Math.min(os.cpus().length, +(opt.workers || 2), games.length));
   console.log(`Running ${games.length} game(s) on ${nWorkers} worker thread(s)…`);
   const results = new Array(games.length);
   let next = 0;

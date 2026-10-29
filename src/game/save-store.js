@@ -158,6 +158,21 @@ export async function deleteSave(slot, { backend = idbBackend, store = storage()
   }
 }
 
+/** A slot's name in the lists (the title screen's Load Game and the F10 menu's): "Autosave" or "Slot 2". */
+export function saveTitle(info) {
+  return info && info.slot === AUTO_SLOT ? 'Autosave' : `Slot ${info ? info.slot : '?'}`;
+}
+
+/** "Greek vs Norse (Hard) · small map · 23:10 · 5 min ago" for a save's info. */
+export function saveLine(info, now = Date.now()) {
+  const t = Math.max(0, Math.floor((info && info.time) || 0));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const ss = String(t % 60).padStart(2, '0');
+  const clock = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+  return `${(info && info.label) || 'Saved game'} · ${clock} · ${savedAgo(info && info.savedAt, now)}`;
+}
+
 /** "12 min ago", "yesterday 18:04", or a date, for the slot list. */
 export function savedAgo(savedAt, now = Date.now()) {
   const s = Math.max(0, (now - savedAt) / 1000);
