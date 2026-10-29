@@ -390,15 +390,18 @@ const CHAT_PREFIX = /^\/(t|team|a|all)(?:\s+|$)/i;
 /**
  * Who a typed chat line goes to (DESIGN 7, "Team chat"): { text, team }. A leading "/t " or "/team "
  * sends it to the allies and "/a " or "/all " to everyone, whatever the chat box's switch says
- * (`allies`); the prefix is taken off. Without teammates (`canAllies` false) every line goes to everyone.
+ * (`allies`); the prefix is taken off. Without teammates (`canAllies` false) every line goes to everyone,
+ * except one typed with "/t ": that line was meant to be private, so it is refused (`refused`), never sent to the enemy.
  */
 export function chatTarget(raw, { allies = false, canAllies = false } = {}) {
   let text = typeof raw === 'string' ? raw.trim() : '';
   let team = !!allies;
+  let asked = false;
   const m = CHAT_PREFIX.exec(text);
   if (m) {
-    team = m[1].toLowerCase().startsWith('t');
+    team = asked = m[1].toLowerCase().startsWith('t');
     text = text.slice(m[0].length).trim();
   }
+  if (asked && !canAllies) return { text, team: false, refused: true };
   return { text, team: team && !!canAllies };
 }

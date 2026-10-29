@@ -60,8 +60,9 @@ test('chatTarget: the switch decides, a "/t " or "/team " prefix sends to the al
 
 test('chatTarget without allies: every line goes to everyone, the prefix still taken off', () => {
   assert.deepEqual(chatTarget('hi', { allies: true, canAllies: false }), { text: 'hi', team: false });
-  assert.deepEqual(chatTarget('/t hi', { canAllies: false }), { text: 'hi', team: false });
-  assert.deepEqual(chatTarget('/t hi'), { text: 'hi', team: false }, 'the default is no allies');
+  assert.deepEqual(chatTarget('/t hi', { canAllies: false }), { text: 'hi', team: false, refused: true }, 'a private line never goes to the enemy');
+  assert.deepEqual(chatTarget('/t hi'), { text: 'hi', team: false, refused: true }, 'the default is no allies');
+  assert.deepEqual(chatTarget('/all hi', { canAllies: false }), { text: 'hi', team: false });
 });
 
 test('hasAllies: anyone else on my team in the setup', () => {
@@ -120,7 +121,7 @@ test('with an ally: a typed "/t " turns the box to the allies as it is typed, an
   assert.equal(sent.length, 0, 'nothing after the prefix: nothing sent');
 });
 
-test('without allies (1v1): the switch is disabled and every line, Shift+Enter and "/t " too, goes to all', () => {
+test('without allies (1v1): the switch is disabled, Shift+Enter goes to all, and a "/t " line is not sent at all', () => {
   const { hud, sent, type } = setup([1, 2]);
   hud.openChat({ allies: true });
   assert.equal(hud.chatTo.disabled, true);
@@ -132,7 +133,7 @@ test('without allies (1v1): the switch is disabled and every line, Shift+Enter a
   assert.deepEqual(sent.pop(), ['hi']);
   hud.openChat();
   type('/t gg');
-  assert.deepEqual(sent.pop(), ['gg']);
+  assert.equal(sent.length, 0, 'a line meant to be private never reaches the enemy');
 });
 
 test('a team line shows "[Allies]" before the name; an all-chat line does not', () => {

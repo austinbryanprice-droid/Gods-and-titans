@@ -1237,7 +1237,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   with "/t " or "/team " goes to the allies, "/a " or "/all " to everyone, the prefix taken off (`chatTarget` in
   `src/ui/hud-data.js`); the switch follows the prefix as it is typed. Every opening starts on everyone. The allies
   are the setup's other players on my team (`hasAllies`), humans or computer players, alive or defeated: with none
-  (a 1v1, a free-for-all) the switch is disabled and every line, Shift+Enter and "/t " included, goes to everyone.
+  (a 1v1, a free-for-all) the switch is disabled and every line, Shift+Enter included, goes to everyone; a "/t "
+  line is refused with a notice instead, since it was meant to be private.
   A defeated player keeps both channels (they stay on their team); there are no online spectators, and a replay
   has no chat box. On the wire it is routed as a team mark is: a client sends `teamchat {text}` (its own message
   name, not a flag on `chat`, so the protocol fingerprint changes and a build that would broadcast it can never

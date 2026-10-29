@@ -847,7 +847,8 @@ export class Hud {
 
   /** Send what the box holds, to the allies or everyone (chatTarget: a "/t " or "/all " prefix wins). */
   sendChatLine(game, { allies = this.chatAllies } = {}) {
-    const { text, team } = chatTarget(this.chatInput.value, { allies, canAllies: this.canChatAllies() });
+    const { text, team, refused } = chatTarget(this.chatInput.value, { allies, canAllies: this.canChatAllies() });
+    if (refused) return this.message('You have no allies in this game: the line was not sent.', 'system');
     if (!text) return;
     if (team) game.sendChat(text, { team: true });
     else game.sendChat(text);
