@@ -1679,7 +1679,7 @@ export class Game {
             return new HostSession({
               setup: loaded.world.setup, myIndex: this.myIndex, conns: new Map(), resumed: true, viewState: this.viewState,
               createWorld: () => loaded.world,
-              createAI: (world, index, difficulty) => loaded.ais.get(index) || aiFactory(world, index, difficulty),
+              createAI: (world, index, difficulty, opts) => loaded.ais.get(index) || aiFactory(world, index, difficulty, opts),
               createVoices: (ai && ai.createVoices) || null,
             });
           },

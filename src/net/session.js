@@ -452,7 +452,7 @@ export class HostSession extends SessionBase {
       if (!p || p.kind !== 'human' || i === this.myIndex || this.clients.has(i) || this.ais.has(i)) continue;
       this.leftPlayers.add(i);
       if (snapPlayers[i] && snapPlayers[i].defeated) continue;
-      if (this.addAI(i, difficulty)) this.standIns.add(i);
+      if (this.addAI(i, difficulty, { standIn: true })) this.standIns.add(i);
     }
   }
 

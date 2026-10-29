@@ -29,8 +29,8 @@ function setupWith(kinds) {
   return { version: '0.1.0', seed: 7, mapSize: 'small', players };
 }
 
-const fakeAI = (calls) => (world, index, difficulty) => {
-  const ai = { index, difficulty, ticks: 0, tick() { this.ticks++; } };
+const fakeAI = (calls) => (world, index, difficulty, opts = {}) => {
+  const ai = { index, difficulty, standIn: !!opts.standIn, ticks: 0, tick() { this.ticks++; } };
   calls.push(ai);
   return ai;
 };
@@ -157,6 +157,7 @@ test('handoff: when the host vanishes, the heir carries the game on and the othe
   assert.equal(annHost.pausesLeft.get(2), 1, 'pauses used stay used with the new host');
   assert.equal(annHost.viewState, ann.viewState, 'shown in the view the player already has');
   assert.deepEqual([...annHost.standIns].sort(), [0, 2], 'AIs hold the absent seats');
+  assert.ok([0, 2].every((i) => annHost.ais.get(i).standIn), 'as stand-ins: they keep the absent players\' god powers');
   annHost.enableHandoff({ room: makeRoomCode(), tokens, pack: packFake }); // ready to move on again
   annHost.start();
   assert.equal(annHost.pause && annHost.pause.reason, 'handoff', 'waits for Ben, paused');
