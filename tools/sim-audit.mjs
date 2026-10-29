@@ -3,7 +3,8 @@
 // every few ticks (entity index, positions, health, map occupancy, resources,
 // population that the sim's own recount would hide), a watch for units that
 // stop moving on a move-like order, for worshippers that hold a gather order
-// but deliver nothing for 90 s, and a same-seed determinism check.
+// but deliver nothing for 90 s, gold workers sent between mines 40+ tiles apart (far
+// hops, and bounces back within 2 min), and a same-seed determinism check.
 // (Mine slots and prayer slots are checked lazily by the sim itself, so stale
 // ids left in them are not reported. "pop-over-cap" is legal after losing Houses.)
 //
@@ -113,6 +114,8 @@ function runGame(g) {
   const stuck = new Map(); // id -> { x, y, since, order }
   const stuckReports = [];
   const idle = new Map();
+  const goldHop = new Map(); // worker id -> { mine, prev, t } (its gold mine, the one before, when it changed)
+  const hops = { far: 0, bounce: 0, longWalk: 0 }; // longWalk: worker-seconds walking to a mine 40+ tiles off
   let tick = 0;
   let hash = 0;
   for (; tick < maxTicks && !world.gameOver; tick++) {
@@ -137,6 +140,22 @@ function runGame(g) {
         }
       }
       for (const id of stuck.keys()) if (!world.entities.has(id)) stuck.delete(id);
+      // Gold workers hopping between far-apart mines.
+      for (const u of world.unitList) {
+        if (u.dead || u.def.class !== 'worker' || u.owner < 0) continue;
+        const o = u.order && u.order.type === 'gather' ? u.order : null;
+        const m = o && o.mine ? world.entities.get(o.mine) : null;
+        if (!m) continue;
+        if (o.phase === 'go' && Math.hypot(m.x - u.x, m.y - u.y) >= 40) hops.longWalk += 40 / TICK_RATE;
+        const h = goldHop.get(u.id);
+        if (!h) { goldHop.set(u.id, { mine: m, prev: null, t: world.time }); continue; }
+        if (h.mine === m) continue;
+        if (Math.hypot(h.mine.x - m.x, h.mine.y - m.y) >= 40) {
+          hops.far++;
+          if (h.prev === m && world.time - h.t < 120) hops.bounce++;
+        }
+        goldHop.set(u.id, { mine: m, prev: h.mine, t: world.time });
+      }
     }
     // Gatherers that hold a gather order but deliver nothing for 90 s.
     for (const u of world.unitList) {
@@ -158,7 +177,7 @@ function runGame(g) {
   for (const u of world.unitList) hash = (hash * 31 + Math.round(u.x * 1000) + Math.round(u.hp * 10) + u.id) | 0;
   hash = (hash * 31 + world.players.reduce((s, p) => s + Math.round(p.gold) + Math.round(p.wood), 0)) | 0;
   const aiErrors = ais.map((a) => a.ai.errors);
-  return { world, issues, stuckReports, hash, minutes: world.time / 60, over: world.gameOver, aiErrors };
+  return { world, issues, stuckReports, hash, minutes: world.time / 60, over: world.gameOver, aiErrors, hops };
 }
 
 const games = [];
@@ -177,7 +196,7 @@ for (const g of games) {
   const t0 = performance.now();
   const r = runGame(g);
   const label = `seed ${g.seed} ${g.players.map((p) => p.pantheon).join(' v ')}`;
-  console.log(`\n== ${label}: ${r.minutes.toFixed(1)} min ${r.over ? `winner team ${r.over.winningTeam} ${r.over.how || ''}` : 'unfinished'} (${((performance.now() - t0) / 1000).toFixed(1)} s) aiErrors=${JSON.stringify(r.aiErrors)}`);
+  console.log(`\n== ${label}: ${r.minutes.toFixed(1)} min ${r.over ? `winner team ${r.over.winningTeam} ${r.over.how || ''}` : 'unfinished'} (${((performance.now() - t0) / 1000).toFixed(1)} s) aiErrors=${JSON.stringify(r.aiErrors)} goldHops far=${r.hops.far} bounce=${r.hops.bounce} longWalk=${r.hops.longWalk.toFixed(0)}s`);
   for (const [k, v] of r.issues) console.log(`  ${k} x${v.count} (first tick ${v.tick}): ${v.first}`);
   for (const s of r.stuckReports.slice(0, 15)) console.log(`  stuck: ${s}`);
   if (r.stuckReports.length > 15) console.log(`  ... ${r.stuckReports.length - 15} more stuck`);

@@ -29,7 +29,7 @@ import { CampaignView, missionPointer } from './hud-campaign.js';
 import { HintsView, HintScheduler } from './hud-hints.js';
 import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
-import { MarksLayer, MarkPalette, teammateCount } from './hud-marks.js';
+import { MarksLayer, MarkPalette, teammateCount, aiAllyCount } from './hud-marks.js';
 import { PowerBar } from './hud-powers.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
@@ -437,7 +437,7 @@ export class Hud {
     const m = input && input.mode;
     this.markpad.setArmed(m && m.kind === 'target' && m.order === 'mark' ? m.mark : null);
     this.powerbar.update(vs, m && m.kind === 'target' && m.order === 'power' ? m.power : null);
-    this.markpad.setTeammates(teammateCount(vs));
+    this.markpad.setTeammates(teammateCount(vs), game.replay ? 0 : aiAllyCount(vs));
     if (this.tips) this.tips.update(now);
     if (!this.tutorial && !this.missionView && !game.replay) this.hintTimer.update();
     this.hints.update();

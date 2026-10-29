@@ -142,3 +142,60 @@ test('AI workers are not sent back and forth between a mine and the trees', () =
   }
   assert.ok(worst <= 8, `a worker got ${worst} gather orders within 30 s`);
 });
+
+test('a rival foundation by a worked mine does not send its gold workers across the map', () => {
+  // Found in a Brutal 2v2 (seed 33): rivals kept placing Storehouse sites by a mine the AI worked
+  // and losing them. Each one dropped the mine from the AI's owned mines, its workers were sent to
+  // an expansion 110 tiles off, and back when the site fell: two workers walked for minutes, mining nothing.
+  const g = soloGame(3, 'greek', 'normal');
+  const { world, ai } = g;
+  ai.ai.prof = { ...ai.ai.prof, firstAttack: 1e9, raids: null };
+  g.step(20);
+  const home = world.buildingsOf(0).find((b) => b.type === 'town_center');
+  const homeMine = world.mineList.reduce((a, m) => (Math.hypot(m.x - home.x, m.y - home.y) < Math.hypot(a.x - home.x, a.y - home.y) ? m : a));
+  // An expansion far away, its Storehouse already standing.
+  const enemyHome = world.buildingsOf(1).find((b) => b.type === 'town_center');
+  const far = world.mineList
+    .filter((m) => Math.hypot(m.x - home.x, m.y - home.y) > 50 && Math.hypot(m.x - enemyHome.x, m.y - enemyHome.y) > 25)
+    .sort((a, b) => Math.hypot(b.x - home.x, b.y - home.y) - Math.hypot(a.x - home.x, a.y - home.y))[0];
+  assert.ok(far, 'a far mine on the map');
+  for (const c of world.camps) if (Math.hypot(c.x - far.x, c.y - far.y) < 10) for (const u of c.members) if (!u.dead) world.killEntity(u, null);
+  const sp = world.findPlacement(0, 'storehouse', far.x, far.y, 8);
+  world.createBuilding(0, 'storehouse', sp.tx, sp.ty, true, true);
+  g.step(2);
+  assert.ok(ai.ai.pairs.some((p) => p.mine === far), 'the far mine is owned');
+  // Turned round: a worker ordered to a gold mine 40+ tiles from the one it was last sent to, within 2 min.
+  let bounces = 0;
+  const sentTo = new Map(); // worker id -> { m, t }
+  const issue = ai.ai.issue.bind(ai.ai);
+  ai.ai.issue = (cmd) => {
+    const m = cmd.type === 'gather' && cmd.target ? world.entities.get(cmd.target) : null;
+    if (m && m.kind === 'mine') {
+      for (const id of cmd.units) {
+        const last = sentTo.get(id);
+        if (last && Math.hypot(last.m.x - m.x, last.m.y - m.y) >= 40 && world.time - last.t < 120) bounces++;
+        sentTo.set(id, { m, t: world.time });
+      }
+    }
+    return issue(cmd);
+  };
+  // A rival foundation by the home mine every 15 s, gone 6 s later.
+  const spot = world.findPlacement(1, 'storehouse', homeMine.x, homeMine.y, 9);
+  assert.ok(spot && Math.hypot(spot.tx + 1 - homeMine.x, spot.ty + 1 - homeMine.y) < 10, 'room for a rival site by the home mine');
+  let dropped = 0;
+  for (let k = 0; k < 6; k++) {
+    const site = world.createBuilding(1, 'storehouse', spot.tx, spot.ty, false, true);
+    g.step(6);
+    if (!ai.ai.pairs.some((p) => p.mine === homeMine)) dropped++;
+    world.killEntity(site, null);
+    g.step(9);
+  }
+  assert.equal(dropped, 0, 'the home mine stays owned under a rival foundation');
+  assert.equal(bounces, 0, `${bounces} gold workers turned round between mines across the map`);
+  // A finished rival building by the mine still makes it contested.
+  const b = world.createBuilding(1, 'storehouse', spot.tx, spot.ty, true, true);
+  g.step(2);
+  assert.ok(!ai.ai.pairs.some((p) => p.mine === homeMine), 'a finished rival building contests the mine');
+  world.killEntity(b, null);
+  assert.equal(ai.ai.errors, 0);
+});

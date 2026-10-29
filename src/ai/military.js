@@ -7,6 +7,7 @@ import { teamTarget, clearTeamTarget } from './team.js';
 import { doneOf } from './scan.js';
 import { POP_MAX } from '../config.js';
 import { sacredTarget } from './sacred.js';
+import { markToAnswer, runMark } from './marks.js';
 
 const THREAT_RANGE = 12; // enemy units this close to a building threaten the base
 const ROUTE_STEP = 10; // tiles between march waypoints
@@ -318,6 +319,9 @@ function setMode(ai, mode, extra = {}) {
   mil.camp = null;
   mil.site = null;
   mil.targetB = null;
+  mil.mark = null;
+  mil.guard = null;
+  mil.sent = null;
   Object.assign(mil, extra);
 }
 
@@ -369,12 +373,23 @@ export function runMilitary(ai, s) {
   // ---- Mode transitions caused by threats
   if (ai.threat) {
     const farAway = c && dist(c, ai.threat) > 25;
-    const big = ai.threat.power >= Math.max(1.5, armyPower * 0.3) || ai.threat.urgent;
-    if (mil.mode !== 'defend' && (mil.mode !== 'attack' || (big && (farAway || ai.threat.power >= armyPower * 0.5)))) {
-      if (mil.mode !== 'attack' || big) setMode(ai, 'defend', { ally: false });
+    // A lone enemy Worshipper placing a building by the base is urgent for the guards at home, but
+    // calling back a whole attack for it let a rival who kept trying to expand stall every wave.
+    const armed = ai.threat.units.some((u) => u.def.class !== 'worker');
+    const big = ai.threat.power >= Math.max(1.5, armyPower * 0.3) || (ai.threat.urgent && armed);
+    // (An army answering a teammate's mark has left a guard at home: like a wave, only a big threat calls it back.)
+    const away = mil.mode === 'attack' || mil.mode === 'mark';
+    if (mil.mode !== 'defend' && (!away || (big && (farAway || ai.threat.power >= armyPower * 0.5)))) {
+      if (!away || big) setMode(ai, 'defend', { ally: false });
     }
   } else if (allyThreat && (mil.mode === 'home' || mil.mode === 'creep')) {
     setMode(ai, 'defend', { ally: true });
+  }
+
+  // ---- A teammate's Attack / Defend / Help marker (marks.js) comes before anything but the base's own defence.
+  const order = markToAnswer(ai, s);
+  if (order && !(mil.mode === 'defend' && !mil.ally) && !(mil.mode === 'mark' && mil.mark.id === order.id)) {
+    setMode(ai, 'mark', { mark: order });
   }
 
   switch (mil.mode) {
@@ -429,6 +444,16 @@ export function runMilitary(ai, s) {
     }
     case 'attack': {
       runAttack(ai, s, fighters, rams, all, c, armyForce);
+      break;
+    }
+    case 'mark': {
+      if (!order || order.id !== mil.mark.id) {
+        setMode(ai, 'home');
+        break;
+      }
+      const res = runMark(ai, s, fighters, rams, s.minions);
+      if (res === 'retreat') setMode(ai, 'retreat');
+      else if (!res) setMode(ai, 'home');
       break;
     }
     case 'site': {
@@ -657,6 +682,6 @@ function manageMilitia(ai, s, armyForce, c) {
 }
 
 export function newMilitary() {
-  return { mode: 'home', since: 0, waves: 0, lastAttackEnd: 0, lastThreat: -999, route: null, wp: 0, phase: null, camp: null, site: null, target: -1, targetB: null, ratio: 0 };
+  return { mode: 'home', since: 0, waves: 0, lastAttackEnd: 0, lastThreat: -999, route: null, wp: 0, phase: null, camp: null, site: null, target: -1, targetB: null, ratio: 0, mark: null, markDone: 0, guard: null, sent: null };
 }
 

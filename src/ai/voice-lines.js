@@ -1,10 +1,11 @@
 // What computer players say in chat (DESIGN 10.1), per pantheon and per moment of the match.
 // `{unit}` is the god or Titan the line is about, `{enemy}` the other player's name; a line
 // whose blanks cannot be filled is skipped. `greetAlly` is the greeting of a match with no enemy
-// player (the Trial of the Titans: everyone together against the monsters). Keep each line short (one card in the message feed).
+// player (the Trial of the Titans: everyone together against the monsters). `ackAttack` and `ackDefend`
+// answer a teammate's Attack marker and Defend / Help marker (said to the team only). Keep each line short (one card in the message feed).
 
 /** The moments an AI speaks, in the order DESIGN 10.1 lists them. */
-export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory'];
+export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory', 'ackAttack', 'ackDefend'];
 
 export const VOICE_LINES = {
   greek: {
@@ -19,6 +20,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my temples! I have hymns still to sing.', 'The Fates have turned against me...'],
     defeat: ['Olympus falls. Remember our songs.', 'The gods have abandoned me. Well fought.'],
     victory: ['Glory to Olympus! Your names will be forgotten.', 'As the Fates foretold: victory is ours.'],
+    ackAttack: ['Our spears go where you point.', 'As you command. The phalanx marches!'],
+    ackDefend: ['Hold fast, friend. Our shields are coming.', 'Olympus heard you. We march to your side.'],
   },
   norse: {
     greet: ['Skål! May your mead be strong and your walls weak.', 'The ravens are flying. Odin wants a good show.'],
@@ -32,6 +35,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my mead halls! ...No? Then I fight to the last.', 'My halls burn. A good death, at least.'],
     defeat: ['Valhalla calls. I go to drink with heroes.', 'A fine battle. The skalds will sing of you, sadly.'],
     victory: ['To Hel with you all! The North stands.', 'Skål! Another saga for the halls.'],
+    ackAttack: ['Point the way and the axes follow!', 'Ha! A fight. We\'re coming, shield-sibling.'],
+    ackDefend: ['Hold the line! The longships are coming.', 'Stand fast, friend. The North rides to you.'],
   },
   egyptian: {
     greet: ['Ra sees all from his sun boat. Build well, for he judges.', 'Greetings. My pyramids will outlast your whole people.'],
@@ -45,6 +50,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my temples! They took a thousand years to build!', 'The Nile runs red... my kingdom crumbles.'],
     defeat: ['My tomb awaits. Seal it well.', 'The sun sets on my dynasty.'],
     victory: ['Your names are struck from every monument. Ra is victorious.', 'Eternity belongs to Egypt.'],
+    ackAttack: ['As you will it. The chariots ride.', 'Ra lights the way. We strike where you point.'],
+    ackDefend: ['Hold on, friend. The armies of the Nile are coming.', 'We come to you, as the flood comes every year.'],
   },
   hindu: {
     greet: ['Namaste. May dharma guide this battle.', 'The wheel turns. Let us see where it stops for you.'],
@@ -58,6 +65,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my temples! They hold a thousand prayers.', 'The wheel turns against me...'],
     defeat: ['I return to the great cycle. We will meet again.', 'This life ends. Another begins.'],
     victory: ['Dharma prevails. Your cycle ends here.', 'As it was written in the stars. Victory!'],
+    ackAttack: ['Your will is our dharma. We march.', 'The war elephants turn where you point.'],
+    ackDefend: ['Hold firm, friend. We come to your side.', 'The wheel turns your way. We are coming.'],
   },
   japanese: {
     greet: ['Honour to you, rivals. May the kami favour the worthy.', 'The cherry blossoms fall. So will your walls.'],
@@ -71,6 +80,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my shrines! The kami will not forgive you.', 'My castle burns... but my spirit does not break.'],
     defeat: ['I fall like the cherry blossom. Well fought.', 'There is no shame in falling to a worthy foe.'],
     victory: ['The way of the kami prevails. Bow.', 'Victory, as the sun goddess willed.'],
+    ackAttack: ['Hai! Our blades go where you point.', 'As you command. The samurai advance.'],
+    ackDefend: ['Hold, friend. We come with honour.', 'Stand firm. Our banners ride to you.'],
   },
   chinese: {
     greet: ['Greetings. Heaven granted its mandate to me, not you.', 'May your rice bowl stay full. Mine will be fuller.'],
@@ -84,6 +95,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my temples! I will pay tribute! ...Generous tribute!', 'The Mandate slips from my hands...'],
     defeat: ['My dynasty ends. The histories will be kind to you.', 'Heaven has chosen another.'],
     victory: ['The Mandate of Heaven is mine. Ten thousand years!', 'All under Heaven bows to us.'],
+    ackAttack: ['The order is given. The legions march.', 'Heaven wills it: we strike where you point.'],
+    ackDefend: ['Hold the wall, ally. Our troops are coming.', 'Stand firm. The Mandate sends you aid.'],
   },
   aztec: {
     greet: ['The Fifth Sun shines on us. It must be fed.', 'Welcome, friends. The sun is hungry today.'],
@@ -97,6 +110,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my temples! The sun must rise tomorrow!', 'My pyramids crumble... the sun grows dark.'],
     defeat: ['The Fifth Sun sets for me. Feed it well.', 'My heart goes to the sun. Fight on without me.'],
     victory: ['The sun drinks deeply today. Victory!', 'Huitzilopochtli is pleased.'],
+    ackAttack: ['The sun is hungry. We go where you point.', 'Yes! The jaguars hunt where you show them.'],
+    ackDefend: ['Hold on, friend. The eagles fly to you.', 'We come to your side. The sun will not set on you.'],
   },
   celtic: {
     greet: ['Well met, strangers. The druids say this ends badly for you.', 'May the wild lands welcome you... briefly.'],
@@ -110,6 +125,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my groves! The oaks are older than you!', 'The forest burns... my clans scatter.'],
     defeat: ['I go to the Otherworld. Leave the oaks standing.', 'The clans fall. Tell our tales by the fire.'],
     victory: ['The wild prevails! Raise a cup to the Dagda.', 'Back to your boats, all of you.'],
+    ackAttack: ['To the charge! We go where you point.', 'Ha! A raid. The clans are with you.'],
+    ackDefend: ['Hold fast, friend. The clans are coming.', 'The woods march to you. Hold on!'],
   },
   mesopotamian: {
     greet: ['Greetings from the first city. We invented all this, you know.', 'The gods of Sumer are watching. They keep careful records.'],
@@ -123,6 +140,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my ziggurats! They reach the heavens!', 'My walls crumble... like clay in the rain.'],
     defeat: ['Write it on the tablets: I fought well.', 'The first city falls. Others will rise.'],
     victory: ['Carve it in stone: we are victorious!', 'All the lands between the rivers are ours.'],
+    ackAttack: ['It is written: we march where you point.', 'The scribes record the order. Forward!'],
+    ackDefend: ['Hold the walls, friend. We are coming.', 'Help comes from the first city. Hold on.'],
   },
   west_african: {
     greet: ['Welcome, friends. Anansi has already told me your plans.', 'May the ancestors give us a good contest.'],
@@ -136,6 +155,8 @@ export const VOICE_LINES = {
     beaten: ['Spare my shrines! The ancestors live there!', 'My villages burn... the drums go quiet.'],
     defeat: ['I go to the ancestors. They will judge you.', 'The drums fall silent. Well played.'],
     victory: ['The drums beat for victory! Àṣẹ!', 'The ancestors smile on us today.'],
+    ackAttack: ['The drums answer! We strike where you point.', 'Àṣẹ! The warriors go where you show them.'],
+    ackDefend: ['Hold on, friend. The drums call us to you.', 'We are coming. The ancestors walk with us.'],
   },
 };
 

@@ -10,6 +10,7 @@ import { INTERP_DELAY_MS, SNAPSHOT_EVERY_TICKS } from '../config.js';
 import { MARK_RATE } from '../data/marks.js';
 import { ViewState } from '../game/view-state.js';
 import * as mapgen from '../sim/mapgen.js';
+import { isTeamOrderKind } from '../sim/team-orders.js';
 import { encode, apply } from './delta.js';
 import {
   MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, STALL_NOTICE_MS, MAX_CLIENT_BUFFER_BYTES,
@@ -713,7 +714,11 @@ export class HostSession extends SessionBase {
     }
     for (const l of lines || []) {
       const text = sanitizeChat(l.text);
-      if (text && this.ais.has(l.from)) this.broadcastChat({ from: l.from, name: this.playerName(l.from), text, system: false, voice: true });
+      if (!text || !this.ais.has(l.from)) continue;
+      const line = { from: l.from, name: this.playerName(l.from), text, system: false, voice: true };
+      // An answer to a team mark is for the team only: the enemy must not learn that an order was given.
+      if (l.team) this.relayTeamChat(line);
+      else this.broadcastChat(line);
     }
   }
 
@@ -745,8 +750,17 @@ export class HostSession extends SessionBase {
    * A team mark (DESIGN 7, 9) goes to the sender's teammates and nobody else: the other teams'
    * connections never see it, so it cannot tell an enemy where an attack is called. The host's own
    * screen shows it when the host is on the team; the sender has shown it to itself already.
+   * An Attack, Defend or Help marker is also a sim command (`teamMark`, src/sim/team-orders.js) from
+   * the sender, recorded like every command, so that the sender's computer allies answer it.
    */
   relayMark(from, mark) {
+    if (isTeamOrderKind(mark.kind) && this.world && typeof this.world.issueCommand === 'function') {
+      try {
+        this.world.issueCommand(from, { type: 'teamMark', kind: mark.kind, x: mark.x, y: mark.y });
+      } catch (err) {
+        this.reportError('command', err);
+      }
+    }
     const team = this.teamOf(from);
     if (team === null) return;
     const msg = { t: MSG.MARK, from, kind: mark.kind, x: mark.x, y: mark.y };

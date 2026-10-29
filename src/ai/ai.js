@@ -55,6 +55,7 @@ export class AIPlayer {
     this.militia = new Set();
     this.pilgrims = new Map(); // worker id -> { site, since }: Worshippers sent to capture a sacred site
     this.pairs = [];
+    this.hauls = new Map(); // worker id -> tick it was sent more than FAR_TRIP away (economy.js)
     this.drops = [];
     this.woodSpot = null;
     this.expansion = null;
@@ -185,7 +186,7 @@ export class AIPlayer {
   /** Forget per-unit bookkeeping of units that are gone. */
   pruneMemory() {
     const ents = this.world.entities;
-    for (const map of [this.lastOrder, this.cmdMemo]) {
+    for (const map of [this.lastOrder, this.cmdMemo, this.hauls]) {
       for (const id of map.keys()) {
         const u = ents.get(id);
         if (!u || u.dead) map.delete(id);
@@ -276,14 +277,19 @@ export class AIPlayer {
     return this.pairs;
   }
 
-  /** Is a mine unsafe (enemy buildings next to it, or a living creep camp guarding it)? */
-  mineThreatened(m, s) {
+  /**
+   * Is a mine contested (a creep camp or an enemy building by it)? For a mine it already works
+   * (`held`), an enemy foundation does not count: rivals keep placing drop-off sites by a
+   * contested mine and losing them, and dropping the mine each time sent its workers across the
+   * map and back.
+   */
+  mineThreatened(m, s, held = false) {
     for (const camp of s.camps) {
       if (Math.hypot(camp.x - m.x, camp.y - m.y) < 8) return true;
     }
     for (const e of s.enemies) {
       if (e.defeated) continue;
-      for (const b of e.buildings) if (!b.dead && Math.hypot(b.x - m.x, b.y - m.y) < 10) return true;
+      for (const b of e.buildings) if (!b.dead && (b.constructed || !held) && Math.hypot(b.x - m.x, b.y - m.y) < 10) return true;
     }
     return false;
   }
