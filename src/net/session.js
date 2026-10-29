@@ -459,7 +459,8 @@ export class HostSession extends SessionBase {
     if (this.started) this.sendSnapshot(c, this.lastSnap);
     if (this.pause) conn.send(this.pauseMessage());
     const name = this.playerName(index);
-    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true });
+    // Everyone else hears it; the player who came back knows (no "<me> has rejoined" on their own screen).
+    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true }, index);
     if (this.plan) conn.send(this.planFor(index));
     this.updatePlan();
     // A new host waits for the players who were in the game when it moved (DESIGN 7), then plays on.
@@ -676,6 +677,8 @@ export class HostSession extends SessionBase {
   /**
    * Leave the game without ending it (DESIGN 7): the heir gets the game as it is now, and once it has gone
    * out (or after HANDOFF_FLUSH_MS) every client hears that the host quit; they carry on with the heir.
+   * @returns {Promise<boolean>} whether the clients carry the game on with the heir (from this copy, or the
+   *   one before when this one did not go out): the old host is told who hosts now (Game.quitToMenu)
    */
   async handOff() {
     if (!this.canHandOff) {
@@ -685,14 +688,14 @@ export class HostSession extends SessionBase {
     if (this.pause && this.pause.reason === 'player') this.setPause(-1, false);
     this.ticker.stop();
     const h = this.handoff;
-    const sent = await this.backup(true); // (after any backup still compressing)
+    await this.backup(true); // (after any backup still compressing)
     const c = this.plan && this.clients.get(this.plan.heir);
     const t0 = now();
     while (c && c.conn.open && c.conn.buffered > 0 && now() - t0 < HANDOFF_FLUSH_MS) await new Promise((r) => setTimeout(r, 50));
     // Even when the newest copy did not go out, the heir carries on from the one before.
     const carry = h.sent > 0 && !!(this.plan && this.clients.has(this.plan.heir));
     this.stop(REASONS.HOST_QUIT, { carry });
-    return carry && sent;
+    return carry;
   }
 
   /** The AIs' chat lines for these events (DESIGN 10.1), flagged `voice` so that a player can hide them. */
@@ -710,10 +713,11 @@ export class HostSession extends SessionBase {
     }
   }
 
-  broadcastChat(line) {
+  /** A chat line for everyone (but the player `except`, when given: a line about that player meant for the others). */
+  broadcastChat(line, except = null) {
     this.emitChat(line);
     const msg = { t: MSG.CHAT, ...line };
-    for (const c of this.clients.values()) c.conn.send(msg);
+    for (const c of this.clients.values()) if (c.index !== except) c.conn.send(msg);
   }
 
   /**

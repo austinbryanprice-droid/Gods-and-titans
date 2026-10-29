@@ -899,8 +899,10 @@ export class Game {
     if (this.overShown && (reason === 'game-over' || reason === 'host-quit')) {
       if (this.rematchRoom) return; // the host went to the rematch's lobby, and said so
       this.rematchClosed = true;
+      // The game-over panel covers the message line: it says so itself while open.
       this.hud.message('The host has closed the game.', 'system');
       this.hud.overlays.refreshGameOver();
+      this.hud.overlays.noteEnded('The host has closed the game.');
       return;
     }
     this.hud.overlays.showEnded(reason);

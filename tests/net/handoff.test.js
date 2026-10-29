@@ -204,6 +204,33 @@ test('handoff: a host quitting through the menu sends a fresh copy first, then t
   assert.equal(end.handoff.backup.tick, tick, 'the copy is as the host left it');
 });
 
+test('handoff: when the last copy fails but an earlier one reached the heir, the game still goes on and handOff says so', async () => {
+  const setup = setupWith(['human', 'human', 'hard']);
+  const { host, clients } = makeGame(setup);
+  const ann = clients.get(1);
+  host.start();
+  ann.start();
+  await ann.ready;
+  await host.backup(true);
+  await waitFor(() => ann.backup, 2000, 'first backup');
+  const earlier = ann.backup.tick;
+  host.step(5);
+  host.handoff.pack = () => {
+    throw new Error('pack failed');
+  };
+  const errors = [];
+  const report = host.reportError;
+  host.reportError = (where) => errors.push(where);
+  let end = null;
+  ann.onEnd((info) => (end = info));
+  assert.equal(await host.handOff(), true, 'the old host is told the heir hosts now');
+  host.reportError = report;
+  assert.deepEqual(errors, ['handoff-pack']);
+  await waitFor(() => end, 2000, 'end');
+  assert.ok(end.handoff, 'the clients carry on with the heir');
+  assert.equal(end.handoff.backup.tick, earlier, 'from the copy before');
+});
+
 test('handoff: a host quitting while a backup is still compressing waits for it and still hands over', async () => {
   const setup = setupWith(['human', 'human', 'hard']);
   const { host, clients } = makeGame(setup);

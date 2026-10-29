@@ -1294,7 +1294,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     client gets `start` again and a full snapshot (the client keeps its career tally with the ticket,
     `saveTally`, and what it has seen, the fog explored and enemy buildings and mines as last seen, every
     10 s under `mythicwar-rejoin-view` with `saveView`, put back on rejoin; a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
-    `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. Anyone else is told
+    `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. The others get a system line ("<Name> has rejoined the game…"); the player who came back does not get it about themselves. Anyone else is told
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link
     offers Rejoin Game. The host gets a token too (`lobby.hostToken`), for a game carried on by its
@@ -1328,7 +1328,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     (at most 10 s; nothing when the host quits through the menu: `handOff` sends a fresh backup
     and waits up to 4 s for it to go out). The new host keeps an heir of its own in turn; the old
     host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload (a host who quit
-    through the menu is told on the title screen who hosts now). A player who cannot reach the heir in time ends as
+    through the menu is told on the title screen who hosts now, also when only its last copy failed to go out and the heir carries on from the one before). A player who cannot reach the heir in time ends as
     after a lost link ('host-left': ticket kept, Rejoin offered), even when the host quit through the menu.
     Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
     A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
@@ -1360,6 +1360,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
     `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
     'host-left' (connection lost), 'host-quit', 'game-over', or the host's sanitized reason.
+    Once the game is over, the host closing it ('game-over' / 'host-quit') leaves the game-over panel up:
+    the panel itself says "The host has closed the game." (`Overlays.noteEnded`), as does the chat.
   - Both: `{ setup, myIndex, mapData, viewState, sendCommand(cmd), sendChat(text), sendMark({ kind, x, y }), onChat(cb), onMark(cb), onEnd(cb), start(), stop() }`
     (`sendMark` returns the clean mark or null; `onMark(cb({ from, name, kind, x, y }))` hears teammates' marks and my own).
 - `ViewState` (`src/game/view-state.js`, used identically on host and client):
