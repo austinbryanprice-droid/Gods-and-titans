@@ -1310,6 +1310,7 @@ kbd {
   .mw-slot > :nth-child(6) { display: none; }
   .mw-title-foot { justify-content: center; text-align: center; }
   .mw-main-nav { display: flex; flex-direction: column; align-items: stretch; width: min(25em, 92vw); }
+  .mw-nav-row { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mw-lobby-head { grid-template-columns: auto 1fr; }
   .mw-lobby-head .mw-head-spacer { display: none; }
 }
