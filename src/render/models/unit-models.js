@@ -14,6 +14,10 @@
 // metalness, self-glow and occlusion (unit-geo.js), so metal reflects the sky
 // while cloth stays matte under the same material.
 //
+// The rigid parts are drawn as one skinned mesh per unit (buildJoined): every
+// part is a bone, so a unit is one draw call while the animation keeps posing
+// the parts.
+//
 // On high and ultra (detail 'rich') humanoids the rich builder can dress are one
 // smooth skinned mesh on a bone rig instead of rigid parts (rich-humanoid.js,
 // rich-anim.js); everything else, and every unit on low and medium, keeps the
@@ -69,13 +73,13 @@ const UNIT_VERTEX = `
   if ( aFx.x > 0.0 ) vColor.rgb = uTeamColor * aFx.x;
 #endif
   vUnitFx = vec4( aFx.yzw, aAo );`;
-// (skinned meshes keep the noise on the surface: their rest position, not the posed one)
+// (the noise stays on the surface: the part-local position after the joint morphs, before any
+// skinning moves it; a rich unit's rest position, a joined unit's position in its part)
+const UNIT_SKIN_VERTEX = `
+vec3 unitRestP = transformed;
+#include <skinning_vertex>`;
 const UNIT_POS_VERTEX = `
-#ifdef USE_SKINNING
-  vUnitP = position;
-#else
-  vUnitP = transformed;
-#endif
+  vUnitP = unitRestP;
 #include <project_vertex>`;
 const UNIT_PARS_FRAGMENT = `
 uniform vec4 uUnitLook;
@@ -211,6 +215,7 @@ function patchUnitShader(mat) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${UNIT_PARS_VERTEX}`)
       .replace('#include <color_vertex>', `#include <color_vertex>\n${UNIT_VERTEX}`)
+      .replace('#include <skinning_vertex>', UNIT_SKIN_VERTEX)
       .replace('#include <project_vertex>', UNIT_POS_VERTEX)
       .replace('#include <shadowmap_vertex>', UNIT_SHADOW_VERTEX);
     shader.fragmentShader = shader.fragmentShader
@@ -225,7 +230,7 @@ function patchUnitShader(mat) {
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${UNIT_EMISSIVE}`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>\n${UNIT_AO}`);
   };
-  mat.customProgramCacheKey = () => 'mythicwar-unit-v4';
+  mat.customProgramCacheKey = () => 'mythicwar-unit-v5';
 }
 
 /**
@@ -273,6 +278,9 @@ function auraMaterial(color) {
       );
     };
     m.customProgramCacheKey = () => 'unit-aura-hdr2';
+    // additive and no depth writes: the faces add up in any order, so one pass draws what three.js's two-pass
+    // back-then-front draw of a transparent double-sided material does, without its extra draw and its two program lookups a frame
+    m.forceSinglePass = true;
     m.name = `unit-aura-${key}`;
     AURA_MATS.set(key, m);
   }
@@ -497,6 +505,136 @@ function templateAO(tpl, unitType, key) {
   AO_CACHE.set(key, geos.map((g) => g.attributes.aAo.array));
 }
 
+// ---------------------------------------------------------------------------
+// joined parts: one draw per unit
+// ---------------------------------------------------------------------------
+
+/**
+ * The rigid parts of a low-poly unit (torso, head, arms, legs ...) used to be a
+ * mesh each: five or six draw calls per unit, and as many again in the shadow
+ * pass. They are joined into one skinned geometry instead, every vertex bound
+ * with full weight to the "bone" of the part it came from, so the parts still
+ * move as rigid pieces and the animation code keeps posing the part objects it
+ * always posed (unit-anim.js). The bone matrices are the parts' transforms in
+ * the rig (syncJoined), recomputed only when the unit animates.
+ *
+ * Joint morphs (knees, elbows, wings, waves) become slots of the joined
+ * geometry, one per (part, morph): a part object's morphTargetDictionary maps
+ * its own morph names to its slots in the joined mesh's influences, which it
+ * shares. A worker's tool arms are extra bones on the right arm's slots; the
+ * arm not in use gets a zero matrix (its triangles collapse to a point). The
+ * slot count is padded to a multiple of MORPH_STEP so the few joined layouts
+ * share a handful of shader programs.
+ *
+ * Ghost parts (spirits' see-through bodies) keep their own transparent mesh.
+ * Units with a single mesh (serpents, birds, dragons) are left as they were.
+ */
+const MORPH_STEP = 4;
+
+function buildJoined(tpl) {
+  const bones = []; // { part, tool? }: geometry order
+  const geos = [];
+  for (const p of tpl.parts) {
+    if (!p.geo || p.ghost) continue;
+    bones.push({ part: p.name, tool: p.name === 'armR' && tpl.rig.tools ? 'none' : undefined });
+    geos.push(p.geo);
+  }
+  if (tpl.rig.tools && bones.some((b) => b.part === 'armR')) {
+    for (const [kind, g] of Object.entries(tpl.rig.tools)) {
+      if (geos.includes(g)) continue;
+      bones.push({ part: 'armR', tool: kind });
+      geos.push(g);
+    }
+  }
+  if (geos.length < 2) return null;
+  let total = 0;
+  for (const g of geos) total += g.attributes.position.count;
+  const geo = new THREE.BufferGeometry();
+  const names = ['position', 'normal', 'color', 'aFx', 'aAo'];
+  for (const name of names) {
+    const size = geos[0].attributes[name].itemSize;
+    const arr = new Float32Array(total * size);
+    let off = 0;
+    for (const g of geos) {
+      arr.set(g.attributes[name].array, off);
+      off += g.attributes[name].count * size;
+    }
+    geo.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  const skinIndex = new Uint16Array(total * 4);
+  const skinWeight = new Float32Array(total * 4);
+  // morph slots: (owner part, morph name); tool arms share the right arm's
+  const slots = {};
+  const slotList = [];
+  let start = 0;
+  const ranges = [];
+  geos.forEach((g, bi) => {
+    const n = g.attributes.position.count;
+    for (let i = start; i < start + n; i++) {
+      skinIndex[i * 4] = bi;
+      skinWeight[i * 4] = 1;
+    }
+    ranges.push(start);
+    const owner = bones[bi].part;
+    for (const name of g.userData.morphNames || []) {
+      const dict = slots[owner] || (slots[owner] = {});
+      if (dict[name] === undefined) {
+        dict[name] = slotList.length;
+        slotList.push(name);
+      }
+    }
+    start += n;
+  });
+  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
+  geo.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
+  const count = Math.ceil(slotList.length / MORPH_STEP) * MORPH_STEP;
+  if (count > 0) {
+    const pos = [];
+    const nrm = [];
+    for (let k = 0; k < count; k++) {
+      const a = new THREE.Float32BufferAttribute(new Float32Array(total * 3), 3);
+      const b = new THREE.Float32BufferAttribute(new Float32Array(total * 3), 3);
+      a.name = b.name = k < slotList.length ? slotList[k] : `pad${k}`;
+      pos.push(a);
+      nrm.push(b);
+    }
+    geos.forEach((g, bi) => {
+      const dict = slots[bones[bi].part];
+      (g.userData.morphNames || []).forEach((name, mi) => {
+        const k = dict[name];
+        pos[k].array.set(g.morphAttributes.position[mi].array, ranges[bi] * 3);
+        if (g.morphAttributes.normal) nrm[k].array.set(g.morphAttributes.normal[mi].array, ranges[bi] * 3);
+      });
+    });
+    geo.morphAttributes.position = pos;
+    geo.morphAttributes.normal = nrm;
+    geo.morphTargetsRelative = true;
+  }
+  // a fixed sphere around the rest pose, with room for swings, strides and flaps
+  const rest = restMatrices(tpl);
+  const box = new THREE.Box3();
+  const p = geo.attributes.position;
+  for (let i = 0; i < total; i++) box.expandByPoint(_v.fromBufferAttribute(p, i).applyMatrix4(rest.get(bones[skinIndex[i * 4]].part)));
+  geo.boundingBox = box;
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  sphere.radius = sphere.radius * 1.2 + 0.3;
+  geo.boundingSphere = sphere;
+  geo.userData.triangles = total / 3;
+  return { geo, bones, slots, morphCount: count, sphere };
+}
+
+/** Each part's rest transform in the rig (parent chain of position and rotation). */
+function restMatrices(tpl) {
+  const out = new Map();
+  for (const p of tpl.parts) {
+    _e.set(...(p.rot || [0, 0, 0]));
+    const m = new THREE.Matrix4().compose(_v.fromArray(p.pos), _q.setFromEuler(_e), _one);
+    if (p.parent && out.has(p.parent)) m.premultiply(out.get(p.parent));
+    out.set(p.name, m);
+  }
+  return out;
+}
+
 function getTemplate(unitType, detail = 'base') {
   if (useRich(unitType, detail)) return getRichTemplate(unitType);
   const key = templateKey(unitType);
@@ -505,6 +643,7 @@ function getTemplate(unitType, detail = 'base') {
     tpl = buildTemplate(unitType);
     templateAO(tpl, unitType, key);
     tpl.visual = normalizeVisual(unitType.visual);
+    tpl.joined = buildJoined(tpl);
     tpl.triangles = 0;
     tpl.meshes = 0;
     for (const p of tpl.parts) {
@@ -524,6 +663,19 @@ function getTemplate(unitType, detail = 'base') {
 }
 
 const _box = new THREE.Box3();
+const _identity = new THREE.Matrix4();
+const noop = () => {};
+
+/** Part names that stay in the scene graph of a joined unit: ghost meshes, the cargo, and their ancestors. */
+function hostParts(tpl) {
+  const byName = new Map(tpl.parts.map((p) => [p.name, p]));
+  const out = new Set();
+  for (const p of tpl.parts) {
+    if (!p.ghost && p.name !== 'carry') continue;
+    for (let q = p; q && !out.has(q.name); q = q.parent && byName.get(q.parent)) out.add(q.name);
+  }
+  return out;
+}
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -564,10 +716,18 @@ class UnitModel {
     this.parts = {};
     this.teamColor = C(teamColor ?? '#8a8a8a');
     this.rich = null;
+    this.joined = null;
     if (tpl.rich) this.buildRichParts(tpl);
+    const J = tpl.joined;
+    // with the parts joined, a part object without a mesh of its own (or a descendant that has one, or the
+    // cargo) stays out of the scene graph: the scene's matrix pass and the renderer's walk skip it
+    const hosts = J ? hostParts(tpl) : null;
     for (const p of tpl.parts) {
       let obj;
-      if (p.geo) {
+      if (J && !p.ghost) {
+        obj = new THREE.Object3D();
+        obj.matrixAutoUpdate = false; // composed by syncJoined when the unit animates
+      } else if (p.geo) {
         const count = p.geo.morphAttributes.position ? p.geo.morphAttributes.position.length : 0;
         obj = new THREE.Mesh(p.geo, getUnitMaterial(this.teamColor, count, !!p.ghost));
         obj.castShadow = true;
@@ -578,8 +738,9 @@ class UnitModel {
       obj.position.fromArray(p.pos);
       if (p.rot) obj.rotation.set(p.rot[0], p.rot[1], p.rot[2]);
       this.parts[p.name] = obj;
-      (p.parent ? this.parts[p.parent] : this.rigGroup).add(obj);
+      if (!hosts || hosts.has(p.name)) (p.parent ? this.parts[p.parent] : this.rigGroup).add(obj);
     }
+    if (J) this.buildJoinedMesh(J);
     this.rest = {
       torsoRz: this.parts.torso ? this.parts.torso.rotation.z : 0,
       armRx: this.parts.armR ? this.parts.armR.position.x : 0,
@@ -638,6 +799,7 @@ class UnitModel {
     this.rangedStyle = w === 'bow' ? 'bow' : ['lightning_bolt', 'discus', 'spear', 'club', 'axe', 'hammer', 'trident', 'cauldron'].includes(w) || RANGED_THROW.has(unitType.attack?.projectile) ? 'throw' : 'cast';
     this.hoverY = this.air ? HOVER : 0;
     this.rigGroup.position.y = this.hoverY;
+    if (this.joined) this.syncJoined();
     this.root.updateMatrixWorld(true);
     if (this.rich) bindInstance(this.rich);
     this.height = this.computeHeight();
@@ -690,12 +852,85 @@ class UnitModel {
     }
   }
 
+  /** One skinned mesh for every rigid part (see buildJoined); the part objects keep driving it. */
+  buildJoinedMesh(J) {
+    const mesh = new THREE.SkinnedMesh(J.geo, getUnitMaterial(this.teamColor, J.morphCount, false, true));
+    mesh.name = 'body';
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.bindMode = THREE.DetachedBindMode;
+    mesh.boundingSphere = J.sphere;
+    mesh.boundingBox = J.geo.boundingBox;
+    // detached bones (outside the scene graph) whose world matrices are the parts' transforms in the rig,
+    // as the rich units' are (rich-kit.js instantiate): bone matrices, picking and Box3.setFromObject agree
+    const bones = J.bones.map((b) => {
+      const bone = new THREE.Bone();
+      bone.name = b.tool ? `${b.part}:${b.tool}` : b.part;
+      bone.matrixAutoUpdate = false;
+      bone.matrixWorldAutoUpdate = false;
+      return bone;
+    });
+    const skeleton = new THREE.Skeleton(bones, J.bones.map(() => new THREE.Matrix4()));
+    // the renderer calls skeleton.update() for every skinned mesh it draws, each frame: the bone
+    // matrices are written by syncJoined instead, when the pose changes
+    skeleton.update = noop;
+    mesh.bind(skeleton, _identity);
+    this.rigGroup.add(mesh);
+    const infl = mesh.morphTargetInfluences;
+    for (const name in J.slots) {
+      const part = this.parts[name];
+      part.morphTargetDictionary = J.slots[name];
+      part.morphTargetInfluences = infl;
+    }
+    // the parts in parent-first order, each with its transform in the rig (mats); `rel` finds one by part
+    const names = this.template.parts.map((p) => p.name);
+    const order = this.template.parts.map((p) => ({ obj: this.parts[p.name], parent: p.parent ? names.indexOf(p.parent) : -1 }));
+    const mats = order.map(() => new THREE.Matrix4());
+    const rel = new Map(order.map((o, i) => [o.obj, mats[i]]));
+    this.joined = {
+      mesh, skeleton, order, mats, rel,
+      bones: J.bones.map((b, i) => ({ part: this.parts[b.part], src: names.indexOf(b.part), tool: b.tool, bone: bones[i] })),
+    };
+  }
+
+  /** The parts' transforms in the rig, into the joined mesh's bone matrices (and the hosts' matrices). */
+  syncJoined() {
+    const { order, mats, bones } = this.joined;
+    for (let i = 0; i < order.length; i++) {
+      const { obj, parent } = order[i];
+      obj.updateMatrix(); // (a ghost part's mesh is composed by the scene again, but its children need it now)
+      if (!obj.matrixAutoUpdate) obj.matrixWorldNeedsUpdate = true;
+      if (parent >= 0) mats[i].multiplyMatrices(mats[parent], obj.matrix);
+      else mats[i].copy(obj.matrix);
+    }
+    const out = this.joined.skeleton.boneMatrices;
+    const tool = this.rig.tools && this.rig.tools[this.toolKind] ? this.toolKind : 'none';
+    for (let i = 0; i < bones.length; i++) {
+      const b = bones[i];
+      const w = b.bone.matrixWorld;
+      if (b.tool !== undefined && b.tool !== tool) w.elements.fill(0);
+      else w.copy(mats[b.src]);
+      w.toArray(out, i * 16);
+    }
+    if (this.joined.skeleton.boneTexture) this.joined.skeleton.boneTexture.needsUpdate = true;
+  }
+
   computeHeight() {
     let top = 0;
     this.rigGroup.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
+    if (this.joined) {
+      // the joined mesh's parts at their rest pose in the rig, scaled with it
+      const s = this.rigGroup.matrix;
+      for (const b of this.joined.bones) {
+        if (b.tool !== undefined && b.tool !== 'none') continue;
+        const p = this.template.parts.find((q) => this.parts[q.name] === b.part);
+        _box.copy(baseBox(p.geo)).applyMatrix4(new THREE.Matrix4().multiplyMatrices(s, this.joined.rel.get(b.part)));
+        top = Math.max(top, _box.max.y);
+      }
+    }
     this.rigGroup.traverse((o) => {
-      if (!o.isMesh || !o.visible || o === this.aura || o === this.carryMesh) return;
+      if (!o.isMesh || !o.visible || o === this.aura || o === this.carryMesh || (this.joined && o === this.joined.mesh)) return;
       _box.copy(baseBox(o.geometry)).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
       top = Math.max(top, _box.max.y);
     });
@@ -711,6 +946,11 @@ class UnitModel {
     if (!this.rig.tools || this.toolKind === kind) return;
     if (this.rich) {
       for (const k in this.rich.tools) this.rich.tools[k].visible = k === kind;
+      this.toolKind = kind;
+      return;
+    }
+    if (this.joined) {
+      // (the bones follow in syncJoined, after this frame's pose)
       this.toolKind = kind;
       return;
     }
@@ -763,6 +1003,7 @@ class UnitModel {
       }
     }
     animateModel(this, st, timeSec, dt, ex);
+    if (this.joined) this.syncJoined();
     this.animateCommon(st, timeSec, dt, ex);
   }
 
@@ -814,6 +1055,7 @@ class UnitModel {
     if (this.disposed) return;
     this.disposed = true;
     if (this.rich) this.rich.mesh.skeleton.dispose();
+    if (this.joined) this.joined.skeleton.dispose();
     this.root.removeFromParent();
     this.root.clear();
     this.parts = {};
@@ -855,6 +1097,7 @@ export function getUnitModelInfo(unitType, detail = 'base') {
 export function clearUnitModelCache() {
   for (const tpl of TEMPLATES.values()) {
     for (const p of tpl.parts) if (p.geo) p.geo.dispose();
+    if (tpl.joined) tpl.joined.geo.dispose();
     if (tpl.rig.tools) for (const g of Object.values(tpl.rig.tools)) g.dispose();
   }
   TEMPLATES.clear();

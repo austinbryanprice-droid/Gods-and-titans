@@ -224,12 +224,14 @@ export class Game {
    * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
    * @param {(record: object, opts?: object) => void} [o.onReplay] watch a replay (main.js tears this Game down and
    *   builds the replay's): the game-over screen's Watch Replay, and a replay going back in time
+   * @param {(slot: string, leave: (launch: object) => void) => Promise<void>} [o.onLoad] the F10 menu's Load Game
+   *   (main.js): reads the slot (rejecting with a message to show), calls leave(launch) and starts the loaded game
    * @param {HTMLElement} [o.root] #game-root (with #game-canvas and #hud-root)
    * @param {Function} [o.createAI] override the AI factory (tests)
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onNextMission = null, onRejoin = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onNextMission = null, onRejoin = null, onLoad = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.replay = replay && replay.record ? replay : null;
     this.onReplay = onReplay;
@@ -242,6 +244,7 @@ export class Game {
     this.onRematch = onRematch;
     this.onNextMission = onNextMission;
     this.onRejoin = onRejoin;
+    this.onLoad = onLoad;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -1483,6 +1486,35 @@ export class Game {
     if (this.disposed) return;
     this.dispose();
     if (this.onExit) this.onExit();
+  }
+
+  /** Can the F10 menu load a saved game here? A solo match against the computer (the matches that can be saved). */
+  canLoad() {
+    return typeof this.onLoad === 'function' && this.canSave();
+  }
+
+  /** Is this saved game's info (save-store listSaves) a save of this very match? */
+  isOwnSave(info) {
+    return !!(info && this.saver && info.matchId && info.matchId === this.saver.matchId);
+  }
+
+  /**
+   * Load Game from the F10 menu (DESIGN 9.4): leave this match for a saved one. Leaving counts like Quit to
+   * Menu (a loss after the first minute), except when the save is of this very match: then nothing is counted.
+   * Rejects with a message to show when the slot cannot be read (the match goes on).
+   */
+  loadSave(slot) {
+    if (this.disposed || !this.canLoad()) return Promise.reject(new Error('A saved game cannot be loaded now.'));
+    return this.onLoad(slot, (launch) => this.leaveForLoad(launch));
+  }
+
+  /** The saved game was read: count this match unless the save is of it, and tear it down (no onExit: the loaded game follows). */
+  leaveForLoad(launch) {
+    if (this.disposed) return;
+    const extra = launch && launch.resume && launch.resume.extra;
+    const own = !!(extra && this.saver && extra.matchId && extra.matchId === this.saver.matchId);
+    if (!own) this.countLeave();
+    this.dispose();
   }
 
   /** Leave the match and go back to the title screen. */

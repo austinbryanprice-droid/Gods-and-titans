@@ -197,6 +197,7 @@ export class LobbyHost {
    * @param {string} [opts.roomCode] preferred room code
    * @param {object} [opts.params] network overrides (see protocol.readNetParams)
    * @param {string} [opts.version] protocol version (tests)
+   * @param {string} [opts.aiDifficulty] the difficulty of the AI players the presets add (default 'normal')
    * @returns {Promise<LobbyHost>}
    */
   static async create(opts = {}) {
@@ -222,8 +223,9 @@ export class LobbyHost {
     return lobby;
   }
 
-  constructor(endpoint, { transport, name, version = PROTOCOL_VERSION }) {
+  constructor(endpoint, { transport, name, version = PROTOCOL_VERSION, aiDifficulty = 'normal' }) {
     this.endpoint = endpoint;
+    this.aiDifficulty = DIFFICULTIES.includes(aiDifficulty) ? aiDifficulty : 'normal'; // new AI players start at this level
     this.transport = transport;
     this.version = version;
     this.roomCode = endpoint.roomCode;
@@ -608,7 +610,7 @@ export class LobbyHost {
       }
       if (l.fill === 'ai') {
         const old = prevAi[ai++];
-        const difficulty = old ? old.difficulty : 'normal';
+        const difficulty = old ? old.difficulty : this.aiDifficulty;
         next.push(slotOf('ai', { team: l.team, pantheon: old ? old.pantheon : 'random', difficulty, name: aiName(difficulty), color: -1 }));
       } else next.push(slotOf(l.fill, { team: l.team ?? i + 1, color: -1 }));
     }

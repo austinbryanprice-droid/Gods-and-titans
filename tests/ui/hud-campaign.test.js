@@ -79,6 +79,8 @@ test('objective rows count up, down and out', () => {
   assert.equal(objectiveProgress({ kind: 'hold', state: 0, value: 65, seconds: 120 }, vs), '1:05 of 2:00');
   assert.equal(objectiveProgress({ kind: 'hold', state: 0, value: 0, seconds: 120 }, vs), '');
   assert.equal(objectiveProgress({ kind: 'build', state: 1, value: 1, count: 1 }, vs), '', 'nothing once done');
+  assert.equal(objectiveProgress({ kind: 'destroy', state: 0, value: 2, limit: 900 }, vs), '2 left · 13:20', 'a deadline shows the clock left');
+  assert.equal(objectiveProgress({ kind: 'destroy', state: 0, value: 0, limit: 60 }, vs), '0:00');
 });
 
 test('a won mission offers the next one and says what opened; a lost one offers a retry', () => {
@@ -108,6 +110,54 @@ test('a won mission offers the next one and says what opened; a lost one offers 
   assert.match(lost.textContent, /The raiders burned Thera/);
   assert.ok(lost.all('button').some((b) => b.textContent === 'Retry Mission'));
   assert.ok(!lost.all('button').some((b) => b.textContent === 'Next Mission'));
+});
+
+test('the last mission of Chapter I says the chapter is done and opens Chapter II', () => {
+  const root = document.createElement('div');
+  const calls = [];
+  const game = {
+    session: { isHost: true, clients: new Map() }, viewState: { myIndex: 0, myTeam: 1, time: 900, players: [] },
+    quitToMenu: () => {}, rematch: () => {}, nextMission: () => calls.push('next'),
+    canRematch: () => true, onNextMission: () => {}, setPaused: () => false,
+  };
+  const ov = new Overlays(root, game);
+  ov.statsTable = () => null;
+  ov.showGameOver({ result: 'victory', winningTeam: 1, unlocked: null, how: 'campaign', mission: { m: MISSION_BY_ID.twilight, record: { first: true, best: 1400, previous: 0, chapterDone: true }, next: MISSION_BY_ID.hordaland } });
+  assert.match(root.textContent, /Chapter I complete! The Long Winter is told\. Chapter II is open: The Wolf Age\./);
+  root.all('button').find((b) => b.textContent === 'Begin Chapter II').click();
+  assert.deepEqual(calls, ['next']);
+  const end = document.createElement('div');
+  const ov2 = new Overlays(end, game);
+  ov2.statsTable = () => null;
+  ov2.showGameOver({ result: 'victory', winningTeam: 1, unlocked: null, how: 'campaign', mission: { m: MISSION_BY_ID.vigrid, record: { first: true, best: 1600, previous: 0, chapterDone: true }, next: null } });
+  assert.match(end.textContent, /Chapter II complete! The Wolf Age is told\.$|Chapter II complete! The Wolf Age is told\./);
+  assert.ok(!end.all('button').some((b) => /Next Mission|Begin Chapter/.test(b.textContent)));
+});
+
+test('Chapter II stays locked until Chapter I is won, then the title screen and the chapter screen open on it', () => {
+  resetProgress();
+  const root = document.createElement('div');
+  menu.createMenu({ root, onStart: () => {} });
+  menu.showMenu('campaign');
+  const tab = () => root.all('button').find((b) => (b.className || '').includes('mw-chapter-tab') && b.textContent.includes('The Wolf Age'));
+  const locked = (b) => b.disabled === true || (typeof b.getAttribute === 'function' && b.getAttribute('disabled') !== null && b.getAttribute('disabled') !== undefined);
+  assert.ok(locked(tab()), 'Chapter II is locked at first');
+  for (const m of MISSIONS.slice(0, 5)) recordMission(m.id, 900);
+  menu.showMenu('title');
+  const btn = root.all('button').find((b) => b.textContent.includes('Campaign'));
+  assert.match(btn.textContent, /Chapter II: The Wolf Age/);
+  btn.click();
+  assert.match(root.textContent, /Chapter II: The Wolf Age/);
+  assert.match(root.textContent, /Hordaland, in the fjords of the north/, 'the first briefing of Chapter II');
+  assert.ok(!locked(tab()));
+  const missions = root.all('button').filter((b) => (b.className || '').includes('mw-mission'));
+  assert.equal(missions.length, 5);
+  assert.equal(missions.filter(locked).length, 4);
+  // Back to Chapter I by its tab: its five won missions, each with a best time.
+  root.all('button').find((b) => (b.className || '').includes('mw-chapter-tab') && b.textContent.includes('The Long Winter')).click();
+  assert.match(root.textContent, /Chapter I: The Long Winter/);
+  assert.match(root.textContent, /5 of 5 won/);
+  resetProgress();
 });
 
 test('the title screen opens the chapter; a locked mission cannot start; Begin starts a solo mission', () => {

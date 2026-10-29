@@ -396,6 +396,12 @@ export function updateCampaign(world) {
       m.events.forEach((e, k) => {
         if (!cp.fired[k] && e.after === o.id) fire(world, cp, k);
       });
+    } else if (Number.isFinite(o.limit) && world.time >= o.limit - 1e-9) {
+      // Out of time: not done by its limit, the objective fails, and the mission with it.
+      cp.state[i] = FAILED;
+      cp.shown[i] = true;
+      failed = true;
+      world.emit({ type: 'objective', i, s: FAILED });
     }
   }
   // Raiders with nothing left to do march on again (their target fell, or they won a fight).

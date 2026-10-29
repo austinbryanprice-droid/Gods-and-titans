@@ -314,7 +314,7 @@ lists them Village, Town, City; `POWERS` has every one by id (30 in all; `valida
 `validateData`, holds the rules below).
 - **Village: a blessing** that helps the caster's people and hurts nobody: a harvest (every load of gold and wood
   brought in counts 50% more for 60 s), a festival (prayer gives twice the faith for 60 s), a healing rain
-  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (300 gold and 150 wood).
+  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (400 gold and 200 wood).
 - **Town: a strike** aimed at a spot within about 3–5 tiles: a storm of bolts, a hammerfall, a swarm, a gale, a
   summoning of crows.
 - **City: a cataclysm** over 7–12 tiles: an earthquake, a winter, a flood, a tsunami, an eclipse, a tempest.
@@ -338,8 +338,16 @@ lists them Village, Town, City; `POWERS` has every one by id (30 in all; `valida
   holds for another m:ss: no god powers against other players yet.`), while a blessing works during it. Used:
   `<Name> has already been used.` Powers never hurt the caster's own side. A blessing with no target shines over
   the caster's first Town Center.
-- **Numbers** are first guesses for Austin to tune after play; change them in `src/data/powers.js` only (the
-  builders `boon`, `healRain` and `barrage` keep the ten pantheons comparable).
+- **Numbers** live in `src/data/powers.js` only (the builders `boon`, `healRain` and `barrage` keep the ten
+  pantheons comparable). In AI games the strikes and above all the cataclysms decide most battles, so they are
+  kept even by measurement (balance pass, 2026-10-29): `node tools/power-bench.mjs` casts each on a carpet of
+  tough soldiers that stand and fight, and every Town strike removes about 4,400-6,900 health there (the Crows 3,250, plus six crows) and every
+  cataclysm about 26,000-52,000 (the low ones carry extras the bench does not count: Taranis's stuns, Tandava's
+  instant blast, Ryūjin's knockback and slow, Apep's damage buffs and mummies, the Crows' damage cut and crows).
+  Then `node tools/ai-tournament.mjs --seeds=1-8 --diff=hard` (and `normal`) checks that every pantheon wins
+  about 40-60% of its 1v1 games. Before the pass the Plague of Locusts did twice any other strike, the
+  Morrígan's Crows, Apep Swallows the Sun and Taranis almost nothing, and win rates ran from 25% (Celtic) to
+  72% (Chinese).
 
 ## 5. Rules
 
@@ -848,8 +856,10 @@ Treasures of world myth that give creeping a reward beyond the bounty (WC3 items
 
 ### 5.16 Campaign missions (`src/data/campaign.js`, `src/sim/campaign.js`)
 A GameSetup with `campaign: '<mission id>'` (built by `campaignSetup(id, { name, version })`, started from the
-chapter screen of 9.6, solo, no lobby) plays one mission of Chapter I, "The Long Winter": five missions for the
-Greeks against Norse raiders, in order. The hero is always player 0; the mission's data fixes the seed, map size,
+chapter screen of 9.6, solo, no lobby) plays one mission of the campaign: Chapter I, "The Long Winter" (five
+missions for the Greeks against Norse raiders), then Chapter II, "The Wolf Age" (five for the Norse against Loki),
+in order (`CHAPTERS`, each mission carrying its `chapter` id and its number `n` in it; `MISSIONS` is all of them
+in the order they open). The hero is always player 0; the mission's data fixes the seed, map size,
 the computer players (name, pantheon, team, difficulty; `'tutorial'` is the sleeping camp of 5.13), whether creep
 camps are spawned, and each side's start (`start[i]`: purse, a Town Center health in place of 2000, finished
 buildings placed in front of the Town Center, some tagged, and units). The hero's Town Center is tagged `home`.
@@ -857,7 +867,8 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   spawned with the tag is dead), `destroy` {tag} (every start building with the tag has fallen), `protect` {tag}
   (fails the mission when every building with the tag has fallen), `survive` {seconds}, `hold` {count, seconds}
   (the hero's team holds that many sacred sites at once for that long without a break), `conquer`. `optional`
-  ones are a bonus; `hidden` ones show once an event reveals them. Judged once a second; a finished one stays
+  ones are a bonus; `hidden` ones show once an event reveals them. Any but a protect one may carry a `limit` in
+  seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
   `{ owner, tag, units, at, march, target }`: units in a line in front of the owner's Town Center (none if the
@@ -870,7 +881,12 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   lands at 4:30), Burn the Longhouses (destroy three tagged Barracks of an Easy AI), The Narrow Pass (hold a
   tagged Temple ten minutes against six scripted waves, Spartans at 5:00), The Sacred Groves (hold three sacred
   sites for 2:00 against an Easy AI, frost trolls at 7:00), Twilight of the North (conquer a Normal Norse AI with
-  an Egyptian ally; Surtr wakes at 14:00 and marches).
+  an Egyptian ally; Surtr wakes at 14:00 and marches). Chapter II: The Wolf Winter (a Temple, a god, and a raid at
+  4:30 that makes for the tagged winter stores, a Storehouse that must stand), The Last Link (destroy three tagged
+  Shrines of an Easy AI within 15:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
+  minutes against six waves, Valkyries for the hero at 4:30), The Ship of Nails (muster twelve soldiers, which
+  reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
+  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00).
 
 ## 6. Simulation API (src/sim/)
 
@@ -1350,6 +1366,21 @@ per-frame budget, so a revealed army appears over a few frames.
   (`createForest(mapData, heightFn)` → `{ object3d, fell(tx, ty) }`), `createDecor(mapData, heightFn)`;
   `src/render/models/ground-cover.js` exports `createGroundCover(mapData, heightFn, { quality })`
   (instanced grass and flowers, none on low).
+- Joined parts (`buildJoined` in unit-models.js): a low-poly unit's rigid parts (torso, head, arms,
+  legs, a creature's body and wings) are one skinned mesh, each vertex bound with full weight to the
+  bone of its part, so a unit is one draw call (and one in the shadow pass) instead of five or six.
+  The part objects stay what the animation poses (unit-anim.js); `syncJoined` turns their transforms
+  in the rig into the bone matrices after each `animate`, so frames where a unit does not animate cost
+  nothing. Joint morphs (knees, elbows, wings, waves) are slots of the joined geometry per (part, morph);
+  a part's `morphTargetDictionary` points into the mesh's shared influences, so `inf` / `hinge` work
+  unchanged. A worker's tool arms are extra bones on the right arm's slots, the one not in hand with a
+  zero matrix. The slot count is padded to a multiple of 4 so the layouts share a few shader programs.
+  Ghost parts keep their own transparent mesh; single-part bodies (serpents, birds, dragons) are drawn
+  as before. Part objects with nothing to carry (no ghost mesh, no cargo below them) stay out of the
+  scene graph. Late battle at the population cap, densest crowd at default zoom, draw calls stubbed
+  out (`node tools/perf-late.mjs --focus --stub-draws --warm 10`): Medium 853 to 485 draw calls,
+  render() 10.2 to 6.1 ms of JavaScript and renderer update 1.5 to 1.65 ms; Low 650 to 282 calls,
+  render() 5.3 to 3.8 ms. The frames are pixel-identical. High and Ultra draw rich characters and barely change.
 - Rich characters (high / ultra only; `GameRenderer.unitDetail()` / `detailFor(pantheon)`): humanoids and
   giants with a human head (`richSupported(unitType)`, `src/render/models/rich-humanoid.js`) are one
   skinned mesh on a 23-bone rig instead of rigid low-poly parts: lofted smooth bodies, layered garments,
@@ -1905,10 +1936,17 @@ per-frame budget, so a revealed army appears over a few frames.
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
-  above it, never over it), join screen (name + code), how-to-play, settings
+  above it, never over it), join screen (name + code), how-to-play (the rules in eight steps, then tips: Learn to
+  Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
-  preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
+  preview shows the same rows.
+  Play vs AI opens the lobby with one AI on a small map. Its AI players (the presets' too: `LobbyHost` option
+  `aiDifficulty`) start on **Easy** until this device's career has a win against the computer (any difficulty,
+  `hasBeatenComputer`, 9.1), then on **Normal**. While Easy is the default, that slot's dropdown reads
+  "AI — Easy (suggested)" and a hint line under the players says the computer plays on Easy for a first game
+  (hidden once no AI is on Easy). Online lobbies keep Normal and show neither; Quick Match keeps reusing the last
+  lobby as it was. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier. The top bar's left group stops short of
   the centre banner: when its chips (Market, clock, sites, peace or wave, ping, pantheon, relics) run long, the
   pantheon's name gives way and ends in an ellipsis (the name alone is hidden under 1100 px wide).
@@ -2239,7 +2277,9 @@ Client only: nothing goes over the wire and the sim does not know about it. The 
 localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
 `sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
 and wins per pantheon, records (most kills, most gathered, longest game, best Trial of the Titans wave:
-`recordMatch` takes an optional `wave`, 5.14), the last 12 games, unlocked
+`recordMatch` takes an optional `wave`, 5.14), wins against a side with a computer player in it (`aiWins`;
+`hasBeatenComputer` is true with one, or with Proving Ground, Hard-Won or Undaunted unlocked, for a career kept
+before `aiWins` existed: it sets Play vs AI's default difficulty, 9), the last 12 games, unlocked
 achievements with the time, and the ones not yet seen.
 
 - `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
@@ -2312,7 +2352,11 @@ is the run of days played up to today, or up to yesterday while today is not pla
 ### 9.4 Saved games (src/game/save-game.js, src/game/save-store.js, src/game/game-saves.js, src/sim/save-graph.js)
 A match against the computer (one human, the rest AI; not the guided first match) can be saved and carried on.
 - In the match: the F10 menu has **Save Game** (three slots, each showing its match, game time and when it was
-  saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
+  saved; a click saves over it, the game stays paused), **Load Game** (the saved games listed as on the title
+  screen, `saveTitle` / `saveLine`, the slot of this very match marked "this battle"; a click asks first, then
+  leaves this match for the save: counted like Quit to Menu, a loss after the first minute, unless the save is of
+  this very match (its `matchId`), when nothing is counted; a slot that cannot be read leaves the match running
+  and says why) and **Save & Quit** (saves to the autosave slot and leaves
   without counting the match in the career: it counts when it ends after being carried on). The game is also
   autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
   ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept. **Quit to
@@ -2388,8 +2432,9 @@ its ticks, and checksums.
   record) and Delete, and Open a replay file.
 
 ### 9.6 Campaign (src/ui/menu-campaign.js, src/ui/hud-campaign.js, src/game/campaign-progress.js, src/game/campaign-voice.js)
-Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won") opens the
-chapter screen: the five missions down the left (locked with a padlock until the one before is won, a tick and
+Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won", naming the chapter
+of the next mission to play) opens the chapter screen: a tab per chapter (Chapter II locked until Chapter I's last
+mission is won), the chosen chapter's five missions down the left (locked with a padlock until the one before is won, a tick and
 the best time once won) and the chosen one's briefing on the right (where, who you face and who stands with
 you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in localStorage
 `mythicwar-campaign` (`{ won: { id: { best, at } } }`); missions are not games of the career, nor saved (9.4); a mission is kept as a replay (9.5), whose panel and narrator follow the mission.
@@ -2400,13 +2445,14 @@ you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in 
   ducks the music while it speaks, and hands a line with no clip to the browser's voice. A briefing is read when
   the screen opens or a mission is chosen.
 - In the match: the objective panel takes the checklist's corner (no checklist, no gameplay tips): "Chapter I ·
-  Mission n", the title, one row per shown objective (ticked, crossed out red when failed, dashed ring for a
+  Mission n" (the mission's chapter), the title, one row per shown objective (ticked, crossed out red when failed, dashed ring for a
   protect one, italic for a bonus) with its count ("0/1", "3 left", the clock left, "1:05 of 2:00"). The lesson's
   "Here" pin (`missionPointer`) stands over the current objective's spot from the snapshot's `cp.at`. An event
   line goes to the feed (an enemy spawn as a red banner with a horn) and is spoken; objectives finished, failed
   or revealed go to the feed.
 - The end: "Mission Complete" with the victory text (also spoken) and what opened ("The next mission is open:
-  …", a new best time, "Chapter I complete!"), and Next Mission (the chapter screen on the next briefing), Play
+  …", a new best time, "Chapter I complete! … Chapter II is open: The Wolf Age."), and Next Mission ("Begin
+  Chapter II" when it leads into the next chapter) (the chapter screen on the next briefing), Play
   It Again, Campaign; "Mission Failed" with the defeat text and Retry Mission.
 
 ## 10. AI (src/ai/)

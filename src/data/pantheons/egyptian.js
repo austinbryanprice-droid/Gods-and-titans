@@ -13,16 +13,16 @@ export default {
   // ---- Identity (DESIGN 4.10): what makes this pantheon play differently ----
   identity: {
     tagline: 'Builders of Eternity',
-    playstyle: 'Dig in: your people raise and mend monuments fast, your walls shrug off blows, and a rich priesthood fills the shrines with faith.',
+    playstyle: 'Dig in: your people raise and mend monuments fast, your towers strike hard, and a rich priesthood fills the shrines with faith.',
     blessings: [
       {
         id: 'egyptian_pyramid_builders',
         name: 'Pyramid Builders',
         icon: '🔺',
-        description: 'Buildings are raised and repaired 35% faster, and every building has +2 armor.',
+        description: 'Buildings are raised and repaired 35% faster, and towers shoot 25% harder.',
         effects: [
           { type: 'perk', stat: 'buildSpeed', amount: 0.35 },
-          { type: 'building', building: '*', stat: 'armor', amount: 2 },
+          { type: 'building', building: 'tower', stat: 'damage', amount: 0.25 },
         ],
       },
       {

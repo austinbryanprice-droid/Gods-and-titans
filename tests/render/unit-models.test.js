@@ -205,8 +205,10 @@ test('models face +X with their feet at the origin', () => {
   const box = new THREE.Box3().setFromObject(m.root, true);
   assert.ok(Math.abs(box.min.y) < 0.08, `feet at ${box.min.y}`);
   // the head (topmost part of the torso mesh) sits forward of the body's back
-  const torso = m.root.getObjectByName('torso');
-  const tb = new THREE.Box3().setFromObject(torso, true);
+  // (the parts are joined into one skinned mesh: the torso's own vertices, posed by its bone)
+  const torsoGeo = m.template.parts.find((p) => p.name === 'torso').geo;
+  const tb = new THREE.Box3().setFromBufferAttribute(torsoGeo.attributes.position)
+    .applyMatrix4(new THREE.Matrix4().multiplyMatrices(m.rigGroup.matrixWorld, m.joined.rel.get(m.parts.torso)));
   assert.ok(tb.max.x > Math.abs(tb.min.x) * 0.5, 'torso extends toward +X');
   m.dispose();
 });
@@ -338,17 +340,98 @@ test('workers swap tools and show cargo', () => {
   const idle = visibleMeshes();
   m.animate('return', 0.1, 1 / 30, { moving: true, carry: 'w' });
   assert.equal(visibleMeshes(), idle + 1, 'cargo visible while returning');
-  const arm = m.root.getObjectByName('armR');
-  const bare = arm.geometry;
+  // the right arm's variants are bones of the joined mesh: the one in hand has the arm's pose, the rest a zero matrix
+  const arm = () => {
+    const { skeleton } = m.joined;
+    const shown = skeleton.bones.filter((b) => b.name.startsWith('armR') && b.matrixWorld.elements.some((v) => v !== 0));
+    assert.equal(shown.length, 1, 'one right arm at a time');
+    const i = skeleton.bones.indexOf(shown[0]);
+    assert.deepEqual([...skeleton.boneMatrices.subarray(i * 16, i * 16 + 16)], shown[0].matrixWorld.elements.map(Math.fround));
+    return shown[0].name;
+  };
+  const bare = arm();
+  assert.equal(bare, 'armR:none');
   m.animate('gather', 0.2, 1 / 30, { gather: 'w' });
-  assert.notEqual(arm.geometry, bare, 'tool in hand while gathering');
+  assert.equal(arm(), 'armR:axe', 'tool in hand while gathering');
   m.animate('build', 0.3, 1 / 30, {});
-  const hammer = arm.geometry;
+  assert.equal(arm(), 'armR:hammer');
   m.animate('gather', 0.4, 1 / 30, { gather: 'g' });
-  assert.notEqual(arm.geometry, hammer, 'pick for gold differs from the hammer');
+  assert.equal(arm(), 'armR:pick', 'pick for gold differs from the hammer');
   m.animate('idle', 0.5, 1 / 30, {});
-  assert.equal(arm.geometry, bare, 'tool put away');
+  assert.equal(arm(), bare, 'tool put away');
   m.dispose();
+});
+
+test('a low-poly unit draws its rigid parts in one call, and the joined mesh is posed as the parts were', () => {
+  const drawn = (m) => {
+    const out = [];
+    m.root.traverse((o) => {
+      if (o.isMesh && o.name !== 'aura' && o.name !== 'shadow' && o !== m.carryMesh) out.push(o);
+    });
+    return out;
+  };
+  let joined = 0;
+  for (const u of Object.values(UNITS)) {
+    if (!u.visual) continue;
+    const m = buildUnitModel(u, PLAYER_COLORS[2]);
+    const tpl = m.template;
+    const solid = tpl.parts.filter((p) => p.geo && !p.ghost).length;
+    const ghosts = tpl.parts.filter((p) => p.geo && p.ghost).length;
+    // one draw for every solid part together (a single-part body is drawn as it was), one per see-through part
+    assert.equal(drawn(m).length, (solid > 1 ? 1 : solid) + ghosts, `${u.id} draws`);
+    if (m.joined) {
+      joined++;
+      const mat = m.joined.mesh.material;
+      assert.ok(m.joined.mesh.isSkinnedMesh && !mat.transparent, `${u.id} is one solid skinned mesh`);
+      assert.equal(m.joined.mesh.morphTargetInfluences.length % 4, 0, 'joint slots padded to a shared program size');
+    }
+    m.dispose();
+  }
+  assert.ok(joined > 80, `most unit types are joined (${joined})`);
+
+  // every vertex of the joined mesh sits where its part, posed and bent by its own joint morphs, would put it
+  for (const [id, st, ex] of [['warrior', 'attack', { attackPhase: 0.4 }], ['worshipper', 'gather', { gather: 'w' }], ['archer', 'move', { moving: true }],
+    ['greek_pegasus', 'move', { moving: true }], ['norse_wolf_of_fenrir', 'attack', { attackPhase: 0.3 }]]) {
+    const u = UNITS[id];
+    if (!u) continue;
+    const m = buildUnitModel(u, PLAYER_COLORS[1]);
+    for (let t = 0; t < 0.5; t += 1 / 30) m.animate(st, t, 1 / 30, ex);
+    m.root.updateMatrixWorld(true);
+    const mesh = m.joined.mesh;
+    const si = mesh.geometry.attributes.skinIndex;
+    const geos = [];
+    for (const p of m.template.parts) if (p.geo && !p.ghost) geos.push({ part: p.name, geo: p.geo, tool: p.name === 'armR' && m.rig.tools ? 'none' : undefined });
+    for (const kind of Object.keys(m.rig.tools || {})) if (!geos.some((g) => g.geo === m.rig.tools[kind])) geos.push({ part: 'armR', geo: m.rig.tools[kind], tool: kind });
+    const got = new THREE.Vector3();
+    const want = new THREE.Vector3();
+    let off = 0;
+    let checked = 0;
+    for (const g of geos) {
+      const n = g.geo.attributes.position.count;
+      const hidden = g.tool !== undefined && g.tool !== m.toolKind;
+      const part = m.parts[g.part];
+      const toWorld = new THREE.Matrix4().multiplyMatrices(m.rigGroup.matrixWorld, m.joined.rel.get(part));
+      for (let i = 0; i < n; i += 7) {
+        assert.equal(si.getX(off + i), m.joined.skeleton.bones.findIndex((b) => b.name === (g.tool ? `armR:${g.tool}` : g.part)));
+        mesh.getVertexPosition(off + i, got).applyMatrix4(mesh.matrixWorld);
+        want.fromBufferAttribute(g.geo.attributes.position, i);
+        (g.geo.userData.morphNames || []).forEach((name, k) => {
+          const w = part.morphTargetInfluences[part.morphTargetDictionary[name]];
+          want.addScaledVector(new THREE.Vector3().fromBufferAttribute(g.geo.morphAttributes.position[k], i), w);
+        });
+        if (hidden) want.set(0, 0, 0).applyMatrix4(mesh.matrixWorld);
+        else want.applyMatrix4(toWorld);
+        assert.ok(got.distanceTo(want) < 1e-4, `${id} ${g.part}${g.tool ? `:${g.tool}` : ''} vertex ${i}: ${got.toArray()} vs ${want.toArray()}`);
+        checked++;
+      }
+      off += n;
+    }
+    assert.equal(off, mesh.geometry.attributes.position.count);
+    assert.ok(checked > 50);
+    // the joints really bend: some part has a non-zero joint influence in these states
+    assert.ok(mesh.morphTargetInfluences.some((w) => Math.abs(w) > 0.05), `${id} bends a joint`);
+    m.dispose();
+  }
 });
 
 test('preload and cache clearing rebuild cleanly', () => {
