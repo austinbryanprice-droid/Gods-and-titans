@@ -108,6 +108,7 @@ const lobbyRows = (p) => p.evaluate(() => [...document.querySelectorAll('.mw-slo
   kind: (r.className.match(/is-(host|human|ai|open|closed)/) || [])[1],
   me: r.classList.contains('is-me'),
   text: r.textContent.replace(/\s+/g, ' ').trim().slice(0, 70),
+  pantheon: r.querySelector('.mw-pbtn-name, .mw-pantheon-name')?.textContent?.trim() || r.querySelector('[class*="pantheon"]')?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 30) || null,
   team: r.querySelector('select[aria-label^="Team"]')?.value || r.querySelector('.mw-team, [class*="team"]')?.textContent?.trim() || null,
 })));
 const inLobby = (p) => until(p, () => document.querySelector('#menu-root')?.dataset.screen === 'lobby' && !window.__game, 'the lobby', 120000);
@@ -154,7 +155,7 @@ try {
   const startOk = await host.evaluate(() => document.querySelector('.mw-btn--start')?.disabled === false);
   check(startOk, 'the host can start with an Open seat left');
   await shot(host, 'lobby-friends');
-  await host.locator('.mw-btn--start').click();
+  await host.evaluate(() => document.querySelector('.mw-btn--start').click()); // (the start keeps the page busy: no click waiting on it)
   await gameRuns([host, cleo, dax]);
   const setup1 = await host.evaluate(() => window.__game.setup.players.map((p) => ({ name: p.name, team: p.team, pantheon: p.pantheon, kind: p.kind })));
   log('setup 1:', JSON.stringify(setup1));
@@ -198,10 +199,10 @@ try {
   log('rematch lobby:', JSON.stringify(rows2));
   const cleoRow = (rows) => rows.findIndex((r) => r.text.includes('Cleo'));
   check(cleoRow(rows2) === cleoRow(rows1) && rows2.findIndex((r) => r.text.includes('Dax')) === rows1.findIndex((r) => r.text.includes('Dax')), 'both friends are back in their own seats');
-  check(!!cleoPantheon && cleoPantheon !== 'Random' && rows2[cleoRow(rows2)].text.includes(cleoPantheon.slice(0, 5)), `Cleo keeps her pantheon (${cleoPantheon})`);
+  check(!!cleoPantheon && cleoPantheon !== 'Random' && (rows2[cleoRow(rows2)].pantheon || '').includes(cleoPantheon.slice(0, 5)), `Cleo keeps her pantheon (${cleoPantheon})`);
   await shot(host, 'rematch-lobby-host');
   await shot(cleo, 'rematch-lobby-cleo');
-  await host.locator('.mw-btn--start').click();
+  await host.evaluate(() => document.querySelector('.mw-btn--start').click()); // (the start keeps the page busy: no click waiting on it)
   await gameRuns([host, cleo, dax]);
   const setup2 = await host.evaluate(() => window.__game.setup.players.map((p) => ({ name: p.name, team: p.team, pantheon: p.pantheon, kind: p.kind })));
   log('setup 2:', JSON.stringify(setup2));
