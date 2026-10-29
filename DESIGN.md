@@ -1322,7 +1322,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     (at most 10 s; nothing when the host quits through the menu: `handOff` sends a fresh backup
     and waits up to 4 s for it to go out). The new host keeps an heir of its own in turn; the old
     host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload (a host who quit
-    through the menu is told on the title screen who hosts now). A player who cannot reach the heir in time ends as
+    through the menu is told on the title screen who hosts now, also when only its last copy failed to go out and the heir carries on from the one before). A player who cannot reach the heir in time ends as
     after a lost link ('host-left': ticket kept, Rejoin offered), even when the host quit through the menu.
     Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
     A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
