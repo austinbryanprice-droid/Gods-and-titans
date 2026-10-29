@@ -152,6 +152,7 @@ export class CardView {
       if (c.target) row.appendChild(el('span', 'ht-res is-dim', c.target));
       tip.appendChild(row);
     }
+    if (b.stats && b.stats.length) tip.appendChild(el('div', 'ht-stats', ...b.stats.map((line) => el('div', null, line))));
     if (b.description) tip.appendChild(el('div', 'ht-desc', b.description));
     if (b.toggle) tip.appendChild(el('div', 'ht-note', b.autocast ? 'Casts automatically. Right-click to cast it yourself.' : 'Manual: cast it yourself. Right-click to cast automatically.'));
     else if (b.autocast) tip.appendChild(el('div', 'ht-note', 'Casts automatically.'));

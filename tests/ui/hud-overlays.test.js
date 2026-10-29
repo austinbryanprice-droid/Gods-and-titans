@@ -106,3 +106,37 @@ test('the host closes a finished game: the open game-over panel says so (the mes
   ov.hide();
   assert.equal(ov.noteEnded('The host has closed the game.'), false);
 });
+
+test('a win against Easy computer players: "Ready for Normal?" and Play on Normal lead, Play Again comes second', async () => {
+  const { Game } = await import('../../src/game/game.js');
+  const calls = [];
+  const { ov, root, game } = setup({ host: true, clients: 0 });
+  ov.statsTable = () => null;
+  game.viewState.gameOver = { winningTeam: 1 };
+  game.onStepUp = () => calls.push('normal');
+  game.canStepUp = Game.prototype.canStepUp;
+  game.stepUp = Game.prototype.stepUp;
+  game.countLeave = () => calls.push('leave');
+  game.dispose = () => (game.disposed = true);
+  game.canRematch = () => true;
+  game.rematch = () => calls.push('again');
+  ov.showGameOver({ result: 'victory', winningTeam: 1, unlocked: [] });
+  assert.match(root.textContent, /Ready for Normal\?/);
+  const buttons = root.find('hud-obtns').children;
+  assert.deepEqual(buttons.map((b) => b.textContent).slice(0, 2), ['Play on Normal', 'Play Again']);
+  assert.ok(buttons[0].className.includes('mw-btn--primary'));
+  assert.ok(!buttons[1].className.includes('mw-btn--primary'));
+  root.button('Play on Normal').click();
+  assert.deepEqual(calls, ['leave', 'normal']);
+  // A loss, or a game without the step up (not Easy only, online): plain Play Again.
+  for (const over of [{ winningTeam: 2, result: 'defeat' }, { winningTeam: 1, result: 'victory', none: true }]) {
+    const s = setup({ host: true, clients: 0 });
+    s.ov.statsTable = () => null;
+    Object.assign(s.game, { canStepUp: Game.prototype.canStepUp, canRematch: () => true, onStepUp: over.none ? null : () => {} });
+    s.game.viewState.gameOver = { winningTeam: over.winningTeam };
+    s.ov.showGameOver({ result: over.result, winningTeam: over.winningTeam, unlocked: [] });
+    assert.doesNotMatch(s.root.textContent, /Ready for Normal/);
+    assert.equal(s.root.button('Play on Normal'), null);
+    assert.ok(s.root.button('Play Again').className.includes('mw-btn--primary'));
+  }
+});

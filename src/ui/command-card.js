@@ -69,6 +69,7 @@ function button(slot, o) {
     toggle: o.toggle || null,
     level: o.level || 0,
     passive: !!o.passive,
+    stats: o.stats || null,
     action: o.action || null,
   };
 }
@@ -258,6 +259,36 @@ function describeUnit(def) {
   if (def.title) parts.push(def.title + '.');
   if (def.description) parts.push(def.description);
   return parts.join(' ');
+}
+
+const num = (v) => String(Math.round(v * 100) / 100);
+
+/**
+ * A unit's combat stats from its data, for the train and summon tooltips: the core line ("420 HP · 13 melee damage ·
+ * 2 armor · speed 2.7"), then a line of what it is good or bad against (flyers, buildings, splash) and one per
+ * passive. Base values: upgrades, ranks and god levels are not counted.
+ * @returns {string[]}
+ */
+export function unitStats(def) {
+  if (!def) return [];
+  const a = def.attack || null;
+  const melee = !a || !(a.range > 1);
+  const attack = a && a.damage > 0 ? (melee ? `${num(a.damage)} melee damage` : `${num(a.damage)} ranged damage, range ${num(a.range)}`) : 'no attack';
+  const lines = [`${def.hp} HP · ${attack} · ${num(def.armor || 0)} armor · speed ${num(def.speed)}`];
+  const vs = [];
+  if (def.air) vs.push('Flying');
+  if (a && a.damage > 0) {
+    if (a.buildingsOnly) vs.push('attacks buildings only');
+    else vs.push(a.canHitAir ? 'hits flyers' : 'cannot hit flyers');
+    if ((a.buildingMult ?? 1) !== 1) vs.push(`×${num(a.buildingMult)} damage vs buildings`);
+    if (a.splash > 0) vs.push(`splash ${num(a.splash)} tiles`);
+  }
+  if (vs.length) lines.push(vs.join(' · ').replace(/^./, (c) => c.toUpperCase()));
+  for (const p of def.passives || []) {
+    const text = p.description || describePassive(p);
+    if (text) lines.push(`${p.name || PASSIVE_TITLES[p.type] || 'Passive'}: ${text}`);
+  }
+  return lines;
 }
 
 /** Short text for a passive without a written description. */
@@ -519,6 +550,7 @@ function trainButton(slot, key, vs, unitId, buildings, verb) {
     reason: chk.reason,
     cost: chk.cost,
     queued,
+    stats: unitStats(def),
     action: { kind: 'train', unit: unitId },
   });
 }

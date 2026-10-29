@@ -11,6 +11,8 @@ import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS, QUALITY_OPTIONS } from './speed-options.js';
 import { buildKeyPanel } from './key-panel.js';
+import { bindingsOf, gridKeys, keyLabel } from './key-bindings.js';
+import { renderControls } from './menu-howto.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
@@ -179,6 +181,7 @@ export class Overlays {
     const teamColors = choiceRow('Team colours', TEAM_COLOR_OPTIONS, s.teamColors, (v) => saveSettings({ teamColors: v }));
     const cardKeys = choiceRow('Command keys', CARD_KEY_OPTIONS, s.cardKeys, (v) => saveSettings({ cardKeys: v }));
     const keysBtn = btn('Change keys…', 'mw-btn--small mw-btn--ghost hud-keys-btn', () => this.openKeys());
+    const controlsBtn = btn('Controls', 'mw-btn--small mw-btn--ghost hud-keys-btn', () => this.openControls());
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
     const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
@@ -290,7 +293,7 @@ export class Overlays {
         uiScale.row,
         teamColors.row,
         cardKeys.row,
-        keysBtn,
+        el('div', 'hud-keys-btns', controlsBtn, keysBtn),
         bars.row,
         edge.row,
         tips.row,
@@ -368,6 +371,27 @@ export class Overlays {
   }
 
   /**
+   * The Controls panel: How to Play's mouse and hotkey tables (menu-howto.js renderControls), read only, with the
+   * player's own camera keys; in the Grid layout a line names the card's keys. Back or Esc returns to the game menu.
+   */
+  openControls() {
+    const s = getSettings();
+    const binds = bindingsOf(s.keyBindings);
+    const make = (spec, ...kids) => {
+      const [tag, ...cls] = spec.split('.');
+      return el(tag, cls.join(' ') || null, ...kids);
+    };
+    const keys = gridKeys(binds).map(keyLabel);
+    const grid = s.cardKeys === 'grid'
+      ? el('p', 'hud-otext', `Command keys: Grid. The card's buttons take ${keys.slice(0, 4).join(' ')} · ${keys.slice(4, 8).join(' ')} · ${keys.slice(8).join(' ')} by place, not the letters below.`)
+      : null;
+    const back = btn('Back', 'mw-btn--ghost', () => this.openMenu());
+    const node = this.panel('Controls', 'Change keys… in the game menu sets the camera keys.', grid, el('div', 'mw-howto-controls hud-controls', renderControls(make, binds)), el('div', 'hud-obtns', back));
+    this.swap('controls', node, () => this.openMenu());
+    setTimeout(() => back.focus({ preventScroll: true }), 0);
+  }
+
+  /**
    * The Load Game panel: the saved games as the title screen lists them (the autosave and the three slots,
    * newest first). Loading leaves this match after a confirm: it counts as a quit, unless the save is of
    * this very match. Back (or Esc) returns to the game menu; the game stays paused throughout.
@@ -430,14 +454,14 @@ export class Overlays {
   }
 
   closeMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys') {
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys' || this.name === 'controls') {
       this.hide();
       this.game.setPaused(false);
     }
   }
 
   toggleMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys') this.closeMenu();
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys' || this.name === 'controls') this.closeMenu();
     else this.openMenu();
   }
 
@@ -501,7 +525,7 @@ export class Overlays {
       : mission && result !== 'draw' ? (result === 'victory' ? mission.m.victory : mission.m.defeat)
       : how === 'sacred'
         ? (result === 'victory' ? 'Sacred Victory! Your people held every sacred site, and the heavens answered.' : 'Sacred Victory to your rivals: they held every sacred site, and the heavens turned from you.')
-        : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on the title screen.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
+        : result === 'victory' ? (tutorial ? 'You know the ways of gods and mortals now. Face a real rival next: Play vs AI on Easy.' : 'The gods smile upon your people. Your pantheon reigns supreme.')
           : result === 'defeat' ? 'Your city has fallen, and your gods have gone silent.' : 'No pantheon remains standing.';
     const best = survival && record ? el('div', `hud-go-best${record.isNew ? ' is-new' : ''}`, record.isNew
       ? (record.previous > 0 ? `A new best! Your old best was wave ${record.previous}.` : 'Your first trial: the bar is set.')
@@ -518,8 +542,9 @@ export class Overlays {
       this.missionLine(mission),
       chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
+      this.stepUpLine(result, mission),
       this.careerLine(),
-      this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission)));
+      this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission, tutorial)));
     this.show('gameover', node, () => this.hide());
   }
 
@@ -530,12 +555,15 @@ export class Overlays {
   refreshGameOver(bringBack = false) {
     if (!this.gameOverArgs) return;
     if (this.current && this.current.name === 'gameover' && this.goBtns) {
-      this.goBtns.replaceChildren(...this.gameOverButtons(this.gameOverArgs.mission || null).filter(Boolean));
+      this.goBtns.replaceChildren(...this.gameOverButtons(this.gameOverArgs.mission || null, !!this.gameOverArgs.tutorial).filter(Boolean));
     } else if (bringBack && !this.current) this.showGameOver(this.gameOverArgs);
   }
 
-  /** Play Again (or a mission's Next Mission and Retry), Watch Replay, Return to Menu and Keep Watching. */
-  gameOverButtons(mission) {
+  /**
+   * Play Again (or a mission's Next Mission and Retry, or the lesson's Play vs AI (Easy)), Watch Replay, Return to
+   * Menu and Keep Watching.
+   */
+  gameOverButtons(mission, tutorial = false) {
     const watch = btn('Keep Watching', 'mw-btn--ghost', () => this.hide());
     const replay = this.canWatchReplay() ? btn('Watch Replay', 'mw-btn--ghost', () => this.game.watchReplay()) : null;
     if (mission) {
@@ -549,14 +577,18 @@ export class Overlays {
       ];
     }
     let again = null;
-    if (this.canRematch()) {
-      again = btn(typeof this.game.rematchLabel === 'function' ? this.game.rematchLabel() : 'Play Again', 'mw-btn--primary', () => this.game.rematch());
+    // A win against Easy computer players: Play on Normal leads, Play Again (on Easy) comes second.
+    const up = this.canStepUp() ? btn('Play on Normal', 'mw-btn--primary', () => this.game.stepUp()) : null;
+    if (tutorial && typeof this.game.onPlayVsAI === 'function') again = btn('Play vs AI (Easy)', 'mw-btn--primary', () => this.game.playVsAI());
+    else if (this.canRematch()) {
+      again = btn(typeof this.game.rematchLabel === 'function' ? this.game.rematchLabel() : 'Play Again', up ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.rematch());
       if (this.game.rematchWaiting) again.disabled = true;
     }
     return [
+      up,
       again,
       replay,
-      btn('Return to Menu', this.canRematch() ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
+      btn('Return to Menu', again || up ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
       watch,
     ];
   }
@@ -571,6 +603,17 @@ export class Overlays {
       : r.first ? (mission.next ? `The next mission is open: ${mission.next.title}.` : `Mission won in ${formatClock(r.best)}.`)
         : r.best < r.previous ? `A new best time! ${formatClock(r.best)} (was ${formatClock(r.previous)}).` : `Your best time: ${formatClock(r.best)}.`;
     return el('div', `hud-go-best${r.first || r.best < r.previous ? ' is-new' : ''}`, text);
+  }
+
+  /** Play on Normal after a win against Easy computer players (Game.canStepUp). */
+  canStepUp() {
+    return typeof this.game.canStepUp === 'function' && this.game.canStepUp();
+  }
+
+  /** "Ready for Normal?" over the buttons when Play on Normal is offered (null otherwise). */
+  stepUpLine(result, mission) {
+    if (mission || result !== 'victory' || !this.canStepUp()) return null;
+    return el('div', 'hud-go-best is-new', 'Ready for Normal? The computer fights harder: Play on Normal sets up the same game again.');
   }
 
   /** Watch Replay: the host kept this match (Game.canWatchReplay). */
