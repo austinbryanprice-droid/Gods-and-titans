@@ -19,6 +19,8 @@ function score(pantheon, pw) {
   w.peaceEnd = 0;
   w.time = 900;
   w.players[0].tier = 3;
+  // No neutral creeps: their attacks are not the power's, and soldiers would leave the carpet to answer them.
+  for (const u of w.unitList.slice()) if (u.owner < 0 && !u.dead) w.killEntity(u, null, true);
   const cx = w.map.width / 2;
   const cy = w.map.height / 2;
   const ids = [];
@@ -34,7 +36,7 @@ function score(pantheon, pw) {
   w.reveals.push({ team: w.teamOf(0), x: cx, y: cy, r: 20, rem: 9999, owner: 0 });
   w.hash.rebuild(w.unitList);
   for (let i = 0; i < 4; i++) w.tick();
-  w.issueCommand(1, { type: 'stop', units: ids });
+  w.issueCommand(1, { type: 'hold', units: ids });
   w.tick();
   castPower(w, 0, pw.id, cx, cy);
   let lost = 0;

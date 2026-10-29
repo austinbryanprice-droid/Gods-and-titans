@@ -341,8 +341,8 @@ lists them Village, Town, City; `POWERS` has every one by id (30 in all; `valida
 - **Numbers** live in `src/data/powers.js` only (the builders `boon`, `healRain` and `barrage` keep the ten
   pantheons comparable). In AI games the strikes and above all the cataclysms decide most battles, so they are
   kept even by measurement (balance pass, 2026-10-29): `node tools/power-bench.mjs` casts each on a carpet of
-  tough soldiers that stand and fight, and every Town strike removes about 5,000-7,500 health there (the Crows 3,800, plus six crows) and every
-  cataclysm about 26,000-47,000 (the low ones carry extras the bench does not count: Taranis's stuns, Tandava's
+  tough soldiers that stand and fight, and every Town strike removes about 4,400-6,900 health there (the Crows 3,250, plus six crows) and every
+  cataclysm about 26,000-52,000 (the low ones carry extras the bench does not count: Taranis's stuns, Tandava's
   instant blast, Ryūjin's knockback and slow, Apep's damage buffs and mummies, the Crows' damage cut and crows).
   Then `node tools/ai-tournament.mjs --seeds=1-8 --diff=hard` (and `normal`) checks that every pantheon wins
   about 40-60% of its 1v1 games. Before the pass the Plague of Locusts did twice any other strike, the
