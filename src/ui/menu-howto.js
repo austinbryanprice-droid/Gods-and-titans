@@ -75,6 +75,7 @@ const HOTKEYS = [
     [kbd('Alt'), 'Show every health bar'],
     [kbd('Enter'), 'Chat'],
     [kbd('F10'), 'Game menu (pauses a game against the AI)'],
+    [kbd('Pause'), 'Online: pause the game for everyone (three times a game each; any player can resume, and it goes on by itself after two minutes). Also in the game menu'],
     [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera'],
     [kbd('Mouse wheel'), 'Zoom in and out (smoothly on a trackpad)'],
   ]],

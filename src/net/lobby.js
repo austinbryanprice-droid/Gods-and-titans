@@ -205,6 +205,23 @@ export class LobbyHost {
     return new LobbyHost(ep, { ...opts, transport });
   }
 
+  /**
+   * The room of a game carried on by its new host (host migration, DESIGN 7): already started, it only
+   * seats the game's players again, each by the rejoin token they got at the start.
+   * @param {object} endpoint from hostRoom
+   * @param {object} o { transport, version, tokens: Map<player index, token> }
+   */
+  static forGame(endpoint, { transport, version = PROTOCOL_VERSION, tokens }) {
+    const lobby = new LobbyHost(endpoint, { transport, name: 'Host', version });
+    lobby.started = true;
+    lobby.state.started = true;
+    for (const [index, token] of tokens || []) {
+      const t = cleanToken(token);
+      if (t) lobby.rejoinTokens.set(t, index);
+    }
+    return lobby;
+  }
+
   constructor(endpoint, { transport, name, version = PROTOCOL_VERSION }) {
     this.endpoint = endpoint;
     this.transport = transport;
@@ -220,6 +237,7 @@ export class LobbyHost {
     this.rejoinTokens = new Map(); // token → player index, for the humans of the started game
     this.rejoining = new Set(); // connections after the start that have not said HELLO yet
     this.rejoinHandler = null; // (index, conn) → reason | null, set by the game's HostSession
+    this.hostToken = null; // the host's own token: a new host (migration) seats this browser with it
     this.state = {
       roomCode: this.roomCode,
       version,
@@ -659,6 +677,9 @@ export class LobbyHost {
       this.rejoinTokens.set(token, index);
       m.conn.send({ t: MSG.START, setup, you: index, rejoin: token });
     }
+    // The host gets one too: should the game move to another player's browser (DESIGN 7), this one can take its seat back there.
+    this.hostToken = rejoinToken();
+    this.rejoinTokens.set(this.hostToken, slotToPlayer.get(0));
     this.members.clear();
     this.started = true;
     this.state.started = true;
@@ -667,6 +688,13 @@ export class LobbyHost {
     // The endpoint (the PeerJS peer of the room code) stays open for the whole game, so that a player
     // who drops out can come back (handleRejoin); close() drops it when the host leaves the game.
     return { setup, myIndex: slotToPlayer.get(0), conns };
+  }
+
+  /** Every player's rejoin token of the started game: Map<player index, token> (for the host's heir, DESIGN 7). */
+  gameTokens() {
+    const m = new Map();
+    for (const [token, index] of this.rejoinTokens) m.set(index, token);
+    return m;
   }
 
   /**

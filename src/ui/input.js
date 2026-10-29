@@ -1336,6 +1336,12 @@ export class InputController {
       if (!rep) overlays.openMenu();
       return;
     }
+    // An online game pauses for everyone (a few times per player, DESIGN 7); against the computer, F10 pauses.
+    if (key === 'Pause' || e.code === 'Pause') {
+      e.preventDefault();
+      if (!rep && typeof this.game.togglePause === 'function') this.game.togglePause();
+      return;
+    }
     if (this.game.replayBar && this.game.replayBar.onKey(e)) return; // a replay's own keys (src/ui/hud-replay.js)
     if (key === 'Enter') {
       e.preventDefault();

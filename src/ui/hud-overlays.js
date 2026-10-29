@@ -135,8 +135,8 @@ export class Overlays {
 
   // ---------------------------------------------------------------- waiting
 
-  showWaiting(text = 'Waiting for the host…') {
-    const node = this.panel('Joining Battle', null,
+  showWaiting(text = 'Waiting for the host…', title = 'Joining Battle') {
+    const node = this.panel(title, null,
       el('div', 'hud-wait', el('span', 'hud-spinner'), el('span', null, text)),
       el('div', 'hud-obtns', btn('Leave', 'mw-btn--ghost', () => this.game.quitToMenu())));
     this.show('waiting', node);
@@ -207,6 +207,14 @@ export class Overlays {
 
     const resume = btn('Resume', 'mw-btn--primary', () => this.closeMenu());
     const buttons = [resume];
+    // An online game pauses for everyone instead (DESIGN 7): each player has a few pauses, and anyone may resume.
+    if (game.online && !over && !defeated && !game.replay) {
+      const pausedNow = !!(game.session && game.session.pause);
+      buttons.push(btn(pausedNow ? 'Resume Game for Everyone' : 'Pause Game for Everyone', '', () => {
+        this.closeMenu();
+        game.togglePause();
+      }));
+    }
     // A solo match against the computer can be saved and carried on later (DESIGN 9.4).
     const savable = typeof game.canSave === 'function' && game.canSave();
     if (savable) buttons.push(btn('Save Game', '', () => this.openSaves()));
@@ -225,7 +233,10 @@ export class Overlays {
     let quitHint = 'Return to the main menu.';
     if (replay) quitHint = 'Leave the replay.';
     else if (!over) {
-      if (this.hostingOthers()) quitHint = 'The game ends for every player.';
+      if (this.hostingOthers()) {
+        const sh = game.session;
+        quitHint = sh.canHandOff ? `The game goes on without you: ${sh.playerName(sh.heir)} hosts it from here.` : 'The game ends for every player.';
+      }
       else if (game.session && !game.session.isHost) quitHint = 'An AI will take over your army.';
       else quitHint = savable ? 'The battle will be lost. Save & Quit keeps it for Continue on the title screen.' : 'The battle will be lost.';
     }
@@ -459,9 +470,12 @@ export class Overlays {
     const vs = this.game.viewState;
     const allies = (vs.players || []).some((p) => p.i !== vs.myIndex && !p.defeated && p.team === vs.myTeam);
     // On a host the game itself runs on this page: leaving it ends the game for everyone else.
-    const hosting = this.hostingOthers();
+    // (unless another player can take it over, DESIGN 7).
+    const s = this.game.session;
+    const handOff = !!(s && s.canHandOff);
+    const hosting = this.hostingOthers() && !handOff;
     const leave = () => {
-      if (!this.hostingOthers()) return this.game.quitToMenu();
+      if (!this.hostingOthers() || (this.game.session && this.game.session.canHandOff)) return this.game.quitToMenu();
       this.confirm('Quit to Menu?', 'The game ends for every player.', 'Quit', () => this.game.quitToMenu(), () => this.showDefeated());
     };
     const node = el('div', 'mw-panel hud-opanel hud-gameover is-defeat',
