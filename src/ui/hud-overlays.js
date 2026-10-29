@@ -14,7 +14,7 @@ import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
 import { MEDALS } from '../data/medals.js';
-import { CAMPAIGN } from '../data/campaign.js';
+import { chapterOf } from '../data/campaign.js';
 import { SLOTS, saveInfo, savedAgo, listSaves, saveTitle, saveLine } from '../game/save-store.js';
 
 const END_TEXT = {
@@ -39,6 +39,13 @@ function survivalLine(wave) {
   if (wave <= 0) return 'The Trial of the Titans is over before the first wave even came.';
   if (wave === 1) return 'The Trial of the Titans is over: the first wave broke your city.';
   return `The Trial of the Titans is over: your people held out to wave ${wave}.`;
+}
+
+/** The chapter a won mission's Next Mission opens, when it is the first of a new one (else null). */
+function nextChapter(mission) {
+  const a = mission && mission.m ? chapterOf(mission.m) : null;
+  const b = mission && mission.next ? chapterOf(mission.next) : null;
+  return a && b && a !== b ? b : null;
 }
 
 function btn(text, cls, onClick) {
@@ -476,7 +483,7 @@ export class Overlays {
     if (mission) {
       const next = mission.next && typeof this.game.nextMission === 'function' && typeof this.game.onNextMission === 'function';
       return [
-        next ? btn('Next Mission', 'mw-btn--primary', () => this.game.nextMission()) : null,
+        next ? btn(nextChapter(mission) ? `Begin ${nextChapter(mission).chapter}` : 'Next Mission', 'mw-btn--primary', () => this.game.nextMission()) : null,
         this.canRematch() ? btn(mission.record ? 'Play It Again' : 'Retry Mission', next ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.rematch()) : null,
         replay,
         btn('Campaign', 'mw-btn--ghost', () => this.game.quitToMenu()),
@@ -495,7 +502,9 @@ export class Overlays {
   missionLine(mission) {
     if (!mission || !mission.record) return null;
     const r = mission.record;
-    const text = r.chapterDone ? `${CAMPAIGN.chapter} complete! ${CAMPAIGN.title} is told.`
+    const c = chapterOf(mission.m);
+    const opened = nextChapter(mission);
+    const text = r.chapterDone ? `${c.chapter} complete! ${c.title} is told.${opened ? ` ${opened.chapter} is open: ${opened.title}.` : ''}`
       : r.first ? (mission.next ? `The next mission is open: ${mission.next.title}.` : `Mission won in ${formatClock(r.best)}.`)
         : r.best < r.previous ? `A new best time! ${formatClock(r.best)} (was ${formatClock(r.previous)}).` : `Your best time: ${formatClock(r.best)}.`;
     return el('div', `hud-go-best${r.first || r.best < r.previous ? ' is-new' : ''}`, text);

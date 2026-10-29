@@ -856,8 +856,10 @@ Treasures of world myth that give creeping a reward beyond the bounty (WC3 items
 
 ### 5.16 Campaign missions (`src/data/campaign.js`, `src/sim/campaign.js`)
 A GameSetup with `campaign: '<mission id>'` (built by `campaignSetup(id, { name, version })`, started from the
-chapter screen of 9.6, solo, no lobby) plays one mission of Chapter I, "The Long Winter": five missions for the
-Greeks against Norse raiders, in order. The hero is always player 0; the mission's data fixes the seed, map size,
+chapter screen of 9.6, solo, no lobby) plays one mission of the campaign: Chapter I, "The Long Winter" (five
+missions for the Greeks against Norse raiders), then Chapter II, "The Wolf Age" (five for the Norse against Loki),
+in order (`CHAPTERS`, each mission carrying its `chapter` id and its number `n` in it; `MISSIONS` is all of them
+in the order they open). The hero is always player 0; the mission's data fixes the seed, map size,
 the computer players (name, pantheon, team, difficulty; `'tutorial'` is the sleeping camp of 5.13), whether creep
 camps are spawned, and each side's start (`start[i]`: purse, a Town Center health in place of 2000, finished
 buildings placed in front of the Town Center, some tagged, and units). The hero's Town Center is tagged `home`.
@@ -865,7 +867,8 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   spawned with the tag is dead), `destroy` {tag} (every start building with the tag has fallen), `protect` {tag}
   (fails the mission when every building with the tag has fallen), `survive` {seconds}, `hold` {count, seconds}
   (the hero's team holds that many sacred sites at once for that long without a break), `conquer`. `optional`
-  ones are a bonus; `hidden` ones show once an event reveals them. Judged once a second; a finished one stays
+  ones are a bonus; `hidden` ones show once an event reveals them. Any but a protect one may carry a `limit` in
+  seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
   `{ owner, tag, units, at, march, target }`: units in a line in front of the owner's Town Center (none if the
@@ -878,7 +881,12 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   lands at 4:30), Burn the Longhouses (destroy three tagged Barracks of an Easy AI), The Narrow Pass (hold a
   tagged Temple ten minutes against six scripted waves, Spartans at 5:00), The Sacred Groves (hold three sacred
   sites for 2:00 against an Easy AI, frost trolls at 7:00), Twilight of the North (conquer a Normal Norse AI with
-  an Egyptian ally; Surtr wakes at 14:00 and marches).
+  an Egyptian ally; Surtr wakes at 14:00 and marches). Chapter II: The Wolf Winter (a Temple, a god, and a raid at
+  4:30 that makes for the tagged winter stores, a Storehouse that must stand), The Last Link (destroy three tagged
+  Shrines of an Easy AI within 15:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
+  minutes against six waves, Valkyries for the hero at 4:30), The Ship of Nails (muster twelve soldiers, which
+  reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
+  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00).
 
 ## 6. Simulation API (src/sim/)
 
@@ -2380,8 +2388,9 @@ its ticks, and checksums.
   record) and Delete, and Open a replay file.
 
 ### 9.6 Campaign (src/ui/menu-campaign.js, src/ui/hud-campaign.js, src/game/campaign-progress.js, src/game/campaign-voice.js)
-Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won") opens the
-chapter screen: the five missions down the left (locked with a padlock until the one before is won, a tick and
+Campaign (title screen, under Learn to Play: "Chapter I: The Long Winter · n of 5 missions won", naming the chapter
+of the next mission to play) opens the chapter screen: a tab per chapter (Chapter II locked until Chapter I's last
+mission is won), the chosen chapter's five missions down the left (locked with a padlock until the one before is won, a tick and
 the best time once won) and the chosen one's briefing on the right (where, who you face and who stands with
 you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in localStorage
 `mythicwar-campaign` (`{ won: { id: { best, at } } }`); missions are not games of the career, nor saved (9.4); a mission is kept as a replay (9.5), whose panel and narrator follow the mission.
@@ -2392,13 +2401,14 @@ you, the shown objectives, Begin Mission, Hear the briefing). Progress lives in 
   ducks the music while it speaks, and hands a line with no clip to the browser's voice. A briefing is read when
   the screen opens or a mission is chosen.
 - In the match: the objective panel takes the checklist's corner (no checklist, no gameplay tips): "Chapter I ·
-  Mission n", the title, one row per shown objective (ticked, crossed out red when failed, dashed ring for a
+  Mission n" (the mission's chapter), the title, one row per shown objective (ticked, crossed out red when failed, dashed ring for a
   protect one, italic for a bonus) with its count ("0/1", "3 left", the clock left, "1:05 of 2:00"). The lesson's
   "Here" pin (`missionPointer`) stands over the current objective's spot from the snapshot's `cp.at`. An event
   line goes to the feed (an enemy spawn as a red banner with a horn) and is spoken; objectives finished, failed
   or revealed go to the feed.
 - The end: "Mission Complete" with the victory text (also spoken) and what opened ("The next mission is open:
-  …", a new best time, "Chapter I complete!"), and Next Mission (the chapter screen on the next briefing), Play
+  …", a new best time, "Chapter I complete! … Chapter II is open: The Wolf Age."), and Next Mission ("Begin
+  Chapter II" when it leads into the next chapter) (the chapter screen on the next briefing), Play
   It Again, Campaign; "Mission Failed" with the defeat text and Retry Mission.
 
 ## 10. AI (src/ai/)

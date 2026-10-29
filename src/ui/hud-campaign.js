@@ -4,7 +4,7 @@
 import { el, setClass, setHidden, setText } from './hud-dom.js';
 import { formatClock } from './hud-data.js';
 import { GuidePointer } from './hud-tutorial.js';
-import { CAMPAIGN } from '../data/campaign.js';
+import { chapterOf } from '../data/campaign.js';
 import { currentObjective } from '../sim/campaign.js';
 
 const UPDATE_MS = 500;
@@ -13,6 +13,14 @@ const DONE_FLASH_MS = 1400;
 /** The progress words of one objective row ('' for none). */
 export function objectiveProgress(o, vs) {
   if (o.state !== 0) return '';
+  const words = progressWords(o, vs);
+  if (!Number.isFinite(o.limit)) return words;
+  // A deadline: the clock left beside the count.
+  const left = formatClock(Math.max(0, o.limit - ((vs && vs.time) || 0)));
+  return words ? `${words} · ${left}` : left;
+}
+
+function progressWords(o, vs) {
   switch (o.kind) {
     case 'build':
     case 'gods':
@@ -47,7 +55,7 @@ export class CampaignView {
     this.count = el('span', 'hud-tips-progress');
     this.list = el('ol', 'hud-tips-list hud-mission-list');
     this.el = el('section', 'hud-tips hud-guide hud-mission hud-panel',
-      el('header', 'hud-tips-head', el('b', 'hud-tips-title', `${CAMPAIGN.chapter} · Mission ${m.n}`), this.count),
+      el('header', 'hud-tips-head', el('b', 'hud-tips-title', `${chapterOf(m).chapter} · Mission ${m.n}`), this.count),
       el('div', 'hud-guide-step', el('span', 'hud-guide-icon', '📜'), el('b', 'hud-guide-title', m.title)),
       this.list,
       el('div', 'hud-tips-foot', 'F10 opens the menu, where you can restart the mission.'));
