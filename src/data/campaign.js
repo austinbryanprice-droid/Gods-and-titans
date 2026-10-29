@@ -21,7 +21,9 @@
 // `optional` objectives are a bonus; `hidden` ones show once an event reveals them. The mission is won when
 // every objective that is not optional and not a protect one is done, or when every enemy is beaten. A
 // mission's `waitFor` (objective ids) holds that second way back until those are done: its story beat (a
-// hold to the end, a foe who arrives late) still has to happen when the enemy is wiped out early.
+// hold to the end, a foe who arrives late) still has to happen when the enemy is wiped out early. A hidden
+// `waitFor` objective carries a `waitText`: the panel's row while it waits to be revealed (with the clock to the
+// event that reveals it), so a player who has beaten every enemy knows the mission is not over.
 //
 // Events: { at: seconds } or { after: objective id }, then any of: say (a line on the screen, spoken),
 // spawn { owner, tag, units: [[type, n]], at: 'home'|'front', march, always } (march: sent at the hero's
@@ -332,7 +334,7 @@ const WOLF_AGE = [
     defeat: 'Loki\'s host has won, and the world ends in fire and ice. Try again, Jarl.',
     objectives: [
       { id: 'conquer', kind: 'conquer', icon: '🔥', text: 'Destroy Loki\'s host and the giants' },
-      { id: 'loki', kind: 'kill', tag: 'loki', icon: '🐍', text: 'Slay Loki, the trickster', hidden: true },
+      { id: 'loki', kind: 'kill', tag: 'loki', icon: '🐍', text: 'Slay Loki, the trickster', hidden: true, waitText: 'Loki comes at the world\'s end' },
       { id: 'home', kind: 'protect', tag: 'home', icon: '🛡️', text: 'Keep your Town Center standing' },
     ],
     events: [

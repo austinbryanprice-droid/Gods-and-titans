@@ -892,7 +892,10 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
   (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00; `waitFor: ['loki']`: a host
   broken before then does not win it, Loki still comes, an `always` spawn from his beaten host's old seat, and
-  must fall).
+  must fall). While a hidden `waitFor` objective waits to be revealed, the objective panel shows its `waitText`
+  as an extra row with the clock to the event that reveals it ("Loki comes at the world's end 2:14"), derived from
+  the snapshot (no new sim state, no change to the objective list); a shown one (Burning Bridge's hold) already
+  shows its clock.
 
 ## 6. Simulation API (src/sim/)
 
