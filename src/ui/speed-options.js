@@ -34,3 +34,12 @@ export function optionNote(options, id) {
   const o = options.find((x) => x[0] === id);
   return o ? o[2] : '';
 }
+
+// The "Graphics quality" choices (setting `quality`, src/render/game-renderer.js QUALITY). The renderer
+// changes quality live, so the in-game menu offers them too.
+export const QUALITY_OPTIONS = [
+  ['low', 'Low', 'No shadows or post-processing, fewer particles. For older laptops.'],
+  ['medium', 'Medium', 'Shadows, glow (bloom), smoothed edges and cloud shadows. Recommended.'],
+  ['high', 'High', 'Adds ambient occlusion, sharper shadows, unit shadows and the most particles.'],
+  ['ultra', 'Ultra', 'Everything at its best and finest. For gaming PCs.'],
+];

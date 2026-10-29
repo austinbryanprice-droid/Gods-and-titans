@@ -9,7 +9,7 @@ import { el } from './hud-dom.js';
 import { chronicleView } from './hud-chronicle.js';
 import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
-import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS } from './speed-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS, QUALITY_OPTIONS } from './speed-options.js';
 import { buildKeyPanel } from './key-panel.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
@@ -171,6 +171,8 @@ export class Overlays {
     const edge = toggleRow('Edge scrolling', 'Move the camera when the mouse touches the screen edge.', s.edgeScroll, (v) => saveSettings({ edgeScroll: v }));
     const tips = toggleRow('Getting-started tips', 'The checklist in the top-right corner.', !s.tipsDismissed, (v) => saveSettings({ tipsDismissed: !v }));
     const sky = choiceRow('Time of day', TIME_OF_DAY_OPTIONS, s.timeOfDay, (v) => saveSettings({ timeOfDay: v }));
+    // Graphics quality changes live (game.js onSettings → renderer.setQuality), so a laggy match need not be left to lower it.
+    const quality = choiceRow('Graphics quality', QUALITY_OPTIONS, s.quality, (v) => saveSettings({ quality: v }));
     // Game speed only in a match against the computer: an online game runs at one pace for everyone.
     const speed = game.solo ? choiceRow('Game speed', GAME_SPEED_OPTIONS, s.gameSpeed, (v) => saveSettings({ gameSpeed: v })) : null;
     const uiScale = choiceRow('Interface size', UI_SCALE_OPTIONS, s.uiScale, (v) => saveSettings({ uiScale: v }));
@@ -283,6 +285,7 @@ export class Overlays {
       el('div', 'hud-options',
         el('div', 'mw-label', 'Options'),
         speed && speed.row,
+        quality.row,
         sky.row,
         uiScale.row,
         teamColors.row,
