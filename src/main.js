@@ -106,6 +106,14 @@ export async function startGame(launch) {
         backToMenu('campaign', { mission: id, brief: true });
       } : null,
       onReplay: (record, opts) => startReplay(record, opts),
+      // Load Game in the F10 menu: the save is read first (a failure leaves this match running), then this match is left.
+      onLoad: async (slot, leave) => {
+        const next = await readLaunch(slot);
+        if (current !== game) return;
+        leave(next);
+        current = null;
+        await startGame(next);
+      },
     });
     current = game;
     await game.ready;
@@ -182,6 +190,11 @@ async function rematch(state) {
  * message) when the slot cannot be read; a save that cannot be rebuilt fails on the game's start screen.
  */
 async function loadGame(slot) {
+  await startGame(await readLaunch(slot));
+}
+
+/** The launch for a saved game in a slot; rejects with a message to show when it cannot be read. */
+async function readLaunch(slot) {
   let save;
   try {
     save = await readSave(slot);
@@ -192,7 +205,7 @@ async function loadGame(slot) {
   if (!save || !save.setup) throw new Error('That saved game is gone.');
   const info = saveInfo(slot) || {};
   const extra = save.extra || {};
-  await startGame({ role: 'host', setup: save.setup, myIndex: Number.isInteger(extra.myIndex) ? extra.myIndex : 0, conns: new Map(), lobby: null, skirmish: info.skirmish || null, daily: info.daily || null, resume: save });
+  return { role: 'host', setup: save.setup, myIndex: Number.isInteger(extra.myIndex) ? extra.myIndex : 0, conns: new Map(), lobby: null, skirmish: info.skirmish || null, daily: info.daily || null, resume: save };
 }
 
 /** Play Again on a daily challenge: the same day's game (same map and sides) once more; the best score is kept. */

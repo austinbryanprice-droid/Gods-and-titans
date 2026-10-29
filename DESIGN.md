@@ -1892,10 +1892,17 @@ per-frame budget, so a revealed army appears over a few frames.
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
-  above it, never over it), join screen (name + code), how-to-play, settings
+  above it, never over it), join screen (name + code), how-to-play (the rules in eight steps, then tips: Learn to
+  Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
-  preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
+  preview shows the same rows.
+  Play vs AI opens the lobby with one AI on a small map. Its AI players (the presets' too: `LobbyHost` option
+  `aiDifficulty`) start on **Easy** until this device's career has a win against the computer (any difficulty,
+  `hasBeatenComputer`, 9.1), then on **Normal**. While Easy is the default, that slot's dropdown reads
+  "AI — Easy (suggested)" and a hint line under the players says the computer plays on Easy for a first game
+  (hidden once no AI is on Easy). Online lobbies keep Normal and show neither; Quick Match keeps reusing the last
+  lobby as it was. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier. The top bar's left group stops short of
   the centre banner: when its chips (Market, clock, sites, peace or wave, ping, pantheon, relics) run long, the
   pantheon's name gives way and ends in an ellipsis (the name alone is hidden under 1100 px wide).
@@ -2226,7 +2233,9 @@ Client only: nothing goes over the wire and the sim does not know about it. The 
 localStorage under `mythicwar-career` (guarded like the settings; a damaged value is cleaned by
 `sanitizeCareer`): games, wins, losses, draws, game time played, kills and resources gathered, games
 and wins per pantheon, records (most kills, most gathered, longest game, best Trial of the Titans wave:
-`recordMatch` takes an optional `wave`, 5.14), the last 12 games, unlocked
+`recordMatch` takes an optional `wave`, 5.14), wins against a side with a computer player in it (`aiWins`;
+`hasBeatenComputer` is true with one, or with Proving Ground, Hard-Won or Undaunted unlocked, for a career kept
+before `aiWins` existed: it sets Play vs AI's default difficulty, 9), the last 12 games, unlocked
 achievements with the time, and the ones not yet seen.
 
 - `CareerTracker` (built by Game for the local player; a spectator has none) reads the ViewState's
@@ -2299,7 +2308,11 @@ is the run of days played up to today, or up to yesterday while today is not pla
 ### 9.4 Saved games (src/game/save-game.js, src/game/save-store.js, src/game/game-saves.js, src/sim/save-graph.js)
 A match against the computer (one human, the rest AI; not the guided first match) can be saved and carried on.
 - In the match: the F10 menu has **Save Game** (three slots, each showing its match, game time and when it was
-  saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
+  saved; a click saves over it, the game stays paused), **Load Game** (the saved games listed as on the title
+  screen, `saveTitle` / `saveLine`, the slot of this very match marked "this battle"; a click asks first, then
+  leaves this match for the save: counted like Quit to Menu, a loss after the first minute, unless the save is of
+  this very match (its `matchId`), when nothing is counted; a slot that cannot be read leaves the match running
+  and says why) and **Save & Quit** (saves to the autosave slot and leaves
   without counting the match in the career: it counts when it ends after being carried on). The game is also
   autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
   ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept. **Quit to
