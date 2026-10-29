@@ -1321,6 +1321,21 @@ per-frame budget, so a revealed army appears over a few frames.
   (`createForest(mapData, heightFn)` → `{ object3d, fell(tx, ty) }`), `createDecor(mapData, heightFn)`;
   `src/render/models/ground-cover.js` exports `createGroundCover(mapData, heightFn, { quality })`
   (instanced grass and flowers, none on low).
+- Joined parts (`buildJoined` in unit-models.js): a low-poly unit's rigid parts (torso, head, arms,
+  legs, a creature's body and wings) are one skinned mesh, each vertex bound with full weight to the
+  bone of its part, so a unit is one draw call (and one in the shadow pass) instead of five or six.
+  The part objects stay what the animation poses (unit-anim.js); `syncJoined` turns their transforms
+  in the rig into the bone matrices after each `animate`, so frames where a unit does not animate cost
+  nothing. Joint morphs (knees, elbows, wings, waves) are slots of the joined geometry per (part, morph);
+  a part's `morphTargetDictionary` points into the mesh's shared influences, so `inf` / `hinge` work
+  unchanged. A worker's tool arms are extra bones on the right arm's slots, the one not in hand with a
+  zero matrix. The slot count is padded to a multiple of 4 so the layouts share a few shader programs.
+  Ghost parts keep their own transparent mesh; single-part bodies (serpents, birds, dragons) are drawn
+  as before. Part objects with nothing to carry (no ghost mesh, no cargo below them) stay out of the
+  scene graph. Late battle at the population cap, densest crowd at default zoom, draw calls stubbed
+  out (`node tools/perf-late.mjs --focus --stub-draws --warm 10`): Medium 853 to 485 draw calls,
+  render() 10.2 to 6.1 ms of JavaScript and renderer update 1.5 to 1.65 ms; Low 650 to 282 calls,
+  render() 5.3 to 3.8 ms. The frames are pixel-identical. High and Ultra draw rich characters and barely change.
 - Rich characters (high / ultra only; `GameRenderer.unitDetail()` / `detailFor(pantheon)`): humanoids and
   giants with a human head (`richSupported(unitType)`, `src/render/models/rich-humanoid.js`) are one
   skinned mesh on a 23-bone rig instead of rigid low-poly parts: lofted smooth bodies, layered garments,

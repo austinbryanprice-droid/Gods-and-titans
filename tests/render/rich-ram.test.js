@@ -240,7 +240,8 @@ test('Low and Medium keep the low-poly ram; High and Ultra swap in the rich one'
   assert.equal(info.rich, false);
   const base = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'base' });
   assert.equal(base.rich, null, 'it stays low-poly on Low and Medium');
-  assert.ok(!base.root.getObjectByProperty('isSkinnedMesh', true));
+  // (its only skinned mesh, if any, is its rigid parts joined into one draw)
+  assert.ok(!base.root.getObjectByProperty('isSkinnedMesh', true) || base.root.getObjectByProperty('isSkinnedMesh', true) === base.joined?.mesh);
   const rich = buildUnitModel(u, PLAYER_COLORS[0], { detail: 'rich' });
   assert.ok(rich.rich, 'it is rich on High and Ultra');
   assert.equal(rich.kind, 'ram', 'and has the ram\'s pose');

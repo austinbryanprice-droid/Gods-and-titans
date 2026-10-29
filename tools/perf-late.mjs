@@ -14,7 +14,12 @@
 //
 //   node tools/perf-late.mjs [--port 8331] [--quality low] [--fill 200] [--minutes 2] [--frames 60]
 //        [--width 1280] [--height 720] [--seed 4242] [--dist 0] [--fow] [--profile] [--save-profile x.cpuprofile] [--top 30] [--json out.json]
-//        [--game] [--seconds 15] [--settle 4] [--sel 0]
+//        [--game] [--seconds 15] [--settle 4] [--sel 0] [--stub-draws] [--focus] [--warm 0]
+//
+// --stub-draws turns the WebGL draw calls into no-ops for the measured frames (harness only), so the render
+// column is the JavaScript three.js spends per frame (scene walk, sorting, uniforms, state) without
+// SwiftShader's rasterizing; the draw-call count is still three.js's own. --focus points the camera at the
+// densest crowd of units instead of the map's middle; --warm draws that many frames before the measured ones.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -73,22 +78,55 @@ async function runHarness() {
   await page.goto(url);
   await page.waitForFunction(() => window.harness && window.harness.ready === true, null, { timeout: 900000, polling: 500 });
   await page.addStyleTag({ content: '#panel, #stats, #box { display: none !important; }' });
-  const info = await page.evaluate((d) => {
+  const info = await page.evaluate(({ d, focus }) => {
     const h = window.harness;
     const m = h.world.mapData;
     h.camera(m.width / 2, m.height / 2, d || undefined);
     h.advance(2); // let the armies close and the first fights start
+    if (focus) {
+      // look at the densest crowd instead (most units in a 16-tile cell)
+      const cells = new Map();
+      for (const e of h.vs.entities.values()) {
+        if (e.k !== 'u') continue;
+        const k = `${Math.floor(e.x / 16)},${Math.floor(e.y / 16)}`;
+        cells.set(k, (cells.get(k) || 0) + 1);
+      }
+      const [best] = [...cells].sort((a, b) => b[1] - a[1]);
+      if (best) {
+        const [cx, cy] = best[0].split(',').map(Number);
+        h.camera(cx * 16 + 8, cy * 16 + 8, d || undefined);
+      }
+    }
     h.render();
-    return { units: h.unitCount(), ents: h.vs.entities.size, dist: Math.round(h.renderer.camera.distance), w: m.width };
-  }, dist);
-  console.log(`late ${minutes} min + fill ${fill}: ${info.units} units, ${info.ents} entities, ${quality}, ${width}x${height}, camera ${info.dist} (setup ${((Date.now() - t0) / 1000).toFixed(0)} s)`);
+    return { units: h.unitCount(), ents: h.vs.entities.size, dist: Math.round(h.renderer.camera.distance), w: m.width, progs: h.renderer.renderer.info.programs.length };
+  }, { d: dist, focus: flag('focus') });
+  console.log(`late ${minutes} min + fill ${fill}: ${info.units} units, ${info.ents} entities, ${quality}, ${width}x${height}, camera ${info.dist}, ${info.progs} shader programs (setup ${((Date.now() - t0) / 1000).toFixed(0)} s)`);
 
   const stop = await startProfile();
-  const r = await page.evaluate((n) => {
+  const r = await page.evaluate(({ n, stub, warm }) => {
     const h = window.harness;
     const rr = h.renderer;
     const gl = rr.renderer.getContext();
     const px = new Uint8Array(4);
+    if (stub) {
+      const nop = () => {};
+      for (const k of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements']) if (gl[k]) gl[k] = nop;
+    }
+    const progs0 = new Set(rr.renderer.info.programs.map((q) => q.cacheKey));
+    // shader programs whose link the GPU process had not finished: the first draw with them waits for it
+    const stalls = [];
+    const getLog = gl.getProgramInfoLog.bind(gl);
+    gl.getProgramInfoLog = (prog) => {
+      const t = performance.now();
+      const out = getLog(prog);
+      const ms = performance.now() - t;
+      if (ms > 20) stalls.push(`${(rr.renderer.info.programs.find((q) => q.program === prog) || {}).name || '?'} ${ms.toFixed(0)} ms`);
+      return out;
+    };
+    for (let i = 0; i < warm; i++) {
+      h.advance(1 / 30, 30);
+      rr.render();
+    }
     const sim = [], upd = [], ren = [];
     let calls = 0, tris = 0;
     for (let i = 0; i < n; i++) {
@@ -96,17 +134,20 @@ async function runHarness() {
       h.advance(1 / 30, 30);
       const b = performance.now();
       rr.render();
+      // (with the draws stubbed, the render column is render()'s own JavaScript: the readPixels wait comes after)
+      if (stub) ren.push(performance.now() - b);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       const c = performance.now();
       const u = rr.getStats().updateMs;
       upd.push(u);
       sim.push(b - a - u);
-      ren.push(c - b);
+      if (!stub) ren.push(c - b);
       calls = rr.renderer.info.render.calls;
       tris = rr.renderer.info.render.triangles;
     }
-    return { sim, upd, ren, calls, tris };
-  }, frames);
+    const progs = rr.renderer.info.programs.filter((q) => !progs0.has(q.cacheKey)).map((q) => q.name);
+    return { sim, upd, ren, calls, tris, progs, stalls };
+  }, { n: frames, stub: flag('stub-draws'), warm: Number(opt('warm', '0')) });
   const prof = await stop();
   return { info, r, prof, n: frames };
 }
@@ -173,10 +214,14 @@ try {
       rows[k] = { p50: pct(s, 0.5), p95: pct(s, 0.95), avg: s.reduce((a, b) => a + b, 0) / s.length };
     }
     console.log(`draw calls ${r.calls}, ${Math.round(r.tris / 1000)}k triangles`);
+    const slow = r.ren.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, 3);
+    console.log(`slowest renders: ${slow.map(([v, i]) => `frame ${i} ${v.toFixed(1)} ms`).join(', ')}`);
+    if (r.stalls.length) console.log(`waits for a shader link: ${r.stalls.join(', ')}`);
+    if (r.progs) console.log(`shader programs created during the frames: ${r.progs.length}${r.progs.length ? ` (${r.progs.join(', ')})` : ''}`);
     console.log(`                        p50      p95      avg   (ms per frame, ${nFrames} frames)`);
     console.log(`sim + view state    ${fmt(rows.sim.p50)}  ${fmt(rows.sim.p95)}  ${fmt(rows.sim.avg)}`);
     console.log(`renderer update     ${fmt(rows.upd.p50)}  ${fmt(rows.upd.p95)}  ${fmt(rows.upd.avg)}`);
-    console.log(`render (+GPU)       ${fmt(rows.ren.p50)}  ${fmt(rows.ren.p95)}  ${fmt(rows.ren.avg)}`);
+    console.log(`${flag('stub-draws') ? 'render() JS       ' : 'render (+GPU)     '}  ${fmt(rows.ren.p50)}  ${fmt(rows.ren.p95)}  ${fmt(rows.ren.avg)}`);
   }
   let hot = null;
   if (prof && profOut) writeFileSync(profOut, JSON.stringify(prof));
