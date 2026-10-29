@@ -19,10 +19,9 @@ export default {
         id: 'egyptian_pyramid_builders',
         name: 'Pyramid Builders',
         icon: '🔺',
-        description: 'Buildings are raised and repaired 35% faster, and Town Centers and towers shoot 25% harder.',
+        description: 'Buildings are raised and repaired 35% faster, and towers shoot 25% harder.',
         effects: [
           { type: 'perk', stat: 'buildSpeed', amount: 0.35 },
-          { type: 'building', building: 'town_center', stat: 'damage', amount: 0.25 },
           { type: 'building', building: 'tower', stat: 'damage', amount: 0.25 },
         ],
       },

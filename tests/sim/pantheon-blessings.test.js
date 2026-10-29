@@ -49,7 +49,7 @@ test('every player starts with their pantheon blessings in p.mods, and researchi
 test('blessing effects: building damage, kin soldiers share their mortal\'s upgrades, speed and revive', () => {
   const egypt = computeMods([], 'egyptian');
   assert.equal(buildingMods(egypt, 'tower').damage, 0.25);
-  assert.equal(buildingMods(egypt, 'town_center').damage, 0.25);
+  assert.equal(buildingMods(egypt, 'town_center').damage, 0, 'a Town Center does not shoot');
   for (const id of Object.keys(BUILDINGS)) assert.equal(buildingMods(egypt, id).armor, 0, `${id}: no armor, so the Eye of Horus does not stack`);
   assert.equal(egypt.perks.buildSpeed, 0.35);
 
