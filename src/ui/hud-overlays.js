@@ -11,6 +11,8 @@ import { formatClock } from './hud-data.js';
 import { TIME_OF_DAY_OPTIONS } from './time-of-day-options.js';
 import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS, QUALITY_OPTIONS } from './speed-options.js';
 import { buildKeyPanel } from './key-panel.js';
+import { bindingsOf, gridKeys, keyLabel } from './key-bindings.js';
+import { renderControls } from './menu-howto.js';
 import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, tabAlertNote } from './alert-options.js';
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
@@ -179,6 +181,7 @@ export class Overlays {
     const teamColors = choiceRow('Team colours', TEAM_COLOR_OPTIONS, s.teamColors, (v) => saveSettings({ teamColors: v }));
     const cardKeys = choiceRow('Command keys', CARD_KEY_OPTIONS, s.cardKeys, (v) => saveSettings({ cardKeys: v }));
     const keysBtn = btn('Change keys…', 'mw-btn--small mw-btn--ghost hud-keys-btn', () => this.openKeys());
+    const controlsBtn = btn('Controls', 'mw-btn--small mw-btn--ghost hud-keys-btn', () => this.openControls());
     const hints = toggleRow('Gameplay tips', 'A short tip now and then.', s.hints, (v) => saveSettings({ hints: v }));
     const aiChat = toggleRow('AI chatter', 'Computer players speak up in chat now and then.', s.aiChat, (v) => saveSettings({ aiChat: v }));
     const alerts = choiceRow('Alerts', ALERT_OPTIONS, s.alerts, (v) => saveSettings({ alerts: v }));
@@ -290,7 +293,7 @@ export class Overlays {
         uiScale.row,
         teamColors.row,
         cardKeys.row,
-        keysBtn,
+        el('div', 'hud-keys-btns', controlsBtn, keysBtn),
         bars.row,
         edge.row,
         tips.row,
@@ -368,6 +371,27 @@ export class Overlays {
   }
 
   /**
+   * The Controls panel: How to Play's mouse and hotkey tables (menu-howto.js renderControls), read only, with the
+   * player's own camera keys; in the Grid layout a line names the card's keys. Back or Esc returns to the game menu.
+   */
+  openControls() {
+    const s = getSettings();
+    const binds = bindingsOf(s.keyBindings);
+    const make = (spec, ...kids) => {
+      const [tag, ...cls] = spec.split('.');
+      return el(tag, cls.join(' ') || null, ...kids);
+    };
+    const keys = gridKeys(binds).map(keyLabel);
+    const grid = s.cardKeys === 'grid'
+      ? el('p', 'hud-otext', `Command keys: Grid. The card's buttons take ${keys.slice(0, 4).join(' ')} · ${keys.slice(4, 8).join(' ')} · ${keys.slice(8).join(' ')} by place, not the letters below.`)
+      : null;
+    const back = btn('Back', 'mw-btn--ghost', () => this.openMenu());
+    const node = this.panel('Controls', 'Change keys… in the game menu sets the camera keys.', grid, el('div', 'mw-howto-controls hud-controls', renderControls(make, binds)), el('div', 'hud-obtns', back));
+    this.swap('controls', node, () => this.openMenu());
+    setTimeout(() => back.focus({ preventScroll: true }), 0);
+  }
+
+  /**
    * The Load Game panel: the saved games as the title screen lists them (the autosave and the three slots,
    * newest first). Loading leaves this match after a confirm: it counts as a quit, unless the save is of
    * this very match. Back (or Esc) returns to the game menu; the game stays paused throughout.
@@ -430,14 +454,14 @@ export class Overlays {
   }
 
   closeMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys') {
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys' || this.name === 'controls') {
       this.hide();
       this.game.setPaused(false);
     }
   }
 
   toggleMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys') this.closeMenu();
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads' || this.name === 'keys' || this.name === 'controls') this.closeMenu();
     else this.openMenu();
   }
 

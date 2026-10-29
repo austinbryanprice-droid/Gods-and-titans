@@ -6,6 +6,7 @@ import { MANOR, mergeRule } from '../data/houses.js';
 import { RELIC_LIST } from '../data/relics.js';
 import { DELETE_CONFIRM_ABOVE } from './delete-key.js';
 import { SITE_ICON } from './hud-sites.js';
+import { bindingsOf, keyLabel } from './key-bindings.js';
 import {
   MAX_GODS, POP_MAX, START_RESOURCES, START_WORKERS, CARRY_AMOUNT, MINE_SLOTS, MINE_TIME, DROPOFF_MINE_GAP,
   GOD_SLOT_TIER, REVIVE_COST_MULT, GOD_MAX_LEVEL, SPELL_VS_BUILDING, RANK_HP, RANK_DAMAGE, RANK_ARMOR, PEACE_LENGTHS, PEACE_NAME, PEACE_BUILD_GAP,
@@ -13,9 +14,13 @@ import {
   MAX_WALL_LINE, WALL_PLACE_RANGE, MAX_QUEUE, SURVIVAL_NAME, SURVIVAL_FIRST_WAVE, SURVIVAL_INTERVAL, SURVIVAL_BOSS_EVERY,
 } from '../config.js';
 
-// kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives.
-const kbd = (...k) => k.map((x, i) => [i ? h('span.mw-plus', '+') : null, h('kbd', x)]);
-const keys = (...k) => k.map((x, i) => [i ? h('span.mw-keysep') : null, h('kbd', x)]);
+// The keys of a control, as data (rendered by renderKeys, so How to Play and the F10 menu's Controls share them):
+// kbd('Ctrl', '1–9') = a key combination; keys('Q', 'W') = alternatives; label('Marker buttons') = words, no key.
+// bound('cam_jump') = a rebindable key (key-bindings.js): its default in How to Play, the player's key in Controls.
+const kbd = (...k) => ({ combo: true, keys: k });
+const keys = (...k) => ({ combo: false, keys: k });
+const label = (text) => ({ text });
+const bound = (...ids) => ({ combo: false, keys: ids.map((id) => ({ bind: id })) });
 
 const MANOR_TEXT = `In a Town, select four Houses that stand together in a square and press U to combine them into a Manor: ${BUILDINGS[MANOR].popProvided} population instead of the ${mergeRule().count * BUILDINGS.house.popProvided} they shelter apart (${mergeRule().time} seconds, and the Houses keep sheltering meanwhile).`;
 
@@ -26,7 +31,17 @@ function faithRate(id) {
 
 const RELIC_NAMES = `${RELIC_LIST.slice(0, 3).map((r) => `the ${r.name}`).join(', ')} and ${RELIC_LIST.length - 3} more`;
 
-const HOTKEYS = [
+const MOUSE = [
+  [kbd('Left-click'), 'Select a unit or building'],
+  [kbd('Drag'), 'Box-select units'],
+  [kbd('Shift', 'Click'), 'Add to or remove from the selection'],
+  [kbd('Double-click'), 'Select every unit of that type on screen'],
+  [kbd('Ctrl', 'Click'), 'The same, with a single click'],
+  [kbd('Shift', 'Right-click'), 'Queue orders'],
+];
+
+/** The hotkey tables: [group title, [[keys, what they do]…]]. */
+export const HOTKEYS = [
   ['Units', [
     [kbd('Right-click'), 'Smart command: move, attack, gather, pray, help build, repair'],
     [kbd('A'), 'Attack-move (then click the ground)'],
@@ -68,24 +83,24 @@ const HOTKEYS = [
     [kbd('Ctrl', '1–9'), 'Assign a control group'],
     [kbd('1–9'), 'Select a group (tap twice to jump to it)'],
     [kbd('F1–F3'), 'Select your gods'],
-    [kbd('Space'), 'Center on selection or the last alert'],
+    [bound('cam_jump'), 'Center on selection or the last alert'],
     [kbd('Tab'), 'Next unit type in a mixed selection'],
     [kbd('.'), 'Next idle worshipper (Shift or Ctrl: select all of them)'],
-    [kbd('Home'), 'Jump to your Town Center (on a Mac laptop: fn + the left arrow)'],
+    [bound('cam_home'), 'Jump to your Town Center (on a Mac laptop: fn + the left arrow)'],
     [kbd('Alt'), 'Show every health bar'],
     [kbd('Enter'), 'Chat'],
     [kbd('F10'), 'Game menu (pauses a game against the AI)'],
     [kbd('Pause'), 'Online: pause the game for everyone (three times a game each; any player can resume, and it goes on by itself after two minutes). Also in the game menu'],
-    [['Arrows · screen edge · middle-drag · minimap'], 'Move the camera'],
+    [bound('cam_up', 'cam_down', 'cam_left', 'cam_right'), 'Move the camera (also the screen edge, a middle-drag or the minimap)'],
     [kbd('Mouse wheel'), 'Zoom in and out (smoothly on a trackpad)'],
-    [keys('=', '-'), 'Zoom in (=) and out (-) from the keyboard'],
-    [['Settings · Keys'], 'Change the camera keys, or switch the command card to the Grid layout: Q W E R · A S D F · Z X C V by position, whatever is selected. The keys above are the defaults'],
+    [bound('cam_zoom_in', 'cam_zoom_out'), 'Zoom in and out from the keyboard'],
+    [label('Settings · Keys'), 'Change the camera keys, or switch the command card to the Grid layout: Q W E R · A S D F · Z X C V by position, whatever is selected. The keys above are the defaults'],
   ]],
   ['Team signals', [
     [kbd('Alt', 'Click'), 'Ping your team at that spot on the map or the minimap (not while aiming an order or placing a building)'],
     [kbd('Middle-click'), 'The same with the middle button; hold it and drag to move the camera instead'],
-    [['Marker buttons'], 'Beside the minimap: Ping, Attack, Defend, Help and Gather. Press one, then click the map or the minimap'],
-    [['Who sees them'], 'Only your teammates. A mark fades after a few seconds; click the arrow at the edge of the screen to jump to one out of view'],
+    [label('Marker buttons'), 'Beside the minimap: Ping, Attack, Defend, Help and Gather. Press one, then click the map or the minimap'],
+    [label('Who sees them'), 'Only your teammates. A mark fades after a few seconds; click the arrow at the edge of the screen to jump to one out of view'],
   ]],
 ];
 
@@ -165,22 +180,27 @@ export function renderHowToContent() {
     h('p.mw-tip', h('strong', 'Watch it again: '), 'the newest twelve games you played against the computer or hosted are kept as replays. Watch Replay on the game-over screen, or Replays on the Career screen, plays it from any player\'s eyes at up to eight times the speed.'),
     h('p.mw-tip', h('strong', 'Tip: '), 'Keep a few worshippers praying from the very start. Faith accumulates slowly, and the side that summons its first god earlier usually wins the early fights.'),
   );
-  const controls = h('div.mw-howto-controls',
-    h('h3.mw-h3', 'Mouse'),
-    h('table.mw-keys',
-      h('tbody',
-        h('tr', h('td', kbd('Left-click')), h('td', 'Select a unit or building')),
-        h('tr', h('td', kbd('Drag')), h('td', 'Box-select units')),
-        h('tr', h('td', kbd('Shift', 'Click')), h('td', 'Add to or remove from the selection')),
-        h('tr', h('td', kbd('Double-click')), h('td', 'Select every unit of that type on screen')),
-        h('tr', h('td', kbd('Ctrl', 'Click')), h('td', 'The same, with a single click')),
-        h('tr', h('td', kbd('Shift', 'Right-click')), h('td', 'Queue orders')),
-      ),
-    ),
-    HOTKEYS.map(([title, rows]) => [
-      h('h3.mw-h3', title),
-      h('table.mw-keys', h('tbody', rows.map(([keys, text]) => h('tr', h('td', keys), h('td', text))))),
-    ]),
-  );
+  const controls = h('div.mw-howto-controls', renderControls(h));
   return h('div.mw-howto', rules, controls);
+}
+
+/**
+ * The controls: the mouse, then every hotkey table. `make` is the page's element maker, (tag, ...children):
+ * menu-dom's h, or the HUD's el (the F10 menu's Controls). `bindings` (key-bindings.js bindingsOf) are the keys the
+ * rebindable rows show; the defaults when left out.
+ */
+export function renderControls(make, bindings = bindingsOf({})) {
+  const cell = (spec) => {
+    if (spec.text) return spec.text;
+    return spec.keys.map((k, i) => [
+      i ? make(spec.combo ? 'span.mw-plus' : 'span.mw-keysep', spec.combo ? '+' : null) : null,
+      make('kbd', typeof k === 'string' ? k : keyLabel(bindings[k.bind])),
+    ]);
+  };
+  const table = (rows) => make('table.mw-keys', make('tbody', rows.map(([spec, text]) => make('tr', make('td', cell(spec)), make('td', text)))));
+  return [
+    make('h3.mw-h3', 'Mouse'),
+    table(MOUSE),
+    HOTKEYS.map(([title, rows]) => [make('h3.mw-h3', title), table(rows)]),
+  ];
 }

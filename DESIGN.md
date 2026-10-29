@@ -2114,7 +2114,10 @@ per-frame budget, so a revealed army appears over a few frames.
   by position (Q W E R / A S D F / Z X C V, each rebindable; a Cancel button still answers Esc). Binding a key another
   action had swaps the two, so no action is left without a key; Esc, Pause, F1-F12, Enter, Tab, the digits, Delete,
   Backspace, `.`, `` ` `` and the modifiers keep their jobs. The camera is checked first, so a letter bound to it stops
-  reaching the Classic card (the panel says so). Tips and How to Play name the default keys. *Text*: no text is
+  reaching the Classic card (the panel says so). Tips and How to Play name the default keys. The F10 menu's
+  *Controls* (beside Change keys…) shows How to Play's mouse and hotkey tables read only (`renderControls` in
+  `menu-howto.js`, whose tables are data shared by both), with the player's own camera keys in the rebindable rows,
+  and in the Grid layout a line naming the card's twelve keys. *Text*: no text is
   drawn under 10 px (`--mw-min-text`; at 1280 × 720 the HUD's base is 11 px and its small print was 6.6 to 9.9 px), and
   the muted ink (`--mw-ink-mute`) is #a39983, 4.5:1 or better on the panels. `tools/shot-access.mjs` measures every
   visible text's size and contrast on each screen at a window size and stills a battle in both palettes.
