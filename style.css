@@ -502,16 +502,21 @@ kbd {
 
 /* ------------------------------------------------------------ lobby */
 
-/* The lobby grid plus its footer (the dock); the dock sticks to the bottom of the window so Start Battle stays in reach. */
+/* The lobby grid plus its footer (the dock). The grid scrolls on its own and the dock sits below it, never over it,
+   so Start Battle stays in reach and nothing (the Victory toggle at 1280×720) hides behind the dock. */
 .mw-lobby-wrap {
-  flex: 1 0 auto;
+  flex: 1 1 0;
+  min-height: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 .mw-lobby {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: var(--mw-bronze-lo) transparent;
   width: 100%;
   max-width: 92em;
   margin: 0 auto;
@@ -523,8 +528,7 @@ kbd {
   gap: 1.1em 1.3em;
 }
 .mw-lobby-dock {
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 3;
   flex: 0 0 auto;
   width: 100%;
@@ -791,7 +795,7 @@ kbd {
   gap: 0.9em 2em;
   padding: 0.9em 1.25em;
   border-top: 1px solid var(--mw-line-soft);
-  background: linear-gradient(180deg, rgba(10, 12, 20, 0.93), rgba(10, 12, 20, 0.97)); /* near-opaque: it can float over scrolled content */
+  background: linear-gradient(180deg, rgba(10, 12, 20, 0.93), rgba(10, 12, 20, 0.97));
   border-radius: 6px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0.5em 1.2em rgba(0, 0, 0, 0.5);
 }
@@ -1320,6 +1324,14 @@ kbd {
   .mw-main-nav { gap: 0.5em 0.7em; }
   .mw-btn--menu { padding: 0.6em 1.1em 0.55em; }
   .mw-btn--menu.mw-btn--primary { padding: 0.7em 1.3em 0.62em; }
+  .mw-lobby { padding: 0.9em 2em 0.5em; gap: 0.8em 1.3em; }
+  .mw-lobby-main, .mw-lobby-side { gap: 0.8em; }
+  .mw-lobby-dock { padding-bottom: 0.9em; }
+  .mw-lobby-foot { padding: 0.65em 1.25em; }
+  .mw-slots { gap: 0.4em; }
+  .mw-slot { min-height: 3.4em; padding: 0.35em 0.8em; }
+  .mw-lobby .mw-panel { padding: 0.85em 1.15em; }
+  .mw-lobby-options { row-gap: 0.8em; }
 }
 @media (max-height: 640px) {
   .mw-crest { display: none; }

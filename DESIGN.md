@@ -1857,7 +1857,8 @@ per-frame budget, so a revealed army appears over a few frames.
   30 / 45 / 60 min buttons, or Trial of the Titans with its rules and the player's best wave, 5.14; the host's pick;
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
-  `?join=CODE`; chat; Start for host), join screen (name + code), how-to-play, settings
+  `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
+  above it, never over it), join screen (name + code), how-to-play, settings
   (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
