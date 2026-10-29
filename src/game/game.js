@@ -857,7 +857,8 @@ export class Game {
     this.ended = true;
     this.setLoading(false);
     // Only a lost link can be rejoined, not a game the host closed. (Taken over by another window: that one keeps the ticket.)
-    if (reason !== REASONS.HOST_LEFT && reason !== REASONS.REPLACED) dropTicket(this.launch);
+    if (reason === REASONS.REPLACED) this.replaced = true;
+    else if (reason !== REASONS.HOST_LEFT) dropTicket(this.launch);
     if (!this.hud) return;
     if (this.overShown && (reason === 'game-over' || reason === 'host-quit')) {
       this.hud.message('The host has closed the game.', 'system');
@@ -955,7 +956,8 @@ export class Game {
     const career = this.career;
     if (t && t.tally) Object.assign(career.m, t.tally);
     let last = 0;
-    const keep = () => saveTally(token, career.m);
+    // (A window whose seat another window took back writes nothing more: that one keeps the tally now.)
+    const keep = () => !this.replaced && saveTally(token, career.m);
     this.offs.push(this.viewState.on('snapshot', () => {
       const ms = Date.now();
       if (ms - last < 3000) return;

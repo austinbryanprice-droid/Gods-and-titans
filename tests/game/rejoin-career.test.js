@@ -52,6 +52,11 @@ test('a rejoined game carries on the career tally its ticket kept (buildings los
     game.career.m.buildingsLost = 4;
     for (const off of offs) off(); // leaving keeps the latest tally
     assert.equal(readTicket().tally.buildingsLost, 4);
+    // A window replaced by a newer one (that took the seat back) leaves the ticket's tally alone.
+    game.replaced = true;
+    game.career.m.buildingsLost = 1;
+    for (const off of offs) off();
+    assert.equal(readTicket().tally.buildingsLost, 4);
   } finally {
     if (had) Object.defineProperty(globalThis, 'localStorage', had);
     else delete globalThis.localStorage;
