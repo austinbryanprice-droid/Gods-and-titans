@@ -93,9 +93,10 @@ export async function startGame(launch) {
     const game = new Game({
       launch,
       settings: getSettings(),
-      onExit: () => {
+      onExit: (info) => {
         if (current === game) current = null;
         backToMenu(mission ? 'campaign' : 'title', mission ? { mission } : {});
+        if (info && typeof info.notice === 'string' && menu) menu.toast(info.notice, 'info', 10000);
       },
       onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : mission ? () => startGame({ ...launch, conns: new Map() }) : null,
       // An online game's Rematch (DESIGN 7): the host back in its room's lobby, a client joining it.

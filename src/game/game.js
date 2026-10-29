@@ -218,7 +218,7 @@ export class Game {
    * @param {object} [o.launch] from the menu: { role: 'host'|'client', setup, myIndex, conns | conn, lobby }
    * @param {object} [o.session] an already built HostSession / ClientSession (instead of launch)
    * @param {object} [o.settings] getSettings()
-   * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
+   * @param {(info?: { notice?: string }) => void} [o.onExit] called after teardown (main.js shows the menu, and `notice` as a toast)
    * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
    * @param {(to: object) => void} [o.onRematchOnline] an online game's Rematch (DESIGN 7), after this Game is torn down: the
    *   host goes to its room's lobby ({ lobby }), a client joins it ({ join: { roomCode, token, transport, name } }) (main.js)
@@ -1654,11 +1654,16 @@ export class Game {
     // A host with other players hands the game over first (DESIGN 7): it goes on in the heir's browser.
     if (s && s.isHost && s.canHandOff && s.clients && s.clients.size) {
       this.leaving = true;
-      if (this.hud) this.hud.overlays.showWaiting(`Handing the game to ${s.playerName(s.heir)}…`, 'Leaving');
-      s.handOff().catch((err) => console.warn('[game] hand-over failed', err)).finally(() => {
+      const heir = s.playerName(s.heir);
+      if (this.hud) this.hud.overlays.showWaiting(`Handing the game to ${heir}…`, 'Leaving');
+      let carried = false;
+      s.handOff().then((ok) => {
+        carried = !!ok;
+      }, (err) => console.warn('[game] hand-over failed', err)).finally(() => {
         if (this.disposed) return;
         this.dispose();
-        if (this.onExit) this.onExit();
+        // The title screen says where the game went (and that Rejoin takes the seat back).
+        if (this.onExit) this.onExit(carried ? { notice: `${heir} now hosts the game. Rejoin Online Game takes your seat back.` } : undefined);
       });
       return;
     }
@@ -1692,7 +1697,9 @@ export class Game {
     const s = this.session;
     if (!this.online || this.ended || this.disposed) return false;
     const vs = this.viewState;
-    if (!s.pause && vs && (vs.gameOver || (vs.me && vs.me.defeated))) return false;
+    if (vs && vs.gameOver && !s.pause) return false;
+    // A fallen player watches: the host takes neither a pause nor a resume from them (HostSession.setPause).
+    if (vs && vs.me && vs.me.defeated) return false;
     s.sendPause(!s.pause);
     return true;
   }
@@ -1793,7 +1800,10 @@ export class Game {
       this.migrating = false;
       if (this.disposed) return;
       if (this.hud) this.hud.overlays.hideWaiting();
-      this.onEnd({ reason });
+      // The heir may still carry the game on (it may just be slow to open its room): a player who could not
+      // follow keeps the ticket into that room and is offered Rejoin, as after a lost link, even when the host
+      // quit through the menu (whose 'host-quit' would drop the ticket and say the game was closed).
+      this.onEnd({ reason: mine ? reason : REASONS.HOST_LEFT });
     }
   }
 
