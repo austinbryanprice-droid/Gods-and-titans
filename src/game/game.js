@@ -752,8 +752,9 @@ export class Game {
     this.session.sendCommand(cmd);
   }
 
-  sendChat(text) {
-    if (this.session && !this.ended) this.session.sendChat(text);
+  /** A chat line to everyone, or with { team: true } to my allies only (DESIGN 7, "Team chat"). */
+  sendChat(text, opts) {
+    if (this.session && !this.ended) this.session.sendChat(text, opts);
   }
 
   /**
