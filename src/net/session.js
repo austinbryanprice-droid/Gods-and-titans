@@ -17,7 +17,7 @@ import {
   RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
 } from './protocol.js';
 import { sanitizeCommand, sanitizeMark, isValidSnapshot, sanitizeFelled } from './sanitize.js';
-import { sanitizePlan, sanitizeHandoff } from './handoff.js';
+import { sanitizePlan, sanitizeHandoff, randomProof } from './handoff.js';
 import { Ticker } from './ticker.js';
 
 export const HOST_VIEW_DELAY_MS = 50;
@@ -220,6 +220,9 @@ export class HostSession extends SessionBase {
     this.netStats = { encodes: 0, encodeMs: 0, encodeMaxMs: 0, skipped: 0 };
     // Host migration (enableHandoff): { room, tokens, pack, heir, at, busy, sent }
     this.handoff = null;
+    // Host migration: a secret per seat (index → hex) that only the game's host knows and shows in `start` to that seat,
+    // so a player who reaches its room can tell the host from someone else sitting on the room's code (DESIGN 7).
+    this.proofs = new Map();
     // Online pauses: each player's pauses left, the timer that ends a pause, and the players a new host waits for.
     this.pausesLeft = new Map();
     this.pauseTimer = null;
@@ -419,7 +422,8 @@ export class HostSession extends SessionBase {
     this.leftPlayers.delete(index);
     const tookOver = this.standIns.delete(index);
     if (tookOver) this.ais.delete(index);
-    conn.send({ t: MSG.START, setup: this.setup, you: index, rejoin: true });
+    const proof = this.proofs.get(index);
+    conn.send({ t: MSG.START, setup: this.setup, you: index, rejoin: true, ...(proof ? { proof } : {}) });
     this.attach(index, conn);
     const c = this.clients.get(index);
     c.grace = { pings: 0 };
@@ -428,7 +432,7 @@ export class HostSession extends SessionBase {
     if (this.pause) conn.send(this.pauseMessage());
     const name = this.playerName(index);
     this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true });
-    if (this.plan) conn.send({ t: MSG.PLAN, ...this.plan });
+    if (this.plan) conn.send(this.planFor(index));
     this.updatePlan();
     // A new host waits for the players who were in the game when it moved (DESIGN 7), then plays on.
     if (this.waiting.delete(index) && !this.waiting.size && this.pause && this.pause.reason === 'handoff') this.setPause(-1, false);
@@ -551,6 +555,8 @@ export class HostSession extends SessionBase {
   enableHandoff({ room, here = null, tokens, pack }) {
     if (typeof pack !== 'function' || !room) return;
     this.handoff = { room, here, tokens: tokens || new Map(), pack, at: -Infinity, busy: null, sent: 0 };
+    // (A game carried on keeps the proofs it came with: the players got theirs from the host before.)
+    for (const p of this.setup.players) if (p.kind === 'human' && p.index !== this.myIndex && !this.proofs.has(p.index)) this.proofs.set(p.index, randomProof());
     this.plan = null;
     this.updatePlan();
   }
@@ -580,8 +586,13 @@ export class HostSession extends SessionBase {
     h.at = -Infinity;
     h.sent = 0;
     if (!this.plan) return;
-    const msg = { t: MSG.PLAN, ...this.plan };
-    for (const c of this.clients.values()) c.conn.send(msg);
+    for (const c of this.clients.values()) c.conn.send(this.planFor(c.index));
+  }
+
+  /** The PLAN for one client: with that seat's proof, which only it and the heir get. */
+  planFor(index) {
+    const proof = this.proofs.get(index);
+    return { t: MSG.PLAN, ...this.plan, ...(proof ? { proof } : {}) };
   }
 
   /** Send the heir the game when it is due (or now, with force). Resolves once it is handed to the link. */
@@ -611,7 +622,7 @@ export class HostSession extends SessionBase {
       if (this.stopped && !force) return false;
       const cc = this.clients.get(heir);
       if (!cc || !cc.conn.open || !this.plan || this.plan.heir !== heir) return false;
-      cc.conn.send({ t: MSG.HANDOFF, room: h.room, tick, state, tokens: Object.fromEntries(h.tokens), present, pauses });
+      cc.conn.send({ t: MSG.HANDOFF, room: h.room, tick, state, tokens: Object.fromEntries(h.tokens), present, pauses, proofs: Object.fromEntries(this.proofs) });
       h.sent++;
       return true;
     }, (err) => {

@@ -95,6 +95,7 @@ export const REASONS = {
   REJOIN_OVER: 'That game is over.',
   REJOIN_DENIED: 'You cannot rejoin that game.',
   REPLACED: 'You rejoined this game from another window.',
+  NOT_HOST: 'Someone who is not the game\'s host answered in its room.',
 };
 
 /** Kick reason for a client running a different build than the host. */

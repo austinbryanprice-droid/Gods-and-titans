@@ -763,7 +763,8 @@ export class LobbyClient {
    * this browser got with `start`. Resolves with what `onStart` gives ({ setup, myIndex, conn }),
    * the connection handed over to the game; rejects with a readable Error (the game is over, this
    * browser was not in it, the room is gone, …), flagged `refused` when the host itself said no (and `retry` when only for now: still loading, busy).
-   * @param {object} opts { transport, roomCode, token, name, params, timeoutMs, signal, version }
+   * @param {object} opts { transport, roomCode, token, name, params, timeoutMs, signal, version, proof }
+   *   (proof: my seat's proof from the host's PLAN; a START without it is refused)
    */
   static async rejoin(opts = {}) {
     const { signal } = opts;
@@ -792,6 +793,8 @@ export class LobbyClient {
           else if (msg.t === MSG.START) {
             const valid = validateSetup(msg.setup, msg.you);
             if (!valid) reject(new Error('The host sent an invalid game setup. Make sure you both run the same version (reload the page).'));
+            // After a host migration only the game's host knows my seat's proof: anyone else in that room is not it.
+            else if (opts.proof && msg.proof !== opts.proof) reject(Object.assign(new Error(REASONS.NOT_HOST), { refused: true, retry: false }));
             else resolve({ setup: valid.setup, myIndex: valid.myIndex, conn, rejoin: token });
           }
         }));

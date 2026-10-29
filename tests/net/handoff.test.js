@@ -66,7 +66,9 @@ test('handoff: the state travels compressed and comes back the same; plans and b
 
   const setup = setupWith(['human', 'human', 'hard']);
   const code = makeRoomCode();
-  assert.deepEqual(sanitizePlan({ heir: 1, room: code.toLowerCase(), host: 0 }, setup), { heir: 1, room: code, host: 0, at: null });
+  assert.deepEqual(sanitizePlan({ heir: 1, room: code.toLowerCase(), host: 0 }, setup), { heir: 1, room: code, host: 0, at: null, proof: null });
+  assert.equal(sanitizePlan({ heir: 1, room: code, proof: 'ef'.repeat(16) }, setup).proof, 'ef'.repeat(16));
+  assert.equal(sanitizePlan({ heir: 1, room: code, proof: 'not hex' }, setup).proof, null);
   assert.equal(sanitizePlan({ heir: 1, room: code, at: 'zz' }, setup).at, null);
   assert.equal(sanitizePlan({ heir: 1, room: code, host: 1 }, setup).host, -1);
   assert.equal(sanitizePlan({ heir: 2, room: code }, setup), null, 'a computer player is never the heir');
@@ -88,8 +90,11 @@ test('handoff: the host names the lowest connected player still playing as heir 
   ben.start();
   await ann.ready;
   await ben.ready;
-  assert.deepEqual(ann.plan, { heir: 1, room, host: 0, at: null });
-  assert.deepEqual(ben.plan, { heir: 1, room, host: 0, at: null });
+  const { proof: annProof, ...annPlan } = ann.plan;
+  const { proof: benProof, ...benPlan } = ben.plan;
+  assert.deepEqual(annPlan, { heir: 1, room, host: 0, at: null });
+  assert.deepEqual(benPlan, { heir: 1, room, host: 0, at: null });
+  assert.ok(annProof && benProof && annProof !== benProof, 'each player hears only their own seat\'s proof');
   assert.equal(host.canHandOff, false, 'no copy sent yet');
   await host.backup(true);
   await waitFor(() => ann.backup, 2000, 'backup at the heir');
@@ -97,6 +102,7 @@ test('handoff: the host names the lowest connected player still playing as heir 
   assert.equal(ann.backup.room, room);
   assert.deepEqual(ann.backup.present.sort(), [0, 1, 2]);
   assert.equal(ann.backup.tokens.size, 3);
+  assert.deepEqual([...ann.backup.proofs].sort(), [[1, annProof], [2, benProof]], 'the heir gets every seat\'s proof');
   assert.equal(JSON.parse(await decodeState(ann.backup.state)).tick, host.world.tickCount);
   assert.equal(host.canHandOff, true);
 
@@ -133,7 +139,7 @@ test('handoff: when the host vanishes, the heir carries the game on and the othe
   for (const c of host.clients.values()) c.conn.close('gone');
   await waitFor(() => ends.size === 2, 2000, 'both ends');
   assert.equal(ends.get(1).reason, REASONS.HOST_LEFT);
-  assert.deepEqual(ends.get(1).handoff.plan, { heir: 1, room, host: 0, at: null });
+  assert.deepEqual({ ...ends.get(1).handoff.plan, proof: null }, { heir: 1, room, host: 0, at: null, proof: null });
   assert.ok(ends.get(1).handoff.backup, 'the heir has the game');
   assert.equal(ends.get(2).handoff.backup, null, 'the others only know where to go');
 
@@ -328,6 +334,34 @@ test('pause: a rejoining player hears the pause, and a pause ends by itself', as
     t.mock.timers.reset();
   }
   host.stop();
+});
+
+test('handoff: a player sitting on the planned room cannot pass for the heir', async () => {
+  const setup = setupWith(['human', 'human', 'human', 'hard']);
+  const { host, clients, room, tokens } = makeGame(setup);
+  const ben = clients.get(2);
+  host.start();
+  clients.get(1).start();
+  ben.start();
+  await ben.ready;
+  const plan = ben.plan;
+  assert.ok(plan.proof);
+  // Ann (not playing fair) opens the room the plan names before the heir would, and answers like a host.
+  const { hostRoom } = await import('../../src/net/transport.js');
+  const ep = await hostRoom({ transport: 'loopback', roomCode: room });
+  const fake = LobbyHost.forGame(ep, { transport: 'loopback', tokens });
+  fake.setRejoinHandler((index, conn) => {
+    conn.send({ t: MSG.START, setup, you: index, rejoin: true });
+    return null;
+  });
+  host.stop();
+  await assert.rejects(followHeir({ plan, token: tokens.get(2), name: 'Ben', transport: 'loopback', retryMs: 20, timeoutMs: 1000 }), (err) => err.message === REASONS.NOT_HOST);
+  // The host's own `start` carries the proof (a player reaching the host again checks it too).
+  await assert.rejects(reachHost({ plan: { ...plan, at: room }, token: tokens.get(2), name: 'Ben', transport: 'loopback', timeoutMs: 500 }).then((r) => {
+    if (!r) throw new Error('no host');
+    return r;
+  }));
+  fake.close();
 });
 
 test('lobby: the host gets a token too, and a carried-on game seats players by theirs', async () => {

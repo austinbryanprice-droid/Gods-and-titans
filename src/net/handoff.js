@@ -42,9 +42,29 @@ export async function decodeState(state) {
   return new TextDecoder().decode(bytes);
 }
 
+/** A seat's proof (HostSession.proofs): 32 random hex digits. */
+export function randomProof() {
+  const bytes = new Uint8Array(16);
+  const c = globalThis.crypto;
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+const readProofs = (obj, setup) => {
+  const out = new Map();
+  if (!isObject(obj)) return out;
+  for (const [k, v] of Object.entries(obj)) {
+    const i = Number(k);
+    const p = Number.isInteger(i) ? setup.players[i] : null;
+    if (p && p.kind === 'human' && typeof v === 'string' && TOKEN_RE.test(v)) out.set(i, v);
+  }
+  return out;
+};
+
 /**
- * A PLAN from the host, checked against the setup: { heir, room, host, at } or null (host: the host's index, -1 if
- * unknown; at: the room the game is in now, null if unknown).
+ * A PLAN from the host, checked against the setup: { heir, room, host, at, proof } or null (host: the host's index, -1 if
+ * unknown; at: the room the game is in now, null if unknown; proof: my seat's, that the next host shows me, or null).
  */
 export function sanitizePlan(msg, setup) {
   if (!isObject(msg) || !setup || !Array.isArray(setup.players)) return null;
@@ -54,11 +74,12 @@ export function sanitizePlan(msg, setup) {
   if (!p || p.kind !== 'human' || !isValidRoomCode(room)) return null;
   const host = Number.isInteger(msg.host) && setup.players[msg.host] && msg.host !== heir ? msg.host : -1;
   const at = msg.at === undefined ? '' : normalizeRoomCode(msg.at);
-  return { heir, room, host, at: isValidRoomCode(at) && at !== room ? at : null };
+  const proof = typeof msg.proof === 'string' && TOKEN_RE.test(msg.proof) ? msg.proof : null;
+  return { heir, room, host, at: isValidRoomCode(at) && at !== room ? at : null, proof };
 }
 
 /**
- * A HANDOFF from the host: { room, tick, state: { enc, data }, tokens: Map<index, token>, present: number[] }, or
+ * A HANDOFF from the host: { room, tick, state: { enc, data }, tokens: Map<index, token>, present: number[], pauses, proofs: Map<index, proof> }, or
  * null. Only shape is checked here: the game inside is read (and may still fail) when it is needed.
  */
 export function sanitizeHandoff(msg, setup) {
@@ -67,14 +88,7 @@ export function sanitizeHandoff(msg, setup) {
   const s = msg.state;
   if (!isValidRoomCode(room) || !Number.isSafeInteger(msg.tick) || msg.tick < 0) return null;
   if (!isObject(s) || (s.enc !== 'gz' && s.enc !== 'json') || typeof s.data !== 'string' || s.data.length > MAX_HOST_MESSAGE_CHARS) return null;
-  const tokens = new Map();
-  if (isObject(msg.tokens)) {
-    for (const [k, v] of Object.entries(msg.tokens)) {
-      const i = Number(k);
-      const p = Number.isInteger(i) ? setup.players[i] : null;
-      if (p && p.kind === 'human' && typeof v === 'string' && TOKEN_RE.test(v)) tokens.set(i, v);
-    }
-  }
+  const tokens = readProofs(msg.tokens, setup); // (tokens have the same shape)
   const present = Array.isArray(msg.present)
     ? [...new Set(msg.present.filter((i) => Number.isInteger(i) && setup.players[i] && setup.players[i].kind === 'human'))].slice(0, MAX_PLAYERS)
     : [];
@@ -85,7 +99,7 @@ export function sanitizeHandoff(msg, setup) {
       if (Number.isInteger(i) && setup.players[i] && Number.isInteger(v) && v >= 0 && v <= ONLINE_PAUSES) pauses.set(i, v);
     }
   }
-  return { room, tick: msg.tick, state: { enc: s.enc, data: s.data }, tokens, present, pauses };
+  return { room, tick: msg.tick, state: { enc: s.enc, data: s.data }, tokens, present, pauses, proofs: readProofs(msg.proofs, setup) };
 }
 
 /**
@@ -106,6 +120,7 @@ export async function takeOver({ plan, backup, makeSession, transport = 'peer', 
   const save = JSON.parse(text);
   const session = makeSession(save);
   session.pausesLeft = new Map(backup.pauses || []);
+  session.proofs = new Map(backup.proofs || []); // the seats' proofs: the others check them in my `start`
   let endpoint;
   try {
     endpoint = await hostRoom({ transport, roomCode: plan.room, params });
@@ -138,7 +153,7 @@ export async function takeOver({ plan, backup, makeSession, transport = 'peer', 
 export async function reachHost({ plan, token, name, transport = 'peer', params, version, timeoutMs = 5000, rejoin = LobbyClient.rejoin }) {
   if (!plan || !plan.at || !token) return null;
   try {
-    return await rejoin({ transport, roomCode: plan.at, token, name, params, version, timeoutMs });
+    return await rejoin({ transport, roomCode: plan.at, token, name, params, version, timeoutMs, proof: plan.proof || undefined });
   } catch (err) {
     if (err && err.refused && err.message === REASONS.REJOIN_OVER) throw err;
     return null;
@@ -156,7 +171,7 @@ export async function followHeir({ plan, token, name, transport = 'peer', params
   for (;;) {
     if (signal && signal.aborted) throw Object.assign(new Error('aborted'), { type: 'aborted' });
     try {
-      return await rejoin({ transport, roomCode: plan.room, token, name, params, version, timeoutMs: Math.min(15000, Math.max(3000, timeoutMs)), signal });
+      return await rejoin({ transport, roomCode: plan.room, token, name, params, version, timeoutMs: Math.min(15000, Math.max(3000, timeoutMs)), signal, proof: plan.proof || undefined });
     } catch (err) {
       last = err;
       if (err && err.refused && !err.retry) throw err;

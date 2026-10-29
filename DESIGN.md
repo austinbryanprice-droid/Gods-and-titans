@@ -1282,12 +1282,12 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   - Host migration (`src/net/handoff.js`, `HostSession.enableHandoff`, `Game.migrate`): a host that
     leaves no longer ends an online game. The host names an heir (`pickHeir`: the connected player
     still playing with the lowest index) and a room code for them, and tells every client
-    (`{t:'plan', heir, room, host}`, again whenever the heir changes). Every `HANDOFF_EVERY_MS` (10 s;
+    (`{t:'plan', heir, room, host, at, proof}`, again whenever the heir changes). Every `HANDOFF_EVERY_MS` (10 s;
     the first after 2 s) the heir gets the whole game: the save-game graph of the World and the
     setup's computer players' minds (`packMatch`, DESIGN 9.4), gzip + base64 where the browser has
     CompressionStream (about 90 KB for four players at 25 minutes; packing takes about 20 ms), with
     every player's rejoin token and who is connected (`{t:'handoff', room, tick, state, tokens,
-    present}`). When the host's link closes (or its END says `host-quit`) and the game is not over,
+    present, pauses, proofs}`). When the host's link closes (or its END says `host-quit`) and the game is not over,
     the client's `onEnd` carries `handoff: { plan, backup }`. Unless the host said it hands over (END
     `carry`), each player first tries the room the game is in now (`plan.at`, `reachHost`, 5 s): when
     only their own link dropped, the host takes them back and nothing moves (no split game). The heir rebuilds the game from the
@@ -1303,7 +1303,11 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload.
     Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
     A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
-    the whole game and every token: a trade-off for friends' games.
+    the whole game and every token: a trade-off for friends' games. Anyone can open a room code, so
+    each seat has a proof (`HostSession.proofs`, random, in that seat's own `plan` and in the heir's
+    `handoff`): the host shows it in the `start` it sends that seat on a rejoin, and `reachHost` and
+    `followHeir` refuse a `start` without it (`REASONS.NOT_HOST`). A player sitting on the planned
+    room can then stop the move (the game ends) but cannot pass for the host and take the others in.
   - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
     everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`
     (3) per player per game, any player still in the game may resume, a pause ends by itself after
