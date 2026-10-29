@@ -235,6 +235,10 @@ test('surrender defeats the issuing player; teams win together', () => {
   assert.equal(w.players[2].defeated, true);
   assert.equal(w.buildingsOf(2).length, 0);
   assert.deepEqual(eventsOf(ev, 'gameOver').map((e) => e.winningTeam), [1]);
+  // The snapshot says who surrendered (the career does not count an early win handed over so, DESIGN 9.1).
+  const snap = w.getSnapshot();
+  assert.equal(snap.players[2].sur, true);
+  assert.equal(snap.players[0].sur, undefined);
 });
 
 test('no victory while two teams still stand', () => {

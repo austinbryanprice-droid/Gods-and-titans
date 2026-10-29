@@ -82,6 +82,10 @@ test('rejoin: a dropped player in a Hard game gets a Hard stand-in, and takes th
   assert.match(hostLines.at(-1).text, /^Ann has left the game\. An AI \(Hard\) plays for them until they rejoin, and keeps their god powers for them\.$/);
   host.step(3);
   assert.equal(standIn.ticks, 3, 'the stand-in plays while Ann is away');
+  // Everyone's snapshot marks the seat a stand-in holds (the career counts no win over a person there, DESIGN 9.1).
+  assert.equal(host.lastSnap.players[1].away, true);
+  assert.equal(host.lastSnap.players[0].away, undefined);
+  assert.equal(host.world.players[1].away, undefined, 'a mark on the snapshot, not on the world');
 
   // Ann comes back on a new link.
   const link = rejoinLink(host, 1);
@@ -97,6 +101,7 @@ test('rejoin: a dropped player in a Hard game gets a Hard stand-in, and takes th
   assert.equal(host.leftPlayers.has(1), false);
   host.step(2);
   assert.equal(standIn.ticks, 3, 'and no longer plays');
+  assert.equal(host.lastSnap.players[1].away, undefined, 'her seat is hers again');
 
   // A new ClientSession on the link picks up where the host is, and its commands are Ann's.
   link.off();

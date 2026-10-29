@@ -3,7 +3,7 @@
 // (nothing goes over the wire). Every storage access is guarded like src/settings.js: a
 // private window, blocked storage or Node (tests) keep the career in memory instead.
 import { PANTHEON_LIST } from '../data/pantheon-list.js';
-import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID } from '../data/achievements.js';
+import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID, earnedWin } from '../data/achievements.js';
 
 const STORAGE_KEY = 'mythicwar-career';
 const HISTORY = 12; // the last games shown on the career screen
@@ -145,7 +145,10 @@ export function recordMatch(m, now = Date.now()) {
   const c = getCareer();
   const t = num(m.time);
   c.games++;
-  if (m.result === 'victory') {
+  // A win handed over by an early surrender (earnedWin) is played, not won: it adds no win (and so no First
+  // Victory, pantheon win, Warlord…), though the history shows it as the victory it was.
+  const win = earnedWin(m);
+  if (win) {
     c.wins++;
     if (Array.isArray(m.enemies) && m.enemies.some((e) => e && e.kind === 'ai')) c.aiWins++;
   } else if (m.result === 'defeat') c.losses++;
@@ -156,7 +159,7 @@ export function recordMatch(m, now = Date.now()) {
   if (m.pantheon && PANTHEON_LIST.some((p) => p.id === m.pantheon)) {
     const r = c.pantheons[m.pantheon] || (c.pantheons[m.pantheon] = { games: 0, wins: 0 });
     r.games++;
-    if (m.result === 'victory') r.wins++;
+    if (win) r.wins++;
   }
   c.best.kills = Math.max(c.best.kills, num(m.kills));
   c.best.gathered = Math.max(c.best.gathered, num(m.gathered));

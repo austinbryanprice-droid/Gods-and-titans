@@ -52,16 +52,41 @@ export class CareerTracker {
     this.offs = [];
   }
 
-  /** Who is on which side, from the setup (or the snapshot's players while the setup is unknown). */
+  /**
+   * Who is on which side, from the setup (or the snapshot's players while the setup is unknown). Each enemy:
+   * { index, kind, difficulty, away, surrendered, out } (the last three from the snapshots, see watchEnemies;
+   * kept from what the tally already knew).
+   */
   readSides() {
     const me = this.me;
     const players = (this.setup && this.setup.players) || this.vs.players || [];
-    const mine = players.find((p, i) => (p.index ?? p.i ?? i) === me);
+    const indexOf = (p, i) => p.index ?? p.i ?? i;
+    const mine = players.find((p, i) => indexOf(p, i) === me);
     if (!mine) return;
     this.m.pantheon = mine.pantheon || this.m.pantheon;
-    const others = players.filter((p, i) => (p.index ?? p.i ?? i) !== me);
-    this.m.teamSize = 1 + others.filter((p) => p.team === mine.team).length;
-    this.m.enemies = others.filter((p) => p.team !== mine.team).map((p) => ({ kind: p.kind === 'ai' ? 'ai' : 'human', difficulty: p.difficulty || null }));
+    const others = players.map((p, i) => [p, indexOf(p, i)]).filter(([, i]) => i !== me);
+    this.m.teamSize = 1 + others.filter(([p]) => p.team === mine.team).length;
+    const known = new Map((this.m.enemies || []).filter((e) => e && Number.isInteger(e.index)).map((e) => [e.index, e]));
+    this.m.enemies = others.filter(([p]) => p.team !== mine.team).map(([p, index]) => {
+      const was = known.get(index) || {};
+      return { index, kind: p.kind === 'ai' ? 'ai' : 'human', difficulty: p.difficulty || null, away: !!was.away, surrendered: !!was.surrendered, out: !!was.out };
+    });
+  }
+
+  /**
+   * From each snapshot, per enemy until they fall: is a stand-in AI holding their seat (`away`, the host marks it,
+   * DESIGN 7), and did they surrender. What it was when they fell stays: a win over a seat counts as one over a
+   * person only if a person held it when it fell (for a win, that is at the end of their part of the game).
+   */
+  watchEnemies() {
+    const players = this.vs.players || [];
+    for (const e of this.m.enemies) {
+      const p = players[e.index];
+      if (!p || e.out) continue;
+      e.away = !!p.away;
+      if (p.sur) e.surrendered = true;
+      if (p.defeated) e.out = true;
+    }
   }
 
   onEvent(ev) {
@@ -121,7 +146,8 @@ export class CareerTracker {
     const me = vs.me;
     if (this.me < 0 || this.recorded || !me) return;
     const m = this.m;
-    if (!m.pantheon) this.readSides();
+    if (!m.pantheon || m.enemies.some((e) => !e || !Number.isInteger(e.index))) this.readSides(); // (a tally kept before enemies had an index)
+    this.watchEnemies();
     m.time = Math.max(m.time, vs.time || 0);
     const st = me.stats || {};
     m.kills = st.kills | 0;
