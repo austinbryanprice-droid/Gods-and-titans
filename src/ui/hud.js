@@ -153,7 +153,7 @@ export class Hud {
     this.relicSig = '';
     this.top = el('div', 'hud-top hud-panel',
       el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n, this.rRelics.n),
-      el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
+      this.topRight = el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
     this.gods = el('div', 'hud-gods');
@@ -344,7 +344,9 @@ export class Hud {
       setText(this.rPop.v, `${me.pop}/${me.popCap}`);
       setClass(this.rPop.n, 'is-capped', me.pop >= me.popCap);
       setText(this.rTier.v, tierName(me.tier));
-    }
+    } else if (this.pantheonId) this.showPantheon(null);
+    // No player of mine (a replay seen by everyone): no resources to show, so no empty boxes either.
+    setHidden(this.topRight, !me);
     setText(this.clock, formatClock(vs.time));
     this.updatePeace();
     this.updateRelics();

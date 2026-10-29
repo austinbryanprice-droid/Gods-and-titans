@@ -2313,7 +2313,8 @@ its ticks, and checksums.
   nor can the trees regrow), keeping speed, eyes and camera. A checksum that does not match marks the
   moment the replay parted from the recorded game (a replay from an earlier build, whose rules have
   changed): the timeline gets a red mark and the bar says so; one from another build says it may differ.
-- Eyes: everyone (`myIndex` -1, no fog) or one player (`ViewState.setViewer`: their fog of war and top bar;
+- Eyes: everyone (`myIndex` -1, no fog; the top bar hides its resource boxes and the pantheon chip, there being
+  no player of mine to show) or one player (`ViewState.setViewer`: their fog of war and top bar;
   the map counts as explored, as no memory of it was kept). The free camera turns round its target and
   tilts (`CameraController.rotate`, `tiltBy`, `resetAngle`: pan and edge scroll turn with it; the pitch
   stays 22° to 68°).
