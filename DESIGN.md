@@ -1257,6 +1257,12 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   LobbyState: `{ roomCode, mapSize, landscape (a landscape id from 6.7 or 'random'; `LobbyHost.setLandscape`), peace (0 = standard game, or 30 | 45 | 60 for the Decade of Peace, 5.10), sacred (bool, Sacred Victory, 5.11; `LobbyHost.setSacred`; off in a trial), survival (true for the Trial of the Titans, 5.14; never beside a peace), slots: [4 × { kind: 'host'|'human'|'ai'|'open'|'closed', name, pantheon ('random' allowed), team (1–4), color (index into PLAYER_COLORS), difficulty ('easy'|'normal'|'hard'|'brutal'), peerId }] }`.
   Presets: `coop` = humans team 1 + AI Normal on team 2 filling remaining slots (2 humans vs 2 AI on medium);
   `1v1` = 2 slots, teams 1/2, small map; `2v2` = teams 1,1,2,2; `ffa` = each its own team.
+  Online (any transport but `none`) the seats a preset gives other players are Open for friends (coop keeps its
+  AI opponents); against the computer they are AI. An online lobby starts with every seat Open on two sides,
+  row by row (teams 1,2,1,2, no preset lit, small map), so up to three friends can come in by the room code.
+  A newcomer takes the Open seat on the side with the fewest players (the first such row on a tie: the first
+  friend plays against the host), and Open seats do not hold up the start. Someone turned away from a full
+  room shows up in the host's lobby chat ("… tried to join, but every seat is taken"), at most every 5 s.
   A preset lays out slots and map size only: `peace` stays as the host set it, and `buildSetup`
   turns it into `setup.peaceMinutes` (only a length `PEACE_LENGTHS` offers; `sanitizeLobbyState`
   and `validateSetup` drop anything else on the clients).
@@ -1331,6 +1337,18 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `handoff`): the host shows it in the `start` it sends that seat on a rejoin, and `reachHost` and
     `followHeir` refuse a `start` without it (`REASONS.NOT_HOST`); the rejoin ticket keeps it, so Rejoin from the title checks it too. A player sitting on the planned
     room can then stop the move (the game ends) but cannot pass for the host and take the others in.
+  - Rematch (online games, `LobbyHost.reopen`, `Game.rematchOnline`, `{t:'rematch'}`): at the game-over screen
+    the host's Rematch turns the room back into its lobby with the same players, sides, AI players and settings
+    (a room carried on by a new host has no lobby of its own: its seats come from the setup, the new host in the
+    first) and goes there; each human seat is Open and held for its player by their rejoin token of that game
+    (`seats`; a stranger gets a held seat only when no other is Open), and a player who joins with that token
+    (`LobbyClient.join({ rematch })`) gets their seat, pantheon choice and colour back, once. Before `stop`
+    the host tells every client still there `{t:'rematch', room}` (only after the game is over); their
+    button becomes Join Rematch, and the game-over screen comes back if it was put away. A client's Rematch
+    before that asks the host (`{t:'rematch'}`, once, only after the game is over; "Cleo wants a rematch."
+    in everyone's chat) and goes to the lobby the moment the room opens. A join that arrives before the host
+    has opened the room is told `REMATCH_LATER` and tries again every second (`laterTries`). The menu's
+    `rematch` screen does the join; the host's game-over screen leaves its room open (`keepLobby`).
   - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
     everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`
     (3) per player per game, any player still in the game may resume, a pause ends by itself after
@@ -2030,7 +2048,7 @@ per-frame budget, so a revealed army appears over a few frames.
   the match like Return to Menu and starts that lobby anew with a fresh seed (`launchFrom` → `buildSetup`: a new map,
   random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
   AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
-  Online games offer neither.
+  Online games are not remembered; their game-over screen offers Rematch instead, back to the same room's lobby (7).
   **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
   choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
   (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the

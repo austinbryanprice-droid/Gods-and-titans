@@ -285,6 +285,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     settings: settingsScreen,
     load: loadScreen,
     rejoin: rejoinScreen,
+    rematch: rematchScreen,
   };
 
   /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
@@ -1263,6 +1264,71 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('p.mw-panel-sub', ticket
           ? `While you are away, an AI plays for ${ticket.name}. Rejoining gives you your seat back, with everything your side has now.`
           : 'Nothing to rejoin.'),
+        status,
+        actions,
+      ),
+    );
+    return { el, focus: backBtn, onEscape: back, cleanup: () => { alive = false; if (ctrl) ctrl.abort(); } };
+  }
+
+  // ---------------------------------------------------------- rematch
+
+  /**
+   * Into the lobby of an online game's rematch (DESIGN 7): the host has opened its room again, and my token of
+   * the last game gives me my seat back there. opts.join: { roomCode, token, transport, name }.
+   */
+  function rematchScreen({ join = null } = {}) {
+    let alive = true;
+    let ctrl = null;
+    const roomCode = join ? M.cleanRoomCode(join.roomCode) : '';
+    const status = h('div.mw-join-status', { role: 'status', 'aria-live': 'polite' });
+    const actions = h('div.mw-form-actions');
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => back() }, 'Back');
+    const retryBtn = h('button.mw-btn.mw-btn--primary', { type: 'button', onclick: () => attempt() }, 'Try Again');
+
+    function back() {
+      alive = false;
+      if (ctrl) ctrl.abort();
+      go('title');
+    }
+
+    function show(kind, text, retry) {
+      status.className = `mw-join-status is-${kind}`;
+      if (kind === 'busy') setChildren(status, h('div.mw-spinner.mw-spinner--small', { 'aria-hidden': 'true' }), h('span', text));
+      else setChildren(status, h('span.mw-status-icon', '⚠'), h('span', text));
+      setChildren(actions, backBtn, retry ? retryBtn : null);
+    }
+
+    async function attempt() {
+      if (!roomCode) return show('error', 'There is no rematch to join.', false);
+      if (ctrl) ctrl.abort();
+      const my = ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      show('busy', `Joining the rematch in room ${roomCode}…`, false);
+      try {
+        const mod = await loadLobby();
+        const lobby = await mod.LobbyClient.join({
+          transport: join.transport || onlineTransport, roomCode, name: getSettings().name || join.name, rematch: join.token,
+          laterTries: 15, signal: my ? my.signal : undefined,
+        });
+        if (!alive || ctrl !== my) {
+          closeLobby(lobby);
+          return;
+        }
+        alive = false;
+        sfx.play('select');
+        go('lobby', { lobby, role: 'client', transport: join.transport || onlineTransport });
+      } catch (err) {
+        if (!alive || ctrl !== my || (err && err.type === 'aborted')) return;
+        show('error', M.friendlyJoinError(err, roomCode), true);
+        sfx.play('error');
+      }
+    }
+
+    attempt();
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-form-panel.mw-join.mw-rematch',
+        h('h2.mw-h2', 'Rematch'),
+        h('p.mw-panel-sub', 'Back to the lobby with the same players, sides and settings. The host starts the battle when everyone is in.'),
         status,
         actions,
       ),

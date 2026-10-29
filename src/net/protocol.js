@@ -31,6 +31,8 @@ export const MSG = {
   // ({ heir, room }, to every client); and the game itself for that heir ({ room, tick, state, tokens, present }).
   PLAN: 'plan',
   HANDOFF: 'handoff',
+  // Rematch, once the game is over (DESIGN 7): a client asks for one ({}), the host says its room is open again ({ room }).
+  REMATCH: 'rematch',
 };
 
 // Wire framing. A frame is a string: a JSON object ('{…}'), a chunk
@@ -93,6 +95,8 @@ export const REASONS = {
   REJOIN_UNKNOWN: 'That game has already started, and this browser was not one of its players.',
   REJOIN_LATER: 'The host is still loading the game. Try again in a moment.',
   REJOIN_OVER: 'That game is over.',
+  // Rematch (DESIGN 7): a player of the last game asked before the host opened the room again
+  REMATCH_LATER: 'The host has not opened the rematch yet.',
   REJOIN_DENIED: 'You cannot rejoin that game.',
   REPLACED: 'You rejoined this game from another window.',
   NOT_HOST: 'Someone who is not the game\'s host answered in its room.',
