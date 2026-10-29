@@ -24,7 +24,7 @@ import {
   MAX_QUEUE, MAX_GODS, MAX_TITANS, GOD_SLOT_TIER, CANCEL_BUILD_REFUND, ABILITY_LEVEL_SCALE,
   MINE_SLOTS, DROPOFF_MINE_GAP, REPAIR_COST, AUTO_REPAIR_RANGE, POP_MAX, WALL_REMOVE_REFUND,
 } from '../config.js';
-import { UNITS, BUILDINGS, BUILD_MENU, producibleAt, eliteFor } from '../data/index.js';
+import { UNITS, BUILDINGS, BUILD_MENU, producibleAt, eliteFor, buildingIcon } from '../data/index.js';
 import { offeredUpgrades, lineOf, getUpgrade, reviveMult } from '../data/upgrades.js';
 import { MANOR, MERGE_TEXT, mergeRule, planMerges } from '../data/houses.js';
 import { selectionIds, subgroups, isComplete, isMergingEntity, ownBuildings, tierName, upgradesOf, modsOf, pantheonOf, mineTripText } from './hud-data.js';
@@ -386,7 +386,7 @@ function unitCard(card, vs, group, ownIds, mode) {
       card[i] = button(i, {
         id: `build:${typeId}`,
         key: b.hotkey,
-        icon: b.icon,
+        icon: buildingIcon(typeId, pantheonOf(vs, vs.myIndex)), // the Temple wears my pantheon's own icon
         title: `Build ${b.name}`,
         description: buildingDescription(typeId),
         state: chk.state,

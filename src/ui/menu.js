@@ -321,12 +321,14 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     const saves = onLoad ? listSaves() : [];
     const continueBtn = saves.length ? mainBtn('Continue', saveLine(saves[0]), () => loadSlot(saves[0].slot), 'mw-continue-btn') : null;
     let quick = null;
+    let nav = null;
     loadLobby().then((mod) => {
       if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
       quick = loadSkirmish(mod);
       if (!quick) return;
       quickSub.textContent = `Again: ${skirmishLabel(quick)}`;
       quickBtn.hidden = false;
+      nav.classList.add('has-quick'); // pairs Quick Match with the Daily Challenge (style.css)
     }).catch(() => {});
     async function quickMatch() {
       if (!quick) return;
@@ -378,7 +380,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('div.mw-subtitle', h('span.mw-rule'), h('span', GAME_SUBTITLE), h('span.mw-rule')),
         h('p.mw-tagline', 'Raise a city of the faithful. Pray. Summon the gods. Unleash the titans.'),
       ),
-      h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
+      nav = h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
         continueBtn,
         playBtn,

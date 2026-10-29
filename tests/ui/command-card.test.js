@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ViewState } from '../../src/game/view-state.js';
 import { getCommandCard, buttonForKey, trainCheck, pickTrainBuilding, godCount, researchCheck, CARD_SLOTS } from '../../src/ui/command-card.js';
-import { subgroups } from '../../src/ui/hud-data.js';
+import { subgroups, iconOf } from '../../src/ui/hud-data.js';
 import { POP_MAX, MAX_QUEUE } from '../../src/config.js';
 import { UPGRADES } from '../../src/data/upgrades.js';
 import { makeWorld, spawn, place, run, runUntil } from '../sim/helpers.js';
-import { PANTHEON_LIST, godsFor } from '../../src/data/index.js';
+import { PANTHEON_LIST, godsFor, BUILDINGS } from '../../src/data/index.js';
 import { modsOf } from '../../src/ui/hud-data.js';
 
 let clock = 0;
@@ -69,6 +69,21 @@ test('worker card: WC3 layout, hotkeys and states', () => {
   const card2 = getCommandCard({ ids: ids(workers) }, vs2);
   assert.equal(byId(card2, 'return').state, 'ready');
   assert.equal(byId(card2, 'pray').state, 'ready');
+});
+
+test('the Temple wears its builder\'s pantheon icon: on the build button and on the portrait', () => {
+  const world = makeWorld({ pantheons: ['aztec', 'japanese'] });
+  const vs = viewOf(world);
+  const card = getCommandCard({ ids: ids(workersOf(world)) }, vs, 'build');
+  assert.equal(byId(card, 'build:temple').icon, BUILDINGS.temple.pantheonIcons.aztec);
+  assert.notEqual(byId(card, 'build:temple').icon, '⛩️', 'no torii for the Aztecs');
+  assert.equal(byId(card, 'build:house').icon, BUILDINGS.house.icon);
+  const mine = place(world, 0, 'temple', 6, 13);
+  const theirs = place(world, 1, 'temple', 20, 20);
+  const vs2 = viewOf(world);
+  assert.equal(iconOf(vs2.entities.get(mine.id), vs2), BUILDINGS.temple.pantheonIcons.aztec);
+  assert.equal(iconOf(vs2.entities.get(theirs.id), vs2), '⛩️', 'the Japanese Temple keeps its torii');
+  assert.equal(iconOf(vs2.entities.get(mine.id)), BUILDINGS.temple.icon, 'without a view: the plain icon');
 });
 
 test('build submenu: the buildings and the wall with costs, tier and requirement locks, Back', () => {
