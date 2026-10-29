@@ -363,6 +363,7 @@ export class Hud {
     const vs = this.vs;
     const me = vs.me;
     const game = this.game;
+    this.syncPanelChat();
     if (me) {
       if (me.pantheon !== this.pantheonId) this.showPantheon(me.pantheon);
       setText(this.rGold.v, fmt(me.gold));
@@ -734,6 +735,7 @@ export class Hud {
     // (text nodes only, single line, no control / bidi characters, bounded).
     const text = sanitizeChat(line.text);
     if (!text) return;
+    this.syncPanelChat(); // a line that comes while the end panel is up shows over it
     if (line.system) {
       this.pushLine(this.feedCard('system', null, text), CHAT_MS);
       return;
@@ -794,6 +796,28 @@ export class Hud {
     return n === 'gameover' || n === 'defeated' || n === 'ended';
   }
 
+  /**
+   * An online game's end panel (game over, or "defeated" while the others fight on; DESIGN 7, "Chat over the
+   * end panel"): the players still chat over it, to say gg and agree on a rematch, while the session is up.
+   */
+  canChatOverPanel() {
+    const n = this.overlays && this.overlays.name;
+    const g = this.game;
+    return (n === 'gameover' || n === 'defeated') && !!(g && g.online && !g.ended);
+  }
+
+  /** The feed and the chat box stand over the overlay layer while the end panel can chat (`is-panel-chat`). */
+  syncPanelChat() {
+    const on = this.canChatOverPanel();
+    if (on !== !!this.panelChat) {
+      this.panelChat = on;
+      this.root.classList.toggle('is-panel-chat', on);
+      // the session ended (or the panel went) with the box open over a panel: it would be hidden and send nothing
+      if (!on && this.chatOpen && this.overlays && this.overlays.open) this.closeChat();
+    }
+    return on;
+  }
+
   /** Big centred announcement under the top bar. */
   showBanner(text, kind = 'info') {
     this.banner.textContent = text;
@@ -818,6 +842,7 @@ export class Hud {
   /** Open the chat box, to everyone or ({ allies: true }) to the allies when I have any. */
   openChat({ allies = false } = {}) {
     if (this.chatOpen) return;
+    this.syncPanelChat();
     this.chatOpen = true;
     this.chatBox.hidden = false;
     this.msgs.classList.add('is-chatting');
@@ -888,5 +913,6 @@ export class Hud {
     for (const off of this.offs.splice(0)) off();
     this.root.textContent = '';
     this.root.classList.remove('hud');
+    this.root.classList.remove('is-panel-chat');
   }
 }

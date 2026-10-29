@@ -1261,6 +1261,13 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   The HUD shows a team line as "[Allies] Name: text" (`hud-chat-team`, green, the card `is-team`). The host's replay
   records only the chat its screen showed, so never another team's team lines (its own team's carry a flag, 9.5).
   The lobby chat has no team channel (the teams are still being chosen there).
+- **Chat over the end panel**: in an online game (`Game.online`, the session still up) the game-over panel and the
+  "defeated" panel keep the chat: Enter (Shift+Enter: the allies) opens the chat box, so the players can say gg and
+  agree on a rematch without Keep Watching (`Hud.canChatOverPanel`; a focused panel button keeps Enter). While it
+  can, the HUD root carries `is-panel-chat`, which lifts the message feed and the chat box over the overlay layer
+  (z-index 11 over `.hud-overlays`' 10), so lines that arrive show over the panel. Esc in the box closes the box
+  only (its keys never reach the game); the next Esc puts the panel away. Once the host closes the game the box
+  closes and Enter does nothing (the panel says so, `Overlays.noteEnded`). A game against the computer is unchanged.
 - Delta codec (`src/net/delta.js`, wire format v2; the header comment lists every key): host
   keeps the last snapshot sent to each client and sends only changes: movement as integer
   hundredth deltas in flat columns (`m`, `mf` with facing), other changed or added EntityView
