@@ -1196,7 +1196,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   events and felled trees carried over (a full snapshot, once the queue drains, if too many).
 - **Untrusted input**: a reassembled message may be at most 1 MB from a client and 32 MB from
   the host; more than 100 malformed frames in 10 s closes with 'protocol-error'. Token buckets
-  per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5, `ping` 4/8, `mark` 1.5/5 (`MARK_RATE`),
+  per client (rate/s, burst): in game `cmd` 40/80, `chat` 1/5 (all-chat and `teamchat` share it), `ping` 4/8, `mark` 1.5/5 (`MARK_RATE`),
   `resync` at most one per second (deferred); in the lobby `lobby` patches 5/10, `chat` 1/5, `ping` 4/8, one `hello`.
   The host rebuilds every client command from a whitelist (src/net/sanitize.js: 20 types, typed
   fields, unit lists deduped and capped at 256, coordinates clamped, type ids own keys of the
@@ -1210,10 +1210,12 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `EVENT_SHAPES`, the command whitelist, the team mark kinds and the unit / building / ability /
     pantheon ids, and of the rules themselves (every value in the data tables and config, so a balance
     change alone also marks older replays as from another build), so a stale tab after a deploy is refused with the "Version mismatch" text; it is
-    only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`,
+    only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `teamchat {text}` (in game: to the
+    sender's team only, below), `ping {ts}`,
     `mark {kind, x, y}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
-    `delta {d}`, `chat {from, name, text, system, voice?}` (`voice: true` marks a computer player's line, 10.1), `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
+    `delta {d}`, `chat {from, name, text, system, voice?, team?}` (`voice: true` marks a computer player's line, 10.1;
+    `team: true` a team line, to the sender's teammates only), `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
     teammates only), `kick {reason}`, `end {reason}`
 - **Team marks** (pings and markers, 9): a mark is a signal, not world state, so it never rides in a
   snapshot (snapshots go to everyone). The kinds are the table `MARKS` in `src/data/marks.js`. The sender's
@@ -1229,6 +1231,24 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   `MARK_SEND_RATE` (1/s, burst 4, in `Game.sendMark`), a little under the host's bucket so a mark the sender saw
   go up is never one the host silently dropped; past it the HUD says "Slow down: too many pings." A client's mark
   that reaches the host before the match has started is ignored.
+- **Team chat** (allies only, as in AoE II / IV and SC2): Enter opens the chat box on everyone; its "To all:" label
+  is a switch (`Hud.chatTo`: a click or Tab flips it to "To allies:", the box going green) and Shift+Enter in the game
+  opens it on the allies; in the box Shift+Enter sends to the allies whatever the switch says. A line that starts
+  with "/t " or "/team " goes to the allies, "/a " or "/all " to everyone, the prefix taken off (`chatTarget` in
+  `src/ui/hud-data.js`); the switch follows the prefix as it is typed. Every opening starts on everyone. The allies
+  are the setup's other players on my team (`hasAllies`), humans or computer players, alive or defeated: with none
+  (a 1v1, a free-for-all) the switch is disabled and every line, Shift+Enter and "/t " included, goes to everyone.
+  A defeated player keeps both channels (they stay on their team); there are no online spectators, and a replay
+  has no chat box. On the wire it is routed as a team mark is: a client sends `teamchat {text}` (its own message
+  name, not a flag on `chat`, so the protocol fingerprint changes and a build that would broadcast it can never
+  host one that sends it), through the same `chat` bucket and `sanitizeChat`; the host's `relayTeamChat` sends
+  `chat {from, name, text, system: false, team: true}`, `from` always the connection's own index, to the open
+  connections on the sender's team, the sender included (its line comes back from the host, as in all-chat), and
+  shows it on its own screen only when on that team (the host's own `sendChat(text, { team: true })` goes the same
+  way). Other teams' connections never receive it. A client shows a `team` line only from a player on its own team.
+  The HUD shows a team line as "[Allies] Name: text" (`hud-chat-team`, green, the card `is-team`). The host's replay
+  records only the chat its screen showed, so never another team's team lines (its own team's carry a flag, 9.5).
+  The lobby chat has no team channel (the teams are still being chosen there).
 - Delta codec (`src/net/delta.js`, wire format v2; the header comment lists every key): host
   keeps the last snapshot sent to each client and sends only changes: movement as integer
   hundredth deltas in flat columns (`m`, `mf` with facing), other changed or added EntityView
@@ -2027,7 +2047,7 @@ per-frame budget, so a revealed army appears over a few frames.
   and a red tip by the cursor with the reason (`InputController.showPeaceZone` / `peaceTip`; the same
   text a refused click and the sim give).
   God portraits top-left (click selects, double-click centers). Messages (alerts, "Kronos is being summoned!",
-  the game's other events, chat on Enter) are the stone cards at the bottom left ("The message feed" below);
+  the game's other events, chat on Enter, to the allies on Shift+Enter or "/t ": 7 "Team chat") are the stone cards at the bottom left ("The message feed" below);
   an error is the red line over the console. Game-over overlay with the after-game chronicle (below), menu (surrender, quit).
   **After-game chronicle** (`src/game/chronicle.js`, `src/ui/hud-chronicle.js`): the victory / defeat / draw screen and
   the "game ended" screen have four tabs, after the Age of Empires score screens. Summary: pantheon, score (its tooltip
@@ -2133,7 +2153,8 @@ per-frame budget, so a revealed army appears over a few frames.
   peace marks, chat) is a card at the bottom left, above the idle button and the task counts, in the tips' carved
   stone: an emblem chip (the line's own sign, a unit's, building's or god's emoji or a resource's, else its kind's
   from `messageIcon`; the stylesheet draws it from the card's `data-icon`), an edge in the colour of its kind
-  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat) and the text at
+  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat, a green "[Allies]" before
+  the name of a team line) and the text at
   1.18 em. A card slides in with a flash of its colour (a warning pulses three times), stays 10 to 16 s by length
   (`messageDwell`: 8.5 s plus 45 ms a letter, 2.5 s more for a warning; chat 14 s) and fades. A line that comes
   again while its card is still up (enemies still near, a second "Temple completed.") counts up a ×N badge and
@@ -2486,7 +2507,8 @@ its ticks, and checksums.
   `data`, gzip-compressed by CompressionStream; a 2-player 15-minute game is about 26 KB, a 4-player
   22-minute one about 100 KB), keeping the newest 12. Storage that is off keeps nothing, silently.
   A record: `{ format: 1, id, version (PROTOCOL_VERSION), date, setup, pov, ticks, result, winningTeam,
-  mode, players, truncated, cmds: [[tick, player, cmd]], chat: [[tick, from, text, voice?, system?]],
+  mode, players, truncated, cmds: [[tick, player, cmd]], chat: [[tick, from, text, voice?, system?, team?]] (`team`: a line
+  to the host's allies only; the host never sees another team's, 7 "Team chat"),
   sums: [[tick, hash]] }`. Loading (and opening a file, untrusted) goes through `sanitizeReplay`:
   the setup through `validateSetup`, the commands in tick order through `normalizeCommand`.
 - Playback: a Game built with `replay` runs a `ReplaySession` (the HostSession surface) whose World gets

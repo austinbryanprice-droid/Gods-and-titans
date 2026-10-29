@@ -375,3 +375,30 @@ export function mineTripText(mods) {
   const secs = Math.round((MINE_TIME / workSpeed(mods)) * 10) / 10;
   return `${secs} s per ${CARRY_AMOUNT + mods.carry.g} gold`;
 }
+
+/** Whether player `myIndex` has a teammate in the setup (anyone else, human or computer, on the same team). */
+export function hasAllies(setup, myIndex) {
+  const players = (setup && setup.players) || [];
+  const me = Number.isInteger(myIndex) ? players[myIndex] : null;
+  if (!me || !Number.isInteger(me.team)) return false;
+  return players.some((p, i) => i !== myIndex && p && p.team === me.team);
+}
+
+// "/t ", "/team " (allies) and "/a ", "/all " (everyone) at the start of a chat line pick its audience.
+const CHAT_PREFIX = /^\/(t|team|a|all)(?:\s+|$)/i;
+
+/**
+ * Who a typed chat line goes to (DESIGN 7, "Team chat"): { text, team }. A leading "/t " or "/team "
+ * sends it to the allies and "/a " or "/all " to everyone, whatever the chat box's switch says
+ * (`allies`); the prefix is taken off. Without teammates (`canAllies` false) every line goes to everyone.
+ */
+export function chatTarget(raw, { allies = false, canAllies = false } = {}) {
+  let text = typeof raw === 'string' ? raw.trim() : '';
+  let team = !!allies;
+  const m = CHAT_PREFIX.exec(text);
+  if (m) {
+    team = m[1].toLowerCase().startsWith('t');
+    text = text.slice(m[0].length).trim();
+  }
+  return { text, team: team && !!canAllies };
+}

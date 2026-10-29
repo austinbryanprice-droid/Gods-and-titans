@@ -1361,7 +1361,7 @@ export class InputController {
     if (this.game.replayBar && this.game.replayBar.onKey(e)) return; // a replay's own keys (src/ui/hud-replay.js)
     if (key === 'Enter') {
       e.preventDefault();
-      if (!rep) hud.openChat();
+      if (!rep) hud.openChat({ allies: !!e.shiftKey }); // Shift+Enter: to the allies (DESIGN 7, "Team chat")
       return;
     }
     if (key === 'Alt') {

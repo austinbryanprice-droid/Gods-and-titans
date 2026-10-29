@@ -16,7 +16,7 @@ import { getCommandCard, withCardKeys } from './command-card.js';
 import { cardKeysOf } from './key-bindings.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, pauseText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, pauseText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip, chatTarget, hasAllies } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -202,21 +202,29 @@ export class Hud {
     this.chatInput = el('input', 'hud-chat-input');
     this.chatInput.type = 'text';
     this.chatInput.maxLength = 200;
-    this.chatInput.placeholder = 'Message all players — Enter to send, Esc to cancel';
-    this.chatBox = el('div', 'hud-chat hud-panel', el('span', 'hud-chat-to', 'To all:'), this.chatInput);
+    // Who the line goes to (DESIGN 7, "Team chat"): everyone, or the allies only. The switch is a button
+    // (Tab flips it too) that only shows when I have a teammate; "/t " or "/team " sends one line to the allies.
+    this.chatAllies = false;
+    this.chatTo = el('button', 'hud-chat-to', 'To all:');
+    this.chatTo.type = 'button';
+    this.chatTo.addEventListener('click', () => this.setChatAllies(!this.chatAllies));
+    this.chatBox = el('div', 'hud-chat hud-panel', this.chatTo, this.chatInput);
     this.chatBox.hidden = true;
     this.chatInput.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter') {
         e.preventDefault();
-        const text = this.chatInput.value.trim();
-        if (text) game.sendChat(text);
+        this.sendChatLine(game, { allies: e.shiftKey || this.chatAllies });
         this.closeChat();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         this.closeChat();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        this.setChatAllies(!this.chatAllies);
       }
     });
+    this.chatInput.addEventListener('input', () => this.showChatTarget());
     // Key-ups are left to reach the input controller: a key held when chat opened (an
     // arrow, Alt, Shift) would otherwise stay "down" there after it was released.
     this.chatInput.addEventListener('blur', () => {
@@ -719,7 +727,7 @@ export class Hud {
     }, ms);
   }
 
-  /** A chat line { from, name, text, system }. */
+  /** A chat line { from, name, text, system, team? }. */
   chat(line) {
     if (!line || typeof line !== 'object') return;
     // Lines come from the network: clean them again before they reach the page
@@ -733,7 +741,10 @@ export class Hud {
     const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
     const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
     const who = el('b', 'hud-chat-from', `${sanitizeName(line.name || (p && p.name), 'Player')}:`);
-    const card = this.feedCard('chat', null, [who, ' ', el('span', null, text)]);
+    // A line to the allies only (DESIGN 7, "Team chat") says so before the name, in the allies' green.
+    const parts = line.team ? [el('b', 'hud-chat-team', '[Allies]'), ' ', who] : [who];
+    const card = this.feedCard('chat', null, [...parts, ' ', el('span', null, text)]);
+    if (line.team) card.classList.add('is-team');
     if (p) {
       const color = displayColor(safeColor(p.color, '#f1e8d4'));
       who.style.color = color;
@@ -799,13 +810,47 @@ export class Hud {
 
   // ---------------------------------------------------------------- chat
 
-  openChat() {
+  /** Whether the local player has a teammate to talk to (else every line goes to everyone). */
+  canChatAllies() {
+    return hasAllies(this.vs.setup, this.vs.myIndex);
+  }
+
+  /** Open the chat box, to everyone or ({ allies: true }) to the allies when I have any. */
+  openChat({ allies = false } = {}) {
     if (this.chatOpen) return;
     this.chatOpen = true;
     this.chatBox.hidden = false;
     this.msgs.classList.add('is-chatting');
     this.chatInput.value = '';
+    this.setChatAllies(allies);
     this.chatInput.focus({ preventScroll: true });
+  }
+
+  /** Point the chat box's switch at the allies (true) or everyone; without teammates it stays on everyone. */
+  setChatAllies(on) {
+    const can = this.canChatAllies();
+    this.chatAllies = !!on && can;
+    this.chatTo.disabled = !can;
+    this.chatTo.title = can ? 'Who reads it: click or Tab to switch (Shift+Enter sends to allies, "/t " too)' : 'You have no allies in this game';
+    this.showChatTarget();
+  }
+
+  /** The switch's words and the box's colour follow where the line would go, a typed "/t " included. */
+  showChatTarget() {
+    const { team } = chatTarget(this.chatInput.value, { allies: this.chatAllies, canAllies: this.canChatAllies() });
+    this.chatTo.textContent = team ? 'To allies:' : 'To all:';
+    this.chatBox.classList.toggle('is-team', team);
+    this.chatInput.placeholder = team
+      ? 'Message your allies — Enter to send, Esc to cancel'
+      : 'Message all players — Enter to send, Esc to cancel';
+  }
+
+  /** Send what the box holds, to the allies or everyone (chatTarget: a "/t " or "/all " prefix wins). */
+  sendChatLine(game, { allies = this.chatAllies } = {}) {
+    const { text, team } = chatTarget(this.chatInput.value, { allies, canAllies: this.canChatAllies() });
+    if (!text) return;
+    if (team) game.sendChat(text, { team: true });
+    else game.sendChat(text);
   }
 
   closeChat() {

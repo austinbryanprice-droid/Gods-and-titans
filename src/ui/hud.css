@@ -308,6 +308,10 @@
 .hud-msg.is-fading { opacity: 0; transform: translateX(-0.7em); }
 .hud-msgs.is-chatting .hud-msg { opacity: 1 !important; transform: none !important; }
 .hud-chat-from { font-weight: 700; }
+/* Team chat (DESIGN 7): "[Allies]" in green before the name, and the chat box turns green while it talks to them. */
+.hud-chat-team { font-weight: 700; color: #7fdc8c; }
+.hud-chat.is-team .hud-chat-to { color: #7fdc8c; }
+.hud-chat.is-team .hud-chat-input:focus { border-color: #7fdc8c; box-shadow: 0 0 0.6em rgba(127, 220, 140, 0.3); }
 @keyframes hud-card-in {
   0% { opacity: 0; transform: translateX(-1.8em) scale(0.96); }
   60% { opacity: 1; transform: translateX(0.3em) scale(1); }
@@ -506,7 +510,9 @@
   border-radius: 4px;
   z-index: 2;
 }
-.hud-chat-to { font: 600 max(0.8em, var(--mw-min-text))/1 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold); white-space: nowrap; }
+.hud-chat-to { font: 600 max(0.8em, var(--mw-min-text))/1 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold); white-space: nowrap; background: none; border: 0; padding: 0.2em 0; cursor: pointer; }
+.hud-chat-to:disabled { cursor: default; }
+.hud-chat-to:not(:disabled):hover { text-decoration: underline; }
 .hud-chat-input {
   flex: 1;
   min-width: 0;
