@@ -242,3 +242,58 @@ test('Chapter II ends with Loki on Vigrid: he walks for the north at 13:00, the 
   const k = w.campaign.m.objectives.findIndex((o) => o.id === 'loki');
   assert.equal(w.campaign.shown[k], true);
 });
+
+test('The Burning Bridge: razing Helheim\'s town early does not win it; the hold still runs out to Heimdall\'s horn', () => {
+  const w = world('bifrost');
+  for (const b of w.buildingList.filter((x) => x.owner === 1)) w.killEntity(b, null);
+  run(w, 2);
+  assert.equal(w.players[1].defeated, true);
+  assert.equal(w.gameOver, null, 'not over before the horn');
+  const hold = w.campaign.m.objectives.findIndex((o) => o.id === 'hold');
+  assert.equal(w.campaign.state[hold], OPEN);
+  w.time = 538;
+  run(w, 1);
+  assert.equal(w.gameOver, null);
+  run(w, 3);
+  assert.equal(w.campaign.state[hold], DONE);
+  assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' });
+  assert.ok(tagged(w, 'asgard').length > 0, 'the host of Asgard came down');
+});
+
+test('Ragnarök: breaking Loki\'s host early does not win it; Loki still comes at 13:00 and must fall', () => {
+  const w = world('vigrid');
+  const lokiHome = w.campaign.homes[1];
+  for (const b of w.buildingList.filter((x) => x.owner === 1 || x.owner === 3)) w.killEntity(b, null);
+  run(w, 2);
+  assert.equal(w.gameOver, null, 'not over without Loki');
+  const conquer = w.campaign.m.objectives.findIndex((o) => o.id === 'conquer');
+  const loki = w.campaign.m.objectives.findIndex((o) => o.id === 'loki');
+  assert.equal(w.campaign.state[conquer], DONE);
+  assert.equal(w.campaign.state[loki], OPEN);
+  w.time = 779.5;
+  run(w, 2);
+  const host = tagged(w, 'loki');
+  const god = host.find((u) => u.type === 'norse_loki');
+  assert.ok(god && god.owner === 1, 'Loki walks for his beaten host');
+  assert.ok(Math.hypot(god.x - lokiHome.x, god.y - lokiHome.y) < 12, 'from where its Town Center stood');
+  assert.equal(w.campaign.shown[loki], true);
+  run(w, 5);
+  assert.equal(w.gameOver, null, 'not over while Loki lives');
+  for (const u of tagged(w, 'loki')) w.killEntity(u, null);
+  run(w, 2);
+  assert.equal(w.campaign.state[loki], DONE);
+  assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' });
+});
+
+test('Ragnarök: Loki slain while his host still stands, the host must still be broken; then it is won', () => {
+  const w = world('vigrid');
+  w.time = 779.5;
+  run(w, 2);
+  for (const u of tagged(w, 'loki')) w.killEntity(u, null);
+  run(w, 2);
+  assert.equal(w.gameOver, null);
+  for (const b of w.buildingList.filter((x) => x.owner === 1 || x.owner === 3)) w.killEntity(b, null);
+  run(w, 2);
+  assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' });
+});
+

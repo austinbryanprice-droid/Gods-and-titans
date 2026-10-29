@@ -19,11 +19,14 @@
 //   conquer                    every enemy player is beaten
 // Any objective but a protect one may have a `limit` (seconds): not done by then, the mission is lost.
 // `optional` objectives are a bonus; `hidden` ones show once an event reveals them. The mission is won when
-// every objective that is not optional and not a protect one is done, or when every enemy is beaten.
+// every objective that is not optional and not a protect one is done, or when every enemy is beaten. A
+// mission's `waitFor` (objective ids) holds that second way back until those are done: its story beat (a
+// hold to the end, a foe who arrives late) still has to happen when the enemy is wiped out early.
 //
 // Events: { at: seconds } or { after: objective id }, then any of: say (a line on the screen, spoken),
-// spawn { owner, tag, units: [[type, n]], at: 'home'|'front', march } (march: sent at the hero's buildings,
-// or at the building tagged `target`), reveal (an objective id).
+// spawn { owner, tag, units: [[type, n]], at: 'home'|'front', march, always } (march: sent at the hero's
+// buildings, or at the building tagged `target`; always: it comes even once its owner is beaten, from where
+// their Town Center stood; otherwise a beaten owner's spawn does not come), reveal (an objective id).
 
 /** Units of a spawn list: [[type, count], ...]. */
 const U = (...pairs) => Object.freeze(pairs.map((p) => Object.freeze(p)));
@@ -255,6 +258,7 @@ const WOLF_AGE = [
       { gold: 700, wood: 500, faith: 250, units: U(['warrior', 5], ['archer', 3]), buildings: [{ type: 'barracks' }, { type: 'house' }, { type: 'house' }, { type: 'temple', tag: 'bridge', ring: 11 }] },
       { townHp: 5000, units: U(['warrior', 4], ['archer', 2]) },
     ],
+    waitFor: ['hold'], // razing Helheim's town early does not sound Heimdall's horn: the hold still runs out
     briefing: 'Loki is leading the dead of Helheim up the burning bridge to Asgard. At the foot of the bridge stands one Temple, and while it stands, the bridge cannot be crossed. Hold it, Jarl. Hold it nine minutes, until Heimdall\'s horn calls the host of Asgard down to you.',
     victory: 'Heimdall\'s horn has sounded, and the host of Asgard holds the bridge. The dead fall back. But Loki was not among them. He has gone west, to the harbour of the dead, where the ship Naglfar is nearly built.',
     defeat: 'The Temple at the bridge has fallen, and the dead are crossing into Asgard.',
@@ -322,6 +326,7 @@ const WOLF_AGE = [
       {},
       { gold: 600, wood: 400 },
     ],
+    waitFor: ['loki'], // breaking the host before 13:00 does not end it: Loki still comes, and must fall
     briefing: 'On the plain of Vigrid the last battle was always meant to be fought. Loki\'s sworn host is camped there with the frost giants of Utgard, and the trickster has promised them the end of the world. But the Archon of Thera has not forgotten the long winter, and has sailed north with the Greeks to end it at its root. Break Loki\'s host, Jarl. And when the trickster comes, bring him down.',
     victory: 'Loki has fallen on Vigrid, and the gods have bound him again. The wolf sleeps, the sun climbs over the fjords, and the long winter is over at last. The world did not end. But far in the east, other gods have watched the north burn, and they are hungry.',
     defeat: 'Loki\'s host has won, and the world ends in fire and ice. Try again, Jarl.',
@@ -333,7 +338,7 @@ const WOLF_AGE = [
     events: [
       { at: 4, say: 'The Greeks of Thera stand beside you. Build, summon, and strike.' },
       { at: 720, say: 'The sky goes dark over Vigrid. Loki is coming!' },
-      { at: 780, say: 'Loki walks on Vigrid with the wolves at his heel! Bring the trickster down!', reveal: 'loki', spawn: { owner: 1, tag: 'loki', units: U(['norse_loki', 1], ['norse_wolf_of_fenrir', 4]), at: 'front', march: true } },
+      { at: 780, say: 'Loki walks on Vigrid with the wolves at his heel! Bring the trickster down!', reveal: 'loki', spawn: { owner: 1, tag: 'loki', units: U(['norse_loki', 1], ['norse_wolf_of_fenrir', 4]), at: 'front', march: true, always: true } },
       { after: 'loki', say: 'The trickster has fallen! Now finish his sworn host.' },
     ],
   },
