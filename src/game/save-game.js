@@ -34,7 +34,8 @@ const PATHFINDER_SCRATCH = ['g', 'parent', 'openGen', 'closedGen', 'goalGen', 'h
 
 const CLASSES = {
   // onCommand is the replay recorder's hook (src/game/replay.js), a function: the loaded game has none.
-  World: { cls: World, skip: ['onCommand'], revive(w) { w.onCommand = null; } },
+  // _bgrid is a lookup grid of the buildings (sim/building-grid.js), rebuilt on demand.
+  World: { cls: World, skip: ['onCommand', '_bgrid'], revive(w) { w.onCommand = null; w._bgrid = null; } },
   MapState,
   PathService,
   Pathfinder: {
