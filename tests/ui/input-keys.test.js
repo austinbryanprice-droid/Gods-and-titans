@@ -208,3 +208,19 @@ test('Grid layout: keys press buttons by position, Esc still cancels, held Train
   input.dispose();
   _resetSettingsForTests();
 });
+
+test('the digit row keeps the control groups on every layout: AZERTY\'s 6 types "-", the zoom-out key, and still recalls group 6', () => {
+  _resetSettingsForTests();
+  const { sel, input, zooms, warrior, key } = setup();
+  sel.set([warrior.id]);
+  key('-', { code: 'Digit6', ctrlKey: true }); // Ctrl+6 saves the group
+  sel.set([]);
+  key('-', { code: 'Digit6' }); // 6 recalls it, and does not zoom
+  assert.deepEqual(zooms, []);
+  assert.deepEqual(sel.ids, [warrior.id]);
+  key('-', { code: 'NumpadSubtract' }); // the keypad's minus and the US minus still zoom out
+  key('-', { code: 'Minus' });
+  assert.deepEqual(zooms, [-1, -1]);
+  input.dispose();
+  _resetSettingsForTests();
+});
