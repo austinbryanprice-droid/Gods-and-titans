@@ -2257,14 +2257,18 @@ A match against the computer (one human, the rest AI; not the guided first match
   saved; a click saves over it, the game stays paused) and **Save & Quit** (saves to the autosave slot and leaves
   without counting the match in the career: it counts when it ends after being carried on). The game is also
   autosaved every `AUTOSAVE_EVERY` (180) seconds of game time ("Game autosaved." in the feed). When the match
-  ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept.
+  ends, its own autosave is deleted (Continue must not bring back a finished game); slots are kept. **Quit to
+  Menu** counts the match as lost (9.2) and deletes its autosave too. A counted match (ended or quit) is
+  remembered by its id (localStorage `mythicwar-settled`, the last 40): a slot of it loaded later plays on but
+  counts nothing again in the career or the daily challenge. The computer players' chat (10.1) does not greet
+  again after a load, nor announce the gods already on the field (`AIVoices.resume`).
 - Title screen: **Continue** (above Play vs AI) loads the newest save, autosave or slot; **Load Game** (small
   button, shown once a save exists) lists them all with Load and Delete.
 - What is saved: the whole World (entities, map state, pathfinding queue, projectiles, statuses, powers, relics,
   sites, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
   `packGraph` (sim/save-graph.js): object identity and cycles, Maps, Sets, typed arrays, NaN, ±Infinity and -0
   survive; class instances come back on their prototypes (`CLASSES` in save-game.js; the pathfinder's scratch
-  buffers are rebuilt, not saved); unit and building data, config and the generated map are stored by name and
+  buffers are rebuilt, not saved; `World.onCommand`, the replay recorder's hook, is left out); unit and building data, config and the generated map are stored by name and
   looked up again (the map is generated again from the setup's seed). A function in the state throws with its
   path, so a test catches new state that cannot be saved. Also kept: the fog explored, enemy buildings and mines
   as last seen, the camera, control groups, the chronicle's samples and the career tracker's tally.
