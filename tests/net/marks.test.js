@@ -216,3 +216,46 @@ test('after the session stopped, a mark is not sent and shows nothing', async ()
   assert.equal(ann.sendMark({ kind: 'ping', x: 1, y: 1 }), null, 'neither does a stopped client');
   assert.deepEqual(seen, []);
 });
+
+// ---------------------------------------------------------------- the sim hears Attack / Defend / Help (DESIGN 10)
+
+test('an Attack, Defend or Help marker is also a sim command from its sender, on the host; a ping or Gather is not', async () => {
+  const g = makeGame([1, 1, 2]);
+  await startAll(g);
+  const [ann, ben] = g.clients;
+  g.host.sendMark({ kind: 'attack', x: 5, y: 6 });
+  g.host.sendMark({ kind: 'ping', x: 7, y: 8 });
+  ann.sendMark({ kind: 'help', x: 30, y: 31 });
+  ann.sendMark({ kind: 'gather', x: 1, y: 2 });
+  ben.sendMark({ kind: 'defend', x: 9, y: 9, from: 0 }); // its own order (a forged sender is ignored), for its own team
+  const orders = () => g.host.world.commands.filter((c) => c.cmd.type === 'teamMark').map((c) => [c.player, c.cmd.kind, c.cmd.x, c.cmd.y]);
+  await waitFor(() => {
+    g.host.step(1);
+    return orders().length >= 3;
+  });
+  await sleep(30);
+  g.host.step(1);
+  assert.deepEqual(orders().sort(), [[0, 'attack', 5, 6], [1, 'help', 30, 31], [2, 'defend', 9, 9]].sort());
+  stopAll(g);
+});
+
+test('a computer ally\'s answer to a marker goes to its team only', async () => {
+  const g = makeGame([1, 1, 2]);
+  await startAll(g);
+  const [ann, ben] = g.clients;
+  g.host.ais.set(1, { tick() {} }); // (Ann's seat played by the computer for this test)
+  g.host.voices = { step: () => [{ from: 1, text: 'Our spears go where you point.', team: true }] };
+  const heard = { host: [], ann: [], ben: [] };
+  g.host.onChat((l) => heard.host.push(l));
+  ann.onChat((l) => heard.ann.push(l));
+  ben.onChat((l) => heard.ben.push(l));
+  g.host.speak([]);
+  await waitFor(() => heard.ann.length === 1);
+  await sleep(30);
+  assert.equal(heard.host.length, 1);
+  assert.equal(heard.host[0].team, true);
+  assert.equal(heard.host[0].voice, true);
+  assert.equal(heard.ann[0].team, true);
+  assert.deepEqual(heard.ben, [], 'the enemy hears nothing');
+  stopAll(g);
+});

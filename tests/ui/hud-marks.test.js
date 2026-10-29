@@ -5,7 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeDom } from './fake-dom.js';
 import { TeamMarks } from '../../src/game/team-marks.js';
-import { MarksLayer, MarkPalette, teammateCount } from '../../src/ui/hud-marks.js';
+import { MarksLayer, MarkPalette, teammateCount, aiAllyCount } from '../../src/ui/hud-marks.js';
 import { Minimap } from '../../src/ui/minimap.js';
 import { Hud } from '../../src/ui/hud.js';
 import { Selection } from '../../src/ui/hud-selection.js';
@@ -200,6 +200,22 @@ test('the tooltips say what the button does and who will see it', () => {
   pad.setTeammates(3);
   assert.match(tip('help'), /Only your 3 teammates see it/);
   assert.match(tip('defend'), /Esc cancels/);
+  assert.doesNotMatch(tip('attack'), /computer/);
+  // Computer allies answer Attack, Defend and Help (DESIGN 10), not a ping or Gather.
+  pad.setTeammates(0, 1);
+  assert.match(tip('attack'), /No other person sees it\. Your computer ally sends its army there\./);
+  assert.match(tip('help'), /computer ally/);
+  assert.doesNotMatch(tip('ping'), /computer/);
+  assert.doesNotMatch(tip('gather'), /computer/);
+  pad.setTeammates(1, 2);
+  assert.match(tip('defend'), /Only your teammate sees it\. Your computer allies send their army there\./);
+});
+
+test('computer allies are the AIs on my team', () => {
+  const vs = (kinds) => ({ myIndex: 0, myTeam: 1, setup: { players: kinds.map(([team, kind]) => ({ team, kind })) } });
+  assert.equal(aiAllyCount(vs([[1, 'human'], [1, 'ai'], [2, 'ai'], [2, 'ai']])), 1);
+  assert.equal(aiAllyCount(vs([[1, 'human'], [1, 'human'], [2, 'ai']])), 0);
+  assert.equal(aiAllyCount({ myIndex: 0, myTeam: 1 }), 0);
 });
 
 test('teammates are the other people on my team: computers have no screen, other teams are not counted', () => {
