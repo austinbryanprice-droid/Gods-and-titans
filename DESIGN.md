@@ -2687,6 +2687,20 @@ Every difficulty steers its army by where the bulk of it stands: the median posi
 (`centroid` in `src/ai/military.js`), not their mean, which stragglers walking out from home used to drag 30
 tiles back, so a siege kept restarting its march and a winning army stood idle by its first waypoint.
 
+Workers are not walked across the map and back (`src/ai/economy.js`). A mine the AI already works stays one of its
+owned mines while an enemy only has a foundation by it (a finished enemy building or a creep camp still takes it
+off): rivals kept placing Storehouse sites by a contested mine and losing them, and each one sent the mine's
+workers to an expansion 110 tiles off and back (Brutal 2v2 seed 33: two Worshippers walked for three minutes,
+mining nothing). Picking a mine weighs the walk past `FAR_TRIP` (40 tiles), and when every mine is full a worker
+queues at the nearest one. A worker sent farther than `FAR_TRIP` is left alone by the gold / wood / prayer
+rebalance for 90 s so it arrives, and across the map only a worker already queued at a full mine moves to another
+mine. A lone enemy Worshipper building by the base no longer calls back an attack (`big` in
+`src/ai/military.js` needs an armed unit), as a rival that kept trying to expand stalled every wave. Measured with
+`tools/sim-audit.mjs` (gold hops between mines 40+ tiles apart, bounces back within 2 min, worker-seconds walking to
+a mine 40+ tiles off): Hard 1v1 seeds 11 to 16, Hard and Brutal 2v2 seeds 21 to 24 and 31 to 33, bounces per game
+minute 0.21 / 0.57 / 0.71 before and 0.05 / 0.24 / 0.15 after, long walks 23 / 63 / 69 s a minute before and
+15 / 36 / 47 after, gold workers idle for 90 s 7 before and 0 after, game lengths alike and no AI errors.
+
 **Brutal** is Hard's play thinking every 3 ticks and raiding more often, and it plays fair like the rest (a 20 %
 gather bonus was tried and taken out: the AIs never cheat). Earlier tiers, more workers, earlier and bolder waves
 and pickier god casting were all measured on top of Hard and made no difference (28 to 36 wins in 64), so Brutal

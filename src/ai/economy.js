@@ -3,8 +3,22 @@
 // commands; buildings are planned in build.js.
 import { doneOf } from './scan.js';
 import { mirrorTie } from './placement.js';
+import { TICK_RATE } from '../config.js';
 
 const MINE_DROP_RANGE = 7; // a mine counts as "owned" with a drop-off this close (footprint gap)
+const FAR_TRIP = 40; // tiles: sending a worker farther than this is a long haul, only worth it for real room
+const HAUL_LOCK = 90 * TICK_RATE; // a worker sent on a long haul is left to arrive and work this long before a rebalance moves it
+
+/** Remember a worker sent more than FAR_TRIP away, so the rebalance does not turn it round mid-walk. */
+function noteHaul(ai, u, x, y) {
+  if (Math.hypot(x - u.x, y - u.y) > FAR_TRIP) ai.hauls.set(u.id, ai.world.tickCount);
+}
+
+/** May the rebalance move this worker to another job or mine? Not while it is on a recent long haul. */
+function movable(ai, u) {
+  const t = ai.hauls.get(u.id);
+  return t === undefined || ai.world.tickCount - t > HAUL_LOCK;
+}
 
 function rectGap(a, b) {
   const gx = Math.max(0, b.tx - (a.tx + a.size), a.tx - (b.tx + b.size));
@@ -19,6 +33,7 @@ export function refreshEconomy(ai, s) {
   for (const b of s.buildings) if (b.constructed && b.def.dropOff) drops.push(b);
   ai.drops = drops;
   const pairs = [];
+  const before = new Set((ai.pairs || []).map((p) => p.mine));
   for (const m of world.mineList) {
     if (m.dead || m.amount <= 0) continue;
     let best = null;
@@ -30,7 +45,7 @@ export function refreshEconomy(ai, s) {
         best = d;
       }
     }
-    if (best && bestGap <= MINE_DROP_RANGE && !ai.mineThreatened(m, s)) pairs.push({ mine: m, drop: best, gap: bestGap, workers: 0 });
+    if (best && bestGap <= MINE_DROP_RANGE && !ai.mineThreatened(m, s, before.has(m))) pairs.push({ mine: m, drop: best, gap: bestGap, workers: 0 });
   }
   ai.pairs = pairs;
   // Wood: the drop-off with the closest accessible trees (re-checked when the
@@ -275,7 +290,9 @@ function bestPair(ai, u) {
   for (const pr of ai.pairs) {
     const room = minersFor(ai, pr) - pr.workers;
     const d = u ? Math.hypot(pr.mine.x - u.x, pr.mine.y - u.y) : 0;
-    const score = -room * 10 + d * 0.05 + pr.gap * 0.1;
+    // A long haul across the map costs a minute of walking: only a lot of room pays for it, and
+    // when every mine is full a worker waits at the nearest rather than at a slightly emptier queue far off.
+    const score = -(room > 0 ? room * 10 : room * 2) + d * 0.05 + Math.max(0, d - FAR_TRIP) * 0.5 + pr.gap * 0.1;
     if (score < bestScore) {
       bestScore = score;
       best = pr;
@@ -330,6 +347,7 @@ export function manageWorkers(ai, s) {
       const pr = bestPair(ai, u);
       if (!pr) return;
       pr.workers++;
+      noteHaul(ai, u, pr.mine.x, pr.mine.y);
       let g = groups.get(pr.mine.id);
       if (!g) groups.set(pr.mine.id, (g = []));
       g.push(u.id);
@@ -340,6 +358,7 @@ export function manageWorkers(ai, s) {
     if (!list.length || !trees.length) return;
     for (const u of list) {
       const t = trees[treeIdx++ % trees.length];
+      noteHaul(ai, u, t.tx + 0.5, t.ty + 0.5);
       ai.issue({ type: 'gather', units: [u.id], tx: t.tx, ty: t.ty });
     }
   };
@@ -393,7 +412,7 @@ export function manageWorkers(ai, s) {
       const fromWood = (w - want.wood > g - want.gold && wood.length > 0) || gold.length === 0;
       let u;
       if (fromWood) {
-        u = nearestTo(wood, ai.prayerPoint(s));
+        u = nearestTo(wood.filter((x) => movable(ai, x)), ai.prayerPoint(s));
         if (u) {
           removeFrom(wood, u);
           w--;
@@ -418,7 +437,7 @@ export function manageWorkers(ai, s) {
       toWood.push(u);
       w++;
     } else if (shiftHelps(want.gold - g, want.wood - w) && wood.length && ai.pairs.length) {
-      const u = pickMovable(wood, 'w');
+      const u = pickMovable(wood.filter((x) => movable(ai, x)), 'w');
       if (!u) break;
       removeFrom(wood, u);
       w--;
@@ -448,6 +467,7 @@ function pickGoldMover(ai, list, pairOf) {
   let bestV = -Infinity;
   for (let i = list.length - 1; i >= 0; i--) {
     const u = list[i];
+    if (!movable(ai, u)) continue;
     const pr = pairOf.get(u.id);
     let v = 0;
     if (pr && pr.workers > minersFor(ai, pr)) v += 4;
@@ -476,9 +496,14 @@ function moveBetweenMines(ai, gold, pairOf) {
   let u = null;
   let bestV = -Infinity;
   for (const w of gold) {
-    if (pairOf.get(w.id) !== over) continue;
+    if (pairOf.get(w.id) !== over || !movable(ai, w)) continue;
     const o = w.order;
-    const v = (o && o.type === 'gather' && o.phase === 'wait' ? 2 : 0) - (w.carryAmount > 0 ? 1 : 0);
+    const waiting = !!(o && o.type === 'gather' && o.phase === 'wait');
+    const d = Math.hypot(under.mine.x - w.x, under.mine.y - w.y);
+    // Across the map only a worker queued at the full mine goes: one still walking there would be
+    // turned round mid-trip, and turned round again when the counts flip back (it never arrives).
+    if (d > FAR_TRIP && !waiting) continue;
+    const v = (waiting ? 2 : 0) - (w.carryAmount > 0 ? 1 : 0) - d * 0.01;
     if (v > bestV) {
       bestV = v;
       u = w;
@@ -488,6 +513,7 @@ function moveBetweenMines(ai, gold, pairOf) {
   over.workers--;
   under.workers++;
   pairOf.set(u.id, under);
+  noteHaul(ai, u, under.mine.x, under.mine.y);
   ai.issue({ type: 'gather', units: [u.id], target: under.mine.id });
   return true;
 }

@@ -373,7 +373,10 @@ export function runMilitary(ai, s) {
   // ---- Mode transitions caused by threats
   if (ai.threat) {
     const farAway = c && dist(c, ai.threat) > 25;
-    const big = ai.threat.power >= Math.max(1.5, armyPower * 0.3) || ai.threat.urgent;
+    // A lone enemy Worshipper placing a building by the base is urgent for the guards at home, but
+    // calling back a whole attack for it let a rival who kept trying to expand stall every wave.
+    const armed = ai.threat.units.some((u) => u.def.class !== 'worker');
+    const big = ai.threat.power >= Math.max(1.5, armyPower * 0.3) || (ai.threat.urgent && armed);
     // (An army answering a teammate's mark has left a guard at home: like a wave, only a big threat calls it back.)
     const away = mil.mode === 'attack' || mil.mode === 'mark';
     if (mil.mode !== 'defend' && (!away || (big && (farAway || ai.threat.power >= armyPower * 0.5)))) {
