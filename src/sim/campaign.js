@@ -9,6 +9,7 @@
 //   createCampaign(world)       the director's state (null in other games)
 //   updateCampaign(world)       every tick, from World.tick
 //   campaignVictory(world)      World.checkVictory in a mission: the hero beaten loses, every enemy beaten wins
+//                               (once the objectives the mission's `waitFor` names are done)
 //   campaignView(world)         the snapshot's `cp` record
 import { PLAYER_COLORS, TICK_RATE } from '../config.js';
 import { MISSIONS, MISSION_BY_ID } from '../data/campaign.js';
@@ -111,6 +112,7 @@ export function campaignStart(world) {
     for (const r of ['gold', 'wood', 'faith']) if (Number.isFinite(s[r])) p[r] = s[r];
     const tc = homeOf(world, i);
     if (!tc) return;
+    if (world.campaign) world.campaign.homes[i] = { x: tc.x, y: tc.y, size: tc.size, owner: i };
     if (i === HERO) tc.cTag = 'home';
     if (s.townHp) {
       tc.maxHp = s.townHp;
@@ -143,6 +145,7 @@ export function createCampaign(world) {
     fired: m.events.map(() => false),
     spawned: new Set(), // tags an event has spawned
     held: 0, // seconds the hero's team has held enough sacred sites without a break
+    homes: [], // per player, where their Town Center stood at the start ({ x, y, size, owner }): an `always` spawn's fallback
     at: null, // [x, y] of the current objective, for the HUD's pointer
   };
 }
@@ -213,7 +216,10 @@ function fire(world, cp, i) {
     cp.spawned.add(s.tag);
     const owner = s.owner;
     const p = world.players[owner];
-    const from = p && !p.defeated ? homeOf(world, owner) : null;
+    // An `always` spawn comes even once its owner is beaten (a story beat the mission waits for): from
+    // where their Town Center stood at the start.
+    let from = p && !p.defeated ? homeOf(world, owner) : null;
+    if (!from && p && s.always) from = (cp.homes && cp.homes[owner]) || null;
     if (from) {
       const units = spawnFront(world, owner, from, s.units, from.size / 2 + 3);
       for (const u of units) {
@@ -339,14 +345,26 @@ function end(world, win) {
   world.emit({ type: 'gameOver', winningTeam, how: 'campaign' });
 }
 
-/** World.checkVictory in a mission: the hero beaten loses; every enemy beaten wins, whatever is left undone. */
+/** Is a mission's "every enemy beaten" win still waiting for a story objective (the mission's `waitFor`)? */
+function waiting(cp) {
+  const ids = cp && cp.m.waitFor;
+  if (!ids || !ids.length) return false;
+  return cp.m.objectives.some((o, i) => ids.includes(o.id) && cp.state[i] !== DONE);
+}
+
+/**
+ * World.checkVictory in a mission: the hero beaten loses; every enemy beaten wins, whatever is left undone,
+ * except an objective the mission's `waitFor` names: then the mission goes on until it is done (updateCampaign
+ * ends it, won once every objective is).
+ */
 export function campaignVictory(world) {
   if (world.gameOver) return;
   const me = world.players[HERO];
   if (!me || me.defeated) return end(world, false);
   if (enemiesLeft(world) > 0) return;
-  // A protected building that fell since the last once-a-second look still fails the mission.
   const cp = world.campaign;
+  if (waiting(cp)) return;
+  // A protected building that fell since the last once-a-second look still fails the mission.
   if (cp && cp.m.objectives.some((o, i) => o.kind === 'protect' && cp.state[i] !== FAILED && tagged(world, o.tag).length === 0)) {
     cp.m.objectives.forEach((o, i) => {
       if (o.kind !== 'protect' || cp.state[i] === FAILED || tagged(world, o.tag).length) return;
@@ -412,6 +430,8 @@ export function updateCampaign(world) {
   if (failed) return end(world, false);
   const won = m.objectives.every((o, i) => o.optional || o.kind === 'protect' || cp.state[i] === DONE);
   if (won) end(world, true);
+  // Every enemy beaten while the mission waited for a story objective: that wait is over now.
+  else if (m.waitFor && !waiting(cp) && enemiesLeft(world) === 0) campaignVictory(world);
 }
 
 /** Snapshot record: { o: per objective [state, value, shown 0/1], h: seconds held, at: [x, y] | null }. */

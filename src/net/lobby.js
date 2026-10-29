@@ -206,7 +206,23 @@ export class LobbyHost {
     return new LobbyHost(ep, { ...opts, transport });
   }
 
-  constructor(endpoint, { transport, name, version = PROTOCOL_VERSION, aiDifficulty = 'normal' }) {
+  /**
+   * The room of a game carried on by its new host (host migration, DESIGN 7): already started, it only
+   * seats the game's players again, each by the rejoin token they got at the start.
+   * @param {object} endpoint from hostRoom
+   * @param {object} o { transport, version, tokens: Map<player index, token> }
+   */
+  static forGame(endpoint, { transport, version = PROTOCOL_VERSION, tokens }) {
+    // Started from the constructor on: a player reaching the room as it opens is seated by token, never sent to the lobby.
+    const lobby = new LobbyHost(endpoint, { transport, name: 'Host', version, started: true });
+    for (const [index, token] of tokens || []) {
+      const t = cleanToken(token);
+      if (t) lobby.rejoinTokens.set(t, index);
+    }
+    return lobby;
+  }
+
+  constructor(endpoint, { transport, name, version = PROTOCOL_VERSION, aiDifficulty = 'normal', started = false }) {
     this.endpoint = endpoint;
     this.aiDifficulty = DIFFICULTIES.includes(aiDifficulty) ? aiDifficulty : 'normal'; // new AI players start at this level
     this.transport = transport;
@@ -216,12 +232,13 @@ export class LobbyHost {
     this.members = new Set(); // { conn, peerId, name, joined, offs }
     this.changeCbs = new Set();
     this.chatCbs = new Set();
-    this.started = false;
+    this.started = started;
     this.closed = false;
     this.gameConns = null;
     this.rejoinTokens = new Map(); // token → player index, for the humans of the started game
     this.rejoining = new Set(); // connections after the start that have not said HELLO yet
     this.rejoinHandler = null; // (index, conn) → reason | null, set by the game's HostSession
+    this.hostToken = null; // the host's own token: a new host (migration) seats this browser with it
     this.state = {
       roomCode: this.roomCode,
       version,
@@ -231,7 +248,7 @@ export class LobbyHost {
       peace: 0,
       survival: false,
       sacred: false,
-      started: false,
+      started,
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
     for (let i = 1; i < MAX_PLAYERS; i++) this.state.slots.push(slotOf('closed', { team: i + 1, color: i }));
@@ -661,6 +678,9 @@ export class LobbyHost {
       this.rejoinTokens.set(token, index);
       m.conn.send({ t: MSG.START, setup, you: index, rejoin: token });
     }
+    // The host gets one too: should the game move to another player's browser (DESIGN 7), this one can take its seat back there.
+    this.hostToken = rejoinToken();
+    this.rejoinTokens.set(this.hostToken, slotToPlayer.get(0));
     this.members.clear();
     this.started = true;
     this.state.started = true;
@@ -669,6 +689,13 @@ export class LobbyHost {
     // The endpoint (the PeerJS peer of the room code) stays open for the whole game, so that a player
     // who drops out can come back (handleRejoin); close() drops it when the host leaves the game.
     return { setup, myIndex: slotToPlayer.get(0), conns };
+  }
+
+  /** Every player's rejoin token of the started game: Map<player index, token> (for the host's heir, DESIGN 7). */
+  gameTokens() {
+    const m = new Map();
+    for (const [token, index] of this.rejoinTokens) m.set(index, token);
+    return m;
   }
 
   /**
@@ -735,7 +762,8 @@ export class LobbyClient {
    * this browser got with `start`. Resolves with what `onStart` gives ({ setup, myIndex, conn }),
    * the connection handed over to the game; rejects with a readable Error (the game is over, this
    * browser was not in it, the room is gone, …), flagged `refused` when the host itself said no (and `retry` when only for now: still loading, busy).
-   * @param {object} opts { transport, roomCode, token, name, params, timeoutMs, signal, version }
+   * @param {object} opts { transport, roomCode, token, name, params, timeoutMs, signal, version, proof }
+   *   (proof: my seat's proof from the host's PLAN; a START without it is refused)
    */
   static async rejoin(opts = {}) {
     const { signal } = opts;
@@ -764,6 +792,8 @@ export class LobbyClient {
           else if (msg.t === MSG.START) {
             const valid = validateSetup(msg.setup, msg.you);
             if (!valid) reject(new Error('The host sent an invalid game setup. Make sure you both run the same version (reload the page).'));
+            // After a host migration only the game's host knows my seat's proof: anyone else in that room is not it.
+            else if (opts.proof && msg.proof !== opts.proof) reject(Object.assign(new Error(REASONS.NOT_HOST), { refused: true, retry: false }));
             else resolve({ setup: valid.setup, myIndex: valid.myIndex, conn, rejoin: token });
           }
         }));

@@ -598,7 +598,8 @@ cannot be sent to; there is no cooldown. Each transfer emits
 `{ type: 'trade', from, to, res, amt, got }`. Rules live in `src/sim/trade.js` (shared with
 the HUD). AI players send part of their spare gold / wood (above 700 / 450, after the
 think's purchases) to the poorest teammate who is nearly broke (under 120 gold / 60 wood),
-from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid).
+from 1:30 on, at most once every 20 s each (`src/ai/team.js` planAid). A stand-in AI holding the seat of
+a player who dropped out (7) sends nothing: it does not give away an absent player's resources.
 
 ### 5.8 Victory
 A player is **defeated** when they own no buildings (finished or not; wall segments do not count).
@@ -871,11 +872,13 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
   finished.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }`, with `say` (a line), `reveal`, and `spawn`
-  `{ owner, tag, units, at, march, target }`: units in a line in front of the owner's Town Center (none if the
-  owner is beaten), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
+  `{ owner, tag, units, at, march, target, always }`: units in a line in front of the owner's Town Center (none if the
+  owner is beaten, unless `always`: then from where that Town Center stood at the start, `cp.homes`), and with `march` sent by attack-move at the building tagged `target` or the hero's side's
   nearest building; idle marchers are sent again each second.
 - The end (`gameOver.how: 'campaign'`): won when every objective that is neither optional nor a protect one is
-  done, or when every enemy player is beaten (a conquest always wins); lost when a protect objective fails or the
+  done, or when every enemy player is beaten (a conquest wins whatever is left undone, except what the
+  mission's `waitFor` names: a story beat that must still happen, so that win waits until those objectives are
+  done, and the mission plays on with no enemy left; `updateCampaign` then ends it); lost when a protect objective fails or the
   hero is beaten. The mission line-up (all checked by AI-only runs with a Normal AI as the hero, which wins all
   five; an Easy one wins the first three): Ashes on the Shore (build a Temple, summon a god, beat the raid that
   lands at 4:30), Burn the Longhouses (destroy three tagged Barracks of an Easy AI), The Narrow Pass (hold a
@@ -884,9 +887,15 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   an Egyptian ally; Surtr wakes at 14:00 and marches). Chapter II: The Wolf Winter (a Temple, a god, and a raid at
   4:30 that makes for the tagged winter stores, a Storehouse that must stand), The Last Link (destroy three tagged
   Shrines of an Easy AI within 15:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
-  minutes against six waves, Valkyries for the hero at 4:30), The Ship of Nails (muster twelve soldiers, which
+  minutes against six waves, Valkyries for the hero at 4:30; `waitFor: ['hold']`: razing Helheim's town early
+  does not win it, the clock still has to reach 9:00), The Ship of Nails (muster twelve soldiers, which
   reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
-  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00).
+  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00; `waitFor: ['loki']`: a host
+  broken before then does not win it, Loki still comes, an `always` spawn from his beaten host's old seat, and
+  must fall). While a hidden `waitFor` objective waits to be revealed, the objective panel shows its `waitText`
+  as an extra row with the clock to the event that reveals it ("Loki comes at the world's end 2:14"), derived from
+  the snapshot (no new sim state, no change to the objective list); a shown one (Burning Bridge's hold) already
+  shows its clock.
 
 ## 6. Simulation API (src/sim/)
 
@@ -1197,7 +1206,8 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   - client→host: `hello {name, version}` (`version` is `PROTOCOL_VERSION` from
     src/net/wire-version.js: `GAME_VERSION` plus an 8-digit fingerprint of the message names,
     `EVENT_SHAPES`, the command whitelist, the team mark kinds and the unit / building / ability /
-    pantheon ids, so a stale tab after a deploy is refused with the "Version mismatch" text; it is
+    pantheon ids, and of the rules themselves (every value in the data tables and config, so a balance
+    change alone also marks older replays as from another build), so a stale tab after a deploy is refused with the "Version mismatch" text; it is
     only ever compared as a string), `lobby {patch}`, `cmd {cmd}`, `chat {text}`, `ping {ts}`,
     `mark {kind, x, y}`, `resync {}`
   - host→client: `welcome {slot, lobby}`, `lobby {lobby}`, `start {setup, you}`, `full {snap}`,
@@ -1262,7 +1272,10 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `world.issueCommand(slotOfConn, cmd)`, ticks AIs, pushes each snapshot into its local
     `ViewState`, sends deltas. A client that disconnects is played by a stand-in AI at the game's
     difficulty (`standInDifficulty`: the hardest computer player of the setup, Normal in a game of
-    people only) and a system chat line says so. Single-player = HostSession with no conns.
+    people only), created with `{ standIn: true }` so that it fights, gathers, builds and trains but
+    casts none of the player's god powers and sends none of their resources to allies (10), and a
+    system chat line says so ("An AI (Hard) plays for them until they rejoin, and keeps their god
+    powers for them."). Single-player = HostSession with no conns.
   - Rejoining (`src/net/rejoin-ticket.js`, `LobbyHost.handleRejoin`, `HostSession.rejoin`,
     `LobbyClient.rejoin`): the lobby's `start` gives each client a secret `rejoin` token, which the
     client's browser keeps (localStorage `mythicwar-rejoin`: room code, token, seat, transport; six
@@ -1271,12 +1284,49 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     the game's session (`lobby.setRejoinHandler`, set by the Game): the stand-in AI gives the seat
     back (or a link of that player still open is replaced, its window told `REPLACED`), and the
     client gets `start` again and a full snapshot (the client keeps its career tally with the ticket,
-    `saveTally`, and a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
+    `saveTally`, and what it has seen, the fog explored and enemy buildings and mines as last seen, every
+    10 s under `mythicwar-rejoin-view` with `saveView`, put back on rejoin; a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
     `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. Anyone else is told
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link
-    offers Rejoin Game. A host that leaves ends the game (nothing to rejoin). Check:
-    `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
+    offers Rejoin Game. The host gets a token too (`lobby.hostToken`), for a game carried on by its
+    heir. Check: `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
+  - Host migration (`src/net/handoff.js`, `HostSession.enableHandoff`, `Game.migrate`): a host that
+    leaves no longer ends an online game. The host names an heir (`pickHeir`: the connected player
+    still playing with the lowest index) and a room code for them, and tells every client
+    (`{t:'plan', heir, room, host, at, proof}`, again whenever the heir changes). Every `HANDOFF_EVERY_MS` (10 s;
+    the first after 2 s) the heir gets the whole game: the save-game graph of the World and the
+    setup's computer players' minds (`packMatch`, DESIGN 9.4), gzip + base64 where the browser has
+    CompressionStream (about 90 KB for four players at 25 minutes; packing takes about 20 ms), with
+    every player's rejoin token and who is connected (`{t:'handoff', room, tick, state, tokens,
+    present, pauses, proofs}`). When the host's link closes (or its END says `host-quit`) and the game is not over,
+    the client's `onEnd` carries `handoff: { plan, backup }`. Unless the host said it hands over (END
+    `carry`), each player first tries the room the game is in now (`plan.at`, `reachHost`, 5 s): when
+    only their own link dropped, the host takes them back and nothing moves (no split game). The heir rebuilds the game from the
+    backup (`takeOver`: `unpackMatch`, a HostSession on the heir's own ViewState, the planned room
+    through `LobbyHost.forGame`, which seats players by token only), AIs hold every other human's
+    seat (`seatAbsent`), pauses already used stay used (the backup carries them), and the game waits, paused, for the players who were connected (not the old
+    host) for at most `HANDOFF_WAIT_MS` (30 s). The others connect there with their own token
+    (`followHeir`, retrying for `HANDOFF_JOIN_MS`, 45 s) and get a ClientSession on their ViewState.
+    The Game swaps the session in place (`adopt`): the renderer, HUD, alerts, chronicle and career go
+    on; `ViewState.resetMotion` drops the motion history, as the game goes back to the backup's tick
+    (at most 10 s; nothing when the host quits through the menu: `handOff` sends a fresh backup
+    and waits up to 4 s for it to go out). The new host keeps an heir of its own in turn; the old
+    host's browser keeps a ticket into the heir's room, so it can take its seat back after a reload.
+    Not carried over: the replay recording (the heir has none), the chat history, the voices' memory.
+    A tree felled in the few seconds the game goes back stays felled in the view. A modified heir sees
+    the whole game and every token: a trade-off for friends' games. Anyone can open a room code, so
+    each seat has a proof (`HostSession.proofs`, random, in that seat's own `plan` and in the heir's
+    `handoff`): the host shows it in the `start` it sends that seat on a rejoin, and `reachHost` and
+    `followHeir` refuse a `start` without it (`REASONS.NOT_HOST`); the rejoin ticket keeps it, so Rejoin from the title checks it too. A player sitting on the planned
+    room can then stop the move (the game ends) but cannot pass for the host and take the others in.
+  - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
+    everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`
+    (3) per player per game, any player still in the game may resume, a pause ends by itself after
+    `PAUSE_MAX_MS` (2 min), defeated players cannot pause, commands are dropped while paused. The
+    Pause key or the game menu's Pause Game for Everyone; a bar under the top bar says who paused
+    and when it goes on, with Resume. Check: `tools/handoff-check.mjs` (two tabs: pause and resume,
+    the host's tab closes, the client carries on as host, the old host rejoins).
   - `ClientSession({ setup, myIndex, conn })`: decodes full/delta into its `ViewState`;
     `sendCommand(cmd)` → `{t:'cmd', cmd}`; `ready` (promise, first full snapshot), `pingMs`,
     `stalledMs` / `stalled` (host silent for `STALL_NOTICE_MS`), `mapMismatch` (setup `mapHash` differs from the locally generated map). `onEnd({ reason })`:
@@ -2473,6 +2523,10 @@ God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing onc
 health or more within the rain; a strike on the enemy unit whose surroundings (the power's area) hold the most
 enemy health, at least 1,800 (a cataclysm 3,600, where an enemy building counts a quarter of its health), and only
 where its team can see (the sim's own `powerRefusal` decides). Easy's `castThreshold` raises every bar.
+A stand-in AI (`createAI(world, index, difficulty, { standIn: true })`, `AIPlayer.standIn`: the AI
+`HostSession` seats for an online player who dropped out, 7) casts none: each power is once per game and stays
+the absent player's to spend when they rejoin. It sends no gifts either (5.7), and otherwise plays in full
+(gathers, builds, trains, fights). Computer players' own AIs are not flagged.
 
 **Difficulties** (`src/ai/profiles.js`): Easy, Normal, Hard and Brutal, every number in one profile each. All
 four play fair: the same resources, rules and units as a player, with no bonus at any level. (They all

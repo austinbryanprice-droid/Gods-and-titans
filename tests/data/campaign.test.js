@@ -64,6 +64,17 @@ test('objectives and events refer to each other: tags, reveals, afters', () => {
       if (o.limit !== undefined) assert.ok(Number.isFinite(o.limit) && o.limit > 0 && o.kind !== 'protect', `${m.id}/${o.id}: a limit in seconds`);
     }
     assert.ok(m.objectives.some((o) => !o.optional && o.kind !== 'protect'), `${m.id} can be won by its objectives`);
+    for (const id of m.waitFor || []) {
+      // The "every enemy beaten" win waits for it, so it must still come about with no enemy left.
+      const o = m.objectives.find((x) => x.id === id);
+      assert.ok(o && !o.optional && o.kind !== 'protect' && o.kind !== 'conquer', `${m.id}: waitFor ${id} is a headline objective`);
+      // Hidden until its beat: the panel needs words for the wait, or a player who has won early sees nothing to do.
+      if (o.hidden) assert.ok(typeof o.waitText === 'string' && o.waitText, `${m.id}: waitFor ${id} has a waitText for the panel`);
+      if (o.kind === 'kill') {
+        const e = m.events.find((x) => x.spawn && x.spawn.tag === o.tag);
+        assert.ok(e && Number.isFinite(e.at) && e.spawn.always, `${m.id}: ${o.tag} spawns on the clock even once its owner is beaten`);
+      }
+    }
     for (const e of m.events) {
       assert.ok(Number.isFinite(e.at) !== (typeof e.after === 'string'), `${m.id}: an event has a time or an objective, not both`);
       if (e.after) assert.ok(ids.has(e.after), `${m.id}: after ${e.after}`);
@@ -89,4 +100,9 @@ test('every spoken line has its recorded clip, named by its words', () => {
 
 test('the computer players\' names fit the 20 characters a player name may have', () => {
   for (const m of MISSIONS) for (const p of m.players.slice(1)) assert.ok(p.name.length <= 20, p.name);
+});
+
+test('Chapter II\'s story beats are headline: the bridge is held to Heimdall\'s horn, and Ragnarök waits for Loki', () => {
+  assert.deepEqual(MISSIONS.find((m) => m.id === 'bifrost').waitFor, ['hold']);
+  assert.deepEqual(MISSIONS.find((m) => m.id === 'vigrid').waitFor, ['loki']);
 });

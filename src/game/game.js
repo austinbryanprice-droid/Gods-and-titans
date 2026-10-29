@@ -30,9 +30,9 @@ import { AlertEngine } from './alerts.js';
 import { Chronicle } from './chronicle.js';
 import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
-import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
+import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason, makeRoomCode } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
-import { readTicket, clearTicket, saveTally } from '../net/rejoin-ticket.js';
+import { readTicket, saveTicket, clearTicket, saveTally, saveView, readView } from '../net/rejoin-ticket.js';
 import { CareerTracker } from './career-tracker.js';
 import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
@@ -49,7 +49,7 @@ import { ReplayRecorder } from './replay.js';
 import { saveReplay } from './replay-store.js';
 import { ReplaySession } from './replay-session.js';
 import { ReplayBar } from '../ui/hud-replay.js';
-import { MatchSaver, loadSaveGame, isSettled, settleMatch } from './game-saves.js';
+import { MatchSaver, loadSaveGame, isSettled, packView, restoreView, settleMatch } from './game-saves.js';
 import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
@@ -146,7 +146,8 @@ export function showChatLine(line) {
 
 /** A single-player match: this machine hosts it and nobody else is connected. */
 function isSolo(s) {
-  return !!(s && s.isHost && s.ticker && (!s.clients || s.clients.size === 0) && !s.stopped);
+  // (A new host after a migration, still waiting for the others to reconnect, is not alone: DESIGN 7.)
+  return !!(s && s.isHost && s.ticker && (!s.clients || s.clients.size === 0) && !s.stopped && !(s.waiting && s.waiting.size));
 }
 
 /** Let the browser paint once (a timer covers a hidden tab, where frames do not run). */
@@ -206,6 +207,11 @@ function dropTicket(launch) {
   if (launch && launch.role === 'client' && launch.rejoin) clearTicket(undefined, launch.rejoin);
 }
 
+/** Forget the ticket a host keeps into its heir's room (DESIGN 7): the game ended, or nobody carries it on. */
+function dropHostTicket(launch, token) {
+  if (token && !(launch && launch.role === 'client')) clearTicket(undefined, token);
+}
+
 export class Game {
   /**
    * @param {object} o
@@ -254,6 +260,12 @@ export class Game {
     this.lastFrame = 0;
     this.disposed = false;
     this.paused = false;
+    this.netPause = null; // an online game paused for everyone (session.pause), or null
+    this.sessionOffs = []; // listeners on the current session (a new host replaces it, DESIGN 7)
+    this.handoffLobby = null; // the room this browser opened after taking the game over from its host
+    this.migrating = false; // following the game to its new host
+    this.leaving = false; // the host is handing the game over before it goes back to the menu
+    this.myToken = (launch && launch.rejoin) || null; // this browser's rejoin token of an online game (DESIGN 7)
     this.solo = false; // a match against the computer, so the game speed applies (set at start)
     this.speed = 1; // game seconds per real second (applySpeed)
     this.showAllBarsHeld = false;
@@ -331,7 +343,7 @@ export class Game {
         this.session = new HostSession({
           setup: loaded.world.setup, myIndex: l.myIndex ?? 0, conns: new Map(), resumed: true, createVoices: voiceFactory,
           createWorld: () => loaded.world,
-          createAI: (world, index, difficulty) => loaded.ais.get(index) || aiFactory(world, index, difficulty),
+          createAI: (world, index, difficulty, opts) => loaded.ais.get(index) || aiFactory(world, index, difficulty, opts),
         });
       } else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
     }
@@ -341,6 +353,11 @@ export class Game {
     if (session.isHost && lobby && typeof lobby.setRejoinHandler === 'function' && typeof session.rejoin === 'function') {
       lobby.setRejoinHandler((index, conn) => session.rejoin(index, conn));
       this.offs.push(() => lobby.setRejoinHandler(null));
+      // ...and should this browser leave, the game goes on in another player's (host migration).
+      if (lobby.online && lobby.started && typeof lobby.gameTokens === 'function' && lobby.hostToken) {
+        this.myToken = lobby.hostToken;
+        this.prepareHandoff(session, lobby.gameTokens(), lobby.roomCode);
+      }
     }
     this.viewState = session.viewState;
     this.selection = new Selection(this.viewState);
@@ -368,9 +385,8 @@ export class Game {
       }));
     }
     if (session.mapMismatch) this.hud.setMapMismatch(true);
-    this.offs.push(session.onChat((line) => this.onChat(line)));
-    if (typeof session.onMark === 'function') this.offs.push(session.onMark((mark) => this.onMark(mark)));
-    this.offs.push(session.onEnd((info) => this.onEnd(info)));
+    this.listenTo(session);
+    this.offs.push(() => this.listenTo(null));
     this.offs.push(this.viewState.on('*', (ev) => this.onEvent(ev)));
     // A replay is watched, not played: no alerts, chronicle, career or recording of its own.
     if (!this.replay) {
@@ -410,6 +426,7 @@ export class Game {
       this.offs.push(() => this.career.dispose());
       if (rejoinMatchId(this.launch)) this.keepTally();
     }
+    if (rejoinMatchId(this.launch)) this.keepView();
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
@@ -651,7 +668,7 @@ export class Game {
         this.viewState.update(now);
         this.selection.prune();
         this.input.update(dt);
-        this.renderer.update(this.paused ? 0 : dt);
+        this.renderer.update(this.paused || this.netPause ? 0 : dt);
         this.renderer.render(now);
       }
     } catch (err) {
@@ -760,7 +777,7 @@ export class Game {
       if (s && typeof s.hold === 'function') s.hold(on);
       return !!on;
     }
-    if (!isSolo(s)) return false;
+    if (!isSolo(s) && !(this.paused && !on)) return false; // (a pause taken alone always ends, even if someone joined since)
     if (on && !this.paused) {
       s.ticker.stop();
       this.paused = true;
@@ -857,8 +874,13 @@ export class Game {
     if (!own && def.id !== 'ping') this.hud.chat({ from: placed.from, name: mark.name, text: def.text });
   }
 
-  onEnd({ reason } = {}) {
+  onEnd({ reason, handoff = null } = {}) {
     if (this.disposed) return;
+    // The host left a game still being played: it goes on with the heir (DESIGN 7).
+    if (handoff && !this.overShown && !this.replay && !this.leaving) {
+      this.migrate(reason, handoff);
+      return;
+    }
     this.ended = true;
     this.setLoading(false);
     // Only a lost link can be rejoined, not a game the host closed. (Taken over by another window: that one keeps the ticket.)
@@ -886,6 +908,7 @@ export class Game {
       if (this.input) this.input.cancelMode();
       if (this.saver) this.saver.onGameOver();
       dropTicket(this.launch);
+      dropHostTicket(this.launch, this.myToken);
       let unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
       const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
       // The guided first match: a victory earns a medal by its game time, kept with the career.
@@ -966,6 +989,40 @@ export class Game {
     this.offs.push(this.viewState.on('snapshot', () => {
       const ms = Date.now();
       if (ms - last < 3000) return;
+      last = ms;
+      keep();
+    }));
+    this.offs.push(keep);
+  }
+
+  /**
+   * A client of a game it can rejoin keeps what it has seen (the fog explored, enemy buildings and mines
+   * as last seen) with its ticket every few seconds and when it leaves; a rejoined Game starts from it
+   * instead of a black map (DESIGN 7).
+   */
+  keepView() {
+    const token = this.launch.rejoin;
+    const vs = this.viewState;
+    const kept = readView(token);
+    if (kept) {
+      try {
+        restoreView(vs, JSON.parse(kept));
+      } catch (err) {
+        console.warn('[game] the rejoin view could not be restored', err);
+      }
+    }
+    let last = 0;
+    const keep = () => {
+      if (this.replaced) return;
+      try {
+        saveView(token, JSON.stringify(packView(vs)));
+      } catch {
+        // too big or storage refused: a rejoin starts from what the side sees now
+      }
+    };
+    this.offs.push(vs.on('snapshot', () => {
+      const ms = Date.now();
+      if (ms - last < 10000) return;
       last = ms;
       keep();
     }));
@@ -1249,6 +1306,7 @@ export class Game {
       this.countDaily(false);
       if (this.saver) this.saver.onGameOver(); // counted: its autosave would bring it back to count again
       settleMatch(rejoinMatchId(this.launch)); // and so would rejoining it (DESIGN 7)
+      if (this.myToken) settleMatch(`rejoin:${this.myToken}`); // a host's too: it can rejoin the game its heir carries on
     }
   }
 
@@ -1344,6 +1402,8 @@ export class Game {
     } catch (err) {
       console.warn('[game] session.stop failed', err);
     }
+    if (this.handoffLobby) this.handoffLobby.close();
+    this.handoffLobby = null;
     try {
       if (this.input) this.input.dispose();
     } catch (err) {
@@ -1498,9 +1558,174 @@ export class Game {
 
   /** Leave the match and go back to the title screen. */
   quitToMenu() {
-    if (this.disposed) return;
+    if (this.disposed || this.leaving) return;
     this.countLeave();
+    const s = this.session;
+    // A host with other players hands the game over first (DESIGN 7): it goes on in the heir's browser.
+    if (s && s.isHost && s.canHandOff && s.clients && s.clients.size) {
+      this.leaving = true;
+      if (this.hud) this.hud.overlays.showWaiting(`Handing the game to ${s.playerName(s.heir)}…`, 'Leaving');
+      s.handOff().catch((err) => console.warn('[game] hand-over failed', err)).finally(() => {
+        if (this.disposed) return;
+        this.dispose();
+        if (this.onExit) this.onExit();
+      });
+      return;
+    }
+    if (s && s.isHost && !s.canHandOff) dropHostTicket(this.launch, this.myToken);
     this.dispose();
     if (this.onExit) this.onExit();
   }
+
+  // ---------------------------------------------------------------- online: pause and host migration (DESIGN 7)
+
+  /** Follow this session's chat, marks, end and pauses (and stop following the one before). */
+  listenTo(session) {
+    for (const off of this.sessionOffs.splice(0)) off();
+    if (!session) return;
+    this.sessionOffs.push(session.onChat((line) => this.onChat(line)));
+    if (typeof session.onMark === 'function') this.sessionOffs.push(session.onMark((mark) => this.onMark(mark)));
+    this.sessionOffs.push(session.onEnd((info) => this.onEnd(info)));
+    if (typeof session.onPause === 'function') this.sessionOffs.push(session.onPause((p) => this.onNetPause(p)));
+  }
+
+  /** Is this an online game, which pauses for everyone (not a match against the computer only)? */
+  get online() {
+    const s = this.session;
+    return !!(s && !this.replay && typeof s.sendPause === 'function' && (!s.isHost || (s.clients && s.clients.size > 0) || this.handoffLobby || (this.launch && this.launch.lobby && this.launch.lobby.online)))
+      && !isSolo(s);
+  }
+
+  /** Pause the online game for everyone, or resume it (the Pause key, the game menu, the pause bar). */
+  togglePause() {
+    const s = this.session;
+    if (!this.online || this.ended || this.disposed) return false;
+    const vs = this.viewState;
+    if (!s.pause && vs && (vs.gameOver || (vs.me && vs.me.defeated))) return false;
+    s.sendPause(!s.pause);
+    return true;
+  }
+
+  onNetPause(p) {
+    this.netPause = p ? { ...p } : null;
+    if (!p && this.viewState) this.viewState.resetClock();
+    if (this.hud && typeof this.hud.setPause === 'function') this.hud.setPause(this.netPause);
+    sfx.play(p ? 'click' : 'select', { volume: 0.6 });
+  }
+
+  /** How this browser reaches the other players: the lobby's transport ('peer', or 'local' between tabs). */
+  netTransport() {
+    const l = this.launch || {};
+    return l.transport || (l.lobby && l.lobby.transport) || (readTicket() || {}).transport || 'peer';
+  }
+
+  /**
+   * As host of an online game, keep an heir ready (DESIGN 7): the session sends them the whole game every
+   * few seconds. This browser keeps a ticket into the heir's room, so that after a reload it can take its seat back there.
+   */
+  async prepareHandoff(session, tokens, here) {
+    const humans = session.setup.players.filter((p) => p.kind === 'human').length;
+    if (humans < 2 || isTutorial(session.setup) || this.mission) return;
+    let mods;
+    try {
+      mods = await Promise.all([loadSaveGame(), import('../net/handoff.js')]);
+    } catch (err) {
+      console.warn('[game] host migration is not available', err);
+      return;
+    }
+    if (this.disposed || session !== this.session || session.stopped) return;
+    const [saveGame, net] = mods;
+    const room = makeRoomCode();
+    session.enableHandoff({ room, here, tokens, pack: (world, ais) => net.encodeState(JSON.stringify(saveGame.packMatch(world, ais))) });
+    if (this.myToken) saveTicket({ roomCode: room, token: this.myToken, myIndex: session.myIndex, name: session.playerName(session.myIndex), transport: this.netTransport(), proof: session.proofs.get(session.myIndex) });
+  }
+
+  /**
+   * The host left: carry the game on (DESIGN 7). The heir builds it from the copy the host sent and opens the
+   * planned room; everyone else connects there with their token. The view, the HUD and the renderer stay:
+   * only the session under them changes. If that fails, the game ends as it always did.
+   */
+  async migrate(reason, { plan, backup }) {
+    const old = this.session;
+    const mine = plan.heir === this.myIndex;
+    this.migrating = true;
+    this.netPause = null;
+    if (this.hud) {
+      if (typeof this.hud.setPause === 'function') this.hud.setPause(null);
+      if (this.input) this.input.cancelMode();
+      this.hud.overlays.showWaiting(mine ? 'The host has left. You take the game over…' : `The host has left. ${old.playerName(plan.heir)} takes the game over…`, 'Host Left');
+    }
+    const transport = this.netTransport();
+    const name = old.playerName(this.myIndex);
+    try {
+      const net = await import('../net/handoff.js');
+      let session;
+      let lobby = null;
+      // Only my own link may have gone: if the host takes me back, nothing moves (a split game would be worse).
+      // (A host who quit through the menu said it hands over: no need to ask.)
+      const back = reason === REASONS.HOST_QUIT ? null : await net.reachHost({ plan, token: this.myToken, name, transport });
+      if (this.disposed) {
+        if (back) back.conn.close('left');
+        return;
+      }
+      // If what follows does not work out, Rejoin (and the title screen's) tries the new room.
+      if (!back && this.myToken && !mine) saveTicket({ roomCode: plan.room, token: this.myToken, myIndex: this.myIndex, name, transport, proof: plan.proof });
+      if (back) {
+        session = new ClientSession({ setup: back.setup, myIndex: back.myIndex, conn: back.conn, mapData: old.mapData, viewState: this.viewState });
+      } else if (mine) {
+        const [ai, saveGame] = await Promise.all([loadAI(), loadSaveGame()]);
+        const aiFactory = (ai && ai.createAI) || idleAI;
+        ({ session, lobby } = await net.takeOver({
+          plan, backup, transport,
+          makeSession: (save) => {
+            const loaded = saveGame.unpackMatch(save);
+            return new HostSession({
+              setup: loaded.world.setup, myIndex: this.myIndex, conns: new Map(), resumed: true, viewState: this.viewState,
+              createWorld: () => loaded.world,
+              createAI: (world, index, difficulty, opts) => loaded.ais.get(index) || aiFactory(world, index, difficulty, opts),
+              createVoices: (ai && ai.createVoices) || null,
+            });
+          },
+        }));
+      } else {
+        const info = await net.followHeir({ plan, token: this.myToken, name, transport });
+        session = new ClientSession({ setup: info.setup, myIndex: info.myIndex, conn: info.conn, mapData: old.mapData, viewState: this.viewState });
+      }
+      if (this.disposed) {
+        session.stop();
+        if (lobby) lobby.close();
+        return;
+      }
+      this.adopt(session, lobby, !!back);
+    } catch (err) {
+      console.warn('[game] the game could not move to a new host', err);
+      this.migrating = false;
+      if (this.disposed) return;
+      if (this.hud) this.hud.overlays.hideWaiting();
+      this.onEnd({ reason });
+    }
+  }
+
+  /** Carry on with the session of the game's new host (DESIGN 7): this browser's own, or the heir's (or the old host's, reached again). */
+  adopt(session, lobby, reconnected = false) {
+    this.listenTo(session);
+    this.session = session;
+    if (this.handoffLobby) this.handoffLobby.close();
+    this.handoffLobby = lobby;
+    this.migrating = false;
+    this.ended = false;
+    // The game went back a few seconds: the units' motion history is of a future that will not happen.
+    this.viewState.resetMotion();
+    session.start();
+    if (this.hud) {
+      this.hud.overlays.hideWaiting();
+      if (reconnected) this.hud.message('Reconnected to the host.', 'system', { icon: '🔁' });
+      else this.hud.message(session.isHost ? 'You now host the game. It goes on from a few seconds before the host left.' : 'The game goes on with its new host, from a few seconds before the host left.', 'system', { icon: '🔁' });
+      if (typeof this.hud.setPause === 'function') this.hud.setPause(session.pause);
+    }
+    this.netPause = session.pause ? { ...session.pause } : null;
+    // A new host keeps an heir ready in turn (and a ticket into that heir's room).
+    if (session.isHost && lobby) this.prepareHandoff(session, lobby.gameTokens(), lobby.roomCode);
+  }
+
 }

@@ -473,6 +473,27 @@
 .hud-stall[hidden] { display: none; }
 .hud-mismatch:not([hidden]) ~ .hud-stall { top: 5.4em; }
 
+.hud-pausebar {
+  position: absolute;
+  top: 4.6em;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.35em 0.5em 0.35em 0.9em;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #ffe7a3;
+  text-shadow: 0 1px 2px #000;
+  border-radius: 4px;
+  z-index: 3;
+}
+.hud-pausebar[hidden] { display: none; }
+.hud-pause-text { font-variant-numeric: tabular-nums; }
+.hud-pause-ico { font-size: 1.15em; }
+.hud-pause-btn { padding: 0.25em 0.9em; font-size: 0.85em; }
+
 .hud-chat {
   position: absolute;
   left: 0.8em;

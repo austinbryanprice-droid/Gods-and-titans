@@ -5,7 +5,9 @@ import { LobbyHost, LobbyClient } from '../../src/net/lobby.js';
 import { MSG, REASONS } from '../../src/net/protocol.js';
 import { createLoopbackPair } from '../../src/net/transport.js';
 import { fakeWorldFactory, makeFakeMap } from '../../src/net/fake-world.js';
-import { saveTicket, readTicket, clearTicket, saveTally, REJOIN_KEY, TICKET_MAX_AGE_MS } from '../../src/net/rejoin-ticket.js';
+import { saveTicket, readTicket, clearTicket, saveTally, saveView, readView, REJOIN_KEY, REJOIN_VIEW_KEY, TICKET_MAX_AGE_MS } from '../../src/net/rejoin-ticket.js';
+import { ViewState } from '../../src/game/view-state.js';
+import { packView, restoreView } from '../../src/game/game-saves.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(cond, ms = 3000, what = 'condition') {
@@ -77,7 +79,7 @@ test('rejoin: a dropped player in a Hard game gets a Hard stand-in, and takes th
   const standIn = aiCalls[2];
   assert.equal(standIn.index, 1);
   assert.equal(standIn.difficulty, 'hard');
-  assert.match(hostLines.at(-1).text, /^Ann has left the game\. An AI \(Hard\) plays for them until they rejoin\.$/);
+  assert.match(hostLines.at(-1).text, /^Ann has left the game\. An AI \(Hard\) plays for them until they rejoin, and keeps their god powers for them\.$/);
   host.step(3);
   assert.equal(standIn.ticks, 3, 'the stand-in plays while Ann is away');
 
@@ -208,7 +210,11 @@ test('rejoin ticket: kept for one game, a few hours, and cleared once that game 
   const t0 = 1_000_000;
   const token = 'c0ffee'.repeat(4);
   assert.equal(saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local' }, store, t0).roomCode, 'ABCDE');
-  assert.deepEqual(readTicket(store, t0 + 1000), { roomCode: 'ABCDE', token, myIndex: 2, name: 'Ann', transport: 'local', at: t0, tally: null });
+  assert.deepEqual(readTicket(store, t0 + 1000), { roomCode: 'ABCDE', token, myIndex: 2, name: 'Ann', transport: 'local', at: t0, tally: null, proof: null });
+  // After a host migration the ticket keeps my seat's proof (DESIGN 7), checked in the next host's `start`.
+  saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local', proof: 'cd'.repeat(16) }, store, t0);
+  assert.equal(readTicket(store, t0 + 1000).proof, 'cd'.repeat(16));
+  saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local' }, store, t0);
   // The career's running tally rides with the ticket of that game only.
   assert.equal(saveTally('beef'.repeat(8), { buildingsLost: 3 }, store), false);
   assert.equal(saveTally(token, { buildingsLost: 3, godsSummoned: 1 }, store), true);
@@ -224,4 +230,26 @@ test('rejoin ticket: kept for one game, a few hours, and cleared once that game 
   mem.set(REJOIN_KEY, '{nope');
   assert.equal(readTicket(store, t0), null);
   assert.equal(readTicket(null), null);
+});
+
+test('rejoin view: what the player had seen is kept with the ticket and put back, not a black map', () => {
+  const mem = new Map();
+  const store = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const token = 'c0ffee'.repeat(4);
+  const setup = { seed: 3, mapSize: 'small', players: [{ index: 0, team: 1, pantheon: 'greek', kind: 'human' }] };
+  const map = makeFakeMap(32, 32);
+  const before = new ViewState({ setup, mapData: map, myIndex: 0 });
+  for (let i = 0; i < 300; i++) before.explored[i * 3] = 1;
+  before.lastSeen.set(77, { type: 'house', owner: 1 });
+  const packed = JSON.stringify(packView(before));
+  assert.equal(saveView(token, packed, store), false, 'no ticket: the game is over, nothing kept');
+  saveTicket({ roomCode: 'ABCDE', token, myIndex: 0, name: 'Ann', transport: 'local' }, store);
+  assert.equal(saveView(token, packed, store), true);
+  assert.equal(readView('beef'.repeat(8), store), null, 'another game');
+  const after = new ViewState({ setup, mapData: map, myIndex: 0 });
+  restoreView(after, JSON.parse(readView(token, store)));
+  assert.deepEqual([...after.explored], [...before.explored]);
+  assert.deepEqual(after.lastSeen.get(77), { type: 'house', owner: 1 });
+  clearTicket(store, token);
+  assert.equal(mem.has(REJOIN_VIEW_KEY), false, 'cleared with the ticket');
 });

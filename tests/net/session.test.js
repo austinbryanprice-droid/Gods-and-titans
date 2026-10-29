@@ -145,7 +145,7 @@ test('sessions: a disconnected human is taken over by an AI (Normal)', async () 
   assert.equal(aiCalls[0].world, host.world);
   await waitFor(() => annLines.length === 1);
   assert.equal(annLines[0].system, true);
-  assert.match(annLines[0].text, /Ben has left the game\. An AI \(Normal\) plays for them until they rejoin\./);
+  assert.match(annLines[0].text, /Ben has left the game\. An AI \(Normal\) plays for them until they rejoin, and keeps their god powers for them\./);
   assert.match(hostLines[0].text, /Ben has left/);
   await stepAndSync(host, [clients[0]], 5);
   assert.equal(aiCalls[0].ai.ticks, 5);

@@ -40,6 +40,26 @@ function progressWords(o, vs) {
   }
 }
 
+/**
+ * The rows of a mission's story beats still to come: each hidden objective the mission's `waitFor` names, still
+ * open and not yet revealed, as { id, icon, text (its `waitText`), progress (the clock to the timed event that
+ * reveals it, or '') }. Without it a player who has beaten every enemy early sees nothing left to do while the
+ * mission waits (Ragnarök's Loki, at 13:00). Derived from the snapshot alone.
+ */
+export function waitingRows(c, vs) {
+  const m = c && c.mission;
+  if (!m || !Array.isArray(m.waitFor)) return [];
+  const out = [];
+  for (const id of m.waitFor) {
+    const o = c.objectives.find((x) => x.id === id);
+    if (!o || o.shown || o.state !== 0 || !o.waitText) continue;
+    const e = m.events.find((x) => x.reveal === id && Number.isFinite(x.at));
+    const progress = e ? formatClock(Math.max(0, e.at - ((vs && vs.time) || 0))) : '';
+    out.push({ id: `wait:${id}`, icon: o.icon, text: o.waitText, progress });
+  }
+  return out;
+}
+
 export class CampaignView {
   /**
    * @param {HTMLElement} root the HUD root (the panel is appended to it)
@@ -84,7 +104,8 @@ export class CampaignView {
     const rows = c.objectives.filter((o) => o.shown);
     const main = rows.filter((o) => !o.optional && o.kind !== 'protect');
     setText(this.count, `${main.filter((o) => o.state === 1).length}/${main.length}`);
-    const sig = rows.map((o) => `${o.id}:${o.state}:${objectiveProgress(o, vs)}`).join('|');
+    const waits = waitingRows(c, vs);
+    const sig = rows.map((o) => `${o.id}:${o.state}:${objectiveProgress(o, vs)}`).concat(waits.map((w) => `${w.id}:${w.progress}`)).join('|');
     if (sig === this.sig) return;
     this.sig = sig;
     this.list.textContent = '';
@@ -99,6 +120,14 @@ export class CampaignView {
       setClass(li, 'is-failed', o.state === 2);
       setClass(li, 'is-optional', !!o.optional);
       setClass(li, 'is-protect', o.kind === 'protect');
+      this.list.appendChild(li);
+    }
+    // A story beat still to come (a waitFor objective not yet revealed): a row of words and its clock.
+    for (const w of waits) {
+      const li = el('li', 'hud-tips-step is-waiting',
+        el('span', 'hud-tips-check', ''),
+        el('span', 'hud-tips-icon', w.icon || '•'),
+        el('span', 'hud-tips-text', w.text, w.progress ? el('span', 'hud-mission-progress', w.progress) : null));
       this.list.appendChild(li);
     }
   }

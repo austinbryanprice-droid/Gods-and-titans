@@ -79,6 +79,21 @@ export function settleMatch(matchId) {
   }
 }
 
+/** The view's memory (fog explored, enemy buildings and mines as last seen), packed. */
+export function packView(vs) {
+  return packGraph({ explored: vs.explored, lastSeen: vs.lastSeen, mineMemory: vs.mineMemory });
+}
+
+/** Put a packed view memory back (adds to what the view has: nothing seen is forgotten). */
+export function restoreView(vs, packed) {
+  const view = unpackGraph(packed);
+  if (view.explored && view.explored.length === vs.explored.length) {
+    for (let i = 0; i < view.explored.length; i++) if (view.explored[i]) vs.explored[i] = 1;
+  }
+  for (const [id, v] of view.lastSeen || []) if (!vs.lastSeen.has(id)) vs.lastSeen.set(id, v);
+  for (const [id, v] of view.mineMemory || []) if (!vs.mineMemory.has(id)) vs.mineMemory.set(id, v);
+}
+
 function newMatchId() {
   return `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
 }
@@ -125,7 +140,7 @@ export class MatchSaver {
       matchId: this.matchId,
       myIndex: g.myIndex,
       nextAuto: this.nextAuto,
-      view: packGraph({ explored: vs.explored, lastSeen: vs.lastSeen, mineMemory: vs.mineMemory }),
+      view: packView(vs),
       camera: cam && cam.target ? { x: cam.target.x, y: cam.target.y, d: cam.distance } : null,
       groups: sel && sel.groups ? [...sel.groups].map(([k, ids]) => [k, [...ids]]) : [],
       chronicle: g.chronicle ? { samples: g.chronicle.samples, peakArmy: g.chronicle.peakArmy, next: g.chronicle.next } : null,
@@ -195,14 +210,7 @@ export class MatchSaver {
     const g = this.game;
     const vs = g.viewState;
     try {
-      if (extra.view) {
-        const view = unpackGraph(extra.view);
-        if (view.explored && view.explored.length === vs.explored.length) {
-          for (let i = 0; i < view.explored.length; i++) if (view.explored[i]) vs.explored[i] = 1;
-        }
-        for (const [id, v] of view.lastSeen || []) if (!vs.lastSeen.has(id)) vs.lastSeen.set(id, v);
-        for (const [id, v] of view.mineMemory || []) if (!vs.mineMemory.has(id)) vs.mineMemory.set(id, v);
-      }
+      if (extra.view) restoreView(vs, extra.view);
     } catch (err) {
       console.warn('[save] the fog of war could not be restored', err);
     }

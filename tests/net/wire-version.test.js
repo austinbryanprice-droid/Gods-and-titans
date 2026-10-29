@@ -29,3 +29,14 @@ test('the fingerprint changes when a wire table changes (stale builds are refuse
   tweak(() => { COMMAND_SPECS.extra = {}; }, () => { delete COMMAND_SPECS.extra; });
   tweak(() => { UNITS.extra_unit = {}; }, () => { delete UNITS.extra_unit; });
 });
+
+test('a balance change alone changes the fingerprint too (older replays are marked as from another build)', () => {
+  const base = wireFingerprint();
+  const u = Object.values(UNITS).find((d) => Number.isFinite(d.hp));
+  const hp = u.hp;
+  u.hp = hp + 1;
+  const changed = wireFingerprint();
+  u.hp = hp;
+  assert.notEqual(changed, base);
+  assert.equal(wireFingerprint(), base);
+});

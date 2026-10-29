@@ -508,6 +508,15 @@ export class ViewState {
     this.resetClock();
   }
 
+  /**
+   * Forget how the units were moving (a game carried on by a new host went back a few seconds, DESIGN 7):
+   * they are drawn from the next snapshots on, and the clock re-anchors on the first of them.
+   */
+  resetMotion() {
+    this.hist.clear();
+    this.resetClock();
+  }
+
   /** Re-anchor the playback clock on the next snapshot (after a pause: sim time stood still). */
   resetClock() {
     this.clockOffset = null;

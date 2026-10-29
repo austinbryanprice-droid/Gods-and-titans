@@ -192,6 +192,19 @@ export function tauntDwell(text) {
 }
 
 /**
+ * The pause bar of an online game (DESIGN 7): who paused it, or that a new host waits for the players, and
+ * when it goes on by itself. '' when it is not paused.
+ * @param {{ by: number, reason: string, endsAt: number }|null} pause session.pause (endsAt in performance.now() ms)
+ * @param {(i: number) => string} nameOf a player's name
+ */
+export function pauseText(pause, nameOf, nowMs = performance.now()) {
+  if (!pause) return '';
+  const left = formatClock(Math.ceil(Math.max(0, pause.endsAt - nowMs) / 1000));
+  if (pause.reason === 'handoff') return `The new host waits for the players to reconnect · goes on in ${left}`;
+  return `Paused by ${pause.by >= 0 ? nameOf(pause.by) : 'the game'} · goes on in ${left}`;
+}
+
+/**
  * The connection warning for a joined (client) session while the host has been silent
  * for STALL_NOTICE_MS (session.stalled / stalledMs), else '' (also for a HostSession,
  * which has neither property, and for no session).

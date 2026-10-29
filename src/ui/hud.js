@@ -16,7 +16,7 @@ import { getCommandCard, withCardKeys } from './command-card.js';
 import { cardKeysOf } from './key-bindings.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, pauseText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -227,6 +227,18 @@ export class Hud {
     // Shown while the host has gone quiet (clients only; see stallText).
     this.stall = el('div', 'hud-stall');
     this.stall.hidden = true;
+    // An online game paused for everyone (DESIGN 7): who paused it, when it goes on, and Resume for any player.
+    this.pauseText = el('span', 'hud-pause-text');
+    this.pauseBtn = el('button', 'mw-btn mw-btn--primary hud-pause-btn', 'Resume');
+    this.pauseBtn.type = 'button';
+    this.pauseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.play('click');
+      if (game.session && game.session.pause) game.togglePause();
+    });
+    this.pauseBar = el('div', 'hud-pausebar hud-panel', el('span', 'hud-pause-ico', '⏸'), this.pauseText, this.pauseBtn);
+    this.pauseBar.hidden = true;
+    this.pause = null;
 
     // Bottom console: minimap | selection | command card.
     this.miniCanvas = el('canvas', 'hud-minimap-canvas');
@@ -247,10 +259,10 @@ export class Hud {
     this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.pauseBar, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
-    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root]) {
+    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root, this.pauseBar]) {
       p.addEventListener('mousedown', (e) => {
         if (e.target !== this.chatInput) e.preventDefault();
       });
@@ -371,6 +383,7 @@ export class Hud {
     } else setHidden(this.ping, true);
     setText(this.stall, stall);
     setHidden(this.stall, !stall);
+    if (this.pause) setText(this.pauseText, pauseText(this.pause, (i) => (s ? s.playerName(i) : `Player ${i + 1}`)));
     if (!this.leadShown) {
       // The lobby's Random is drawn at Start: name the pantheon once, as the game opens.
       this.leadShown = true;
@@ -499,6 +512,15 @@ export class Hud {
     setClass(this.siteChip, 'is-ours', c.cls === 'is-ours');
     setClass(this.siteChip, 'is-theirs', c.cls === 'is-theirs');
     if (!this.siteChip.title) this.siteChip.title = siteChipTitle(this.vs);
+  }
+
+  /** Show (pause: session.pause) or hide (null) the bar of an online game paused for everyone. */
+  setPause(pause) {
+    this.pause = pause || null;
+    setHidden(this.pauseBar, !this.pause);
+    if (!this.pause) return;
+    const s = this.game.session;
+    setText(this.pauseText, pauseText(this.pause, (i) => (s ? s.playerName(i) : `Player ${i + 1}`)));
   }
 
   /** Current command card (input.js reads it for hotkeys). */
