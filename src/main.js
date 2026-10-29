@@ -98,6 +98,12 @@ export async function startGame(launch) {
         backToMenu(mission ? 'campaign' : 'title', mission ? { mission } : {});
       },
       onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : mission ? () => startGame({ ...launch, conns: new Map() }) : null,
+      // An online game's Rematch (DESIGN 7): the host back in its room's lobby, a client joining it.
+      onRematchOnline: (to) => {
+        if (current === game) current = null;
+        if (to && to.lobby) backToMenu('lobby', { lobby: to.lobby, role: 'host', transport: to.lobby.transport, keepLobby: true });
+        else backToMenu('rematch', { join: to && to.join });
+      },
       onRejoin: launch && launch.role === 'client' ? () => {
         if (current === game) current = null;
         backToMenu('rejoin');

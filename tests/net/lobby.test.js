@@ -20,7 +20,9 @@ const kinds = (state) => state.slots.map((s) => s.kind);
 test('lobby flow: join, presets, setMine, chat, kick on version mismatch, start', async () => {
   const host = await LobbyHost.create({ transport: 'loopback', name: 'Austin' });
   assert.match(host.roomCode, /^[A-Z2-9]{5}$/);
-  assert.deepEqual(kinds(host.state), ['host', 'open', 'closed', 'closed'], 'default 1v1 online');
+  assert.deepEqual(kinds(host.state), ['host', 'open', 'open', 'open'], 'online, every seat is open for friends');
+  assert.deepEqual(host.state.slots.map((s) => s.team), [1, 2, 1, 2], 'on two sides, row by row');
+  assert.equal(host.state.preset, null);
   assert.equal(host.state.mapSize, 'small');
   assert.equal(host.canStart(), false, 'only one team so far');
 
@@ -39,6 +41,7 @@ test('lobby flow: join, presets, setMine, chat, kick on version mismatch, start'
   assert.equal(host.canStart(), true, 'host team 1 vs Bob team 2');
 
   // Lobby is full in 1v1.
+  assert.ok(host.applyPreset('1v1'));
   await assert.rejects(LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Cara' }), /full/);
 
   // Version check in hello.
@@ -63,10 +66,11 @@ test('lobby flow: join, presets, setMine, chat, kick on version mismatch, start'
   assert.ok(host.applyPreset('2v2'));
   assert.deepEqual(host.state.slots.map((s) => s.team), [1, 1, 2, 2]);
   assert.equal(new Set(host.state.slots.map((s) => s.color)).size, 4, 'colors stay unique');
-  assert.equal(host.state.slots[2].name, 'AI (Normal)');
+  assert.deepEqual(kinds(host.state), ['host', 'human', 'open', 'open'], 'online, the presets leave seats open for friends');
+  assert.ok(host.setSlot(3, { kind: 'ai' }));
+  assert.equal(host.state.slots[3].name, 'AI (Normal)');
 
-  // Open a slot for a third player.
-  assert.ok(host.setSlot(2, { kind: 'open' }));
+  // A third player.
   const cara = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'Bob' });
   assert.equal(cara.mySlot, 2);
   assert.equal(host.state.slots[2].name, 'Bob (2)', 'duplicate names are made unique');
@@ -193,6 +197,7 @@ test('Decade of Peace: the host picks the length, clients see it, and the start 
   await waitFor(() => bob.state.peace === 45);
   assert.ok(host.applyPreset('2v2'));
   assert.equal(host.state.peace, 45, 'a preset lays out slots, not the game mode');
+  assert.ok(host.setSlot(3, { kind: 'ai' }), 'an opponent for Bob and the host');
   assert.ok(host.setPeace(60));
   await waitFor(() => bob.state.peace === 60);
   assert.ok(host.setPeace(0), 'back to a normal game');
@@ -234,8 +239,7 @@ test('only a length the lobby offers reaches the GameSetup, and a normal game ke
 test('leaving frees the slot; kicking and closing the lobby notify clients', async () => {
   const host = await LobbyHost.create({ transport: 'loopback', name: 'H' });
   host.applyPreset('ffa');
-  host.setSlot(1, { kind: 'open' });
-  host.setSlot(2, { kind: 'open' });
+  host.setSlot(3, { kind: 'ai' });
   const a = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'A' });
   const b = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'B' });
   const c = await LobbyClient.join({ transport: 'loopback', roomCode: host.roomCode, name: 'C' }).catch((e) => e);
@@ -349,6 +353,7 @@ test('the game gives every player a distinct name; lobby slots keep theirs', asy
 
 test('the preset highlight survives cosmetic edits and goes when the layout changes', async () => {
   const host = await LobbyHost.create({ transport: 'loopback', name: 'H' });
+  assert.ok(host.applyPreset('1v1'));
   assert.equal(host.state.preset, '1v1');
   host.setSlot(0, { pantheon: 'norse' });
   host.setSlot(0, { color: 3 });

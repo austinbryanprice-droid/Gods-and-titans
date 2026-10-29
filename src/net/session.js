@@ -14,7 +14,7 @@ import { encode, apply } from './delta.js';
 import {
   MSG, REASONS, PING_INTERVAL_MS, GAME_TIMEOUT_MS, STALL_NOTICE_MS, MAX_CLIENT_BUFFER_BYTES,
   HANDOFF_EVERY_MS, HANDOFF_FIRST_MS, HANDOFF_WAIT_MS, ONLINE_PAUSES, PAUSE_MAX_MS,
-  RateLimiter, sanitizeChat, sanitizeName, sanitizeReason,
+  RateLimiter, sanitizeChat, sanitizeName, sanitizeReason, normalizeRoomCode, isValidRoomCode,
 } from './protocol.js';
 import { sanitizeCommand, sanitizeMark, isValidSnapshot, sanitizeFelled } from './sanitize.js';
 import { sanitizePlan, sanitizeHandoff, randomProof } from './handoff.js';
@@ -69,6 +69,7 @@ class SessionBase {
     this.markCbs = new Set();
     this.endCbs = new Set();
     this.pauseCbs = new Set();
+    this.rematchCbs = new Set();
     this.pause = null; // { by, reason: 'player'|'handoff', endsAt (local ms), left } while an online game is paused
     this.chatLog = [];
     this.ended = false;
@@ -105,6 +106,25 @@ class SessionBase {
   onPause(cb) {
     this.pauseCbs.add(cb);
     return () => this.pauseCbs.delete(cb);
+  }
+
+  /**
+   * cb(info) about a rematch once the game is over (DESIGN 7). On the host: { from, name } when a player asks
+   * for one. On a client: { room } when the host has opened its room again for the rematch.
+   */
+  onRematch(cb) {
+    this.rematchCbs.add(cb);
+    return () => this.rematchCbs.delete(cb);
+  }
+
+  emitRematch(info) {
+    for (const cb of [...this.rematchCbs]) {
+      try {
+        cb(info);
+      } catch (err) {
+        console.error('[net] rematch listener failed', err);
+      }
+    }
   }
 
   emitPause() {
@@ -352,6 +372,13 @@ export class HostSession extends SessionBase {
           return;
         }
         this.setPause(c.index, msg.on === true);
+        break;
+      case MSG.REMATCH:
+        // Once per player, and only once the game is over: everyone hears who wants to play again.
+        if (c.askedRematch || !(this.lastSnap && this.lastSnap.gameOver)) return;
+        c.askedRematch = true;
+        this.broadcastChat({ from: -1, name: '', text: `${this.playerName(c.index)} wants a rematch.`, system: true });
+        this.emitRematch({ from: c.index, name: this.playerName(c.index) });
         break;
       default:
         break;
@@ -874,6 +901,17 @@ export class HostSession extends SessionBase {
   }
 
   /**
+   * The game is over and this host's room is a lobby again (LobbyHost.reopen): tell every player still
+   * here, so that their game-over screen can take them there. Sent right before `stop`.
+   * @param {string} room the room code to join
+   */
+  inviteRematch(room) {
+    if (this.stopped || !(this.lastSnap && this.lastSnap.gameOver)) return false;
+    for (const c of this.clients.values()) c.conn.send({ t: MSG.REMATCH, room });
+    return true;
+  }
+
+  /**
    * Stop the game: clients get `end` and their connections close.
    * @param {string} [reason] defaults to 'game-over' after a victory, else 'host-quit'
    * @param {object} [o] { carry: true } when the heir has the game and carries it on (handOff)
@@ -1034,6 +1072,14 @@ export class ClientSession extends SessionBase {
         this.emitPause();
         break;
       }
+      case MSG.REMATCH: {
+        // Only after the game is over, and only a room code: the host's room is a lobby again.
+        const room = typeof msg.room === 'string' && msg.room.length <= 16 ? normalizeRoomCode(msg.room) : '';
+        if (!(this.snap && this.snap.gameOver) || !isValidRoomCode(room)) return this.badMessage('rematch');
+        this.rematchRoom = room;
+        this.emitRematch({ room });
+        break;
+      }
       case MSG.KICK:
         this.finish({ reason: sanitizeReason(msg.reason, REASONS.HOST_QUIT) });
         break;
@@ -1171,6 +1217,14 @@ export class ClientSession extends SessionBase {
   stopTimers() {
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
+  }
+
+  /** Ask the host for a rematch (once, after the game is over). */
+  askRematch() {
+    if (this.stopped || this.askedRematch || !(this.snap && this.snap.gameOver)) return false;
+    this.askedRematch = true;
+    this.conn.send({ t: MSG.REMATCH });
+    return true;
   }
 
   /** Leave the game (closes the connection; the host's AI takes over). */
