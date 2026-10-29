@@ -432,7 +432,8 @@ export class HostSession extends SessionBase {
     if (this.started) this.sendSnapshot(c, this.lastSnap);
     if (this.pause) conn.send(this.pauseMessage());
     const name = this.playerName(index);
-    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true });
+    // Everyone else hears it; the player who came back knows (no "<me> has rejoined" on their own screen).
+    this.broadcastChat({ from: -1, name: '', text: tookOver ? `${name} has rejoined the game and takes back control from the AI.` : `${name} has rejoined the game.`, system: true }, index);
     if (this.plan) conn.send(this.planFor(index));
     this.updatePlan();
     // A new host waits for the players who were in the game when it moved (DESIGN 7), then plays on.
@@ -683,10 +684,11 @@ export class HostSession extends SessionBase {
     }
   }
 
-  broadcastChat(line) {
+  /** A chat line for everyone (but the player `except`, when given: a line about that player meant for the others). */
+  broadcastChat(line, except = null) {
     this.emitChat(line);
     const msg = { t: MSG.CHAT, ...line };
-    for (const c of this.clients.values()) c.conn.send(msg);
+    for (const c of this.clients.values()) if (c.index !== except) c.conn.send(msg);
   }
 
   /**

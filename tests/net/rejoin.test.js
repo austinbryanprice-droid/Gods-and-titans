@@ -125,6 +125,33 @@ test('rejoin: a dropped player in a Hard game gets a Hard stand-in, and takes th
   host.stop();
 });
 
+test('rejoin: the others hear "<Name> has rejoined the game", the player who came back does not hear it about themselves', async () => {
+  const { host, clients } = makeHost(setupWith(['human', 'human', 'human']));
+  const ann = clients.get(1);
+  const ben = clients.get(2);
+  host.start();
+  ann.start();
+  ben.start();
+  await ann.ready;
+  await ben.ready;
+  const benLines = [];
+  ben.onChat((l) => benLines.push(l));
+  const hostLines = [];
+  host.onChat((l) => hostLines.push(l));
+
+  ann.stop();
+  await waitFor(() => host.standIns.has(1), 3000, 'stand-in AI');
+  const link = rejoinLink(host, 1);
+  assert.equal(link.problem, null);
+  await waitFor(() => benLines.some((l) => /^Ann has rejoined/.test(l.text)), 3000, 'Ben hears Ann is back');
+  assert.ok(hostLines.some((l) => /^Ann has rejoined/.test(l.text)), 'the host hears it too');
+  await sleep(20);
+  assert.equal(link.seen.filter((m) => m.t === MSG.CHAT && /has rejoined/.test(m.text)).length, 0, 'Ann gets no line about herself');
+  link.off();
+  host.stop();
+  ben.stop();
+});
+
 test('rejoin: a link still open is replaced (the old window is told), and the seat keeps no AI', async () => {
   const { host, clients, aiCalls } = makeHost(setupWith(['human', 'human', 'human']));
   const ann = clients.get(1);

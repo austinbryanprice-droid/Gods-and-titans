@@ -1288,7 +1288,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     client gets `start` again and a full snapshot (the client keeps its career tally with the ticket,
     `saveTally`, and what it has seen, the fog explored and enemy buildings and mines as last seen, every
     10 s under `mythicwar-rejoin-view` with `saveView`, put back on rejoin; a quit it counted settles `rejoin:<token>`, so a rejoin neither recounts nor resets it); its new link may stay silent for
-    `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. Anyone else is told
+    `REJOIN_GRACE_MS` (120 s) while it builds the game, until three pings arrive. The others get a system line ("<Name> has rejoined the game…"); the player who came back does not get it about themselves. Anyone else is told
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link
     offers Rejoin Game. The host gets a token too (`lobby.hostToken`), for a game carried on by its
