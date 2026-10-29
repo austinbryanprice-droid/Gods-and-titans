@@ -13,7 +13,7 @@ import { PANTHEON_LIST } from '../data/index.js';
 import { LANDSCAPE_CHOICES, landscapeInfo } from '../data/landscapes.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { TIME_OF_DAY_OPTIONS, timeOfDayNote } from './time-of-day-options.js';
-import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS, optionNote } from './speed-options.js';
+import { GAME_SPEED_OPTIONS, UI_SCALE_OPTIONS, TEAM_COLOR_OPTIONS, CARD_KEY_OPTIONS, QUALITY_OPTIONS, optionNote } from './speed-options.js';
 import { buildKeyPanel } from './key-panel.js';
 import { sfx } from '../audio/sfx.js';
 import { playTitleMusic, previewMusic, PREVIEW_MOODS } from '../audio/audio.js';
@@ -1458,12 +1458,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       h('button.mw-btn.mw-btn--small', { type: 'button', 'aria-label': 'Next theme', onclick: () => stepPreview(1) }, '›'),
       h('div.mw-segmented', moodBtns));
 
-    const qualities = [
-      ['low', 'Low', 'No shadows or post-processing, fewer particles. For older laptops.'],
-      ['medium', 'Medium', 'Shadows, glow (bloom), smoothed edges and cloud shadows. Recommended.'],
-      ['high', 'High', 'Adds ambient occlusion, sharper shadows, unit shadows and the most particles.'],
-      ['ultra', 'Ultra', 'Everything at its best and finest. For gaming PCs.'],
-    ];
+    const qualities = QUALITY_OPTIONS;
     const qDesc = h('div.mw-field-note');
     const qBtns = qualities.map(([id, label]) => h('button.mw-seg', { type: 'button', dataset: { q: id }, onclick: () => {
       saveSettings({ quality: id });

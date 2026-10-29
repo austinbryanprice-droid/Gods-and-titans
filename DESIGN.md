@@ -2097,6 +2097,7 @@ per-frame budget, so a revealed army appears over a few frames.
   `GameRenderer.setSpeed` scales the animations' dt but not the camera's. Online games always run at Normal and their
   F10 menu leaves the row out. The interface size multiplies the HUD's base font size (`--hud-scale` on #hud-root):
   Small 0.85, Normal 1, Large 1.15, Larger 1.3; every HUD panel is sized in em, so all of it follows.
+  Graphics quality (`QUALITY_OPTIONS`, same file) is in both places too: `GameRenderer.setQuality` applies it live.
   **Team colours, keys and readable text** (settings `teamColors`, `cardKeys`, `keyBindings`; all per device, in
   Settings and the F10 menu). *Colour-blind safe* (`src/team-colors.js`) draws each lobby colour as a stand-in from a set
   that stays apart under protanopia, deuteranopia and tritanopia (Machado 2009 simulation: the worst of the 28 pairs is
