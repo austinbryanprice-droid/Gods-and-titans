@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { FakeElement, installFakeDom } from './fake-dom.js';
 import { Hud } from '../../src/ui/hud.js';
 import { Overlays } from '../../src/ui/hud-overlays.js';
-import { objectiveProgress } from '../../src/ui/hud-campaign.js';
+import { objectiveProgress, waitingRows } from '../../src/ui/hud-campaign.js';
+import { TICK_RATE } from '../../src/config.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { HostSession } from '../../src/net/session.js';
 import { createWorld } from '../../src/sim/world.js';
@@ -58,6 +59,12 @@ function missionHud(id) {
 }
 const TICKS = 25;
 
+/** Jump a world's clock ahead (World.tick derives the time from the tick count). */
+function skipTo(w, seconds) {
+  w.tickCount = seconds * TICK_RATE;
+  w.time = seconds;
+}
+
 test('a mission shows its objectives where the checklist would be, hidden ones left out until revealed', () => {
   const { hud, root } = missionHud('shore');
   assert.ok(hud.missionView, 'the objective panel');
@@ -69,6 +76,52 @@ test('a mission shows its objectives where the checklist would be, hidden ones l
   assert.match(text, /Raise a Temple0\/1/);
   assert.doesNotMatch(text, /Drive off the raiding party/, 'the raid is not shown before it lands');
   assert.match(text, /Bonus: burn the raiders' camp/);
+});
+
+test('Ragnarök: while the mission waits for Loki the panel says he is coming, with the clock; his reveal replaces it', () => {
+  const { session, hud, root } = missionHud('vigrid');
+  hud.missionView.update(10000, true);
+  assert.match(root.textContent, /Loki comes at the world's end12:5\d/, 'the story beat still to come, and its clock');
+  assert.doesNotMatch(root.textContent, /Slay Loki/);
+  assert.equal(root.all('li').filter((li) => (li.className || '').includes('is-waiting')).length, 1);
+  // Loki's host broken early: the row still says what the mission waits for.
+  const w = session.world;
+  for (const b of w.buildingList.filter((x) => x.owner === 1 || x.owner === 3)) w.killEntity(b, null);
+  session.step(2 * TICK_RATE);
+  skipTo(w, 778);
+  session.step(TICK_RATE);
+  hud.missionView.update(20000, true);
+  assert.equal(session.viewState.gameOver, null);
+  assert.match(root.textContent, /Loki comes at the world's end0:01/);
+  session.step(2 * TICK_RATE);
+  hud.missionView.update(30000, true);
+  assert.doesNotMatch(root.textContent, /Loki comes at the world's end/, 'gone once Loki walks');
+  assert.match(root.textContent, /Slay Loki, the trickster/);
+  assert.equal(root.all('li').filter((li) => (li.className || '').includes('is-waiting')).length, 0);
+});
+
+test('The Burning Bridge already shows its hold with the clock left, and nothing more is added; the clock goes once the horn sounds', () => {
+  const { session, hud, root } = missionHud('bifrost');
+  hud.missionView.update(10000, true);
+  assert.match(root.textContent, /Hold until Heimdall's horn sounds8:5\d/);
+  assert.deepEqual(waitingRows(session.viewState.campaign(), session.viewState), [], 'no extra row for a shown beat');
+  skipTo(session.world, 538);
+  session.step(4 * TICK_RATE);
+  hud.missionView.update(20000, true);
+  const c = session.viewState.campaign();
+  assert.equal(c.objectives.find((o) => o.id === 'hold').state, 1);
+  assert.doesNotMatch(root.textContent, /Hold until Heimdall's horn sounds\d/, 'no clock once the hold is over');
+});
+
+test('waiting rows: only a hidden, open waitFor objective with words; the clock runs to the event that reveals it', () => {
+  const m = MISSION_BY_ID.vigrid;
+  const objs = (shown, state = 0) => m.objectives.map((o) => ({ ...o, state: o.id === 'loki' ? state : 0, value: 0, shown: o.id === 'loki' ? shown : !o.hidden }));
+  assert.deepEqual(waitingRows({ mission: m, objectives: objs(false) }, { time: 646 }), [{ id: 'wait:loki', icon: '🐍', text: 'Loki comes at the world\'s end', progress: '2:14' }]);
+  assert.deepEqual(waitingRows({ mission: m, objectives: objs(false) }, { time: 900 }).map((r) => r.progress), ['0:00']);
+  assert.deepEqual(waitingRows({ mission: m, objectives: objs(true) }, { time: 790 }), []);
+  assert.deepEqual(waitingRows({ mission: m, objectives: objs(true, 1) }, { time: 900 }), []);
+  assert.deepEqual(waitingRows({ mission: MISSION_BY_ID.shore, objectives: [] }, { time: 0 }), []);
+  assert.deepEqual(waitingRows(null, null), []);
 });
 
 test('objective rows count up, down and out', () => {

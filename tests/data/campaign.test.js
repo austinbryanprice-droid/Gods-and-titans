@@ -68,6 +68,8 @@ test('objectives and events refer to each other: tags, reveals, afters', () => {
       // The "every enemy beaten" win waits for it, so it must still come about with no enemy left.
       const o = m.objectives.find((x) => x.id === id);
       assert.ok(o && !o.optional && o.kind !== 'protect' && o.kind !== 'conquer', `${m.id}: waitFor ${id} is a headline objective`);
+      // Hidden until its beat: the panel needs words for the wait, or a player who has won early sees nothing to do.
+      if (o.hidden) assert.ok(typeof o.waitText === 'string' && o.waitText, `${m.id}: waitFor ${id} has a waitText for the panel`);
       if (o.kind === 'kill') {
         const e = m.events.find((x) => x.spawn && x.spawn.tag === o.tag);
         assert.ok(e && Number.isFinite(e.at) && e.spawn.always, `${m.id}: ${o.tag} spawns on the clock even once its owner is beaten`);
