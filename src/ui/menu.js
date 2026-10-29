@@ -37,7 +37,7 @@ import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './ale
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
 import * as M from './menu-model.js';
-import { saveTicket, readTicket, clearTicket } from '../net/rejoin-ticket.js';
+import { saveTicket, readTicket, clearTicket, seekGame } from '../net/rejoin-ticket.js';
 import { displayColor } from '../team-colors.js';
 
 let instance = null;
@@ -1227,21 +1227,31 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         if (!alive || ctrl !== my) return;
         const mod = await loadLobby();
         if (!mod.LobbyClient || typeof mod.LobbyClient.rejoin !== 'function') throw Object.assign(new Error('Rejoining is not available here.'), { refused: true });
-        const info = await mod.LobbyClient.rejoin({ transport: ticket.transport, roomCode: ticket.roomCode, token: ticket.token, name: ticket.name, proof: ticket.proof || undefined, signal: my ? my.signal : undefined });
+        // Its room, then the heir's; while neither answers the host may be moving the game: keep looking a while.
+        const found = await seekGame({
+          ticket,
+          rejoin: (o) => mod.LobbyClient.rejoin(o),
+          signal: my ? my.signal : undefined,
+          onWait: () => { if (alive && ctrl === my) show('busy', 'Looking for the game… The host may be handing it to another player.', false); },
+        });
+        const info = found.info;
         if (!alive || ctrl !== my) {
           info.conn.close('left');
           return;
         }
         alive = false;
+        // Found at the heir's: the ticket follows the game there (a later reload goes straight to it).
+        if (found.room !== ticket.roomCode) saveTicket({ ...ticket, roomCode: found.room, proof: found.proof, next: null });
         sfx.play('horn');
         onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby: null, rejoin: ticket.token, transport: ticket.transport });
       } catch (err) {
         if (!alive || ctrl !== my || (err && err.type === 'aborted')) return;
         const msg = M.cleanMessage(err && err.message, 'Could not rejoin the game.');
         // The host said no (the game is over, or this browser is not in it), or the room is gone with the host: forget it.
-        const gone = (err && err.refused && !err.retry) || (!(err && err.refused) && /not found|peer-unavailable|could not connect to peer/i.test(msg));
+        // (seekGame gave up on a room nobody answers at only after REJOIN_SEEK_MS: `gone`.)
+        const gone = !!(err && (err.gone || (err.refused && !err.retry)));
         if (gone) clearTicket(undefined, ticket.token);
-        show('error', gone && !err.refused ? `The game in room ${ticket.roomCode} is gone: the host has left it.` : M.friendlyJoinError(err, ticket.roomCode), !gone);
+        show('error', err && err.gone ? msg : M.friendlyJoinError(err, ticket.roomCode), !gone);
         sfx.play('error');
       }
     }

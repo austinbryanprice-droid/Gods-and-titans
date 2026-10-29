@@ -32,7 +32,7 @@ import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason, makeRoomCode } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
-import { readTicket, saveTicket, clearTicket, saveTally, saveView, readView } from '../net/rejoin-ticket.js';
+import { readTicket, saveTicket, clearTicket, saveTally, saveView, readView, saveNext } from '../net/rejoin-ticket.js';
 import { CareerTracker } from './career-tracker.js';
 import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
@@ -426,7 +426,10 @@ export class Game {
       this.offs.push(() => this.career.dispose());
       if (rejoinMatchId(this.launch)) this.keepTally();
     }
-    if (rejoinMatchId(this.launch)) this.keepView();
+    if (rejoinMatchId(this.launch)) {
+      this.keepView();
+      this.keepNext();
+    }
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
     this.offs.push(() => this.director.dispose());
@@ -993,6 +996,29 @@ export class Game {
       keep();
     }));
     this.offs.push(keep);
+  }
+
+  /**
+   * A client of a game it can rejoin keeps with its ticket where the game goes if the host leaves (the heir's
+   * room and its seat's proof there, from the host's PLAN), so that a reload while the host moves finds the game
+   * at the heir's (DESIGN 7, seekGame). Not when it is the heir itself (nobody else could open that room), nor
+   * once it hosts (prepareHandoff keeps its ticket then).
+   */
+  keepNext() {
+    const token = this.launch.rejoin;
+    let last = 0;
+    const keep = () => {
+      const s = this.session;
+      if (this.replaced || !s || s.isHost) return;
+      const plan = s.plan;
+      saveNext(token, plan && plan.heir !== this.myIndex ? { room: plan.room, proof: plan.proof } : null);
+    };
+    this.offs.push(this.viewState.on('snapshot', () => {
+      const ms = Date.now();
+      if (ms - last < 2000) return;
+      last = ms;
+      keep();
+    }));
   }
 
   /**

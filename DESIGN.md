@@ -1290,7 +1290,14 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     the game has started. Refused: the host's seat, a computer player's, a finished game. The title
     screen shows Rejoin Online Game while a ticket is kept; the Game Ended screen after a lost link
     offers Rejoin Game. The host gets a token too (`lobby.hostToken`), for a game carried on by its
-    heir. Check: `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
+    heir. A client's ticket also keeps `next` (`saveNext`, from the host's PLAN every 2 s: the heir's room and
+    the seat's proof there; null when this browser is the heir; tickets without it still read). Rejoin
+    (`seekGame`) tries the ticket's room, then `next`, and while nobody answers at either ("not found") or the
+    host says "not yet", keeps looking for `REJOIN_SEEK_MS` (20 s, "Looking for the game…"): a host moving the
+    game leaves a gap between its room closing and the heir's opening, and an old host who reopens quickly or
+    a client who reloads just then must not lose the ticket. Only then "The game in room X is gone" (ticket
+    dropped); a host's refusal or a network error comes back at once as before. Found at the heir's, the
+    ticket moves there. Check: `tools/rejoin-check.mjs` (two tabs, a reload mid-game).
   - Host migration (`src/net/handoff.js`, `HostSession.enableHandoff`, `Game.migrate`): a host that
     leaves no longer ends an online game. The host names an heir (`pickHeir`: the connected player
     still playing with the lowest index) and a room code for them, and tells every client

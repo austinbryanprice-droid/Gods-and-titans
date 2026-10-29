@@ -1,7 +1,9 @@
 // The rejoin ticket (DESIGN 7): what this browser needs to get back into an online game it was
 // playing after a lost link or a reloaded page: the room code, the secret token the host gave
 // it with `start`, and the transport. One at a time (a browser plays one online game); kept for
-// a few hours, and dropped once that game is over or the host refuses it.
+// a few hours, and dropped once that game is over or the host refuses it. A client also keeps where the
+// game would go if its host left (`next`: the heir's room and this seat's proof there, from the host's PLAN),
+// so that a reload while the host moves finds the game at the heir's (seekGame).
 import { normalizeRoomCode, isValidRoomCode, sanitizeName } from './protocol.js';
 
 export const REJOIN_KEY = 'mythicwar-rejoin';
@@ -132,6 +134,103 @@ function cleanTicket(t, nowMs) {
     at,
     tally: cleanTally(t.tally), // the career's running tally (saveTally), or null
     // after a host migration: my seat's proof (DESIGN 7), which the game's host shows in `start`; null before one
-    proof: typeof t.proof === 'string' && /^[0-9a-f]{8,64}$/.test(t.proof) ? t.proof : null,
+    proof: cleanProof(t.proof),
+    // where the game goes if its host leaves (saveNext): { room, proof } or null (none known, or a ticket from before)
+    next: cleanNext(t.next, roomCode),
   };
+}
+
+const cleanProof = (p) => (typeof p === 'string' && /^[0-9a-f]{8,64}$/.test(p) ? p : null);
+
+function cleanNext(n, roomCode) {
+  if (!n || typeof n !== 'object') return null;
+  const room = normalizeRoomCode(n.room);
+  return isValidRoomCode(room) && room !== roomCode ? { room, proof: cleanProof(n.proof) } : null;
+}
+
+/**
+ * Keep with this token's ticket where the game goes if its host leaves: the heir's room and my seat's proof
+ * there (a client's PLAN, DESIGN 7), or null when there is none (or I am the heir: nobody else could open it).
+ * Writes only when it changed. True when the ticket holds it now.
+ */
+export function saveNext(token, next, store = storage()) {
+  if (!store || !token) return false;
+  try {
+    const raw = store.getItem(REJOIN_KEY);
+    const t = raw ? JSON.parse(raw) : null;
+    if (!t || typeof t !== 'object' || t.token !== token) return false;
+    const clean = cleanNext(next, normalizeRoomCode(t.roomCode));
+    const had = cleanNext(t.next, normalizeRoomCode(t.roomCode));
+    if (JSON.stringify(clean) === JSON.stringify(had)) return true;
+    t.next = clean;
+    store.setItem(REJOIN_KEY, JSON.stringify(t));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** How long Rejoin keeps looking for a game whose room is not there (the host may be moving it to the heir). */
+export const REJOIN_SEEK_MS = 20000;
+const SEEK_RETRY_MS = 1500;
+
+/** A rejoin that failed because nobody answers at that room code (as opposed to a host saying no, or no network). */
+export function isRoomGone(err) {
+  if (!err || err.refused) return false;
+  return /not found|peer-unavailable|could not connect to peer/i.test(String(err.message || ''));
+}
+
+/** The rooms a ticket may find its game in, in order: [{ room, proof }] (the room it was in, then the heir's). */
+export function ticketRooms(ticket) {
+  if (!ticket) return [];
+  const out = [{ room: ticket.roomCode, proof: ticket.proof || null }];
+  if (ticket.next && ticket.next.room !== ticket.roomCode) out.push({ room: ticket.next.room, proof: ticket.next.proof || null });
+  return out;
+}
+
+/**
+ * Find the ticket's game (DESIGN 7): try its room, then the heir's, again and again for up to `seekMs` while
+ * nobody answers there (a host moving the game leaves a gap between its room closing and the heir's opening)
+ * or the host says "later". Resolves with { info, room, proof } (info: what `rejoin` resolved with);
+ * rejects with the host's refusal or any other error at once, and with an Error flagged `gone` when no room
+ * answered in time. `onWait()` is called once, when the first round found nothing.
+ * @param {object} o { ticket, rejoin(opts), seekMs, retryMs, signal, onWait, now }
+ */
+export async function seekGame({ ticket, rejoin, seekMs = REJOIN_SEEK_MS, retryMs = SEEK_RETRY_MS, signal, onWait, now = Date.now }) {
+  const rooms = ticketRooms(ticket);
+  if (!rooms.length) throw Object.assign(new Error('There is no online game to rejoin from this browser.'), { refused: true });
+  const t0 = now();
+  let waited = false;
+  let later = null; // a host that said "not yet" (still loading, busy): the ticket stays good
+  for (;;) {
+    for (const { room, proof } of rooms) {
+      if (signal && signal.aborted) throw Object.assign(new Error('aborted'), { type: 'aborted' });
+      try {
+        const info = await rejoin({ transport: ticket.transport, roomCode: room, token: ticket.token, name: ticket.name, proof: proof || undefined, signal });
+        return { info, room, proof };
+      } catch (err) {
+        if (err && err.type === 'aborted') throw err;
+        if (err && err.refused && err.retry) later = err;
+        else if (!isRoomGone(err)) throw err;
+      }
+    }
+    if (now() - t0 + retryMs > seekMs) break;
+    later = null;
+    if (!waited && onWait) onWait();
+    waited = true;
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(done, retryMs);
+      function done() {
+        if (signal) signal.removeEventListener('abort', aborted);
+        resolve();
+      }
+      function aborted() {
+        clearTimeout(timer);
+        reject(Object.assign(new Error('aborted'), { type: 'aborted' }));
+      }
+      if (signal) signal.addEventListener('abort', aborted, { once: true });
+    });
+  }
+  if (later) throw later;
+  throw Object.assign(new Error(`The game in room ${ticket.roomCode} is gone: the host has left it.`), { gone: true });
 }
