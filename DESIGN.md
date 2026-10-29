@@ -886,11 +886,11 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   sites for 2:00 against an Easy AI, frost trolls at 7:00), Twilight of the North (conquer a Normal Norse AI with
   an Egyptian ally; Surtr wakes at 14:00 and marches). Chapter II: The Wolf Winter (a Temple, a god, and a raid at
   4:30 that makes for the tagged winter stores, a Storehouse that must stand), The Last Link (destroy three tagged
-  Shrines of an Easy AI within 15:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
+  Shrines of an Easy AI within 20:00, Fenrir's wolves at 6:00), The Burning Bridge (hold a tagged Temple nine
   minutes against six waves, Valkyries for the hero at 4:30; `waitFor: ['hold']`: razing Helheim's town early
   does not win it, the clock still has to reach 9:00), The Ship of Nails (muster twelve soldiers, which
   reveals "burn the two tagged shipyards" of an Easy AI; a bonus for holding two sacred sites a minute), Ragnarök
-  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00; `waitFor: ['loki']`: a host
+  (conquer a Normal Norse AI with a Greek ally; Loki and four wolves walk at 13:00, the wolves on a tag of their own so "Slay Loki" is Loki alone; `waitFor: ['loki']`: a host
   broken before then does not win it, Loki still comes, an `always` spawn from his beaten host's old seat, and
   must fall). While a hidden `waitFor` objective waits to be revealed, the objective panel shows its `waitText`
   as an extra row with the clock to the event that reveals it ("Loki comes at the world's end 2:14"), derived from

@@ -228,6 +228,14 @@ export class Overlays {
     // ... and a saved game loaded in its place, like the title screen's Load Game.
     if (savable && typeof game.canLoad === 'function' && game.canLoad()) buttons.push(btn('Load Game', '', () => this.openLoads()));
     const replay = !!game.replay;
+    // A campaign mission starts again from its beginning (the objective panel's foot points here).
+    if (game.mission && !over && !replay && this.canRematch()) {
+      buttons.push(btn('Restart Mission', '', () => this.confirm(
+        'Restart the mission?', 'The mission starts again from the beginning.', 'Restart',
+        () => game.rematch(),
+        () => this.openMenu(),
+      )));
+    }
     if (!over && !defeated && !replay) {
       buttons.push(btn('Surrender', 'mw-btn--ghost is-danger', () => this.confirm(
         'Surrender?', 'Your buildings will crumble and you will be defeated.', 'Surrender',

@@ -297,3 +297,20 @@ test('Ragnarök: Loki slain while his host still stands, the host must still be 
   assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' });
 });
 
+test('Ragnarök: slaying Loki is done when Loki falls; the wolves at his heel are not part of it', () => {
+  const w = world('vigrid');
+  w.time = 779.5;
+  run(w, 3);
+  const loki = tagged(w, 'loki');
+  assert.deepEqual(loki.map((u) => u.type), ['norse_loki']);
+  const wolves = tagged(w, 'loki_wolves');
+  assert.equal(wolves.length, 4);
+  assert.ok(wolves.every((u) => u.owner === 1 && u.type === 'norse_wolf_of_fenrir' && u.order), 'the wolves march with him');
+  const k = w.campaign.m.objectives.findIndex((o) => o.id === 'loki');
+  assert.equal(w.getSnapshot().cp.o[k][1], 1, 'the panel counts Loki alone');
+  w.killEntity(loki[0], null);
+  run(w, 2);
+  assert.equal(w.campaign.state[k], DONE, 'done while his wolves still run');
+  assert.ok(tagged(w, 'loki_wolves').length > 0);
+});
+
