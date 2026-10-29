@@ -8,6 +8,7 @@
 import { getUnitType } from '../data/index.js';
 import { RNG, hashSeed } from '../sim/rng.js';
 import { VOICE_LINES, fillLine } from './voice-lines.js';
+import { teamOrderFor } from '../sim/team-orders.js';
 
 export const VOICE = {
   greetAt: 6, // game seconds before the first greeting; each later AI waits greetStagger more
@@ -23,6 +24,8 @@ export const VOICE = {
   scanUnits: 48, // at most this many of the AI's units looked around per scan
   beatenShare: 0.35, // nearly beaten: buildings down to this share of the most it ever had...
   beatenMin: 5, // ...once it had at least this many
+  ackGap: 20, // game seconds between two answers of one AI to its teammates' markers
+  maxAcks: 30, // answers one AI gives in a whole match (apart from maxLines)
 };
 
 const URGENT = new Set(['titan', 'beaten']);
@@ -60,6 +63,9 @@ export class AIVoices {
         order: {},
         lastOf: {}, // trigger -> game time of its last line
         gods: new Set(), // gods that have arrived once
+        ackId: 0, // the newest teammate's marker (sim/team-orders.js) it has seen
+        lastAck: -Infinity,
+        acks: 0,
       });
     }
     this.lastAny = -Infinity;
@@ -80,6 +86,7 @@ export class AIVoices {
       v.greeted = true;
       v.met = true;
     }
+    for (const v of this.voices.values()) v.ackId = world.markSeq || 0; // (the markers of the time before are not answered again)
     for (const u of world.unitList || []) {
       const v = !u.dead && this.voices.get(u.owner);
       const def = v && getUnitType(u.type);
@@ -91,7 +98,7 @@ export class AIVoices {
   /**
    * Look at the events since the last call and at the World; returns the lines to send.
    * @param {object[]} [events] the snapshot's events
-   * @returns {{ from: number, text: string }[]}
+   * @returns {{ from: number, text: string, team?: boolean }[]} (`team`: to the speaker's team only)
    */
   step(events) {
     const out = [];
@@ -107,6 +114,7 @@ export class AIVoices {
         if (this.rng.chance(VOICE.greetChance)) this.say(v, this.hasEnemyPlayer(v.index) ? 'greet' : 'greetAlly', {}, now, out);
       }
     }
+    this.answerMarks(now, out);
     if (now >= this.nextScan) {
       this.nextScan = now + VOICE.contactEvery;
       this.scanContact(now, out);
@@ -178,6 +186,31 @@ export class AIVoices {
         break;
       }
       default:
+    }
+  }
+
+  /**
+   * A teammate's Attack, Defend or Help marker (sim/team-orders.js, which the AI answers, src/ai/marks.js):
+   * one AI of that team says so, to the team only (`team: true`: the enemy must not learn an order was
+   * given). Not counted against the ordinary gaps, which would hold most answers back, but at most one
+   * every VOICE.ackGap per AI. An Attack marker in a Decade of Peace waits, unanswered, as the AI does.
+   */
+  answerMarks(now, out) {
+    const world = this.world;
+    const said = new Set();
+    for (const v of this.voices.values()) {
+      const m = teamOrderFor(world, v.index);
+      if (!m || m.id <= v.ackId) continue;
+      if (m.kind === 'attack' && world.peace) continue;
+      v.ackId = m.id;
+      if (said.has(m.id) || v.done || world.players[v.index].defeated) continue;
+      if (v.acks >= VOICE.maxAcks || now - v.lastAck < VOICE.ackGap) continue;
+      const text = this.pick(v, m.kind === 'attack' ? 'ackAttack' : 'ackDefend', {});
+      if (!text) continue;
+      v.lastAck = now;
+      v.acks++;
+      said.add(m.id);
+      out.push({ from: v.index, text, team: true });
     }
   }
 

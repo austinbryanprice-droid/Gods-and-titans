@@ -13,6 +13,7 @@ import { castPower } from './powers.js';
 import { hyp } from './common.js';
 import { isWallType } from '../data/walls.js';
 import { relicAt, canCarry, relicOf, isRelicTemple } from './relics.js';
+import { applyTeamMark } from './team-orders.js';
 
 // ---- Input normalization (commands are untrusted: network, AI, HUD) ----
 
@@ -21,7 +22,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses', 'godPower']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses', 'godPower', 'teamMark']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -72,6 +73,7 @@ export function normalizeCommand(cmd, map) {
       ability: typeof ability === 'string' && ability.length <= MAX_NAME ? ability : undefined,
       upgrade: typeof upgrade === 'string' && upgrade.length <= MAX_NAME ? upgrade : undefined,
       power: typeof cmd.power === 'string' && cmd.power.length <= MAX_NAME ? cmd.power : undefined,
+      kind: typeof cmd.kind === 'string' && cmd.kind.length <= MAX_NAME ? cmd.kind : undefined,
       on: cmd.on === true,
       to: Number.isSafeInteger(cmd.to) ? cmd.to : undefined,
       res: typeof cmd.res === 'string' && cmd.res.length <= MAX_NAME ? cmd.res : undefined,
@@ -318,6 +320,11 @@ function castCommand(world, player, cmd) {
 /** Apply one command for a player (called at the start of a tick). */
 export function applyCommand(world, player, cmd) {
   if (!cmd || typeof cmd !== 'object') return;
+  // A team order (sim/team-orders.js) is a word to the team: a defeated player still gives it.
+  if (cmd.type === 'teamMark') {
+    applyTeamMark(world, player, cmd);
+    return;
+  }
   const p = world.players[player];
   if (!p || p.defeated || world.gameOver) return;
   const queue = !!cmd.queue;
