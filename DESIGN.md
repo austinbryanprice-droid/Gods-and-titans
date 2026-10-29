@@ -2256,7 +2256,9 @@ twist. The nine twists come round in a seeded shuffle of nine days, so every twi
 
 Title screen: a Daily Challenge button under Quick Match, "Today: <twist> · <my pantheons> vs <theirs>" and
 today's best once played; the twist's text as its tooltip; a badge with the streak ("🔥 3", or "🔥 3 · keep it"
-while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist.
+while today is not played yet), or "New today" with no streak. The match opens with a feed line naming the twist,
+and a chip in the top bar's left group (`Hud.showTwist`: the twist's icon and name, its rule as the tooltip) keeps it
+in view for the whole match, a loaded one too.
 It counts once, like the career (9.1): at the game-over screen, or on leaving a match the career counts as a
 loss. The score is the chronicle's (5.11, `scoreOf`) and the game-over screen says it against today's best
 with the streak. Play Again replays the same day's challenge; it is not kept for Quick Match. The record lives in

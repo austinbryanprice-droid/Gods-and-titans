@@ -130,6 +130,11 @@ export class Hud {
     this.siteText = el('span', 'hud-clock');
     this.siteChip = el('div', 'hud-time hud-sites', el('i', 'hud-res-i', SITE_ICON), this.siteText);
     this.siteChip.hidden = true;
+    // The daily challenge's twist (DESIGN 9.3), for the whole match: its icon and name, the rule in the tooltip.
+    this.twistIcon = el('i', 'hud-res-i', '📅');
+    this.twistText = el('span', 'hud-clock');
+    this.twistChip = el('div', 'hud-time hud-twist', this.twistIcon, this.twistText);
+    this.twistChip.hidden = true;
     this.ping = el('span', 'hud-ping');
     const res = (cls, icon, title) => {
       const v = el('b', 'hud-res-v');
@@ -152,7 +157,7 @@ export class Hud {
     this.rRelics.n.hidden = true;
     this.relicSig = '';
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n, this.rRelics.n),
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.twistChip, this.ping, this.rPantheon.n, this.rRelics.n),
       this.topRight = el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
@@ -471,6 +476,15 @@ export class Hud {
       const secs = Math.ceil(sv.next);
       this.message(sv.nextBoss ? `Wave ${coming} comes in ${secs} s, and a Titan leads it!` : `Wave ${coming} comes in ${secs} s.`, 'alert', { icon: SURVIVAL_ICON });
     }
+  }
+
+  /** The daily challenge's twist chip ({ name, icon, desc } from src/data/twists.js); null takes it away. */
+  showTwist(twist) {
+    setHidden(this.twistChip, !twist);
+    if (!twist) return;
+    setText(this.twistIcon, twist.icon || '📅');
+    setText(this.twistText, twist.name);
+    this.twistChip.title = `Daily challenge: ${twist.name}. ${twist.desc}`;
   }
 
   /** The Sacred Sites chip: sites my side holds, and the Sacred Victory countdown while one side holds them all. */

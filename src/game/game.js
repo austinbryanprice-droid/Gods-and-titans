@@ -391,10 +391,11 @@ export class Game {
       this.saver = new MatchSaver(this, { resume: resumed });
       if (resumed) this.saver.restore(resumed);
     }
-    // The daily challenge (DESIGN 9.3): its twist, said once at the start.
-    if (this.launch && this.launch.daily && !resumed) {
+    // The daily challenge (DESIGN 9.3): its twist, said once at the start and kept on a chip in the top bar.
+    if (this.launch && this.launch.daily) {
       const tw = dailyChallenge(this.launch.daily).twist;
-      this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
+      this.hud.showTwist(tw);
+      if (!resumed) this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
     }
     session.start();
     // Only a match against the computer can run faster or slower: nobody else has to keep up.
