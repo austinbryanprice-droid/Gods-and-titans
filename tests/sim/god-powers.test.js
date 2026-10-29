@@ -136,7 +136,7 @@ test('a faith boon doubles prayer, a heal rain heals allies, a caravan pays at o
   const g = wa.players[0].gold;
   power(wa, 0, 0);
   run(wa, 0.1);
-  assert.equal(wa.players[0].gold, g + 300);
+  assert.equal(wa.players[0].gold, g + 400);
 });
 
 test('a cataclysm hurts buildings and kills count for the caster', () => {
@@ -162,7 +162,7 @@ test('summoning powers raise temporary minions for the caster', () => {
   power(w, 0, 1, 23, 20);
   run(w, 0.2);
   const crows = w.unitList.filter((u) => u.owner === 0 && u.type === 'celtic_battle_crow' && !u.dead);
-  assert.equal(crows.length, 4);
+  assert.equal(crows.length, 6);
   run(w, 41);
   assert.equal(w.unitList.filter((u) => u.owner === 0 && u.type === 'celtic_battle_crow' && !u.dead).length, 0);
 });

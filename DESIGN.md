@@ -311,7 +311,7 @@ lists them Village, Town, City; `POWERS` has every one by id (30 in all; `valida
 `validateData`, holds the rules below).
 - **Village: a blessing** that helps the caster's people and hurts nobody: a harvest (every load of gold and wood
   brought in counts 50% more for 60 s), a festival (prayer gives twice the faith for 60 s), a healing rain
-  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (300 gold and 150 wood).
+  (120 health at once, then 30/s for 15 s to own and allied units in 7 tiles) or a caravan (400 gold and 200 wood).
 - **Town: a strike** aimed at a spot within about 3–5 tiles: a storm of bolts, a hammerfall, a swarm, a gale, a
   summoning of crows.
 - **City: a cataclysm** over 7–12 tiles: an earthquake, a winter, a flood, a tsunami, an eclipse, a tempest.
@@ -335,8 +335,16 @@ lists them Village, Town, City; `POWERS` has every one by id (30 in all; `valida
   holds for another m:ss: no god powers against other players yet.`), while a blessing works during it. Used:
   `<Name> has already been used.` Powers never hurt the caster's own side. A blessing with no target shines over
   the caster's first Town Center.
-- **Numbers** are first guesses for Austin to tune after play; change them in `src/data/powers.js` only (the
-  builders `boon`, `healRain` and `barrage` keep the ten pantheons comparable).
+- **Numbers** live in `src/data/powers.js` only (the builders `boon`, `healRain` and `barrage` keep the ten
+  pantheons comparable). In AI games the strikes and above all the cataclysms decide most battles, so they are
+  kept even by measurement (balance pass, 2026-10-29): `node tools/power-bench.mjs` casts each on a carpet of
+  tough soldiers that stand and fight, and every Town strike removes about 5,000-7,500 health there and every
+  cataclysm about 26,000-47,000 (the low ones carry extras the bench does not count: Taranis's stuns, Tandava's
+  instant blast, Ryūjin's knockback and slow, Apep's damage buffs and mummies, the Crows' damage cut and crows).
+  Then `node tools/ai-tournament.mjs --seeds=1-8 --diff=hard` (and `normal`) checks that every pantheon wins
+  about 40-60% of its 1v1 games. Before the pass the Plague of Locusts did twice any other strike, the
+  Morrígan's Crows, Apep Swallows the Sun and Taranis almost nothing, and win rates ran from 25% (Celtic) to
+  72% (Chinese).
 
 ## 5. Rules
 
