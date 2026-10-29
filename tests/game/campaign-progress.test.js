@@ -9,11 +9,11 @@ afterEach(() => resetProgress());
 
 test('missions open one after another as they are won', () => {
   resetProgress();
-  assert.deepEqual(MISSIONS.map((m) => isUnlocked(m.id)), [true, false, false, false, false, false, false, false, false, false]);
+  assert.deepEqual(MISSIONS.map((m) => isUnlocked(m.id)), MISSIONS.map((m, i) => i === 0));
   assert.equal(nextToPlay(), MISSIONS[0]);
   const r = recordMission('shore', 400.6, 1000);
   assert.deepEqual(r, { first: true, best: 400, previous: 0, chapterDone: false });
-  assert.deepEqual(MISSIONS.map((m) => isUnlocked(m.id)), [true, true, false, false, false, false, false, false, false, false]);
+  assert.deepEqual(MISSIONS.map((m) => isUnlocked(m.id)), MISSIONS.map((m, i) => i <= 1));
   assert.equal(nextToPlay(), MISSIONS[1]);
   assert.equal(wonCount(), 1);
 });
@@ -41,8 +41,24 @@ test('winning Chapter I opens Chapter II, whose last mission finishes it once', 
   for (const m of MISSIONS.slice(5, 9)) assert.equal(recordMission(m.id, 800).chapterDone, false);
   assert.equal(recordMission('vigrid', 1500).chapterDone, true);
   assert.equal(recordMission('vigrid', 1400).chapterDone, false);
-  assert.equal(nextToPlay(), MISSIONS[9], 'all won: the last one stays chosen');
+  assert.equal(chapterUnlocked('chaos_sea'), true, 'Chapter III opens with the last of Chapter II');
+  assert.equal(nextToPlay().id, 'delta');
   assert.equal(chapterUnlocked('nope'), false);
+});
+
+test('winning Chapter II opens Chapter III, whose last mission finishes it once', () => {
+  resetProgress();
+  for (const m of MISSIONS.slice(0, 9)) recordMission(m.id, 900);
+  assert.equal(chapterUnlocked('chaos_sea'), false, 'Chapter III is shut until Chapter II is won');
+  recordMission('vigrid', 900);
+  assert.equal(chapterUnlocked('chaos_sea'), true);
+  assert.equal(isUnlocked('delta'), true);
+  assert.equal(isUnlocked('siwa'), false);
+  for (const m of MISSIONS.slice(10, 14)) assert.equal(recordMission(m.id, 800).chapterDone, false);
+  assert.deepEqual([wonCount(undefined, 'chaos_sea'), wonCount()], [4, 14]);
+  assert.equal(recordMission('eridu', 1500).chapterDone, true);
+  assert.equal(recordMission('eridu', 1400).chapterDone, false);
+  assert.equal(nextToPlay(), MISSIONS[14], 'all won: the last one stays chosen');
 });
 
 test('a stored progress is cleaned: unknown missions and bad numbers go', () => {

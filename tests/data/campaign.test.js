@@ -10,10 +10,10 @@ import { MAP_SIZES } from '../../src/config.js';
 
 const KINDS = new Set(['build', 'gods', 'army', 'kill', 'destroy', 'protect', 'survive', 'hold', 'conquer']);
 
-test('two chapters of five linked missions, each chapter for one pantheon', () => {
-  assert.deepEqual(CHAPTERS.map((c) => [c.chapter, c.pantheon, c.missions.length]), [['Chapter I', 'greek', 5], ['Chapter II', 'norse', 5]]);
-  assert.equal(MISSIONS.length, 10);
-  assert.equal(new Set(MISSIONS.map((m) => m.id)).size, 10);
+test('three chapters of five linked missions, each chapter for one pantheon', () => {
+  assert.deepEqual(CHAPTERS.map((c) => [c.chapter, c.pantheon, c.missions.length]), [['Chapter I', 'greek', 5], ['Chapter II', 'norse', 5], ['Chapter III', 'egyptian', 5]]);
+  assert.equal(MISSIONS.length, 15);
+  assert.equal(new Set(MISSIONS.map((m) => m.id)).size, 15);
   assert.deepEqual(MISSIONS, CHAPTERS.flatMap((c) => c.missions), 'the missions in the order they open');
   for (const c of CHAPTERS) {
     assert.equal(CHAPTER_BY_ID[c.id], c);
@@ -29,6 +29,8 @@ test('two chapters of five linked missions, each chapter for one pantheon', () =
   }
   MISSIONS.forEach((m, i) => assert.equal(nextMission(m.id), MISSIONS[i + 1] || null));
   assert.equal(nextMission('twilight').id, 'hordaland', 'the end of Chapter I leads into Chapter II');
+  assert.equal(nextMission('vigrid').id, 'delta', 'the end of Chapter II leads into Chapter III');
+  assert.equal(nextMission('eridu'), null);
   assert.equal(chapterOf('nope'), null);
 });
 
@@ -105,4 +107,19 @@ test('the computer players\' names fit the 20 characters a player name may have'
 test('Chapter II\'s story beats are headline: the bridge is held to Heimdall\'s horn, and Ragnarök waits for Loki', () => {
   assert.deepEqual(MISSIONS.find((m) => m.id === 'bifrost').waitFor, ['hold']);
   assert.deepEqual(MISSIONS.find((m) => m.id === 'vigrid').waitFor, ['loki']);
+});
+
+test('Chapter III\'s story beats are headline: Karnak is held to the dawn, and Eridu waits for Tiamat', () => {
+  assert.deepEqual(MISSION_BY_ID.karnak.waitFor, ['hold']);
+  assert.deepEqual(MISSION_BY_ID.eridu.waitFor, ['tiamat']);
+  // Tiamat's serpents march on a tag of their own, so slaying her is about her alone.
+  const spawns = MISSION_BY_ID.eridu.events.filter((e) => e.spawn).map((e) => [e.spawn.tag, e.spawn.units.map(([t]) => t)]);
+  assert.deepEqual(spawns, [['tiamat', ['mesopotamian_tiamat']], ['tiamat_brood', ['mesopotamian_mushussu']]]);
+});
+
+test('every spawn group of a mission has its own tag, so a kill objective counts only its own units', () => {
+  for (const m of MISSIONS) {
+    const tags = m.events.filter((e) => e.spawn).map((e) => e.spawn.tag);
+    assert.equal(new Set(tags).size, tags.length, m.id);
+  }
 });

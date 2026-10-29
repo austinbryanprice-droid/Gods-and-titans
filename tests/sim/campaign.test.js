@@ -314,3 +314,49 @@ test('Ragnarök: slaying Loki is done when Loki falls; the wolves at his heel ar
   assert.ok(tagged(w, 'loki_wolves').length > 0);
 });
 
+
+test('The Gate of the East: the two lamassu stand guard where they spawn, kept out of their owner\'s army', () => {
+  const w = world('sinai');
+  const ai = createAI(w, 1, 'easy');
+  run(w, 3, [ai]);
+  const bulls = tagged(w, 'lamassu');
+  assert.equal(bulls.length, 2);
+  assert.ok(bulls.every((u) => u.owner === 1 && u.type === 'mesopotamian_lamassu' && u.cGuard && !u.cMarch));
+  const at = bulls.map((u) => [u.x, u.y]);
+  run(w, 240, [ai]);
+  bulls.forEach((u, i) => assert.ok(Math.hypot(u.x - at[i][0], u.y - at[i][1]) < 3, 'still at the gate'));
+  const k = w.campaign.m.objectives.findIndex((o) => o.id === 'lamassu');
+  assert.equal(w.campaign.state[k], OPEN, 'a bonus while they live');
+  for (const u of bulls) w.killEntity(u, null);
+  run(w, 2, [ai]);
+  assert.equal(w.campaign.state[k], DONE);
+  assert.equal(w.gameOver, null, 'a bonus does not end the mission');
+});
+
+test('The Wells of the Desert: not held in eighteen minutes, the wells turn bitter and the mission is lost', () => {
+  const w = world('siwa');
+  w.time = 1078;
+  run(w, 4);
+  const k = w.campaign.m.objectives.findIndex((o) => o.id === 'wells');
+  assert.equal(w.campaign.state[k], FAILED);
+  assert.equal(w.gameOver.winningTeam, 2);
+});
+
+test('The Mother of Monsters: breaking Akkad early does not win it; Tiamat still rises at 13:00 and must fall', () => {
+  const s = campaignSetup('eridu', {});
+  assert.deepEqual(s.players.map((p) => [p.team, p.pantheon]), [[1, 'egyptian'], [2, 'mesopotamian'], [1, 'norse'], [2, 'mesopotamian']]);
+  const w = world('eridu');
+  const home = w.campaign.homes[1];
+  for (const b of w.buildingList.filter((x) => x.owner === 1 || x.owner === 3)) w.killEntity(b, null);
+  run(w, 2);
+  assert.equal(w.gameOver, null, 'not over without Tiamat');
+  w.time = 779.5;
+  run(w, 3);
+  const tiamat = tagged(w, 'tiamat');
+  assert.deepEqual(tiamat.map((u) => u.type), ['mesopotamian_tiamat']);
+  assert.ok(Math.hypot(tiamat[0].x - home.x, tiamat[0].y - home.y) < 14, 'from where the king\'s Town Center stood');
+  assert.equal(tagged(w, 'tiamat_brood').length, 3);
+  w.killEntity(tiamat[0], null);
+  run(w, 2);
+  assert.deepEqual(w.gameOver, { winningTeam: 1, how: 'campaign' }, 'won while her brood still crawls');
+});
