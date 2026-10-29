@@ -340,8 +340,11 @@ const WOLF_AGE = [
     events: [
       { at: 4, say: 'The Greeks of Thera stand beside you. Build, summon, and strike.' },
       { at: 720, say: 'The sky goes dark over Vigrid. Loki is coming!' },
-      { at: 780, say: 'Loki walks on Vigrid with the wolves at his heel! Bring the trickster down!', reveal: 'loki', spawn: { owner: 1, tag: 'loki', units: U(['norse_loki', 1], ['norse_wolf_of_fenrir', 4]), at: 'front', march: true, always: true } },
+      { at: 780, say: 'Loki walks on Vigrid with the wolves at his heel! Bring the trickster down!', reveal: 'loki', spawn: { owner: 1, tag: 'loki', units: U(['norse_loki', 1]), at: 'front', march: true, always: true } },
       { after: 'loki', say: 'The trickster has fallen! Now finish his sworn host.' },
+      // His wolves, on a tag of their own: "Slay Loki" is done when Loki falls, not when the last wolf does.
+      // (Last in the list: a spoken line's clip is named by its event's place.)
+      { at: 780, spawn: { owner: 1, tag: 'loki_wolves', units: U(['norse_wolf_of_fenrir', 4]), at: 'front', march: true, always: true } },
     ],
   },
 ];
