@@ -972,7 +972,15 @@ counted in `world.perf.commandErrors`.
 { type: 'cast',       unit: id, ability: abilityId, x?, y?, target?: id, queue }
 { type: 'godPower',   power: powerId, x?, y? }               // cast one of my pantheon's god powers (4.11); x / y for a strike
 { type: 'surrender' }
+{ type: 'teamMark',   kind: 'attack'|'defend'|'help', x, y }  // a team order for my computer allies (10, "Answering team marks"); issued by the host only
 ```
+**teamMark** (`src/sim/team-orders.js`) is not a click: the host issues it for the sender when it relays an Attack,
+Defend or Help marker (7, "Team marks"); a client cannot send it as a `cmd` (it is not in the net whitelist). The
+World keeps one standing order per player in `world.teamMarks` (`{ id, from, team, kind, x, y, t, until }`, `id`
+from `world.markSeq`), the sender's newer one replacing their older one; it stands `TEAM_ORDER_LIFE` game seconds
+(Attack 90, Defend 75, Help 60). `teamOrderFor(world, i)` is the newest standing order from another player of
+i's team (an enemy's never). It is never in a snapshot or an event (snapshots go to everyone). A defeated player
+still gives one (they keep the team chat too); a ping or Gather is ignored.
 **smart** resolution: with `relic`, a free relic is picked up by the nearest carrier and the rest walk along
 (5.15). Otherwise per unit: a relic carrier + own finished Temple → bring the relic in; enemy target → attack; worker + gold mine → gather; worker +
 tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker carrying cargo +
@@ -1229,7 +1237,10 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     `team: true` a team line, to the sender's teammates only), `pong {ts}`, `mark {from, kind, x, y}` (to the sender's
     teammates only), `kick {reason}`, `end {reason}`
 - **Team marks** (pings and markers, 9): a mark is a signal, not world state, so it never rides in a
-  snapshot (snapshots go to everyone). The kinds are the table `MARKS` in `src/data/marks.js`. The sender's
+  snapshot (snapshots go to everyone). An Attack, Defend or Help marker is also given to the host's World as a
+  `teamMark` command from the sender (`relayMark`, for the host's own marks and a client's alike, after the
+  `mark` bucket and `sanitizeMark`), so the sender's computer allies answer it (10) and the replay records it;
+  that order stays out of every snapshot too. The kinds are the table `MARKS` in `src/data/marks.js`. The sender's
   session shows its own mark at once (`onMark` fires with `from` = me, a local echo) and sends `mark {kind, x, y}`.
   The host takes it through the client's `mark` bucket, rebuilds it with `sanitizeMark` (a kind that is an own
   key of `MARKS`, a finite spot clamped to the map and rounded to a hundredth of a tile; anything else counts as
@@ -2254,7 +2265,9 @@ per-frame budget, so a revealed army appears over a few frames.
   inside the map. Every mark fades over its last 0.8 s. **Sound and text**: `ping`, or `ping_urgent` for Help,
   not positional; my own mark plays quieter; a teammate's marker (not a ping) also writes its words ("Attack
   here!") in the message area in their colour for a player with the sound off. The How to Play screen has a
-  "Team signals" group.
+  "Team signals" group. **Computer allies** answer Attack, Defend and Help (10, "Answering team marks"); the
+  marker buttons' tooltips say so when an AI is on my team (`aiAllyCount`), and with no human teammate they say
+  that no other person sees the mark.
 - `input.js`: left click select, drag box select, shift add/remove, double-click selects same
   type on screen, Ctrl+1–9 groups, 1–9 recall (double tap centers), right-click smart command
   (shift queues), hotkeys from the command card, targeting modes (attack-move A, ability
@@ -2503,7 +2516,7 @@ A match against the computer (one human, the rest AI; not the guided first match
 - Title screen: **Continue** (above Play vs AI) loads the newest save, autosave or slot; **Load Game** (small
   button, shown once a save exists) lists them all with Load and Delete.
 - What is saved: the whole World (entities, map state, pathfinding queue, projectiles, statuses, powers, relics,
-  sites, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
+  sites, the standing team orders, the sim RNG) and every computer player's `AIPlayer` (its own RNG, plans and memory), packed by
   `packGraph` (sim/save-graph.js): object identity and cycles, Maps, Sets, typed arrays, NaN, ±Infinity and -0
   survive; class instances come back on their prototypes (`CLASSES` in save-game.js; the pathfinder's scratch
   buffers are rebuilt, not saved; `World.onCommand`, the replay recorder's hook, is left out); unit and building data, config and the generated map are stored by name and
@@ -2648,6 +2661,28 @@ read the whole World, as they always have, so none of them scouts.) Hard and Bru
   Priest, away from its attacker, is healed there and rejoins the army at 65 % health, after 15 s, or when the
   Priest falls. Without a Priest near it fights on.
 
+**Answering team marks** (`src/ai/marks.js`, as in AoE II / IV and SC2 co-op): a human's Attack, Defend or Help
+marker reaches the World as a `teamMark` order (6.2, `src/sim/team-orders.js`), and every AI on the sender's team
+answers the newest standing one (`teamOrderFor`: a newer marker of any kind replaces the older; it runs out after
+90 / 75 / 60 s; an enemy's AI never sees it). Every difficulty does, and so does a stand-in seat (it plays for a
+teammate who dropped out, so it takes their team's calls; it only stays quiet, 10.1). The military enters mode
+`mark` from any mode but defending its own base (a base under attack comes first; while out, like a wave, only a
+big threat calls the army back); an Attack marker waits out a Decade of Peace. The army splits by population:
+`MARK_SHARE` goes (Attack 70 %, Defend 80 %, Help 85 %; gods, the Titan and summoned creatures always go, rams
+only to an Attack) and the rest, the soldiers nearest the rally point, stays as a home guard (sticky across thinks)
+that meets any threat at the base. The party attack-moves to the spot; at an Attack marker it then takes the
+nearest enemy building within 14 tiles (rams hitting it), at Defend / Help it fights the enemy units within 12
+tiles of the spot. When the fight where the party stands is lost (`retreatRatio`, the allies' units counting on its
+side) it falls back to the rally point and that marker counts as answered. When the order ends the army goes home.
+It is all read from the World, so a game with markers replays and saves like any other (tests/ai/ai-marks.test.js).
+Measured with `tools/ally-marks.mjs` (2v2 on medium maps, the "human" an AI that calls Help where it is struck,
+at most every 30 s, and Attack at each of its own waves' targets, against the same seeds without markers; 6 seeds):
+30 s after a call for help 26-31 % of the ally's army stands within 15 tiles of it, against 7-8 % without markers
+(the ally's own `helpAllies` defence comes only for big threats and from home). With a Normal "human" team 1 won
+3 of 6 against 2 of 6 and the human lasted 22.9 against 21.3 minutes; with an Easy one (the weak link the enemy
+goes for) it lost all 6 either way. The game outcome moves within the noise of 6 seeds; what changes plainly is
+that the ally comes when called.
+
 Every difficulty steers its army by where the bulk of it stands: the median position of its ground units
 (`centroid` in `src/ai/military.js`), not their mean, which stragglers walking out from home used to drag 30
 tiles back, so a siege kept restarting its march and a winning army stood idle by its first waypoint.
@@ -2684,6 +2719,13 @@ a god falling, being nearly beaten (its buildings down to 35 % of the most it ha
 Town Center left; once), its defeat, and victory (one AI of the winning team). `{unit}` and `{enemy}`
 in a line are the god or Titan and the other player's name; every pantheon has at least two lines
 per moment, walked in a shuffled order.
+
+An AI also answers a teammate's Attack marker (`ackAttack`, "Our spears go where you point.") or Defend / Help
+marker (`ackDefend`) when it takes the order (`answerMarks`, reading `teamOrderFor`): one AI of the team per
+marker, as a team line (`team: true`, sent with `relayTeamChat`, so the enemy never learns that an order was
+given). These skip the ordinary gaps but one AI answers at most every `ackGap` (20 s) and `maxAcks` (30) times a
+match; an Attack marker in a Decade of Peace is not answered until the peace ends. A loaded game does not
+answer the markers from before the save. A campaign mission has no voices, so no answers either.
 
 Rate limits (`VOICE`, game seconds, so a paused game stays quiet): an ordinary line waits 45 s after
 the same AI's last line and 15 s after any AI's, and 150 s after that AI's last line of the same

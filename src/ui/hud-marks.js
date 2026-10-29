@@ -13,6 +13,17 @@ const PIN_EM = 5.6; // height of a standing pin (name, chip, stem and bob) above
 const INSET_REFRESH_MS = 500; // how often the heights of the top bar and bottom console are read again
 const FADE_MS = 800; // a mark fades out over its last moments
 
+/** How many computer players share my team: they answer an Attack, Defend or Help marker (DESIGN 10). */
+export function aiAllyCount(vs) {
+  const list = (vs.setup && vs.setup.players) || [];
+  let n = 0;
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    if (i !== vs.myIndex && p && p.team === vs.myTeam && p.kind === 'ai') n++;
+  }
+  return n;
+}
+
 /** How many other people share my team: the players who can see a mark (a computer teammate has no screen). */
 export function teammateCount(vs) {
   const list = (vs.setup && vs.setup.players) || vs.players || [];
@@ -171,6 +182,7 @@ export class MarkPalette {
       this.buttons.set(id, b);
     }
     this.teammates = -1;
+    this.aiAllies = -1;
     this.setTeammates(0);
   }
 
@@ -179,17 +191,25 @@ export class MarkPalette {
     for (const [id, b] of this.buttons) setClass(b, 'is-armed', id === kind);
   }
 
-  /** The tooltips say who will see a mark. */
-  setTeammates(n) {
-    if (n === this.teammates) return;
+  /**
+   * The tooltips say who will see a mark, and that computer allies answer an Attack, Defend or Help
+   * marker (DESIGN 10: they send their army there).
+   * @param {number} n other people on my team
+   * @param {number} [ai] computer players on my team
+   */
+  setTeammates(n, ai = 0) {
+    if (n === this.teammates && ai === this.aiAllies) return;
     this.teammates = n;
-    const who = n > 0 ? `Only your ${n === 1 ? 'teammate sees' : `${n} teammates see`} it.` : 'You have no teammates in this match, so only you see it.';
+    this.aiAllies = ai;
+    const who = n > 0 ? `Only your ${n === 1 ? 'teammate sees' : `${n} teammates see`} it.` : ai > 0 ? 'No other person sees it.' : 'You have no teammates in this match, so only you see it.';
+    const answer = ai > 0 ? ` Your computer ${ai === 1 ? 'ally sends its' : 'allies send their'} army there.` : '';
     for (const [id, b] of this.buttons) {
       const def = MARKS[id];
       const how = id === 'ping'
         ? 'Alt+click or middle-click the map or minimap pings at once; this button makes your next click a ping.'
         : `Click, then click the map or the minimap to call "${def.text}"`;
-      b.title = `${def.name}: ${how} ${who} (Esc cancels)`;
+      const ans = id === 'attack' || id === 'defend' || id === 'help' ? answer : '';
+      b.title = `${def.name}: ${how} ${who}${ans} (Esc cancels)`;
     }
   }
 }

@@ -70,6 +70,9 @@ export class World {
     this.fields = [];
     this.reveals = [];
     this.cmdQueue = [];
+    // Standing team orders (sim/team-orders.js): never in a snapshot, read by the AIs of the sender's team.
+    this.teamMarks = [];
+    this.markSeq = 0;
     this.onCommand = null; // (tick, player, command) for every command accepted: the replay recorder (src/game/replay.js)
     this.hash = new SpatialHash(this.map.width, this.map.height, 2);
     this.paths = new PathService(this.map);
