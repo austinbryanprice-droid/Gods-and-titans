@@ -1,5 +1,5 @@
 // Full-screen HUD overlays: "Waiting for the host…", the in-game menu (F10:
-// resume, options, surrender, quit), the confirm dialog, the defeat / victory
+// resume, save, load, options, surrender, quit), the confirm dialog, the defeat / victory
 // screen with the after-game chronicle (src/ui/hud-chronicle.js), the achievements the match
 // unlocked and a line on the player's career, and "the host has left".
 import { getSettings, saveSettings } from '../settings.js';
@@ -15,7 +15,7 @@ import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { getCareer, careerSummary } from '../game/career.js';
 import { MEDALS } from '../data/medals.js';
 import { CAMPAIGN } from '../data/campaign.js';
-import { SLOTS, saveInfo, savedAgo } from '../game/save-store.js';
+import { SLOTS, saveInfo, savedAgo, listSaves, saveTitle, saveLine } from '../game/save-store.js';
 
 const END_TEXT = {
   'host-left': 'The connection to the host was lost.',
@@ -210,6 +210,8 @@ export class Overlays {
     // A solo match against the computer can be saved and carried on later (DESIGN 9.4).
     const savable = typeof game.canSave === 'function' && game.canSave();
     if (savable) buttons.push(btn('Save Game', '', () => this.openSaves()));
+    // ... and a saved game loaded in its place, like the title screen's Load Game.
+    if (savable && typeof game.canLoad === 'function' && game.canLoad()) buttons.push(btn('Load Game', '', () => this.openLoads()));
     const replay = !!game.replay;
     if (!over && !defeated && !replay) {
       buttons.push(btn('Surrender', 'mw-btn--ghost is-danger', () => this.confirm(
@@ -314,6 +316,62 @@ export class Overlays {
     setTimeout(() => rows[0].focus({ preventScroll: true }), 0);
   }
 
+  /**
+   * The Load Game panel: the saved games as the title screen lists them (the autosave and the three slots,
+   * newest first). Loading leaves this match after a confirm: it counts as a quit, unless the save is of
+   * this very match. Back (or Esc) returns to the game menu; the game stays paused throughout.
+   */
+  openLoads() {
+    const game = this.game;
+    const saves = listSaves();
+    const status = el('div', 'hud-ohint hud-save-status', saves.length ? 'Saved games are kept in this browser on this device.' : 'No saved games yet. Save Game keeps this battle in a slot.');
+    status.setAttribute('role', 'status');
+    const rows = saves.map((info) => {
+      const own = typeof game.isOwnSave === 'function' && game.isOwnSave(info);
+      const b = el('button', 'mw-btn hud-obtn hud-save-slot', el('b', null, `${saveTitle(info)}${own ? ' · this battle' : ''}`), el('small', null, saveLine(info)));
+      b.type = 'button';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sfx.play('click');
+        this.confirmLoad(info, own);
+      });
+      return b;
+    });
+    const back = btn('Back', 'mw-btn--ghost', () => this.openMenu());
+    const node = this.panel('Load Game', null, rows.length ? el('div', 'hud-obtns is-col hud-save-slots', ...rows) : null, status, el('div', 'hud-obtns', back));
+    this.swap('loads', node, () => this.openMenu());
+    setTimeout(() => (rows[0] || back).focus({ preventScroll: true }), 0);
+  }
+
+  /** Ask before leaving this match for a saved one; Cancel goes back to the list. */
+  confirmLoad(info, own) {
+    const game = this.game;
+    const time = (game.viewState && game.viewState.time) || 0;
+    const text = own
+      ? 'Go back to this save of the battle you are playing. What happened since it was saved is lost.'
+      : time >= 60 ? 'You leave the battle you are playing: it counts as a loss in your career, like Quit to Menu.'
+        : 'You leave the battle you are playing.';
+    this.confirm(`Load ${saveTitle(info)}?`, text, 'Load', () => {
+      const node = this.panel('Load Game', null, el('div', 'hud-wait', el('span', 'hud-spinner'), el('span', null, 'Loading the saved game…')));
+      this.swap('loads', node, null);
+      game.loadSave(info.slot).catch((err) => {
+        if (game.disposed) return;
+        this.openLoads();
+        sfx.play('error');
+        if (game.hud) game.hud.message(`Could not load: ${err && err.message ? err.message : err}`, 'error');
+      });
+    }, () => this.openLoads());
+  }
+
+  /** Show a panel in place of the current one without running its onHide (keeps the pause). */
+  swap(name, node, onEscape) {
+    if (this.current) {
+      this.current.el.remove();
+      this.current = null;
+    }
+    return this.show(name, node, onEscape);
+  }
+
   /** True on a host with other players connected: the game runs here, so leaving ends it for them. */
   hostingOthers() {
     const s = this.game.session;
@@ -321,14 +379,14 @@ export class Overlays {
   }
 
   closeMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves') {
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads') {
       this.hide();
       this.game.setPaused(false);
     }
   }
 
   toggleMenu() {
-    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves') this.closeMenu();
+    if (this.name === 'menu' || this.name === 'confirm' || this.name === 'saves' || this.name === 'loads') this.closeMenu();
     else this.openMenu();
   }
 
