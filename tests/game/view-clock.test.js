@@ -79,3 +79,16 @@ test('Game.setPaused(false) re-anchors the view clock on the next snapshot', () 
   s.run(1);
   assert.ok(s.ahead() < 0, `interpolating at once after the pause (${s.ahead()} ms ahead)`);
 });
+
+test('Game.setPaused: a new host still waiting for players is not alone, and a pause taken alone always ends', () => {
+  const ticker = { started: 0, stopped: 0, start() { this.started++; }, stop() { this.stopped++; } };
+  const waiting = { paused: false, viewState: null, session: { isHost: true, ticker, clients: new Map(), stopped: false, waiting: new Set([2]) } };
+  assert.equal(Game.prototype.setPaused.call(waiting, true), false, 'the others are on their way back (DESIGN 7)');
+  assert.equal(waiting.paused, false);
+  const game = { paused: false, viewState: null, session: { isHost: true, ticker, clients: new Map(), stopped: false } };
+  assert.equal(Game.prototype.setPaused.call(game, true), true);
+  game.session.clients.set(2, {}); // someone joined while the menu was open
+  Game.prototype.setPaused.call(game, false);
+  assert.equal(game.paused, false, 'the view runs again');
+  assert.equal(ticker.started, 1);
+});

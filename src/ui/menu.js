@@ -1225,7 +1225,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         if (!alive || ctrl !== my) return;
         const mod = await loadLobby();
         if (!mod.LobbyClient || typeof mod.LobbyClient.rejoin !== 'function') throw Object.assign(new Error('Rejoining is not available here.'), { refused: true });
-        const info = await mod.LobbyClient.rejoin({ transport: ticket.transport, roomCode: ticket.roomCode, token: ticket.token, name: ticket.name, signal: my ? my.signal : undefined });
+        const info = await mod.LobbyClient.rejoin({ transport: ticket.transport, roomCode: ticket.roomCode, token: ticket.token, name: ticket.name, proof: ticket.proof || undefined, signal: my ? my.signal : undefined });
         if (!alive || ctrl !== my) {
           info.conn.close('left');
           return;

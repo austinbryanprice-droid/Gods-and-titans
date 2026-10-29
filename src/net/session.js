@@ -557,7 +557,8 @@ export class HostSession extends SessionBase {
     if (typeof pack !== 'function' || !room) return;
     this.handoff = { room, here, tokens: tokens || new Map(), pack, at: -Infinity, busy: null, sent: 0 };
     // (A game carried on keeps the proofs it came with: the players got theirs from the host before.)
-    for (const p of this.setup.players) if (p.kind === 'human' && p.index !== this.myIndex && !this.proofs.has(p.index)) this.proofs.set(p.index, randomProof());
+    // (Mine too: when I come back after leaving, the next host shows it to me.)
+    for (const p of this.setup.players) if (p.kind === 'human' && !this.proofs.has(p.index)) this.proofs.set(p.index, randomProof());
     this.plan = null;
     this.updatePlan();
   }

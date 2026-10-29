@@ -1315,7 +1315,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
     the whole game and every token: a trade-off for friends' games. Anyone can open a room code, so
     each seat has a proof (`HostSession.proofs`, random, in that seat's own `plan` and in the heir's
     `handoff`): the host shows it in the `start` it sends that seat on a rejoin, and `reachHost` and
-    `followHeir` refuse a `start` without it (`REASONS.NOT_HOST`). A player sitting on the planned
+    `followHeir` refuse a `start` without it (`REASONS.NOT_HOST`); the rejoin ticket keeps it, so Rejoin from the title checks it too. A player sitting on the planned
     room can then stop the move (the game ends) but cannot pass for the host and take the others in.
   - Pause (online games): `{t:'pause', on}` from a client, `HostSession.setPause` decides and tells
     everyone (`{t:'pause', on, by, reason, ms, left}`; `session.pause`, `onPause`). `ONLINE_PAUSES`

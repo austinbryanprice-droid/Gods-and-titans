@@ -102,7 +102,7 @@ test('handoff: the host names the lowest connected player still playing as heir 
   assert.equal(ann.backup.room, room);
   assert.deepEqual(ann.backup.present.sort(), [0, 1, 2]);
   assert.equal(ann.backup.tokens.size, 3);
-  assert.deepEqual([...ann.backup.proofs].sort(), [[1, annProof], [2, benProof]], 'the heir gets every seat\'s proof');
+  assert.deepEqual([...ann.backup.proofs].sort(), [[0, host.proofs.get(0)], [1, annProof], [2, benProof]], 'the heir gets every seat\'s proof (the host\'s too)');
   assert.equal(JSON.parse(await decodeState(ann.backup.state)).tick, host.world.tickCount);
   assert.equal(host.canHandOff, true);
 
@@ -176,7 +176,7 @@ test('handoff: when the host vanishes, the heir carries the game on and the othe
   assert.equal(annHost.heir, 2, 'and Ben is next in line');
 
   // The old host can come back as a player with its own token.
-  const back = await LobbyClient.rejoin({ transport: 'loopback', roomCode: room, token: tokens.get(0), name: 'Host' });
+  const back = await LobbyClient.rejoin({ transport: 'loopback', roomCode: room, token: tokens.get(0), name: 'Host', proof: host.proofs.get(0) }); // (the old host's ticket keeps its proof)
   assert.equal(back.myIndex, 0);
   await waitFor(() => !annHost.standIns.has(0), 2000, 'the old host takes its seat back');
   back.conn.close('done');

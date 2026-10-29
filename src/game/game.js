@@ -146,7 +146,8 @@ export function showChatLine(line) {
 
 /** A single-player match: this machine hosts it and nobody else is connected. */
 function isSolo(s) {
-  return !!(s && s.isHost && s.ticker && (!s.clients || s.clients.size === 0) && !s.stopped);
+  // (A new host after a migration, still waiting for the others to reconnect, is not alone: DESIGN 7.)
+  return !!(s && s.isHost && s.ticker && (!s.clients || s.clients.size === 0) && !s.stopped && !(s.waiting && s.waiting.size));
 }
 
 /** Let the browser paint once (a timer covers a hidden tab, where frames do not run). */
@@ -776,7 +777,7 @@ export class Game {
       if (s && typeof s.hold === 'function') s.hold(on);
       return !!on;
     }
-    if (!isSolo(s)) return false;
+    if (!isSolo(s) && !(this.paused && !on)) return false; // (a pause taken alone always ends, even if someone joined since)
     if (on && !this.paused) {
       s.ticker.stop();
       this.paused = true;
@@ -1634,7 +1635,7 @@ export class Game {
     const [saveGame, net] = mods;
     const room = makeRoomCode();
     session.enableHandoff({ room, here, tokens, pack: (world, ais) => net.encodeState(JSON.stringify(saveGame.packMatch(world, ais))) });
-    if (this.myToken) saveTicket({ roomCode: room, token: this.myToken, myIndex: session.myIndex, name: session.playerName(session.myIndex), transport: this.netTransport() });
+    if (this.myToken) saveTicket({ roomCode: room, token: this.myToken, myIndex: session.myIndex, name: session.playerName(session.myIndex), transport: this.netTransport(), proof: session.proofs.get(session.myIndex) });
   }
 
   /**
@@ -1666,7 +1667,7 @@ export class Game {
         return;
       }
       // If what follows does not work out, Rejoin (and the title screen's) tries the new room.
-      if (!back && this.myToken && !mine) saveTicket({ roomCode: plan.room, token: this.myToken, myIndex: this.myIndex, name, transport });
+      if (!back && this.myToken && !mine) saveTicket({ roomCode: plan.room, token: this.myToken, myIndex: this.myIndex, name, transport, proof: plan.proof });
       if (back) {
         session = new ClientSession({ setup: back.setup, myIndex: back.myIndex, conn: back.conn, mapData: old.mapData, viewState: this.viewState });
       } else if (mine) {

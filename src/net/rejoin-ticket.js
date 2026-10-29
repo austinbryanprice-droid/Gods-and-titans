@@ -131,5 +131,7 @@ function cleanTicket(t, nowMs) {
     transport: TRANSPORTS.includes(t.transport) ? t.transport : 'peer',
     at,
     tally: cleanTally(t.tally), // the career's running tally (saveTally), or null
+    // after a host migration: my seat's proof (DESIGN 7), which the game's host shows in `start`; null before one
+    proof: typeof t.proof === 'string' && /^[0-9a-f]{8,64}$/.test(t.proof) ? t.proof : null,
   };
 }

@@ -210,7 +210,11 @@ test('rejoin ticket: kept for one game, a few hours, and cleared once that game 
   const t0 = 1_000_000;
   const token = 'c0ffee'.repeat(4);
   assert.equal(saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local' }, store, t0).roomCode, 'ABCDE');
-  assert.deepEqual(readTicket(store, t0 + 1000), { roomCode: 'ABCDE', token, myIndex: 2, name: 'Ann', transport: 'local', at: t0, tally: null });
+  assert.deepEqual(readTicket(store, t0 + 1000), { roomCode: 'ABCDE', token, myIndex: 2, name: 'Ann', transport: 'local', at: t0, tally: null, proof: null });
+  // After a host migration the ticket keeps my seat's proof (DESIGN 7), checked in the next host's `start`.
+  saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local', proof: 'cd'.repeat(16) }, store, t0);
+  assert.equal(readTicket(store, t0 + 1000).proof, 'cd'.repeat(16));
+  saveTicket({ roomCode: 'abcde', token, myIndex: 2, name: 'Ann', transport: 'local' }, store, t0);
   // The career's running tally rides with the ticket of that game only.
   assert.equal(saveTally('beef'.repeat(8), { buildingsLost: 3 }, store), false);
   assert.equal(saveTally(token, { buildingsLost: 3, godsSummoned: 1 }, store), true);
