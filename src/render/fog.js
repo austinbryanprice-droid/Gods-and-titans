@@ -186,8 +186,17 @@ export class FogOfWar {
     const H = this.height;
     const raw = this.raw;
     const n = W * H;
-    if (revealAll) raw.fill(FOW_VISIBLE);
-    else for (let i = 0; i < n; i++) raw[i] = visible[i] ? FOW_VISIBLE : explored[i] ? FOW_EXPLORED : FOW_UNEXPLORED;
+    // Most snapshots (20 Hz) bring the vision of the one before: the goal, a pure function of `raw`, is then
+    // the one already set, so the blur below is skipped.
+    let changed = this.first;
+    for (let i = 0; i < n; i++) {
+      const r = revealAll || visible[i] ? FOW_VISIBLE : explored[i] ? FOW_EXPLORED : FOW_UNEXPLORED;
+      if (raw[i] !== r) {
+        raw[i] = r;
+        changed = true;
+      }
+    }
+    if (!changed) return;
     // separable [1 2 1] blur: softer, rounder vision edges
     const tmp = this.tmp;
     for (let y = 0; y < H; y++) {
