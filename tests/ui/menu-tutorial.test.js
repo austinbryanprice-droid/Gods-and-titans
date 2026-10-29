@@ -88,3 +88,41 @@ test('after the lesson, the skirmish screen opens a Play vs AI lobby on Easy wit
   assert.deepEqual(slots.filter((s) => s.kind === 'ai').map((s) => s.difficulty), ['easy']);
   menu.showMenu('title');
 });
+
+/** Play vs AI on the title screen with this career; resolves with the lobby it made and the menu's root. */
+async function playVsAI(career) {
+  resetCareer(career);
+  const { LobbyHost } = await import('../../src/net/lobby.js');
+  const create = LobbyHost.create;
+  let lobby = null;
+  LobbyHost.create = async (...args) => (lobby = await create.apply(LobbyHost, args));
+  try {
+    const root = document.createElement('div');
+    menu.createMenu({ root, onStart() {} });
+    menu.showMenu('title');
+    root.all('button').find((b) => b.textContent.includes('Play vs AI')).click();
+    for (let i = 0; i < 100 && !/Prepare for Battle/i.test(root.textContent); i++) await new Promise((r) => setTimeout(r, 5));
+    return { lobby, root };
+  } finally {
+    LobbyHost.create = create;
+  }
+}
+
+test('Play vs AI gives a new player the Greeks (the lesson\'s pantheon); after a win against the computer, Random', async () => {
+  const first = await playVsAI({});
+  assert.equal(first.lobby.state.slots.find((s) => s.kind === 'host').pantheon, 'greek');
+  const later = await playVsAI({ games: 1, wins: 1, aiWins: 1 });
+  assert.equal(later.lobby.state.slots.find((s) => s.kind === 'host').pantheon, 'random');
+  menu.showMenu('title');
+});
+
+test('the Random preview names every pantheon under its emblem, and a click chooses it', async () => {
+  const { PANTHEON_LIST } = await import('../../src/data/index.js');
+  const { lobby, root } = await playVsAI({ games: 1, wins: 1, aiWins: 1 });
+  const picks = root.all('button').filter((b) => b.className.includes('mw-random-pick'));
+  assert.equal(picks.length, PANTHEON_LIST.length);
+  PANTHEON_LIST.forEach((p, i) => assert.ok(picks[i].textContent.endsWith(p.name), p.name));
+  picks.find((b) => b.textContent.endsWith('Norse')).click();
+  assert.equal(lobby.state.slots.find((s) => s.kind === 'host').pantheon, 'norse');
+  menu.showMenu('title');
+});

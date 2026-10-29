@@ -31,6 +31,15 @@ export function defaultAiDifficulty(beatenComputer) {
   return beatenComputer ? 'normal' : 'easy';
 }
 
+/**
+ * The pantheon Play vs AI gives the player (DESIGN 9): Greek, the one the lesson teaches, until this device's career
+ * has a win against the computer; then Random, as in any lobby.
+ * @param {boolean} beatenComputer career.hasBeatenComputer()
+ */
+export function defaultPantheon(beatenComputer) {
+  return beatenComputer ? 'random' : 'greek';
+}
+
 /** The lobby's line under the players while Easy is suggested (a solo lobby, no win against the computer yet). */
 export const EASY_SUGGESTED_NOTE = 'The computer plays on Easy for your first game. Once you have beaten it, new games start on Normal; pick a level in its slot any time.';
 

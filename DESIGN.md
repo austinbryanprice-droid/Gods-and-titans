@@ -2037,7 +2037,9 @@ per-frame budget, so a revealed army appears over a few frames.
   `hasBeatenComputer`, 9.1), then on **Normal**. While Easy is the default, that slot's dropdown reads
   "AI — Easy (suggested)" and a hint line under the players says the computer plays on Easy for a first game
   (hidden once no AI is on Easy). Online lobbies keep Normal and show neither; Quick Match keeps reusing the last
-  lobby as it was. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
+  lobby as it was. Until that same first win the player's slot starts on the Greeks, the pantheon the lesson teaches
+  (`defaultPantheon`), then on Random. The lobby preview of Random lists the ten pantheons, each emblem with its name
+  under it, and a click on one chooses it. In the battle HUD a pantheon chip (top left, `rPantheon`) carries the pantheon's
   emblem and name, and its tooltip lists the blessings and the elite soldier. The top bar's left group stops short of
   the centre banner: when its chips (Market, clock, sites, peace or wave, ping, pantheon, relics) run long, the
   pantheon's name gives way and ends in an ellipsis (the name alone is hidden under 1100 px wide).

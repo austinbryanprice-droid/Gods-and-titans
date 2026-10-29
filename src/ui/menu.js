@@ -233,7 +233,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
           safe(() => lobby.setSlot(i, { kind: 'ai', difficulty, team: 2 }));
         } else safe(() => lobby.setSlot(i, { kind: 'closed' }));
       });
-      if (opts.pantheon) safe(() => lobby.setSlot(me, { pantheon: opts.pantheon }));
+      // A first game: Greek, as in the lesson, until a win against the computer; then Random (DESIGN 9).
+      const pantheon = opts.pantheon || M.defaultPantheon(hasBeatenComputer());
+      if (pantheon !== 'random') safe(() => lobby.setSlot(me, { pantheon }));
       safe(() => lobby.setMapSize('small'));
       done();
       go('lobby', { lobby, role: 'host', transport: 'none' });
@@ -852,8 +854,11 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       if (!sum) {
         setChildren(preview,
           h('div.mw-preview-head', h('span.mw-preview-emblem', pantheonEmblem('random')), h('div', h('div.mw-preview-name', 'Random'), h('div.mw-preview-culture', 'Let the Fates decide'))),
-          h('p.mw-preview-desc', 'A pantheon will be drawn by lot when the battle begins. Click your pantheon in the player list to choose one of the ten mythologies.'),
-          h('div.mw-random-icons', PANTHEON_LIST.map((p) => pantheonEmblem(p.id)).join(' ')),
+          h('p.mw-preview-desc', 'A pantheon will be drawn by lot when the battle begins. Choose one of the ten mythologies below, or click your pantheon in the player list.'),
+          // each pantheon by emblem and name; a click chooses it
+          h('div.mw-random-list', PANTHEON_LIST.map((p) => h('button.mw-random-pick', { type: 'button', title: `Play the ${p.name} pantheon`, onclick: () => patchSlot(myIndex(), { pantheon: p.id }) },
+            h('span.mw-random-emblem', { 'aria-hidden': 'true' }, pantheonEmblem(p.id)),
+            h('span.mw-random-name', p.name)))),
         );
         return;
       }
