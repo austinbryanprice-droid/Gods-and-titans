@@ -49,7 +49,7 @@ import { ReplayRecorder } from './replay.js';
 import { saveReplay } from './replay-store.js';
 import { ReplaySession } from './replay-session.js';
 import { ReplayBar } from '../ui/hud-replay.js';
-import { MatchSaver, loadSaveGame, isSettled } from './game-saves.js';
+import { MatchSaver, loadSaveGame, isSettled, settleMatch } from './game-saves.js';
 import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
@@ -194,6 +194,11 @@ export function effectSound(ev) {
   }
   if (ev.el === 'holy') return [ev.shape === 'buff' || ev.shape === 'shield' ? 'heal' : 'magic', 1];
   return [SPELL_SOUNDS[ev.el] || 'magic', 1];
+}
+
+/** The career's id of an online game this client can rejoin (its token), or null. */
+export function rejoinMatchId(launch) {
+  return launch && launch.role === 'client' && launch.rejoin ? `rejoin:${launch.rejoin}` : null;
 }
 
 /** Forget the rejoin ticket of a client's game (DESIGN 7): it is over, or cannot be rejoined. */
@@ -394,7 +399,8 @@ export class Game {
     // The guided first match is not a game of the career: its medal is kept instead (checkEnd); nor is a
     // campaign mission, whose wins and best times the campaign keeps (src/game/campaign-progress.js).
     // A loaded game the career has already counted (quit as a loss, then carried on from a save) counts nothing more.
-    const settled = !!(resumed && isSettled(resumed.matchId));
+    // Likewise a rejoined online game already counted when the player quit it (rejoinMatchId).
+    const settled = !!(resumed && isSettled(resumed.matchId)) || isSettled(rejoinMatchId(this.launch));
     if (settled) this.dailyCounted = true;
     if (!this.tutorial && !this.mission && !this.replay && !settled) {
       this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
@@ -1212,6 +1218,7 @@ export class Game {
       }
       this.countDaily(false);
       if (this.saver) this.saver.onGameOver(); // counted: its autosave would bring it back to count again
+      settleMatch(rejoinMatchId(this.launch)); // and so would rejoining it (DESIGN 7)
     }
   }
 

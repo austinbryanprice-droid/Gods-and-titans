@@ -167,14 +167,14 @@ test('rejoin through the lobby: the start carries a token, and only that token w
   const bobIndex = starts[0].myIndex;
 
   // The host is still loading: no session takes rejoins yet.
-  await assert.rejects(LobbyClient.rejoin({ transport: 'loopback', roomCode: lobby.roomCode, token, name: 'Bob' }), (e) => e.refused && e.message === REASONS.REJOIN_LATER);
+  await assert.rejects(LobbyClient.rejoin({ transport: 'loopback', roomCode: lobby.roomCode, token, name: 'Bob' }), (e) => e.refused && e.retry && e.message === REASONS.REJOIN_LATER);
 
   const host = new HostSession({ setup: res.setup, myIndex: res.myIndex, conns: res.conns, createWorld: fakeWorldFactory({ units: 40 }), createAI: () => ({ tick() {} }), autoTick: false });
   lobby.setRejoinHandler((i, conn) => host.rejoin(i, conn));
   host.start();
 
   // Someone who was never in the game, a made-up token, another build.
-  await assert.rejects(LobbyClient.rejoin({ transport: 'loopback', roomCode: lobby.roomCode, token: 'ab'.repeat(16), name: 'Eve' }), (e) => e.refused && e.message === REASONS.STARTED);
+  await assert.rejects(LobbyClient.rejoin({ transport: 'loopback', roomCode: lobby.roomCode, token: 'ab'.repeat(16), name: 'Eve' }), (e) => e.refused && !e.retry && e.message === REASONS.STARTED);
   await assert.rejects(LobbyClient.rejoin({ transport: 'loopback', roomCode: lobby.roomCode, token: 'not a token', name: 'Eve' }), (e) => e.message === REASONS.REJOIN_UNKNOWN);
   await assert.rejects(LobbyClient.rejoin({ transport: 'loopback', roomCode: lobby.roomCode, token, name: 'Bob', version: '0.0.1' }), (e) => e.refused && /Version mismatch/.test(e.message));
   // A stranger joining the room normally is still told the game started.

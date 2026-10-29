@@ -1228,7 +1228,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         if (!alive || ctrl !== my || (err && err.type === 'aborted')) return;
         const msg = M.cleanMessage(err && err.message, 'Could not rejoin the game.');
         // The host said no (the game is over, or this browser is not in it), or the room is gone with the host: forget it.
-        const gone = (err && err.refused) || /not found|peer-unavailable|could not connect to peer/i.test(msg);
+        const gone = (err && err.refused && !err.retry) || (!(err && err.refused) && /not found|peer-unavailable|could not connect to peer/i.test(msg));
         if (gone) clearTicket(undefined, ticket.token);
         show('error', gone && !err.refused ? `The game in room ${ticket.roomCode} is gone: the host has left it.` : M.friendlyJoinError(err, ticket.roomCode), !gone);
         sfx.play('error');

@@ -732,7 +732,7 @@ export class LobbyClient {
    * Go back into a game that has started (DESIGN 7): connect to the room again and show the token
    * this browser got with `start`. Resolves with what `onStart` gives ({ setup, myIndex, conn }),
    * the connection handed over to the game; rejects with a readable Error (the game is over, this
-   * browser was not in it, the room is gone, …), flagged `refused` when the host itself said no.
+   * browser was not in it, the room is gone, …), flagged `refused` when the host itself said no (and `retry` when only for now: still loading, busy).
    * @param {object} opts { transport, roomCode, token, name, params, timeoutMs, signal, version }
    */
   static async rejoin(opts = {}) {
@@ -754,7 +754,11 @@ export class LobbyClient {
           if (!isObject(msg) || (msg.t !== MSG.KICK && msg.t !== MSG.START)) return;
           // Let go of the link at once: the full snapshot right behind `start` waits in it for the game session.
           for (const off of offs.splice(0)) off();
-          if (msg.t === MSG.KICK) reject(Object.assign(new Error(sanitizeReason(msg.reason, REASONS.REJOIN_DENIED)), { refused: true }));
+          if (msg.t === MSG.KICK) {
+            const reason = sanitizeReason(msg.reason, REASONS.REJOIN_DENIED);
+            // "still loading" and "busy" pass: the ticket stays good for another try
+            reject(Object.assign(new Error(reason), { refused: true, retry: reason === REASONS.REJOIN_LATER || reason === REASONS.BUSY }));
+          }
           else if (msg.t === MSG.START) {
             const valid = validateSetup(msg.setup, msg.you);
             if (!valid) reject(new Error('The host sent an invalid game setup. Make sure you both run the same version (reload the page).'));
