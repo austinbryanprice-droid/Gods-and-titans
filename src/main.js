@@ -97,6 +97,10 @@ export async function startGame(launch) {
         backToMenu(mission ? 'campaign' : 'title', mission ? { mission } : {});
       },
       onRematch: daily ? () => retryDaily(daily) : skirmish ? () => rematch(skirmish) : mission ? () => startGame({ ...launch, conns: new Map() }) : null,
+      onRejoin: launch && launch.role === 'client' ? () => {
+        if (current === game) current = null;
+        backToMenu('rejoin');
+      } : null,
       onNextMission: mission ? (id) => {
         if (current === game) current = null;
         backToMenu('campaign', { mission: id, brief: true });

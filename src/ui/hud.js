@@ -130,6 +130,11 @@ export class Hud {
     this.siteText = el('span', 'hud-clock');
     this.siteChip = el('div', 'hud-time hud-sites', el('i', 'hud-res-i', SITE_ICON), this.siteText);
     this.siteChip.hidden = true;
+    // The daily challenge's twist (DESIGN 9.3), for the whole match: its icon and name, the rule in the tooltip.
+    this.twistIcon = el('i', 'hud-res-i', '📅');
+    this.twistText = el('span', 'hud-clock');
+    this.twistChip = el('div', 'hud-time hud-twist', this.twistIcon, this.twistText);
+    this.twistChip.hidden = true;
     this.ping = el('span', 'hud-ping');
     const res = (cls, icon, title) => {
       const v = el('b', 'hud-res-v');
@@ -152,8 +157,8 @@ export class Hud {
     this.rRelics.n.hidden = true;
     this.relicSig = '';
     this.top = el('div', 'hud-top hud-panel',
-      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.ping, this.rPantheon.n, this.rRelics.n),
-      el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
+      el('div', 'hud-top-left', this.menuBtn, this.marketBtn, el('div', 'hud-time', el('i', 'hud-res-i', '⏳'), this.clock), this.peaceChip, this.siteChip, this.waveChip, this.twistChip, this.ping, this.rPantheon.n, this.rRelics.n),
+      this.topRight = el('div', 'hud-top-right', this.rGold.n, this.rWood.n, this.rFaith.n, this.rPop.n, this.rTier.n));
 
     // God portraits and idle workers.
     this.gods = el('div', 'hud-gods');
@@ -344,8 +349,11 @@ export class Hud {
       setText(this.rPop.v, `${me.pop}/${me.popCap}`);
       setClass(this.rPop.n, 'is-capped', me.pop >= me.popCap);
       setText(this.rTier.v, tierName(me.tier));
-    }
+    } else if (this.pantheonId) this.showPantheon(null);
+    // No player of mine (a replay seen by everyone): no resources to show, so no empty boxes either.
+    setHidden(this.topRight, !me);
     setText(this.clock, formatClock(vs.time));
+    if (!this.taunt.hidden && this.endScreenUp()) this.hideTaunt();
     this.updatePeace();
     this.updateRelics();
     this.updateWaves();
@@ -468,6 +476,15 @@ export class Hud {
       const secs = Math.ceil(sv.next);
       this.message(sv.nextBoss ? `Wave ${coming} comes in ${secs} s, and a Titan leads it!` : `Wave ${coming} comes in ${secs} s.`, 'alert', { icon: SURVIVAL_ICON });
     }
+  }
+
+  /** The daily challenge's twist chip ({ name, icon, desc } from src/data/twists.js); null takes it away. */
+  showTwist(twist) {
+    setHidden(this.twistChip, !twist);
+    if (!twist) return;
+    setText(this.twistIcon, twist.icon || '📅');
+    setText(this.twistText, twist.name);
+    this.twistChip.title = `Daily challenge: ${twist.name}. ${twist.desc}`;
   }
 
   /** The Sacred Sites chip: sites my side holds, and the Sacred Victory countdown while one side holds them all. */
@@ -702,7 +719,7 @@ export class Hud {
    * their name in their colour and the words, larger than the feed. A new taunt replaces the one up.
    */
   showTaunt(line) {
-    if (!line || typeof line !== 'object') return false;
+    if (!line || typeof line !== 'object' || this.endScreenUp()) return false;
     const text = sanitizeChat(line.text);
     if (!text) return false;
     const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
@@ -723,6 +740,19 @@ export class Hud {
       this.tauntTimer = setTimeout(() => (t.hidden = true), 500);
     }, tauntDwell(text));
     return true;
+  }
+
+  /** The taunt goes at once (an end screen came up over it). */
+  hideTaunt() {
+    clearTimeout(this.tauntTimer);
+    this.taunt.classList.remove('is-on');
+    this.taunt.hidden = true;
+  }
+
+  /** The end-of-match screens (game over, defeated, ended) stand at the top centre: no taunt behind them. */
+  endScreenUp() {
+    const n = this.overlays && this.overlays.name;
+    return n === 'gameover' || n === 'defeated' || n === 'ended';
   }
 
   /** Big centred announcement under the top bar. */

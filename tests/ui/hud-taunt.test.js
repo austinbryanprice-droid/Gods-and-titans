@@ -69,6 +69,29 @@ test('a taunt shows at the top centre with the emblem, the name and the words, t
   assert.equal(t.hidden, true);
 });
 
+test('no taunt behind the end screens: the one up goes when they open, and new ones are not shown', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const { hud } = setup();
+  const line = { from: 1, name: 'AI (Hard)', text: 'Blood for blood!', system: false, voice: true };
+  for (const name of ['gameover', 'defeated', 'ended']) {
+    hud.overlays.hide();
+    assert.equal(hud.showTaunt(line), true);
+    hud.overlays.show(name, document.createElement('div'));
+    hud.update(0);
+    assert.equal(hud.taunt.hidden, true, name);
+    assert.equal(hud.taunt.classList.contains('is-on'), false, name);
+    assert.equal(hud.showTaunt(line), false, `${name}: refused`);
+    assert.equal(hud.taunt.hidden, true);
+  }
+  // Other overlays (the in-game menu) leave it alone.
+  hud.overlays.hide();
+  hud.overlays.show('menu', document.createElement('div'));
+  assert.equal(hud.showTaunt(line), true);
+  hud.update(0);
+  assert.equal(hud.taunt.hidden, false);
+  hud.overlays.hide();
+});
+
 test('bad lines are refused; hostile text stays text', () => {
   const { hud } = setup();
   assert.equal(hud.showTaunt(null), false);

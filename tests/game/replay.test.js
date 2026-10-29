@@ -9,9 +9,11 @@ import { createAI } from '../../src/ai/ai.js';
 import { buildSetup } from '../../src/net/lobby.js';
 import { normalizeCommand } from '../../src/sim/commands.js';
 import {
-  ReplayRecorder, worldChecksum, compactCommand, sanitizeReplay, replayMeta, sidesLabel, resultLabel, MIN_REPLAY_TICKS,
+  ReplayRecorder, worldChecksum, compactCommand, sanitizeReplay, replayMeta, sidesLabel, resultLabel, MIN_REPLAY_TICKS, MAX_CARRIED_COMMANDS,
 } from '../../src/game/replay.js';
 import { ReplaySession, PlaybackClock } from '../../src/game/replay-session.js';
+import { MatchSaver } from '../../src/game/game-saves.js';
+import { unpackMatch } from '../../src/game/save-game.js';
 import {
   setReplayBackend, memoryBackend, saveReplay, listReplays, loadReplay, deleteReplay, packReplay, unpackReplay, MAX_REPLAYS,
 } from '../../src/game/replay-store.js';
@@ -238,4 +240,104 @@ test('the store keeps the newest replays, compressed, and loads them back', asyn
   } finally {
     setReplayBackend(null);
   }
+});
+
+/** The player's own clicks in the carried-on game test, on fixed ticks: train at the Town Center, send the army out. */
+function myOrders(host, t) {
+  const w = host.world;
+  if (t % 300 === 20) {
+    const tc = w.buildingList.find((b) => !b.dead && b.owner === 0 && b.type === 'town_center');
+    if (tc) host.sendCommand({ type: 'train', building: tc.id, unit: 'worshipper' });
+  }
+  if (t % 400 === 150) {
+    const ids = w.unitList.filter((u) => !u.dead && u.owner === 0).slice(0, 3).map((u) => u.id);
+    if (ids.length) host.sendCommand({ type: 'move', units: ids, x: 20 + (t % 7), y: 22 });
+  }
+}
+
+test('a game saved and carried on keeps one replay of the whole match', async () => {
+  const { setup } = buildSetup(lobby(), 23);
+  const host = new HostSession({ setup, myIndex: 0, createWorld, createAI, autoTick: false, useWorker: false });
+  const rec = new ReplayRecorder({ world: host.world, setup, myIndex: 0, now: () => 1000 }).attach();
+  host.viewState.on('snapshot', () => rec.sample());
+  host.onChat((line) => rec.chat(line));
+  host.start();
+  const SAVE_AT = 1500;
+  const END = 3000;
+  for (let t = 0; t < SAVE_AT; t++) {
+    myOrders(host, t);
+    host.step(1);
+    if (t === 50) host.sendChat('good luck');
+  }
+  // Save as the F10 menu does (MatchSaver.extras carries the recording), through JSON as the store keeps it.
+  const writes = [];
+  const store = { writeSave: async (slot, save, info) => (writes.push(JSON.parse(JSON.stringify(save))), { ...info, slot }), saveInfo: () => null, deleteSave: async () => {} };
+  const game = {
+    session: host, viewState: host.viewState, myIndex: 0, paused: false, disposed: false, recorder: rec,
+    hud: { message() {} }, renderer: null, selection: { groups: new Map() }, chronicle: null, career: null, launch: {},
+  };
+  await new MatchSaver(game, { store }).save('1');
+  const carried = writes[0].extra.replay;
+  assert.ok(carried && carried.cmds.length > 50, 'the save carries the recording');
+  assert.equal(carried.tick, host.world.tickCount);
+
+  // Load it as Game.init does: the loaded world and minds, and a recorder that carries on.
+  const loaded = unpackMatch(writes[0]);
+  const host2 = new HostSession({
+    setup: loaded.world.setup, myIndex: 0, resumed: true, autoTick: false, useWorker: false, createWorld: () => loaded.world,
+    createAI: (world, index, difficulty) => loaded.ais.get(index) || createAI(world, index, difficulty),
+  });
+  const rec2 = ReplayRecorder.resume({ world: host2.world, carried: loaded.extra.replay, now: () => 5000 }).attach();
+  host2.viewState.on('snapshot', () => rec2.sample());
+  host2.onChat((line) => rec2.chat(line));
+  host2.start();
+  // The original plays on beside it with the same clicks: the two games stay one.
+  for (let t = SAVE_AT; t < END; t++) {
+    myOrders(host, t);
+    myOrders(host2, t);
+    host.step(1);
+    host2.step(1);
+  }
+  assert.equal(worldChecksum(host2.world), worldChecksum(host.world), 'the carried-on game is the same game');
+
+  const record = rec2.finish({ result: null });
+  assert.equal(record.ticks, END);
+  assert.equal(record.date, 1000, 'dated when the match began');
+  assert.ok(record.cmds.some((c) => c[0] < SAVE_AT) && record.cmds.some((c) => c[0] > SAVE_AT));
+  assert.ok(record.cmds.some((c) => c[1] === 0 && c[0] > SAVE_AT), 'the player\'s clicks after the load');
+  assert.ok(record.chat.some((c) => c[2] === 'good luck'));
+  assert.ok(record.sums.some((r) => r[0] < SAVE_AT) && record.sums.some((r) => r[0] > SAVE_AT));
+  // Through the store's check, then played from the setup: the same final world, every checksum matching.
+  const clean = sanitizeReplay(JSON.parse(JSON.stringify(record)));
+  assert.ok(clean);
+  const s = playToEnd(play(clean));
+  assert.equal(s.world.tickCount, END);
+  assert.equal(s.drift, null);
+  assert.equal(s.checked, record.sums.length);
+  assert.equal(worldChecksum(s.world), worldChecksum(host2.world));
+  host.stop();
+  host2.stop();
+  rec.detach();
+});
+
+test('a carried recording that does not fit the loaded game, or is too long, is dropped', () => {
+  const { setup } = buildSetup(lobby(), 23);
+  const host = new HostSession({ setup, myIndex: 0, createWorld, createAI, autoTick: false, useWorker: false });
+  const rec = new ReplayRecorder({ world: host.world, setup, myIndex: 0 }).attach();
+  host.start();
+  host.step(40);
+  const carried = JSON.parse(JSON.stringify(rec.carry()));
+  assert.ok(ReplayRecorder.resume({ world: host.world, carried }));
+  assert.equal(ReplayRecorder.resume({ world: host.world, carried: { ...carried, tick: carried.tick - 1 } }), null, 'another tick');
+  assert.equal(ReplayRecorder.resume({ world: host.world, carried: { ...carried, setup: { ...carried.setup, seed: 99 } } }), null, 'another game');
+  assert.equal(ReplayRecorder.resume({ world: host.world, carried: { ...carried, cmds: [[5, 9, {}]] } }), null, 'a bad row');
+  assert.equal(ReplayRecorder.resume({ world: host.world, carried: null }), null);
+  // Too long to carry: the save goes without it.
+  rec.cmds.length = MAX_CARRIED_COMMANDS + 1;
+  assert.equal(rec.carry(), null);
+  rec.cmds.length = 0;
+  rec.truncated = true;
+  assert.equal(rec.carry(), null);
+  host.stop();
+  rec.detach();
 });

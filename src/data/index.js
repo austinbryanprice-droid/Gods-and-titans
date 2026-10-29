@@ -1,12 +1,12 @@
 // Data registry: every unit, building and pantheon in one place.
 import { MORTALS } from './mortals.js';
-import { BUILDINGS, GOLD_MINE, BUILD_MENU } from './buildings.js';
+import { BUILDINGS, GOLD_MINE, BUILD_MENU, buildingIcon } from './buildings.js';
 import { UPGRADES } from './upgrades.js';
 import { validatePantheon, validateUnit, validateUpgrade, validateUpgradeLines } from './schema.js';
 import { PANTHEON_LIST, PANTHEONS } from './pantheon-list.js';
 import { POWERS, validatePowers } from './powers.js';
 
-export { BUILDINGS, GOLD_MINE, BUILD_MENU, MORTALS, UPGRADES, PANTHEON_LIST, PANTHEONS, POWERS };
+export { BUILDINGS, GOLD_MINE, BUILD_MENU, buildingIcon, MORTALS, UPGRADES, PANTHEON_LIST, PANTHEONS, POWERS };
 
 /** Every unit type by id: mortals plus each pantheon's gods, titan, creatures, minions and elite soldier. */
 export const UNITS = { ...MORTALS };

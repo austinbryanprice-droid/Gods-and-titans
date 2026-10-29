@@ -36,6 +36,7 @@ import { ALERT_OPTIONS, TAB_ALERT_OPTIONS, alertNote, tabAlertNote } from './ale
 import { chooseTabAlerts, notificationState } from './tab-attention.js';
 import { browserSpeech } from '../intro/narrator.js';
 import * as M from './menu-model.js';
+import { saveTicket, readTicket, clearTicket } from '../net/rejoin-ticket.js';
 
 let instance = null;
 
@@ -279,6 +280,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     campaign: (opts) => buildCampaignScreen({ go, onBegin: startMission, mission: opts.mission || null }),
     settings: settingsScreen,
     load: loadScreen,
+    rejoin: rejoinScreen,
   };
 
   /** Carry on a saved game: the slot is read and the match starts; a failure is said in a toast. */
@@ -320,13 +322,18 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     // Continue: the newest saved game (the autosave or a slot), in one click. Load Game lists them all.
     const saves = onLoad ? listSaves() : [];
     const continueBtn = saves.length ? mainBtn('Continue', saveLine(saves[0]), () => loadSlot(saves[0].slot), 'mw-continue-btn') : null;
+    // Rejoin: an online game this browser dropped out of (a lost link, a reloaded page) while an AI holds its seat.
+    const ticket = readTicket();
+    const rejoinBtn = ticket ? mainBtn('Rejoin Online Game', `Back into room ${ticket.roomCode} as ${ticket.name}`, () => go('rejoin'), 'mw-rejoin-btn') : null;
     let quick = null;
+    let nav = null;
     loadLobby().then((mod) => {
       if (typeof mod.sanitizeLobbyState !== 'function') return; // the mock lobby keeps no games
       quick = loadSkirmish(mod);
       if (!quick) return;
       quickSub.textContent = `Again: ${skirmishLabel(quick)}`;
       quickBtn.hidden = false;
+      nav.classList.add('has-quick'); // pairs Quick Match with the Daily Challenge (style.css)
     }).catch(() => {});
     async function quickMatch() {
       if (!quick) return;
@@ -378,8 +385,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('div.mw-subtitle', h('span.mw-rule'), h('span', GAME_SUBTITLE), h('span.mw-rule')),
         h('p.mw-tagline', 'Raise a city of the faithful. Pray. Summon the gods. Unleash the titans.'),
       ),
-      h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
+      nav = h('nav.mw-main-nav', { 'aria-label': 'Main menu' },
         titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null,
+        rejoinBtn,
         continueBtn,
         playBtn,
         quickBtn,
@@ -402,7 +410,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('span.mw-foot-item', `v${GAME_VERSION}`),
       ),
     );
-    return { el, focus: continueBtn || playBtn, cleanup: off };
+    return { el, focus: rejoinBtn || continueBtn || playBtn, cleanup: off };
   }
 
   // ---------------------------------------------------------- load game
@@ -990,7 +998,9 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         alive = false;
         launchedLobby = lobby;
         sfx.play('horn');
-        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby });
+        // The ticket back into this game if the link drops or the page reloads (src/net/rejoin-ticket.js).
+        if (info.rejoin) saveTicket({ roomCode: lobby.roomCode || st().roomCode, token: info.rejoin, myIndex: info.myIndex, name: getSettings().name, transport: onlineTransport });
+        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby, rejoin: info.rejoin || null });
       });
       safeOn('onKicked', (why) => {
         if (!alive) return;
@@ -1170,6 +1180,75 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       ),
     );
     return { el, focus: M.isCompleteRoomCode(codeInput.value) ? joinBtn : codeInput, onEscape: back, cleanup: () => { attempt++; abortJoin(); } };
+  }
+
+  // ---------------------------------------------------------- rejoin
+
+  /** Back into an online game this browser dropped out of (DESIGN 7), with the ticket the host gave it. */
+  function rejoinScreen() {
+    const ticket = readTicket();
+    let alive = true;
+    let ctrl = null;
+    const status = h('div.mw-join-status', { role: 'status', 'aria-live': 'polite' });
+    const actions = h('div.mw-form-actions');
+    const backBtn = h('button.mw-btn.mw-btn--ghost', { type: 'button', onclick: () => back() }, 'Back');
+    const retryBtn = h('button.mw-btn.mw-btn--primary', { type: 'button', onclick: () => attempt() }, 'Try Again');
+
+    function back() {
+      alive = false;
+      if (ctrl) ctrl.abort();
+      go('title');
+    }
+
+    function show(kind, text, retry) {
+      status.className = `mw-join-status is-${kind}`;
+      if (kind === 'busy') setChildren(status, h('div.mw-spinner.mw-spinner--small', { 'aria-hidden': 'true' }), h('span', text));
+      else setChildren(status, h('span.mw-status-icon', kind === 'error' ? '⚠' : '✦'), h('span', text));
+      setChildren(actions, backBtn, retry ? retryBtn : null);
+    }
+
+    async function attempt() {
+      if (!ticket) return show('error', 'There is no online game to rejoin from this browser.', false);
+      if (ctrl) ctrl.abort();
+      const my = ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      show('busy', `Rejoining room ${ticket.roomCode}…`, false);
+      try {
+        // Fetch the game's code before connecting: the host counts every second of silence on the new link.
+        await Promise.all([import('../game/game.js'), import('../render/game-renderer.js'), import('../ai/ai.js')]).catch(() => {});
+        if (!alive || ctrl !== my) return;
+        const mod = await loadLobby();
+        if (!mod.LobbyClient || typeof mod.LobbyClient.rejoin !== 'function') throw Object.assign(new Error('Rejoining is not available here.'), { refused: true });
+        const info = await mod.LobbyClient.rejoin({ transport: ticket.transport, roomCode: ticket.roomCode, token: ticket.token, name: ticket.name, signal: my ? my.signal : undefined });
+        if (!alive || ctrl !== my) {
+          info.conn.close('left');
+          return;
+        }
+        alive = false;
+        sfx.play('horn');
+        onStart({ role: 'client', setup: info.setup, myIndex: info.myIndex, conn: info.conn, lobby: null, rejoin: ticket.token });
+      } catch (err) {
+        if (!alive || ctrl !== my || (err && err.type === 'aborted')) return;
+        const msg = M.cleanMessage(err && err.message, 'Could not rejoin the game.');
+        // The host said no (the game is over, or this browser is not in it), or the room is gone with the host: forget it.
+        const gone = (err && err.refused && !err.retry) || (!(err && err.refused) && /not found|peer-unavailable|could not connect to peer/i.test(msg));
+        if (gone) clearTicket(undefined, ticket.token);
+        show('error', gone && !err.refused ? `The game in room ${ticket.roomCode} is gone: the host has left it.` : M.friendlyJoinError(err, ticket.roomCode), !gone);
+        sfx.play('error');
+      }
+    }
+
+    attempt();
+    const el = h('div.mw-center-screen',
+      h('section.mw-panel.mw-form-panel.mw-join.mw-rejoin',
+        h('h2.mw-h2', 'Rejoin Online Game'),
+        h('p.mw-panel-sub', ticket
+          ? `While you are away, an AI plays for ${ticket.name}. Rejoining gives you your seat back, with everything your side has now.`
+          : 'Nothing to rejoin.'),
+        status,
+        actions,
+      ),
+    );
+    return { el, focus: backBtn, onEscape: back, cleanup: () => { alive = false; if (ctrl) ctrl.abort(); } };
   }
 
   // ---------------------------------------------------------- how to play

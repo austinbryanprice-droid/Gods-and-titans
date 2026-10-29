@@ -15,7 +15,7 @@ import { getSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { GAME_SPEEDS, PEACE_NAME, UI_SCALES } from '../config.js';
 import { edgeName } from '../sim/survival.js';
-import { UNITS, BUILDINGS } from '../data/index.js';
+import { UNITS, BUILDINGS, buildingIcon } from '../data/index.js';
 import { POWERS, isHarmfulPower } from '../data/powers.js';
 import { MARKS, MARK_SEND_RATE } from '../data/marks.js';
 import { Hud } from '../ui/hud.js';
@@ -32,6 +32,7 @@ import { MusicDirector } from './music-director.js';
 import { music } from '../audio/music.js';
 import { MSG, REASONS, RateLimiter, sanitizeName, sanitizeReason } from '../net/protocol.js';
 import { TeamMarks } from './team-marks.js';
+import { readTicket, clearTicket, saveTally } from '../net/rejoin-ticket.js';
 import { CareerTracker } from './career-tracker.js';
 import { getCareer } from './career.js';
 import { recordTutorial } from './career.js';
@@ -48,7 +49,7 @@ import { ReplayRecorder } from './replay.js';
 import { saveReplay } from './replay-store.js';
 import { ReplaySession } from './replay-session.js';
 import { ReplayBar } from '../ui/hud-replay.js';
-import { MatchSaver, loadSaveGame, isSettled } from './game-saves.js';
+import { MatchSaver, loadSaveGame, isSettled, settleMatch } from './game-saves.js';
 import { AUTO_SLOT } from './save-store.js';
 
 const AMBIENT_MS = 800; // worker chop / mine / build sounds near the camera
@@ -195,6 +196,16 @@ export function effectSound(ev) {
   return [SPELL_SOUNDS[ev.el] || 'magic', 1];
 }
 
+/** The career's id of an online game this client can rejoin (its token), or null. */
+export function rejoinMatchId(launch) {
+  return launch && launch.role === 'client' && launch.rejoin ? `rejoin:${launch.rejoin}` : null;
+}
+
+/** Forget the rejoin ticket of a client's game (DESIGN 7): it is over, or cannot be rejoined. */
+function dropTicket(launch) {
+  if (launch && launch.role === 'client' && launch.rejoin) clearTicket(undefined, launch.rejoin);
+}
+
 export class Game {
   /**
    * @param {object} o
@@ -204,6 +215,7 @@ export class Game {
    * @param {() => void} [o.onExit] called after teardown (main.js shows the menu)
    * @param {() => void} [o.onRematch] Play Again: starts a new game with the same lobby (games against the computer only)
    * @param {(id: string) => void} [o.onNextMission] a campaign mission won: open the next one's briefing (main.js)
+   * @param {() => void} [o.onRejoin] a client that lost its link: leave this Game and connect to the room again (main.js)
    * @param {object} [o.replay] play a replay instead of a match: { record (sanitizeReplay), startAt?, viewer?, speed?, camera? }
    * @param {(record: object, opts?: object) => void} [o.onReplay] watch a replay (main.js tears this Game down and
    *   builds the replay's): the game-over screen's Watch Replay, and a replay going back in time
@@ -212,7 +224,7 @@ export class Game {
    * @param {Function} [o.createVoices] the AIs' chat lines with that override (tests; src/ai/voice.js)
    * @param {Function} [o.Renderer] override the renderer class (tests)
    */
-  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onNextMission = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
+  constructor({ launch = null, session = null, settings = null, onExit = null, onRematch = null, onNextMission = null, onRejoin = null, replay = null, onReplay = null, root = null, createAI = null, createVoices = null, Renderer = null } = {}) {
     this.launch = launch;
     this.replay = replay && replay.record ? replay : null;
     this.onReplay = onReplay;
@@ -224,6 +236,7 @@ export class Game {
     this.onExit = onExit;
     this.onRematch = onRematch;
     this.onNextMission = onNextMission;
+    this.onRejoin = onRejoin;
     this.root = root || document.getElementById('game-root');
     this.canvas = freshCanvas(this.root.querySelector('#game-canvas') || this.root.querySelector('canvas'));
     this.hudRoot = this.root.querySelector('#hud-root');
@@ -320,6 +333,12 @@ export class Game {
       } else this.session = new HostSession({ setup: l.setup, myIndex: l.myIndex ?? 0, conns: l.conns || new Map(), createWorld, createAI: aiFactory, createVoices: voiceFactory });
     }
     const session = this.session;
+    // An online host takes back players who dropped out (DESIGN 7): the lobby checks their token, the session seats them.
+    const lobby = this.launch && this.launch.lobby;
+    if (session.isHost && lobby && typeof lobby.setRejoinHandler === 'function' && typeof session.rejoin === 'function') {
+      lobby.setRejoinHandler((index, conn) => session.rejoin(index, conn));
+      this.offs.push(() => lobby.setRejoinHandler(null));
+    }
     this.viewState = session.viewState;
     this.selection = new Selection(this.viewState);
     // The guided first match (DESIGN 9.2): its objectives, read from the view and the selection; the HUD shows them.
@@ -364,9 +383,14 @@ export class Game {
       });
     } else this.offs.push(() => this.replayBar && this.replayBar.dispose());
     // The host keeps a replay of the match (src/game/replay.js): every command the World takes, with its tick.
-    // (Not a game carried on from a save: a replay plays from the setup, and the start of this one is gone.)
-    if (!this.replay && !this.tutorial && !resumed && session.isHost && session.world) {
-      this.recorder = new ReplayRecorder({ world: session.world, setup: session.setup, myIndex: session.myIndex }).attach();
+    // A game carried on from a save records on from the recording the save carried (a replay plays from the
+    // setup); a save without one (an older build's, or a game too long to carry) gets no replay.
+    if (!this.replay && !this.tutorial && session.isHost && session.world) {
+      if (!resumed) this.recorder = new ReplayRecorder({ world: session.world, setup: session.setup, myIndex: session.myIndex });
+      else if (resumed.replay) this.recorder = ReplayRecorder.resume({ world: session.world, carried: resumed.replay });
+    }
+    if (this.recorder) {
+      this.recorder.attach();
       this.offs.push(this.viewState.on('snapshot', () => this.recorder.sample()));
       this.offs.push(session.onChat((line) => this.recorder.chat(line)));
       this.offs.push(() => this.recorder.detach());
@@ -375,11 +399,13 @@ export class Game {
     // The guided first match is not a game of the career: its medal is kept instead (checkEnd); nor is a
     // campaign mission, whose wins and best times the campaign keeps (src/game/campaign-progress.js).
     // A loaded game the career has already counted (quit as a loss, then carried on from a save) counts nothing more.
-    const settled = !!(resumed && isSettled(resumed.matchId));
+    // Likewise a rejoined online game already counted when the player quit it (rejoinMatchId).
+    const settled = !!(resumed && isSettled(resumed.matchId)) || isSettled(rejoinMatchId(this.launch));
     if (settled) this.dailyCounted = true;
     if (!this.tutorial && !this.mission && !this.replay && !settled) {
       this.career = new CareerTracker({ viewState: this.viewState, setup: session.setup, onUnlock: (list) => this.onAchievements(list) }).attach();
       this.offs.push(() => this.career.dispose());
+      if (rejoinMatchId(this.launch)) this.keepTally();
     }
     // The score of the player's pantheon, calm while building and rising with the fighting (src/game/music-director.js).
     this.director = new MusicDirector({ viewState: this.viewState, music }).attach();
@@ -391,10 +417,11 @@ export class Game {
       this.saver = new MatchSaver(this, { resume: resumed });
       if (resumed) this.saver.restore(resumed);
     }
-    // The daily challenge (DESIGN 9.3): its twist, said once at the start.
-    if (this.launch && this.launch.daily && !resumed) {
+    // The daily challenge (DESIGN 9.3): its twist, said once at the start and kept on a chip in the top bar.
+    if (this.launch && this.launch.daily) {
       const tw = dailyChallenge(this.launch.daily).twist;
-      this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
+      this.hud.showTwist(tw);
+      if (!resumed) this.hud.message(`Daily challenge: ${tw.name}. ${tw.desc}`, 'info', { icon: tw.icon });
     }
     session.start();
     // Only a match against the computer can run faster or slower: nobody else has to keep up.
@@ -829,6 +856,9 @@ export class Game {
     if (this.disposed) return;
     this.ended = true;
     this.setLoading(false);
+    // Only a lost link can be rejoined, not a game the host closed. (Taken over by another window: that one keeps the ticket.)
+    if (reason === REASONS.REPLACED) this.replaced = true;
+    else if (reason !== REASONS.HOST_LEFT) dropTicket(this.launch);
     if (!this.hud) return;
     if (this.overShown && (reason === 'game-over' || reason === 'host-quit')) {
       this.hud.message('The host has closed the game.', 'system');
@@ -850,6 +880,7 @@ export class Game {
       const previous = survival ? getCareer().best.wave : 0;
       if (this.input) this.input.cancelMode();
       if (this.saver) this.saver.onGameOver();
+      dropTicket(this.launch);
       let unlocked = this.career ? this.career.finish(result, survival ? { wave } : null) : null;
       const record = survival && unlocked ? { best: Math.max(previous, wave), previous, isNew: wave > previous } : null;
       // The guided first match: a victory earns a medal by its game time, kept with the career.
@@ -905,6 +936,43 @@ export class Game {
     } else {
       hud.message(`New objective: ${o.text}.`, 'info', { icon: o.icon || '📜' });
     }
+  }
+
+  /** This browser's rejoin ticket for this game, when it is a client of one (DESIGN 7). */
+  rejoinTicket() {
+    const l = this.launch;
+    const t = l && l.role === 'client' && l.rejoin ? readTicket() : null;
+    return t && t.token === l.rejoin ? t : null;
+  }
+
+  /**
+   * A client of a game it can rejoin (DESIGN 7) keeps the career's running tally with its ticket, every few
+   * seconds and when it leaves: a rejoined Game carries on from it (buildings lost, gods summoned, …), so that
+   * a reload neither forgets progress nor earns an achievement the match did not.
+   */
+  keepTally() {
+    const token = this.launch.rejoin;
+    const t = this.rejoinTicket();
+    const career = this.career;
+    if (t && t.tally) Object.assign(career.m, t.tally);
+    let last = 0;
+    // (A window whose seat another window took back writes nothing more: that one keeps the tally now.)
+    const keep = () => !this.replaced && saveTally(token, career.m);
+    this.offs.push(this.viewState.on('snapshot', () => {
+      const ms = Date.now();
+      if (ms - last < 3000) return;
+      last = ms;
+      keep();
+    }));
+    this.offs.push(keep);
+  }
+
+  /** Rejoin on the Game Ended screen: leave this Game and connect to the room again. */
+  rejoin() {
+    if (typeof this.onRejoin !== 'function' || this.disposed || !this.rejoinTicket()) return;
+    const go = this.onRejoin;
+    this.dispose();
+    go();
   }
 
   /** Next Mission on the game-over screen: leave this match and open the next mission's briefing. */
@@ -1017,7 +1085,7 @@ export class Game {
       case 'buildingComplete':
         if (ev.o === me) {
           const b = BUILDINGS[ev.t];
-          hud.message(`${b ? b.name : 'Building'} completed.`, 'info', { icon: b && b.icon });
+          hud.message(`${b ? b.name : 'Building'} completed.`, 'info', { icon: b && buildingIcon(ev.t, vs.me && vs.me.pantheon) });
           sfx.play('building_complete');
         }
         break;
@@ -1175,6 +1243,7 @@ export class Game {
       }
       this.countDaily(false);
       if (this.saver) this.saver.onGameOver(); // counted: its autosave would bring it back to count again
+      settleMatch(rejoinMatchId(this.launch)); // and so would rejoining it (DESIGN 7)
     }
   }
 

@@ -105,6 +105,30 @@ test('a greeting, then first contact with the name of the player met', () => {
   }
 });
 
+test('with no enemy player (the Trial of the Titans) the greeting is to allies, never to rivals', () => {
+  const world = fakeWorld(['japanese', 'greek', 'norse'], { teams: [1, 1, 1] });
+  world.buildingList.push(building(0, 'town_center', 10, 10));
+  const v = new AIVoices(world, [0, 1]);
+  VOICE.greetChance = 1;
+  VOICE.globalGap = 0;
+  try {
+    const hello = run(v, world, VOICE.greetAt + VOICE.greetStagger + 1);
+    assert.equal(hello.length, 2);
+    assert.ok(VOICE_LINES.japanese.greetAlly.includes(hello[0].text), hello[0].text);
+    assert.ok(VOICE_LINES.greek.greetAlly.includes(hello[1].text), hello[1].text);
+    for (const l of hello) assert.ok(!/rival/i.test(l.text), l.text);
+    // The wave monsters belong to no player: no first-contact taunt either.
+    world.unitList.push(unit(-1, 12, 12));
+    assert.deepEqual(run(v, world, VOICE.playerGap + 5), []);
+  } finally {
+    VOICE.greetChance = 0.7;
+    VOICE.globalGap = 15;
+  }
+  for (const [id, lines] of Object.entries(VOICE_LINES)) {
+    for (const line of lines.greetAlly) assert.ok(!/rival|foe|enem/i.test(line), `${id}: ${line}`);
+  }
+});
+
 test('struck by a player, not by wild creatures; the line names the attacker', () => {
   const world = fakeWorld(['egyptian', 'aztec', 'hindu']);
   const v = new AIVoices(world, [0]);
