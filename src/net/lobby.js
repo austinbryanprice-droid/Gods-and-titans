@@ -213,9 +213,8 @@ export class LobbyHost {
    * @param {object} o { transport, version, tokens: Map<player index, token> }
    */
   static forGame(endpoint, { transport, version = PROTOCOL_VERSION, tokens }) {
-    const lobby = new LobbyHost(endpoint, { transport, name: 'Host', version });
-    lobby.started = true;
-    lobby.state.started = true;
+    // Started from the constructor on: a player reaching the room as it opens is seated by token, never sent to the lobby.
+    const lobby = new LobbyHost(endpoint, { transport, name: 'Host', version, started: true });
     for (const [index, token] of tokens || []) {
       const t = cleanToken(token);
       if (t) lobby.rejoinTokens.set(t, index);
@@ -223,7 +222,7 @@ export class LobbyHost {
     return lobby;
   }
 
-  constructor(endpoint, { transport, name, version = PROTOCOL_VERSION, aiDifficulty = 'normal' }) {
+  constructor(endpoint, { transport, name, version = PROTOCOL_VERSION, aiDifficulty = 'normal', started = false }) {
     this.endpoint = endpoint;
     this.aiDifficulty = DIFFICULTIES.includes(aiDifficulty) ? aiDifficulty : 'normal'; // new AI players start at this level
     this.transport = transport;
@@ -233,7 +232,7 @@ export class LobbyHost {
     this.members = new Set(); // { conn, peerId, name, joined, offs }
     this.changeCbs = new Set();
     this.chatCbs = new Set();
-    this.started = false;
+    this.started = started;
     this.closed = false;
     this.gameConns = null;
     this.rejoinTokens = new Map(); // token → player index, for the humans of the started game
@@ -249,7 +248,7 @@ export class LobbyHost {
       peace: 0,
       survival: false,
       sacred: false,
-      started: false,
+      started,
       slots: [slotOf('host', { name: sanitizeName(name, 'Host'), peerId: 'host' })],
     };
     for (let i = 1; i < MAX_PLAYERS; i++) this.state.slots.push(slotOf('closed', { team: i + 1, color: i }));

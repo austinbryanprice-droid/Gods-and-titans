@@ -374,3 +374,22 @@ test('lobby: the host gets a token too, and a carried-on game seats players by t
   lobby.close();
   client.conn.close('x');
 });
+
+test('lobby: a player who reaches a carried-on room as it opens is seated by token', async () => {
+  const { hostRoom, joinRoom } = await import('../../src/net/transport.js');
+  const ep = await hostRoom({ transport: 'loopback', roomCode: makeRoomCode() });
+  const conn = await joinRoom({ transport: 'loopback', roomCode: ep.roomCode }); // waits in the room before the lobby is there
+  await waitFor(() => ep.pending.length === 1, 2000, 'the link waiting in the room');
+  const token = 'ab'.repeat(16);
+  const lobby = LobbyHost.forGame(ep, { transport: 'loopback', tokens: new Map([[1, token]]) });
+  const seated = [];
+  lobby.setRejoinHandler((index) => {
+    seated.push(index);
+    return null;
+  });
+  conn.send({ t: MSG.HELLO, name: 'Ann', version: lobby.version, rejoin: token });
+  await waitFor(() => seated.length, 2000, 'seated');
+  assert.deepEqual(seated, [1]);
+  lobby.close();
+  conn.close('x');
+});
