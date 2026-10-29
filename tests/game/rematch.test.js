@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as lobbyMod from '../../src/net/lobby.js';
-import { isSoloLaunch, cleanSkirmish, saveSkirmish, loadSkirmish, launchFrom, skirmishLabel, LAST_SKIRMISH_KEY } from '../../src/game/rematch.js';
+import { isSoloLaunch, cleanSkirmish, saveSkirmish, loadSkirmish, launchFrom, skirmishLabel, stepUpSkirmish, LAST_SKIRMISH_KEY } from '../../src/game/rematch.js';
 
 function memStore() {
   const m = new Map();
@@ -84,4 +84,20 @@ test('a Trial of the Titans is replayed too, with everyone on one side', () => {
   assert.equal(skirmishLabel(st), 'Trial of the Titans · 2 players · small map');
   const launch = launchFrom(lobbyMod, st, 'Me', 5);
   assert.equal(launch.setup.survival, true);
+});
+
+test('Ready for Normal?: a game against Easy computer players only steps up to the same lobby on Normal', () => {
+  const easy = (name = 'AI (Easy)') => ({ kind: 'ai', name, pantheon: 'random', team: 2, color: 1, difficulty: 'easy', peerId: null });
+  const host = soloState().slots[0];
+  const st = soloState({ slots: [host, easy(), { ...easy('Hera'), team: 3, color: 2 }, { kind: 'closed', team: 4, color: 3 }] });
+  const up = stepUpSkirmish(st);
+  assert.deepEqual(up.slots.filter((s) => s.kind === 'ai').map((s) => [s.name, s.difficulty]), [['AI (Normal)', 'normal'], ['Hera', 'normal']]);
+  assert.deepEqual(up.slots[0], host, 'the player keeps their slot');
+  assert.equal(st.slots[1].difficulty, 'easy', 'the remembered lobby is not changed');
+  const launch = launchFrom(lobbyMod, up, 'Austin', 7);
+  assert.deepEqual(launch.setup.players.filter((p) => p.kind === 'ai').map((p) => p.difficulty), ['normal', 'normal']);
+  assert.equal(stepUpSkirmish(soloState()), null, 'a Hard AI: no step up');
+  assert.equal(stepUpSkirmish(soloState({ slots: [host, easy(), { ...easy(), team: 3, difficulty: 'normal' }] })), null, 'not Easy only');
+  assert.equal(stepUpSkirmish(soloState({ survival: true, slots: [host, easy()] })), null, 'not a Trial of the Titans');
+  assert.equal(stepUpSkirmish(null), null);
 });

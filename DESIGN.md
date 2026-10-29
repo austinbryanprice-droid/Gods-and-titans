@@ -2090,6 +2090,10 @@ per-frame budget, so a revealed army appears over a few frames.
   random pantheons drawn again, the host slot named as in Settings). The title screen shows Quick Match under Play vs
   AI once a game is remembered ("Again: 1 vs 1 · Normal AI · small map", `skirmishLabel`), one click to that lobby.
   Online games are not remembered; their game-over screen offers Rematch instead, back to the same room's lobby (7).
+  A won game whose computer players were all on Easy (not a trial: `stepUpSkirmish`, main.js `onStepUp`) says
+  "Ready for Normal?" on its game-over screen, and **Play on Normal** leads the buttons (`Game.stepUp`): the same
+  lobby with those players on Normal (an "AI (Easy)" name becomes "AI (Normal)"), remembered for Quick Match in
+  its turn; Play Again (on Easy) comes second.
   **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
   choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
   (`Game.solo`, fixed at start) runs at Slow 0.5×, Normal, Fast 1.5× or Very fast 2×, changeable at any time from the

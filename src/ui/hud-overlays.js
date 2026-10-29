@@ -542,6 +542,7 @@ export class Overlays {
       this.missionLine(mission),
       chronicleView(vs, winningTeam, this.game.chronicle || null),
       this.unlockCards(unlocked),
+      this.stepUpLine(result, mission),
       this.careerLine(),
       this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission, tutorial)));
     this.show('gameover', node, () => this.hide());
@@ -576,15 +577,18 @@ export class Overlays {
       ];
     }
     let again = null;
+    // A win against Easy computer players: Play on Normal leads, Play Again (on Easy) comes second.
+    const up = this.canStepUp() ? btn('Play on Normal', 'mw-btn--primary', () => this.game.stepUp()) : null;
     if (tutorial && typeof this.game.onPlayVsAI === 'function') again = btn('Play vs AI (Easy)', 'mw-btn--primary', () => this.game.playVsAI());
     else if (this.canRematch()) {
-      again = btn(typeof this.game.rematchLabel === 'function' ? this.game.rematchLabel() : 'Play Again', 'mw-btn--primary', () => this.game.rematch());
+      again = btn(typeof this.game.rematchLabel === 'function' ? this.game.rematchLabel() : 'Play Again', up ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.rematch());
       if (this.game.rematchWaiting) again.disabled = true;
     }
     return [
+      up,
       again,
       replay,
-      btn('Return to Menu', again ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
+      btn('Return to Menu', again || up ? 'mw-btn--ghost' : 'mw-btn--primary', () => this.game.quitToMenu()),
       watch,
     ];
   }
@@ -599,6 +603,17 @@ export class Overlays {
       : r.first ? (mission.next ? `The next mission is open: ${mission.next.title}.` : `Mission won in ${formatClock(r.best)}.`)
         : r.best < r.previous ? `A new best time! ${formatClock(r.best)} (was ${formatClock(r.previous)}).` : `Your best time: ${formatClock(r.best)}.`;
     return el('div', `hud-go-best${r.first || r.best < r.previous ? ' is-new' : ''}`, text);
+  }
+
+  /** Play on Normal after a win against Easy computer players (Game.canStepUp). */
+  canStepUp() {
+    return typeof this.game.canStepUp === 'function' && this.game.canStepUp();
+  }
+
+  /** "Ready for Normal?" over the buttons when Play on Normal is offered (null otherwise). */
+  stepUpLine(result, mission) {
+    if (mission || result !== 'victory' || !this.canStepUp()) return null;
+    return el('div', 'hud-go-best is-new', 'Ready for Normal? The computer fights harder: Play on Normal sets up the same game again.');
   }
 
   /** Watch Replay: the host kept this match (Game.canWatchReplay). */
