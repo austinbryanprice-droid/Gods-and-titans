@@ -434,6 +434,8 @@ kbd {
 }
 .mw-main-nav > .mw-notice, .mw-main-nav > .mw-btn--primary, .mw-main-nav > .mw-nav-row { grid-column: 1 / -1; }
 .mw-main-nav > .mw-continue-btn + .mw-btn--primary { grid-column: auto; }
+/* Rejoin Online Game (a dropped online game, DESIGN 7) leads on a row of its own */
+.mw-main-nav > .mw-rejoin-btn { grid-column: 1 / -1; }
 /* without Quick Match the Daily Challenge takes its row, so the pairs stay even */
 .mw-main-nav:not(.has-quick) > .mw-daily-btn { grid-column: 1 / -1; }
 .mw-btn--menu {

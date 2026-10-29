@@ -479,9 +479,14 @@ export class Overlays {
   showEnded(reason) {
     const text = (typeof reason === 'string' && Object.hasOwn(END_TEXT, reason) && END_TEXT[reason]) || sanitizeReason(reason, 'The game has ended.');
     const vs = this.game.viewState;
-    const node = this.panel('Game Ended', text,
-      vs && vs.players && vs.players.length ? chronicleView(vs, vs.gameOver ? vs.gameOver.winningTeam : null, this.game.chronicle || null) : null,
-      el('div', 'hud-obtns', btn('Return to Menu', 'mw-btn--primary', () => this.game.quitToMenu())));
+    // A lost link (DESIGN 7): the host's AI holds my seat, and this browser can take it back.
+    const g = this.game;
+    const canRejoin = reason === 'host-left' && !(vs && vs.gameOver) && typeof g.onRejoin === 'function' && typeof g.rejoinTicket === 'function' && !!g.rejoinTicket();
+    const node = this.panel('Game Ended', canRejoin ? `${text} An AI plays for you meanwhile: rejoin to take your seat back.` : text,
+      vs && vs.players && vs.players.length ? chronicleView(vs, vs.gameOver ? vs.gameOver.winningTeam : null, g.chronicle || null) : null,
+      el('div', 'hud-obtns',
+        canRejoin ? btn('Rejoin Game', 'mw-btn--primary', () => g.rejoin()) : null,
+        btn('Return to Menu', canRejoin ? '' : 'mw-btn--primary', () => g.quitToMenu())));
     this.show('ended', node, null);
   }
 }

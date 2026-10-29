@@ -72,6 +72,12 @@ export const REASONS = {
   HOST_LEFT: 'host-left',
   HOST_QUIT: 'host-quit',
   LOST: 'Lost connection to the host.',
+  // Rejoining a game in progress (DESIGN 7)
+  REJOIN_UNKNOWN: 'That game has already started, and this browser was not one of its players.',
+  REJOIN_LATER: 'The host is still loading the game. Try again in a moment.',
+  REJOIN_OVER: 'That game is over.',
+  REJOIN_DENIED: 'You cannot rejoin that game.',
+  REPLACED: 'You rejoined this game from another window.',
 };
 
 /** Kick reason for a client running a different build than the host. */
