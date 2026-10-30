@@ -1265,7 +1265,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   go up is never one the host silently dropped; past it the HUD says "Slow down: too many pings." A client's mark
   that reaches the host before the match has started is ignored.
 - **Team chat** (allies only, as in AoE II / IV and SC2): Enter opens the chat box on everyone; its "To all:" label
-  is a switch (`Hud.chatTo`: a click or Tab flips it to "To allies:", the box going green) and Shift+Enter in the game
+  is a switch (`Hud.chatTo`: a click or Tab flips it to "To allies:", the box taking the allies colour) and Shift+Enter in the game
   opens it on the allies; in the box Shift+Enter sends to the allies whatever the switch says. A line that starts
   with "/t " or "/team " goes to the allies, "/a " or "/all " to everyone, the prefix taken off (`chatTarget` in
   `src/ui/hud-data.js`); the switch follows the prefix as it is typed. Every opening starts on everyone. The allies
@@ -1280,7 +1280,9 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   connections on the sender's team, the sender included (its line comes back from the host, as in all-chat), and
   shows it on its own screen only when on that team (the host's own `sendChat(text, { team: true })` goes the same
   way). Other teams' connections never receive it. A client shows a `team` line only from a player on its own team.
-  The HUD shows a team line as "[Allies] Name: text" (`hud-chat-team`, green, the card `is-team`). The host's replay
+  The HUD shows a team line as "[Allies] Name: text" (`hud-chat-team`, the card `is-team`). The tag and the
+  allies box take the allies selection-ring colour (`relationColor('ally')`, set on the HUD as `--hud-ally` and
+  updated on a palette change), so they follow the colour-blind palette (9) with the rings: lime, or white there. The host's replay
   records only the chat its screen showed, so never another team's team lines (its own team's carry a flag, 9.5).
   The lobby chat has no team channel (the teams are still being chosen there).
 - **Chat over the end panel**: in an online game (`Game.online`, the session still up) the game-over panel and the
@@ -2205,7 +2207,7 @@ per-frame budget, so a revealed army appears over a few frames.
   peace marks, chat) is a card at the bottom left, above the idle button and the task counts, in the tips' carved
   stone: an emblem chip (the line's own sign, a unit's, building's or god's emoji or a resource's, else its kind's
   from `messageIcon`; the stylesheet draws it from the card's `data-icon`), an edge in the colour of its kind
-  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat, a green "[Allies]" before
+  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat, an "[Allies]" in the allies colour before
   the name of a team line) and the text at
   1.18 em. A card slides in with a flash of its colour (a warning pulses three times), stays 10 to 16 s by length
   (`messageDwell`: 8.5 s plus 45 ms a letter, 2.5 s more for a warning; chat 14 s) and fades. A line that comes
