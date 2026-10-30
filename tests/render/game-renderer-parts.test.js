@@ -22,7 +22,7 @@ const { FogOfWar, FOW_UNIFORMS, FOW_VISIBLE, FOW_EXPLORED, FOW_UNEXPLORED, FOW_F
 const { buildTerrainGeometry, buildTerrainLodIndex, tileLayers, createTerrain, WATER_LEVEL } = await import('../../src/render/terrain.js');
 const { groundField, FIELD_RES } = await import('../../src/render/ground-field.js');
 const { LAYER, LAYER_COUNT, GROUND_SIZE, terrainTextureData } = await import('../../src/render/terrain-textures.js');
-const { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } = await import('../../src/render/overlays.js');
+const { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, OrderPaths, healthColor } = await import('../../src/render/overlays.js');
 const { PlacementLayer } = await import('../../src/render/placement.js');
 const { NoBuildZone, zoneMask } = await import('../../src/render/no-build-zone.js');
 const { peaceBlocksFootprint } = await import('../../src/sim/peace.js');
@@ -851,5 +851,56 @@ test('fires: damaged buildings burn more the lower their health, at stable spots
   assert.deepEqual(spots(), first, 'the same spots every frame');
   assert.equal(fires.flames.material.uniforms.uTime.value, 5);
   fires.dispose();
+  assert.equal(root.children.length, 0);
+});
+
+test('order paths: dots through each queued point and back along a patrol, pips at the points, bad points end the path', () => {
+  const root = new THREE.Group();
+  const paths = new OrderPaths(root, (x, y) => x * 0.1 + y * 0.05, 200);
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 0], [6, 6, 1]], null, 0);
+  paths.end();
+  const plain = paths.mesh.count;
+  assert.ok(plain > 15 && plain < 25, `${plain} dots`);
+  const m = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  paths.mesh.getMatrixAt(plain - 1, m);
+  p.setFromMatrixPosition(m);
+  assert.ok(close(p.x, 6) && close(p.z, 6) && close(p.y, 6 * 0.1 + 6 * 0.05 + 0.05), 'the last pip sits on the ground at the last point');
+  assert.equal(m.elements[0], 2, 'pips are bigger than the dots');
+  const col = new THREE.Color();
+  paths.mesh.getColorAt(plain - 1, col);
+  assert.equal(col.getHex(), paths.colors[1].getHex(), 'an attack point takes the attack colour');
+
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 1]], [0, 0], 0);
+  paths.end();
+  assert.ok(paths.mesh.count > 15, 'a patrol draws its way back too');
+
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 0], [NaN, 2, 0], [9, 9, 0]], [1, 1], 0);
+  paths.add(0, 0, 0.4, 'junk', null, 0);
+  paths.end();
+  assert.ok(paths.mesh.count > 0 && paths.mesh.count < 12, 'stops at the bad point');
+
+  // a point on a unit: drawn where the unit is seen, and the path stops there when it is not
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 1, 7]], null, 0, (id) => (id === 7 ? { x: 0, y: 6 } : null));
+  paths.end();
+  const seen = paths.mesh.count;
+  const m2 = new THREE.Matrix4();
+  paths.mesh.getMatrixAt(seen - 1, m2);
+  assert.ok(close(m2.elements[12], 0) && close(m2.elements[14], 6), 'the pip follows the seen unit, not the sent point');
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 1, 8], [9, 9, 0]], null, 0, () => null);
+  paths.add(0, 0, 0.4, [[6, 0, 1, 8]], null, 0);
+  paths.end();
+  assert.equal(paths.mesh.count, 0, 'nothing toward a unit out of sight, nor past it');
+
+  paths.begin();
+  for (let i = 0; i < 50; i++) paths.add(0, i, 0.4, [[40, i, 0]], null, 0);
+  paths.end();
+  assert.equal(paths.mesh.count, 200, 'never more dots than the mesh holds');
+  paths.dispose();
   assert.equal(root.children.length, 0);
 });

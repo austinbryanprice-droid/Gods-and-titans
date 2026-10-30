@@ -26,7 +26,7 @@ import { hazeStretch, shadowShare, aoShare, overlayScale, crowdScale, ringLineSc
 import { FarUnits } from './far-units.js';
 import { FogOfWar, patchFowObject, FOW_UNIFORMS } from './fog.js';
 import { createTerrain, WATER_LEVEL } from './terrain.js';
-import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, healthColor } from './overlays.js';
+import { RingLayer, BlobLayer, StarLayer, BarLayer, MarkerLayer, FloatingTextLayer, RallyFlags, OrderPaths, healthColor } from './overlays.js';
 import { PlacementLayer } from './placement.js';
 import { FireLayer } from './fires.js';
 import { SacredSiteLayer } from './sacred-sites.js';
@@ -298,6 +298,7 @@ export class GameRenderer {
     this.markers = new MarkerLayer(this.overlayRoot);
     this.texts = new FloatingTextLayer(this.overlayRoot);
     this.flags = new RallyFlags(this.overlayRoot, 12, (x, y) => heightAt(this.map, x, y));
+    this.paths = new OrderPaths(this.overlayRoot, (x, y) => heightAt(this.map, x, y));
     this.placement = new PlacementLayer(this.overlayRoot, this.map, () => ({
       pantheon: PANTHEONS[this.pantheonOf(this.vs.myIndex)] || null,
       color: this.colorOf(this.vs.myIndex),
@@ -631,6 +632,7 @@ export class GameRenderer {
   setTeamPalette() {
     paintRelationColors();
     this.markers.setPalette();
+    this.paths.setPalette();
     for (const v of this.units.values()) v.dispose();
     this.units.clear();
     for (const v of this.dying) v.dispose();
@@ -1993,6 +1995,21 @@ export class GameRenderer {
     }
     flags.end();
 
+    // where selected own units are going: their queued order points and patrol routes (snapshot wp, pe)
+    // (a point on a unit is drawn where that unit is seen, and a path stops at one in the fog)
+    const paths = this.paths;
+    const unitAt = this.pathUnitAt || (this.pathUnitAt = (uid) => {
+      const u = this.units.get(uid);
+      return u && u.visible ? u : null;
+    });
+    paths.begin();
+    for (const id of sel) {
+      const v = this.units.get(id);
+      if (!v || v.relation !== 'own' || !v.visible || !v.e.wp) continue;
+      paths.add(v.x, v.y, v.radius, v.e.wp, v.e.pe, this.time, unitAt);
+    }
+    paths.end();
+
     this.markers.update(dt);
     this.texts.update(dt, zk);
     this.placement.update(dt);
@@ -2427,6 +2444,7 @@ export class GameRenderer {
     this.markers.dispose();
     this.texts.dispose();
     this.flags.dispose();
+    this.paths.dispose();
     this.vfx.dispose();
     this.fadeMats.dispose();
     this.forest.dispose();
