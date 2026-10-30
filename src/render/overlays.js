@@ -1,6 +1,6 @@
 // Screen-reading overlays for the game renderer (DESIGN 8): selection / hover
-// rings, health + progress bars, command markers, floating text and rally
-// flags. Rings, bars and markers are single InstancedMeshes refilled every
+// rings, health + progress bars, command markers, floating text, rally
+// flags and the dotted order paths of selected units. Rings, bars and markers are single InstancedMeshes refilled every
 // frame (a few draw calls for hundreds of units, no per-frame allocations).
 import * as THREE from 'three';
 import { markerColors } from '../team-colors.js';
@@ -898,5 +898,122 @@ export class RallyFlags {
     this.discMat.dispose();
     for (const m of this.mats.values()) m.dispose();
     this.mats.clear();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// order paths
+// ---------------------------------------------------------------------------
+
+const PATH_KIND = ['move', 'attack', 'gather']; // EntityView wp kind 0 move, 1 attack, 2 work -> marker colour
+const PATH_STEP = 0.6;
+
+/**
+ * Faint dotted paths on the ground from selected own units through their
+ * queued order points (EntityView wp), and along a patrol between its ends
+ * (pe), with a pip at each point. One instanced mesh, refilled every frame.
+ */
+export class OrderPaths {
+  /**
+   * @param {THREE.Object3D} parent
+   * @param {(x:number, y:number)=>number} [groundFn] ground height (sim coords)
+   * @param {number} [maxDots]
+   */
+  constructor(parent, groundFn = null, maxDots = 2400) {
+    this.groundFn = groundFn;
+    this.maxDots = maxDots;
+    const dot = new THREE.CircleGeometry(0.07, 8);
+    dot.rotateX(-Math.PI / 2);
+    this.mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, fog: false });
+    this.mesh = new THREE.InstancedMesh(dot, this.mat, maxDots);
+    this.mesh.name = 'order-paths';
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.setColorAt(0, _c.set(1, 1, 1));
+    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 4;
+    parent.add(this.mesh);
+    this.n = 0;
+    this.setPalette();
+  }
+
+  /** The order colours of the team palette (team-colors.js), as for the command markers. */
+  setPalette(pal) {
+    const cols = markerColors(pal);
+    this.colors = PATH_KIND.map((k) => new THREE.Color(cols[k]));
+  }
+
+  begin() {
+    this.n = 0;
+  }
+
+  dot(x, z, scale, color) {
+    if (this.n >= this.maxDots) return;
+    const g = this.groundFn;
+    const y = (g ? Math.max(g(x, z), -0.2) : 0) + 0.05;
+    _m.makeTranslation(x, y, z);
+    _m.elements[0] = _m.elements[10] = scale;
+    const i = this.n++;
+    this.mesh.setMatrixAt(i, _m);
+    this.mesh.setColorAt(i, color);
+  }
+
+  /** Dots from (x0, z0) to (x1, z1), leaving `skip` at the start and a gap at the end for the pip. */
+  segment(x0, z0, x1, z1, skip, color, time) {
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    const end = len - 0.3;
+    if (end <= skip) return;
+    const ux = dx / len;
+    const uz = dz / len;
+    for (let d = skip + ((time * 0.9) % PATH_STEP); d < end && this.n < this.maxDots; d += PATH_STEP) {
+      this.dot(x0 + ux * d, z0 + uz * d, 1, color);
+    }
+  }
+
+  /**
+   * One unit's path: from where it stands (leaving its radius) through each point of wp, then the
+   * patrol's run back to pe. Points that are not finite numbers (a bad snapshot) end the path.
+   */
+  add(x, y, radius, wp, pe, time) {
+    if (!Array.isArray(wp)) return;
+    let px = x;
+    let py = y;
+    let skip = radius + 0.2;
+    let col = this.colors[0];
+    for (const p of wp) {
+      if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+      col = this.colors[p[2]] || this.colors[0];
+      this.segment(px, py, p[0], p[1], skip, col, time);
+      this.dot(p[0], p[1], 2, col);
+      px = p[0];
+      py = p[1];
+      skip = 0.3;
+    }
+    if (Array.isArray(pe) && Number.isFinite(pe[0]) && Number.isFinite(pe[1])) {
+      this.segment(px, py, pe[0], pe[1], skip, col, time);
+      this.dot(pe[0], pe[1], 2, col);
+    }
+  }
+
+  end() {
+    this.mesh.count = this.n;
+    if (this.n) {
+      this.mesh.instanceMatrix.clearUpdateRanges();
+      this.mesh.instanceMatrix.addUpdateRange(0, this.n * 16);
+      this.mesh.instanceMatrix.needsUpdate = true;
+      this.mesh.instanceColor.clearUpdateRanges();
+      this.mesh.instanceColor.addUpdateRange(0, this.n * 3);
+      this.mesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  dispose() {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    this.mesh.dispose();
+    this.mat.dispose();
   }
 }

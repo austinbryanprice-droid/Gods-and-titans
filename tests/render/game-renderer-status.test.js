@@ -575,3 +575,34 @@ test('GameRenderer: an army coming into sight at once is built over a few frames
   for (const id of visible) assert.ok(r.units.get(id).fade > 0);
   r.dispose();
 });
+
+test('GameRenderer: a selected own unit shows its queued orders as a dotted path; others and the unselected show none', () => {
+  const { world, vs, r, step } = makeMatch({ myIndex: 0 });
+  step(0.2);
+  const tc = tcOf(vs, 0);
+  const a = world.spawnUnit(0, 'warrior', tc.x + 3, tc.y + 5, { silent: true });
+  const e = world.spawnUnit(1, 'warrior', tc.x + 6, tc.y + 5, { silent: true });
+  world.issueCommand(0, { type: 'move', units: [a.id], x: tc.x + 3, y: tc.y + 12 });
+  world.issueCommand(0, { type: 'patrol', units: [a.id], x: tc.x + 10, y: tc.y + 12, queue: true });
+  world.issueCommand(1, { type: 'move', units: [e.id], x: tc.x + 6, y: tc.y + 14 });
+  step(0.2);
+  assert.equal(r.paths.mesh.count, 0, 'nothing selected, no path');
+  r.setSelection([e.id]);
+  step(0.1);
+  assert.equal(r.paths.mesh.count, 0, "another player's unit shows no path");
+  r.setSelection([a.id]);
+  step(0.1);
+  const n = r.paths.mesh.count;
+  assert.ok(n > 15, `${n} dots`);
+  const m = new THREE.Matrix4();
+  let far = 0;
+  for (let i = 0; i < n; i++) {
+    r.paths.mesh.getMatrixAt(i, m);
+    far = Math.max(far, m.elements[12] - tc.x);
+  }
+  assert.ok(far > 9.5, 'the path runs out to the patrol end');
+  world.issueCommand(0, { type: 'stop', units: [a.id] });
+  step(0.2);
+  assert.equal(r.paths.mesh.count, 0, 'a stopped unit has no path');
+  r.dispose();
+});

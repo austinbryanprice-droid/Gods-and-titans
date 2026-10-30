@@ -1072,6 +1072,10 @@ EntityView = {
   bo,             // pending build order for workers: { b: typeId, tx, ty } (omitted otherwise)
   mw,             // 1 while a worker waits its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
   ho, pa,         // 1 while the unit's order is Hold Position (ho) or a patrol (pa); omitted otherwise ("," skips them)
+  wp, pe,         // human players' units only: where the current order and the next queued ones go, [[x, y, kind], …]
+                  // (kind 0 move, 1 attack or patrol, 2 work), up to WAYPOINTS_MAX (5), and pe = [x, y] the far end of a
+                  // patrol that ends the path; omitted when idle or on a standing order with nothing queued (gathering,
+                  // praying, guarding). The HUD draws them as a faint dotted path under selected own units (8)
   tk,             // workers: task 'gold'|'wood'|'pray'|'build'|'repair'|'idle'|'other' (HUD task counts)
   // buildings:
   tx, ty,         // footprint top-left tile
@@ -2014,6 +2018,10 @@ per-frame budget, so a revealed army appears over a few frames.
   building's walls and ceiling.
 - Selection rings colored: own green, ally yellow-green, enemy red, neutral yellow.
   Health bars over damaged/selected/hovered units (all with Alt held).
+- Order paths (`overlays.js` `OrderPaths`): a selected own unit with a path in its view (`wp`, `pe`, 6.3)
+  shows it as faint marching dots on the ground, from the unit through each point, then back along a
+  patrol to its far end, with a larger pip at each point, coloured like the command markers (move,
+  attack, gather; the team palette's colour-blind set too). One instanced mesh, 2400 dots at most.
 - Walls (`building-models.js` `buildWoodenWall` / `buildStoneWall`): a segment is a post with arms
   towards the neighbours its *connection mask* names (`wallConnections`: the low four bits are N, E,
   S, W; the same bits shifted up by `WALL_TOWER_SHIFT` mark a neighbour that is a tower, whose arm
