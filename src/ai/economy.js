@@ -7,17 +7,33 @@ import { TICK_RATE } from '../config.js';
 
 const MINE_DROP_RANGE = 7; // a mine counts as "owned" with a drop-off this close (footprint gap)
 const FAR_TRIP = 40; // tiles: sending a worker farther than this is a long haul, only worth it for real room
+const NEAR_WEIGHT = 0.15; // mine choice (bestPair): cost per tile of walk, so the nearest mine with an open slot wins
+const MOVER_DIST = 0.1; // rebalance: cost per tile between a worker and its new job (10 tiles ~ one wasted load)
+const FAITH_LATCH = 0.75; // faith "piling up" (fewer pray) ends only once faith falls below 75 % of the level that started it
+const BANK_LATCH = 0.75; // likewise a full wood bank (spare hands to gold), below 75 % of 1200
 const HAUL_LOCK = 90 * TICK_RATE; // a worker sent on a long haul is left to arrive and work this long before a rebalance moves it
+const JOB_LOCK = 15 * TICK_RATE; // any other worker given a new job is left at it this long
 
-/** Remember a worker sent more than FAR_TRIP away, so the rebalance does not turn it round mid-walk. */
-function noteHaul(ai, u, x, y) {
-  if (Math.hypot(x - u.x, y - u.y) > FAR_TRIP) ai.hauls.set(u.id, ai.world.tickCount);
+/**
+ * Remember a worker given a new job at (x, y), so the rebalance does not turn it round mid-walk: the
+ * gold / wood / prayer wants swing as the banks cross their levels, and moving the same worker
+ * each time walked it between the jobs (and between far-apart mines) without gathering.
+ */
+function settle(ai, u, x, y) {
+  const far = Math.hypot(x - u.x, y - u.y) > FAR_TRIP;
+  ai.hauls.set(u.id, { until: ai.world.tickCount + (far ? HAUL_LOCK : JOB_LOCK), far });
 }
 
-/** May the rebalance move this worker to another job or mine? Not while it is on a recent long haul. */
+/** May the rebalance move this worker to another job or mine? Not while it settles in at a new one. */
 function movable(ai, u) {
-  const t = ai.hauls.get(u.id);
-  return t === undefined || ai.world.tickCount - t > HAUL_LOCK;
+  const h = ai.hauls.get(u.id);
+  return !h || ai.world.tickCount >= h.until;
+}
+
+/** Is this worker on its way to a far mine or wood line (a build or a relic should take someone else)? */
+export function onLongHaul(ai, u) {
+  const h = ai.hauls.get(u.id);
+  return !!h && h.far && ai.world.tickCount < h.until;
 }
 
 function rectGap(a, b) {
@@ -188,9 +204,22 @@ function prayWant(ai, s) {
     if (p.gold > 2500) pray += 4;
     else if (p.gold > 1200) pray += 2;
   }
-  if (p.faith > faithCap) pray = Math.max(1, Math.floor(pray / 2));
-  if (p.faith > faithCap * 1.8) pray = 0;
+  // With hysteresis: faith hovers around the cap (prayer adds it, a creature or god spends it),
+  // and a plain threshold pulled half the worshippers off prayer and back every few seconds, each
+  // time sending them to a mine, often the far one, and back (DESIGN 10).
+  if (latch(ai, 'faithFull', p.faith, faithCap, FAITH_LATCH)) pray = Math.max(1, Math.floor(pray / 2));
+  if (latch(ai, 'faithFlood', p.faith, faithCap * 1.8, FAITH_LATCH)) pray = 0;
   return pray;
+}
+
+/**
+ * A level that turns on above `on` and off only below `on * off`, remembered on the AI under
+ * `key` (deterministic: it changes only on thinks, from World state).
+ */
+function latch(ai, key, value, on, off) {
+  const now = ai.latches[key] ? value > on * off : value > on;
+  ai.latches[key] = now;
+  return now;
 }
 
 /**
@@ -244,8 +273,10 @@ function targets(ai, s) {
     wood += w;
     left -= w;
   }
-  if (left > 0 && p.wood < 1200) {
-    // Spare hands chop (wood never runs short of buyers for long) rather than queue at a full mine.
+  // Spare hands chop (wood never runs short of buyers for long) rather than queue at a full mine,
+  // until the wood bank is full. With hysteresis: every spare hand moved at once as the bank
+  // crossed 1200 one way and back, and the same workers walked between the trees and a mine.
+  if (left > 0 && !latch(ai, 'woodFull', p.wood, 1200, BANK_LATCH)) {
     wood += left;
     left = 0;
   }
@@ -292,7 +323,10 @@ function bestPair(ai, u) {
     const d = u ? Math.hypot(pr.mine.x - u.x, pr.mine.y - u.y) : 0;
     // A long haul across the map costs a minute of walking: only a lot of room pays for it, and
     // when every mine is full a worker waits at the nearest rather than at a slightly emptier queue far off.
-    const score = -(room > 0 ? room * 10 : room * 2) + d * 0.05 + Math.max(0, d - FAR_TRIP) * 0.5 + pr.gap * 0.1;
+    // Any open slot is worth about the same (a little more room only breaks ties), so a worker takes
+    // the nearest mine with room: weighing the room fully sent workers freed from wood, prayer or a
+    // build to whichever of two far-apart mines had one more slot, and the next one back the other way.
+    const score = (room > 0 ? -10 - Math.min(room, 3) : -room * 2) + d * NEAR_WEIGHT + Math.max(0, d - FAR_TRIP) * 0.5 + pr.gap * 0.1;
     if (score < bestScore) {
       bestScore = score;
       best = pr;
@@ -347,7 +381,7 @@ export function manageWorkers(ai, s) {
       const pr = bestPair(ai, u);
       if (!pr) return;
       pr.workers++;
-      noteHaul(ai, u, pr.mine.x, pr.mine.y);
+      settle(ai, u, pr.mine.x, pr.mine.y);
       let g = groups.get(pr.mine.id);
       if (!g) groups.set(pr.mine.id, (g = []));
       g.push(u.id);
@@ -358,7 +392,7 @@ export function manageWorkers(ai, s) {
     if (!list.length || !trees.length) return;
     for (const u of list) {
       const t = trees[treeIdx++ % trees.length];
-      noteHaul(ai, u, t.tx + 0.5, t.ty + 0.5);
+      settle(ai, u, t.tx + 0.5, t.ty + 0.5);
       ai.issue({ type: 'gather', units: [u.id], tx: t.tx, ty: t.ty });
     }
   };
@@ -367,6 +401,7 @@ export function manageWorkers(ai, s) {
       const b = prayerBuildingFor(ai, s, u, praying);
       if (!b) return;
       praying.set(b.id, (praying.get(b.id) || 0) + 1);
+      settle(ai, u, b.x, b.y);
       ai.issue({ type: 'pray', units: [u.id], target: b.id });
     }
   };
@@ -395,8 +430,8 @@ export function manageWorkers(ai, s) {
     }
   }
   // Leave a gold job: prefer a worker queued at an over-full mine, without cargo.
-  const takeGold = () => {
-    const u = pickGoldMover(ai, gold, pairOf);
+  const takeGold = (to) => {
+    const u = pickGoldMover(ai, gold, pairOf, to);
     if (!u) return null;
     removeFrom(gold, u);
     const p0 = pairOf.get(u.id);
@@ -417,12 +452,13 @@ export function manageWorkers(ai, s) {
           removeFrom(wood, u);
           w--;
         }
-      } else u = takeGold();
+      } else u = takeGold(ai.prayerPoint(s));
       if (!u) break;
       toPray.push(u);
       pr++;
-    } else if (pr > want.pray + 1 && pray.length) {
-      const u = pray.pop();
+    } else if (pr > want.pray + 1 && pray.some((x) => movable(ai, x))) {
+      const u = pray.filter((x) => movable(ai, x)).pop();
+      removeFrom(pray, u);
       pr--;
       if (want.wood - w > want.gold - g && trees.length) {
         toWood.push(u);
@@ -432,12 +468,12 @@ export function manageWorkers(ai, s) {
         g++;
       }
     } else if (shiftHelps(want.wood - w, want.gold - g) && gold.length && trees.length) {
-      const u = takeGold();
+      const u = takeGold(woodPoint(ai));
       if (!u) break;
       toWood.push(u);
       w++;
     } else if (shiftHelps(want.gold - g, want.wood - w) && wood.length && ai.pairs.length) {
-      const u = pickMovable(wood.filter((x) => movable(ai, x)), 'w');
+      const u = nearestToGold(ai, wood.filter((x) => movable(ai, x)));
       if (!u) break;
       removeFrom(wood, u);
       w--;
@@ -462,7 +498,7 @@ export function shiftHelps(needTo, needFrom) {
 }
 
 /** A gold worker to reassign: queued at an over-full mine first, never one carrying gold if avoidable. */
-function pickGoldMover(ai, list, pairOf) {
+function pickGoldMover(ai, list, pairOf, to) {
   let best = null;
   let bestV = -Infinity;
   for (let i = list.length - 1; i >= 0; i--) {
@@ -474,6 +510,9 @@ function pickGoldMover(ai, list, pairOf) {
     const o = u.order;
     if (o && o.type === 'gather' && o.phase === 'wait') v += 2;
     if (u.carry === 'g' && u.carryAmount > 0) v -= 3;
+    // The one nearest the new job goes: taking one from a mine across the map walked it there and,
+    // when the jobs swapped back, a worker by the other base walked the other way.
+    if (to) v -= Math.hypot(u.x - to.x, u.y - to.y) * MOVER_DIST;
     if (v > bestV) {
       bestV = v;
       best = u;
@@ -493,6 +532,7 @@ function moveBetweenMines(ai, gold, pairOf) {
     if (d <= -1 && (!under || d < under.workers - minersFor(ai, under))) under = pr;
   }
   if (!over || !under) return false;
+  const short = minersFor(ai, under) - under.workers;
   let u = null;
   let bestV = -Infinity;
   for (const w of gold) {
@@ -501,8 +541,10 @@ function moveBetweenMines(ai, gold, pairOf) {
     const waiting = !!(o && o.type === 'gather' && o.phase === 'wait');
     const d = Math.hypot(under.mine.x - w.x, under.mine.y - w.y);
     // Across the map only a worker queued at the full mine goes: one still walking there would be
-    // turned round mid-trip, and turned round again when the counts flip back (it never arrives).
-    if (d > FAR_TRIP && !waiting) continue;
+    // turned round mid-trip, and turned round again when the counts flip back (it never arrives);
+    // and only to a mine two short: for one slot the next worker trained or freed fills it, and a
+    // worker walked over for it came back when the counts swung the other way.
+    if (d > FAR_TRIP && (!waiting || short < 2)) continue;
     const v = (waiting ? 2 : 0) - (w.carryAmount > 0 ? 1 : 0) - d * 0.01;
     if (v > bestV) {
       bestV = v;
@@ -513,7 +555,7 @@ function moveBetweenMines(ai, gold, pairOf) {
   over.workers--;
   under.workers++;
   pairOf.set(u.id, under);
-  noteHaul(ai, u, under.mine.x, under.mine.y);
+  settle(ai, u, under.mine.x, under.mine.y);
   ai.issue({ type: 'gather', units: [u.id], target: under.mine.id });
   return true;
 }
@@ -523,15 +565,28 @@ function removeFrom(list, u) {
   if (i >= 0) list.splice(i, 1);
 }
 
-/** A worker whose cargo would not be wasted by switching (not carrying `keep`). */
-function pickMovable(list, keep) {
-  let fallback = null;
-  for (let i = list.length - 1; i >= 0; i--) {
-    const u = list[i];
-    if (!u.carry || u.carryAmount === 0) return u;
-    if (!fallback && u.carry !== keep) fallback = u;
+/** Where the wood line is (null when there is none). */
+function woodPoint(ai) {
+  const t = ai.woodSpot;
+  return t ? { x: t.tx + 0.5, y: t.ty + 0.5 } : null;
+}
+
+/** A wood worker to send to gold: the nearest to an owned mine with room, one without wood if it is about as near. */
+function nearestToGold(ai, list) {
+  let open = ai.pairs.filter((pr) => minersFor(ai, pr) > pr.workers);
+  if (!open.length) open = ai.pairs;
+  let best = null;
+  let bestV = Infinity;
+  for (const u of list) {
+    let d = Infinity;
+    for (const pr of open) d = Math.min(d, Math.hypot(pr.mine.x - u.x, pr.mine.y - u.y));
+    const v = d * MOVER_DIST + (u.carry === 'w' && u.carryAmount > 0 ? 1 : 0);
+    if (v < bestV) {
+      bestV = v;
+      best = u;
+    }
   }
-  return fallback || list[list.length - 1] || null;
+  return best;
 }
 
 function nearestTo(list, pt) {
