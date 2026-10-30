@@ -2056,7 +2056,7 @@ per-frame budget, so a revealed army appears over a few frames.
   `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
   above it, never over it), join screen (name + code), how-to-play (the rules in eight steps, then tips: Learn to
   Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
-  (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, intro film: Every launch / First launch only / Never, with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows.
   Play vs AI opens the lobby with one AI on a small map. Its AI players (the presets' too: `LobbyHost` option
@@ -2831,8 +2831,12 @@ sees those keys, so a second Enter cannot press Play. (On the card that waits fo
 the film like any other key, and Esc and the Skip button skip it.)
 
 **When it plays** (`introWanted`, `src/ui/intro.js`): once per page load, only at the start (never after a match).
-The `intro` setting (`src/settings.js`, default true; Settings, "Intro film") turns it off for good, and Settings
-has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
+The `intro` setting (`src/settings.js`; Settings, "Intro film": Every launch `'always'`, First launch only `'first'`,
+the default, or Never `'never'`) decides; `'first'` plays it until `introSeen`, which `boot` (`src/main.js`) sets once
+the start-up film has played, watched to the end or skipped (not when it failed to start). A first visit therefore
+still gets the film (and its sound card, below); a save from before the choice (the old on / off toggle, when the
+film played on every launch) counts as a returning player who has seen it: on becomes First launch only, off Never.
+Settings has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
 the setting: `?intro=0` never, `?intro=1` always. Without `?intro=1`, an invite link (`?join=`), an automated
 browser (`navigator.webdriver`: the e2e tests) and `prefers-reduced-motion` skip it; a browser without WebGL 2
 never plays it. A film that cannot start, or whose frame throws, is dropped (`'failed'`); on a machine that averages worse than
@@ -2880,7 +2884,7 @@ default for English is its best and a list can open on a novelty voice). The ove
 follows the picture, and a caption that came and went between two frames is not read late. Every way out of the film
 (`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first (after telling the
 score, below), with `speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
-under the intro toggle) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
+under the intro choice) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
 film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
 throws is ignored. Chrome will not speak until the page has had a key press, a click or a tap, unless the site is set
 to Sound: Allow (the rule behind the card above, which is why the film normally begins with the voice allowed): a refused `speak`

@@ -20,6 +20,9 @@ const TAB_ALERTS = ['off', 'title', 'notify'];
 // Game speed of a match against the computer, and the size of the in-game interface (src/config.js).
 const SPEEDS = Object.keys(GAME_SPEEDS);
 const SCALES = Object.keys(UI_SCALES);
+// When the intro film plays at the page's start (src/ui/intro.js introWanted): every launch, only until it has been
+// seen once (`introSeen`), or never.
+const INTRO_MODES = ['always', 'first', 'never'];
 const MAX_NAME_LENGTH = 20;
 
 const listeners = new Set();
@@ -40,8 +43,8 @@ function cleanName(name) {
  * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
  * or one fixed time of day. `alerts` is how much the game speaks up ('all', 'important', 'off'),
  * `hints` whether a gameplay tip appears now and then, `tabAlerts` what a background tab does
- * when the game needs the player ('off', 'title', 'notify'). `intro` plays the intro film
- * when the game opens (src/ui/intro.js) and `narration` has a voice read its captions aloud
+ * when the game needs the player ('off', 'title', 'notify'). `intro` is when the intro film plays
+ * as the game opens (src/ui/intro.js): 'always', 'first' (until `introSeen`, set once it has played) or 'never'; and `narration` has a voice read its captions aloud
  * (src/intro/narrator.js). `aiChat` shows the computer players' in-character chat lines (src/ai/voice.js). `volume` is the sound effects; `musicVolume` (0..1) and `musicMuted`
  * are the background music's own (src/audio/music.js). `gameSpeed` is the pace of a match against the
  * computer (online games always run at normal speed) and `uiScale` the size of the in-game interface.
@@ -50,7 +53,7 @@ function cleanName(name) {
  * the keys changed from their defaults (src/ui/key-bindings.js), kept per device like the rest.
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: Object.freeze({}) };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: 'first', introSeen: false, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: Object.freeze({}) };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -67,7 +70,9 @@ function sanitize(raw, base) {
   if (ALERT_LEVELS.includes(raw.alerts)) out.alerts = raw.alerts;
   if (typeof raw.hints === 'boolean') out.hints = raw.hints;
   if (TAB_ALERTS.includes(raw.tabAlerts)) out.tabAlerts = raw.tabAlerts;
-  if (typeof raw.intro === 'boolean') out.intro = raw.intro;
+  if (INTRO_MODES.includes(raw.intro)) out.intro = raw.intro;
+  else if (typeof raw.intro === 'boolean') out.intro = raw.intro ? 'first' : 'never'; // a save from the on / off toggle
+  if (typeof raw.introSeen === 'boolean') out.introSeen = raw.introSeen;
   if (typeof raw.narration === 'boolean') out.narration = raw.narration;
   if (typeof raw.aiChat === 'boolean') out.aiChat = raw.aiChat;
   if (typeof raw.musicVolume === 'number' && Number.isFinite(raw.musicVolume)) out.musicVolume = Math.min(1, Math.max(0, raw.musicVolume));
@@ -114,15 +119,18 @@ function writeStored(value) {
 function load() {
   if (current) return current;
   const stored = readStored();
-  current = Object.freeze(sanitize(stored, defaultSettings()));
+  // A save from before `introSeen` is a returning player's, who has seen the film (it played on every launch).
+  const base = defaultSettings();
+  if (stored && typeof stored === 'object' && typeof stored.introSeen !== 'boolean') base.introSeen = true;
+  current = Object.freeze(sanitize(stored, base));
   // Persist the generated default name so it stays the same next visit.
-  if (!stored || stored.name !== current.name) writeStored(current);
+  if (!stored || stored.name !== current.name || typeof stored.introSeen !== 'boolean') writeStored(current);
   return current;
 }
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger', teamColors: 'standard'|'colorblind', cardKeys: 'classic'|'grid', keyBindings: Object<string, string> }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: 'always'|'first'|'never', introSeen: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger', teamColors: 'standard'|'colorblind', cardKeys: 'classic'|'grid', keyBindings: Object<string, string> }}
  */
 export function getSettings() {
   return load();
@@ -179,6 +187,7 @@ export const QUALITY_LEVELS = QUALITIES;
 export const TIME_OF_DAY_MODES = TIMES_OF_DAY;
 export const ALERT_LEVEL_IDS = ALERT_LEVELS;
 export const TAB_ALERT_MODES = TAB_ALERTS;
+export const INTRO_MODE_IDS = INTRO_MODES;
 export const GAME_SPEED_IDS = SPEEDS;
 export const UI_SCALE_IDS = SCALES;
 export const TEAM_COLOR_IDS = TEAM_PALETTES;
