@@ -870,7 +870,10 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   (the hero's team holds that many sacred sites at once for that long without a break), `conquer`. `optional`
   ones are a bonus; `hidden` ones show once an event reveals them. Any but a protect one may carry a `limit` in
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
-  finished.
+  finished. A conquest can come between two looks (`campaignVictory` ends the mission from World.checkVictory),
+  so before a won mission ends the open objectives are judged once more and the done ones ticked (a conquer or kill
+  objective shows done on Mission Complete and in the chronicle); a wipe-out loss marks a protect objective whose
+  buildings all fell failed the same way.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }` (whose `say` is left unsaid when that objective ends
   the mission: no "Now finish the king" over Mission Complete), with `say` (a line), `reveal`, and `spawn`
   `{ owner, tag, units, at, march, target, guard, always }`: units in a line in front of the owner's Town Center (none if the
@@ -1265,7 +1268,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   go up is never one the host silently dropped; past it the HUD says "Slow down: too many pings." A client's mark
   that reaches the host before the match has started is ignored.
 - **Team chat** (allies only, as in AoE II / IV and SC2): Enter opens the chat box on everyone; its "To all:" label
-  is a switch (`Hud.chatTo`: a click or Tab flips it to "To allies:", the box going green) and Shift+Enter in the game
+  is a switch (`Hud.chatTo`: a click or Tab flips it to "To allies:", the box taking the allies colour) and Shift+Enter in the game
   opens it on the allies; in the box Shift+Enter sends to the allies whatever the switch says. A line that starts
   with "/t " or "/team " goes to the allies, "/a " or "/all " to everyone, the prefix taken off (`chatTarget` in
   `src/ui/hud-data.js`); the switch follows the prefix as it is typed. Every opening starts on everyone. The allies
@@ -1280,7 +1283,9 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   connections on the sender's team, the sender included (its line comes back from the host, as in all-chat), and
   shows it on its own screen only when on that team (the host's own `sendChat(text, { team: true })` goes the same
   way). Other teams' connections never receive it. A client shows a `team` line only from a player on its own team.
-  The HUD shows a team line as "[Allies] Name: text" (`hud-chat-team`, green, the card `is-team`). The host's replay
+  The HUD shows a team line as "[Allies] Name: text" (`hud-chat-team`, the card `is-team`). The tag and the
+  allies box take the allies selection-ring colour (`relationColor('ally')`, set on the HUD as `--hud-ally` and
+  updated on a palette change), so they follow the colour-blind palette (9) with the rings: lime, or white there. The host's replay
   records only the chat its screen showed, so never another team's team lines (its own team's carry a flag, 9.5).
   The lobby chat has no team channel (the teams are still being chosen there).
 - **Chat over the end panel**: in an online game (`Game.online`, the session still up) the game-over panel and the
@@ -2051,7 +2056,7 @@ per-frame budget, so a revealed army appears over a few frames.
   `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
   above it, never over it), join screen (name + code), how-to-play (the rules in eight steps, then tips: Learn to
   Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
-  (name, volume, graphics quality, time of day, intro film with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, intro film: Every launch / First launch only / Never, with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows.
   Play vs AI opens the lobby with one AI on a small map. Its AI players (the presets' too: `LobbyHost` option
@@ -2205,7 +2210,7 @@ per-frame budget, so a revealed army appears over a few frames.
   peace marks, chat) is a card at the bottom left, above the idle button and the task counts, in the tips' carved
   stone: an emblem chip (the line's own sign, a unit's, building's or god's emoji or a resource's, else its kind's
   from `messageIcon`; the stylesheet draws it from the card's `data-icon`), an edge in the colour of its kind
-  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat, a green "[Allies]" before
+  (blue news, gold good news, orange warning, grey system line, the sender's colour for chat, an "[Allies]" in the allies colour before
   the name of a team line) and the text at
   1.18 em. A card slides in with a flash of its colour (a warning pulses three times), stays 10 to 16 s by length
   (`messageDwell`: 8.5 s plus 45 ms a letter, 2.5 s more for a warning; chat 14 s) and fades. A line that comes
@@ -2602,7 +2607,9 @@ its ticks, and checksums.
 - The bar (above the bottom panel; the command card and the marker and power buttons are hidden): ⏮, play /
   pause (↻ at the end), +30 s, the speeds, the timeline (click: go there), the eyes, turn ⟲ ⟳, tilt ⤒ ⤓,
   the normal view ⌖, Leave. Keys: Space play / pause, [ and ] speed, J +30 s, V next eyes, Q / E turn,
-  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free).
+  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free). A camera action the player
+  rebound (9, *Keys*) to one of these keys keeps it in a replay too: the bar yields to a rebound camera key
+  (`InputController.onKeyDown`), while the default camera keys keep their places (Space stays play / pause).
 - Where: the game-over screen's Watch Replay (this match from its start), and the Career screen's Replays:
   each kept game with its sides, result, date, mode and length, Watch, Save (a `.mwreplay` file, the packed
   record) and Delete, and Open a replay file.
@@ -2653,7 +2660,9 @@ population cap and easy stays well below it. In the Trial of the Titans (5.14) t
 units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
-`canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
+`canPlaceBuilding`, so it simply takes another spot. A lost Town Center is rebuilt first (`planBuildings`); when no
+drop-off is left at all and the Town Center is out of reach, a Storehouse by the trees its workers chop goes up before
+it, so the carriers can deliver again (they stood idle with full loads: Hard 2v2 seed 21). It sends Worshippers to capture sacred sites and its army to
 break a rival's Sacred Victory countdown (5.11).
 God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing once 12 of its worshippers gather
 (easy: more), a festival once 5 pray, a caravan from 1:30, a healing rain where its hurt army is missing 1,200
@@ -2822,8 +2831,12 @@ sees those keys, so a second Enter cannot press Play. (On the card that waits fo
 the film like any other key, and Esc and the Skip button skip it.)
 
 **When it plays** (`introWanted`, `src/ui/intro.js`): once per page load, only at the start (never after a match).
-The `intro` setting (`src/settings.js`, default true; Settings, "Intro film") turns it off for good, and Settings
-has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
+The `intro` setting (`src/settings.js`; Settings, "Intro film": Every launch `'always'`, First launch only `'first'`,
+the default, or Never `'never'`) decides; `'first'` plays it until `introSeen`, which `boot` (`src/main.js`) sets once
+the start-up film has played, watched to the end or skipped (not when it failed to start). A first visit therefore
+still gets the film (and its sound card, below); a save from before the choice (the old on / off toggle, when the
+film played on every launch) counts as a returning player who has seen it: on becomes First launch only, off Never.
+Settings has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
 the setting: `?intro=0` never, `?intro=1` always. Without `?intro=1`, an invite link (`?join=`), an automated
 browser (`navigator.webdriver`: the e2e tests) and `prefers-reduced-motion` skip it; a browser without WebGL 2
 never plays it. A film that cannot start, or whose frame throws, is dropped (`'failed'`); on a machine that averages worse than
@@ -2871,7 +2884,7 @@ default for English is its best and a list can open on a novelty voice). The ove
 follows the picture, and a caption that came and went between two frames is not read late. Every way out of the film
 (`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first (after telling the
 score, below), with `speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
-under the intro toggle) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
+under the intro choice) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
 film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
 throws is ignored. Chrome will not speak until the page has had a key press, a click or a tap, unless the site is set
 to Sound: Allow (the rule behind the card above, which is why the film normally begins with the voice allowed): a refused `speak`

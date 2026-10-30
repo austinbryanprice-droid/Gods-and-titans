@@ -1412,7 +1412,10 @@ export class InputController {
       if (!rep && typeof this.game.togglePause === 'function') this.game.togglePause();
       return;
     }
-    if (this.game.replayBar && this.game.replayBar.onKey(e)) return; // a replay's own keys (src/ui/hud-replay.js)
+    // A replay's own keys (src/ui/hud-replay.js), unless the player rebound a camera action to that key:
+    // their own binding wins (a default camera key, Space, stays play / pause there).
+    const reboundCam = actionOf(getSettings().keyBindings || {}, normKey(e), 'camera');
+    if (this.game.replayBar && !reboundCam && this.game.replayBar.onKey(e)) return;
     if (key === 'Enter') {
       e.preventDefault();
       if (!rep) hud.openChat({ allies: !!e.shiftKey }); // Shift+Enter: to the allies (DESIGN 7, "Team chat")

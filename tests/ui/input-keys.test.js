@@ -9,7 +9,7 @@ import { ViewState } from '../../src/game/view-state.js';
 import { Selection } from '../../src/ui/hud-selection.js';
 import { InputController } from '../../src/ui/input.js';
 import { getCommandCard, withCardKeys } from '../../src/ui/command-card.js';
-import { cardKeysOf } from '../../src/ui/key-bindings.js';
+import { cardKeysOf, rebind } from '../../src/ui/key-bindings.js';
 import { getSettings, saveSettings, _resetSettingsForTests } from '../../src/settings.js';
 import { makeWorld, spawn } from '../sim/helpers.js';
 import { installFakeDom } from './fake-dom.js';
@@ -221,6 +221,22 @@ test('the digit row keeps the control groups on every layout: AZERTY\'s 6 types 
   key('-', { code: 'NumpadSubtract' }); // the keypad's minus and the US minus still zoom out
   key('-', { code: 'Minus' });
   assert.deepEqual(zooms, [-1, -1]);
+  input.dispose();
+  _resetSettingsForTests();
+});
+
+test('in a replay, a camera action rebound to one of the replay bar\'s keys wins; the defaults stay the bar\'s', () => {
+  _resetSettingsForTests();
+  const { input, zooms, key } = setup();
+  const barKeys = [];
+  // The replay bar's keys, as hud-replay.js claims them.
+  input.game.replayBar = { onKey: (e) => (' []QEJVRF'.includes(e.key.toUpperCase()) ? (barKeys.push(e.key), true) : false) };
+  saveSettings({ keyBindings: rebind({}, 'cam_zoom_in', 'Q') }); // the Keys panel's way: the Grid card's Q takes '='
+  key('q');
+  assert.deepEqual(zooms, [1], 'Q zooms in, as the player bound it');
+  key(' ');
+  key('e');
+  assert.deepEqual(barKeys, [' ', 'e'], 'Space (the default camera key) and E stay the replay bar\'s');
   input.dispose();
   _resetSettingsForTests();
 });

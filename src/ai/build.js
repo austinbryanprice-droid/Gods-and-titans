@@ -97,6 +97,14 @@ function woodStoreSpot(ai) {
   return findSpot(ai.world, ai, 'storehouse', spot.tx + 0.5, spot.ty + 0.5, { minR: 1.5, maxR: 7, ideal: 2.2, avoidReserved: false });
 }
 
+/** Spot for a storehouse when every drop-off is gone: by the trees the workers chop, else by a worker. */
+function lostDropSpot(ai, s) {
+  const spot = ai.woodSpot;
+  const at = spot ? { x: spot.tx + 0.5, y: spot.ty + 0.5 } : s.workers[0];
+  if (!at) return null;
+  return findSpot(ai.world, ai, 'storehouse', at.x, at.y, { minR: 1.5, maxR: 9, ideal: 2.5, avoidReserved: false });
+}
+
 function expansionSpot(ai) {
   const m = ai.expansion && ai.expansion.mine;
   if (!m || m.dead) return null;
@@ -146,8 +154,13 @@ export function planBuildings(ai, s, wants) {
   };
   if (!s.workers.length) return;
 
-  // Town Center lost: rebuilding it comes first.
+  // Town Center lost: rebuilding it comes first. With no drop-off left at all and the Town Center out of
+  // reach, a storehouse by the trees goes up before it, so the carriers can deliver and the economy restarts.
   if (haveOf(s, 'town_center') === 0) {
+    const tc = BUILDINGS.town_center.cost;
+    if (haveOf(s, 'storehouse') === 0 && (p.gold < tc.gold || p.wood < tc.wood)) {
+      add(101, 'storehouse', () => lostDropSpot(ai, s), { reserve: false });
+    }
     add(100, 'town_center', () => townCenterSpot(ai, s), { helpers: Math.min(3, s.workers.length - 1) });
     return;
   }

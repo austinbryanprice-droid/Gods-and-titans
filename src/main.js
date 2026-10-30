@@ -2,7 +2,7 @@
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
 // completely, so matches can be played one after another without a reload. Replays
 // (DESIGN 9.4) play in a Game of their own, from the Career screen or the game-over screen.
-import { getSettings, onSettingsChange } from './settings.js';
+import { getSettings, saveSettings, onSettingsChange } from './settings.js';
 import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { introWanted, playIntro } from './ui/intro.js';
@@ -303,9 +303,15 @@ function boot() {
   if (!webgl2) {
     menu.setNotice('This game needs WebGL 2, which this browser is not providing. Turn on hardware acceleration in your browser settings, or try a current Chrome, Edge, Firefox or Safari.');
   }
-  const intro = introWanted({ enabled: settings.intro, search: location.search, webdriver: navigator.webdriver === true, reducedMotion: prefersReducedMotion(), webgl2 });
-  // the film has the machine to itself; the game's code is fetched once it is over
-  if (intro) watchIntro('title').then(warmUp);
+  const intro = introWanted({ mode: settings.intro, seen: settings.introSeen, search: location.search, webdriver: navigator.webdriver === true, reducedMotion: prefersReducedMotion(), webgl2 });
+  // the film has the machine to itself; the game's code is fetched once it is over. Once it has played (watched or
+  // skipped), "First launch only" leaves it out from the next launch on.
+  if (intro) {
+    watchIntro('title').then((outcome) => {
+      if (outcome !== 'failed' && !getSettings().introSeen) saveSettings({ introSeen: true });
+      warmUp();
+    });
+  }
   else warmUp();
 }
 

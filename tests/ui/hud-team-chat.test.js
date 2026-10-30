@@ -9,6 +9,7 @@ import { InputController } from '../../src/ui/input.js';
 import { chatTarget, hasAllies } from '../../src/ui/hud-data.js';
 import { ViewState } from '../../src/game/view-state.js';
 import { saveSettings } from '../../src/settings.js';
+import { setTeamPalette, relationColor } from '../../src/team-colors.js';
 import { makeWorld } from '../sim/helpers.js';
 import { installFakeDom } from './fake-dom.js';
 
@@ -161,4 +162,16 @@ test('in the game, Enter opens the chat on everyone and Shift+Enter on the allie
   input.onKeyDown({ key: 'Enter', code: 'Enter', shiftKey: true, preventDefault() {}, target: document.body });
   assert.deepEqual(opened, [{ allies: false }, { allies: true }]);
   input.dispose && input.dispose();
+});
+
+test('the "[Allies]" colour is the allies selection-ring colour and follows the colour-blind palette', () => {
+  const { hud } = setup([0, 0]);
+  try {
+    assert.equal(hud.root.style.getPropertyValue('--hud-ally'), relationColor('ally', 'standard'));
+    setTeamPalette('colorblind');
+    assert.equal(hud.root.style.getPropertyValue('--hud-ally'), relationColor('ally', 'colorblind'));
+    assert.equal(relationColor('ally', 'colorblind'), '#f2f2f2', 'white, as the rings');
+  } finally {
+    setTeamPalette('standard');
+  }
 });
