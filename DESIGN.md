@@ -870,7 +870,10 @@ buildings placed in front of the Town Center, some tagged, and units). The hero'
   (the hero's team holds that many sacred sites at once for that long without a break), `conquer`. `optional`
   ones are a bonus; `hidden` ones show once an event reveals them. Any but a protect one may carry a `limit` in
   seconds: still open then, it fails, and the mission with it (the panel shows the clock left). Judged once a second; a finished one stays
-  finished.
+  finished. A conquest can come between two looks (`campaignVictory` ends the mission from World.checkVictory),
+  so before a won mission ends the open objectives are judged once more and the done ones ticked (a conquer or kill
+  objective shows done on Mission Complete and in the chronicle); a wipe-out loss marks a protect objective whose
+  buildings all fell failed the same way.
 - Events, in data order: `{ at: seconds }` or `{ after: objective id }` (whose `say` is left unsaid when that objective ends
   the mission: no "Now finish the king" over Mission Complete), with `say` (a line), `reveal`, and `spawn`
   `{ owner, tag, units, at, march, target, guard, always }`: units in a line in front of the owner's Town Center (none if the
