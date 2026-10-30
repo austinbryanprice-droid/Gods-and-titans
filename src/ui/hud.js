@@ -35,7 +35,7 @@ import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
 import { POP_MAX, PEACE_NAME, SURVIVAL_NAME, SURVIVAL_BOSS_EVERY } from '../config.js';
-import { displayColor } from '../team-colors.js';
+import { displayColor, relationColor, onTeamPaletteChange } from '../team-colors.js';
 
 const CARD_REFRESH_MS = 120;
 const IDLE_REFRESH_MS = 250;
@@ -311,6 +311,11 @@ export class Hud {
     // New players get the "getting started" checklist until they close or finish it.
     this.tips = null;
     if (!getSettings().tipsDismissed && !guided()) this.showTips();
+    // Team chat's "[Allies]" tag and allies chat box take the allies colour of the selection rings,
+    // so they follow the colour-blind palette (DESIGN 9).
+    const allyColor = () => root.style.setProperty('--hud-ally', relationColor('ally'));
+    allyColor();
+    this.offs.push(onTeamPaletteChange(allyColor));
     this.offs.push(onSettingsChange((st, changed) => {
       if (changed.includes('cardKeys') || changed.includes('keyBindings')) this.refreshCard(); // the keys on the card
       if (!changed.includes('tipsDismissed') || guided()) return;

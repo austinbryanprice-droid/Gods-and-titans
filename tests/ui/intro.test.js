@@ -176,12 +176,14 @@ function fakeFrames() {
 // ---------------------------------------------------------------- whether it plays
 
 test('introWanted: the player\'s setting decides, the address and the machine can say otherwise', () => {
-  assert.equal(introWanted(), true, 'on by default');
-  assert.equal(introWanted({ enabled: true }), true);
-  assert.equal(introWanted({ enabled: false }), false, 'the setting turns it off');
-  assert.equal(introWanted({ enabled: true, search: '?intro=0' }), false, '?intro=0 never');
-  assert.equal(introWanted({ enabled: false, search: '?intro=1' }), true, '?intro=1 always (screenshots, looking at it on purpose)');
-  assert.equal(introWanted({ enabled: true, search: '?x=1&intro=0&y=2' }), false);
+  assert.equal(introWanted(), true, 'a first launch plays it');
+  assert.equal(introWanted({ mode: 'first', seen: true }), false, 'first launch only: not once it has been seen');
+  assert.equal(introWanted({ mode: 'always', seen: true }), true, 'every launch');
+  assert.equal(introWanted({ mode: 'never' }), false, 'never, not even the first time');
+  assert.equal(introWanted({ mode: 'always', search: '?intro=0' }), false, '?intro=0 never');
+  assert.equal(introWanted({ mode: 'never', search: '?intro=1' }), true, '?intro=1 always (screenshots, looking at it on purpose)');
+  assert.equal(introWanted({ mode: 'first', seen: true, search: '?intro=1' }), true);
+  assert.equal(introWanted({ mode: 'always', search: '?x=1&intro=0&y=2' }), false);
   assert.equal(introWanted({ search: '?join=ABCDE' }), false, 'an invite link goes straight to the lobby');
   assert.equal(introWanted({ search: '?join=ABCDE&intro=1' }), true, 'unless asked');
   assert.equal(introWanted({ webdriver: true }), false, 'an automated browser (the e2e tests) never waits for it');

@@ -180,6 +180,35 @@ test('a protected building lost on the same second as the last enemy still fails
   assert.equal(w.campaign.state[i], FAILED);
 });
 
+test('the last enemy falling between the once-a-second looks still shows the conquer and destroy objectives done', () => {
+  for (const [id, obj] of [['twilight', 'conquer'], ['longhouses', 'burn']]) {
+    const w = world(id);
+    run(w, 0.5); // between two looks
+    const events = [];
+    const emit = w.emit.bind(w);
+    w.emit = (ev) => (events.push(ev), emit(ev));
+    for (const b of w.buildingList.filter((x) => x.owner === 1)) w.killEntity(b, null);
+    w.tick();
+    assert.equal(w.gameOver && w.gameOver.winningTeam, 1, id);
+    const i = MISSION_BY_ID[id].objectives.findIndex((o) => o.id === obj);
+    assert.equal(w.campaign.state[i], DONE, `${id}/${obj}`);
+    assert.ok(events.some((e) => e.type === 'objective' && e.i === i && e.s === DONE), 'the chronicle hears of it');
+    const home = MISSION_BY_ID[id].objectives.findIndex((o) => o.id === 'home');
+    assert.equal(w.campaign.state[home], OPEN, 'a standing protect objective is left as it is');
+  }
+});
+
+test('a wipe-out loss marks the fallen protect objective failed', () => {
+  const w = world('groves');
+  run(w, 0.5);
+  for (const x of w.buildingList.filter((y) => y.owner === 0)) w.killEntity(x, null);
+  for (const u of w.unitList.filter((y) => y.owner === 0)) w.killEntity(u, null);
+  w.tick();
+  assert.equal(w.gameOver && w.gameOver.winningTeam, 2);
+  const home = MISSION_BY_ID.groves.objectives.findIndex((o) => o.id === 'home');
+  assert.equal(w.campaign.state[home], FAILED);
+});
+
 test('the enemy AI leaves a scripted raid on its march at the hero', () => {
   const s = campaignSetup('longhouses', {});
   const w = createWorld(s);

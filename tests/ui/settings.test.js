@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: {} });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: 'first', introSeen: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: {} });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -177,20 +177,35 @@ test('settings saved before the music existed still load, with the music at its 
   assert.equal(s.musicMuted, false);
 });
 
-test('intro: the film plays by default, only booleans accepted, remembered across reloads', () => {
-  assert.equal(getSettings().intro, true);
-  assert.equal(saveSettings({ intro: 'no' }).intro, true);
-  assert.equal(saveSettings({ intro: 0 }).intro, true);
+test('intro: first launch only by default, only known modes accepted, remembered across reloads', () => {
+  assert.equal(getSettings().intro, 'first');
+  assert.equal(getSettings().introSeen, false, 'a first visit has not seen the film');
+  assert.equal(saveSettings({ intro: 'no' }).intro, 'first');
+  assert.equal(saveSettings({ intro: 0 }).intro, 'first');
   const seen = [];
   onSettingsChange((s, changed) => seen.push(changed));
-  assert.equal(saveSettings({ intro: false }).intro, false);
+  assert.equal(saveSettings({ intro: 'never' }).intro, 'never');
   assert.deepEqual(seen, [['intro']]);
   _resetSettingsForTests();
-  assert.equal(getSettings().intro, false);
-  // a save made before the setting existed has no key: the film is on
+  assert.equal(getSettings().intro, 'never');
+  assert.equal(saveSettings({ intro: 'always' }).intro, 'always');
+  assert.equal(saveSettings({ introSeen: true }).introSeen, true);
+  _resetSettingsForTests();
+  assert.equal(getSettings().introSeen, true);
+  // a save made before the setting existed: a returning player, who has seen the film; it is now first launch only
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3 }));
   _resetSettingsForTests();
-  assert.equal(getSettings().intro, true);
+  assert.equal(getSettings().intro, 'first');
+  assert.equal(getSettings().introSeen, true);
+  assert.equal(JSON.parse(globalThis.localStorage.getItem(SETTINGS_KEY)).introSeen, true, 'and that is kept');
+  // the old on / off toggle: on is first launch only, off is never
+  globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', intro: true }));
+  _resetSettingsForTests();
+  assert.equal(getSettings().intro, 'first');
+  globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', intro: false }));
+  _resetSettingsForTests();
+  assert.equal(getSettings().intro, 'never');
+  assert.equal(saveSettings({ intro: true }).intro, 'first');
 });
 
 test('narration: the voice is on by default, only booleans accepted, remembered across reloads, independent of the film', () => {
@@ -201,11 +216,11 @@ test('narration: the voice is on by default, only booleans accepted, remembered 
   onSettingsChange((s, changed) => seen.push(changed));
   const off = saveSettings({ narration: false });
   assert.equal(off.narration, false);
-  assert.equal(off.intro, true, 'the film itself is untouched');
+  assert.equal(off.intro, 'first', 'the film itself is untouched');
   assert.deepEqual(seen, [['narration']]);
   _resetSettingsForTests();
   assert.equal(getSettings().narration, false);
-  assert.equal(saveSettings({ intro: false }).narration, false, 'turning the film off leaves the voice as it was');
+  assert.equal(saveSettings({ intro: 'never' }).narration, false, 'turning the film off leaves the voice as it was');
   // a save made before the setting existed has no key: the voice is on
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, intro: false }));
   _resetSettingsForTests();

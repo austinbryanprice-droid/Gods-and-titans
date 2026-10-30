@@ -364,21 +364,45 @@ function waiting(cp) {
 export function campaignVictory(world) {
   if (world.gameOver) return;
   const me = world.players[HERO];
-  if (!me || me.defeated) return end(world, false);
+  if (!me || me.defeated) {
+    failFallen(world, world.campaign); // a wipe-out takes the protected buildings with it
+    return end(world, false);
+  }
   if (enemiesLeft(world) > 0) return;
   const cp = world.campaign;
   if (waiting(cp)) return;
   // A protected building that fell since the last once-a-second look still fails the mission.
   if (cp && cp.m.objectives.some((o, i) => o.kind === 'protect' && cp.state[i] !== FAILED && tagged(world, o.tag).length === 0)) {
-    cp.m.objectives.forEach((o, i) => {
-      if (o.kind !== 'protect' || cp.state[i] === FAILED || tagged(world, o.tag).length) return;
-      cp.state[i] = FAILED;
-      cp.shown[i] = true;
-      world.emit({ type: 'objective', i, s: FAILED });
-    });
+    failFallen(world, cp);
     return end(world, false);
   }
+  // The last enemy can fall between the once-a-second looks: tick what is done now, so the panel and the
+  // chronicle show a conquer or kill objective done on Mission Complete.
+  if (cp) {
+    cp.m.objectives.forEach((o, i) => {
+      if (cp.state[i] !== OPEN || o.kind === 'protect') return;
+      const [ok, v] = judge(world, cp, o);
+      cp.value[i] = v;
+      if (!ok) return;
+      cp.state[i] = DONE;
+      world.emit({ type: 'objective', i, s: DONE });
+    });
+  }
   end(world, true);
+}
+
+/** Mark failed every protect objective whose buildings are all gone (the hero's side beaten between looks). */
+function failFallen(world, cp) {
+  if (!cp) return;
+  cp.m.objectives.forEach((o, i) => {
+    if (o.kind !== 'protect' || cp.state[i] !== OPEN) return;
+    const n = tagged(world, o.tag).length;
+    cp.value[i] = n;
+    if (n) return;
+    cp.state[i] = FAILED;
+    cp.shown[i] = true;
+    world.emit({ type: 'objective', i, s: FAILED });
+  });
 }
 
 /** One tick of the director: events on the clock; once a second the objectives, the pointer and the end. */

@@ -308,10 +308,10 @@
 .hud-msg.is-fading { opacity: 0; transform: translateX(-0.7em); }
 .hud-msgs.is-chatting .hud-msg { opacity: 1 !important; transform: none !important; }
 .hud-chat-from { font-weight: 700; }
-/* Team chat (DESIGN 7): "[Allies]" in green before the name, and the chat box turns green while it talks to them. */
-.hud-chat-team { font-weight: 700; color: #7fdc8c; }
-.hud-chat.is-team .hud-chat-to { color: #7fdc8c; }
-.hud-chat.is-team .hud-chat-input:focus { border-color: #7fdc8c; box-shadow: 0 0 0.6em rgba(127, 220, 140, 0.3); }
+/* Team chat (DESIGN 7): "[Allies]" in the allies colour (relationColor, set as --hud-ally by hud.js) before the name, and the chat box takes it while it talks to them. */
+.hud-chat-team { font-weight: 700; color: var(--hud-ally, #c4f23a); }
+.hud-chat.is-team .hud-chat-to { color: var(--hud-ally, #c4f23a); }
+.hud-chat.is-team .hud-chat-input:focus { border-color: var(--hud-ally, #c4f23a); box-shadow: 0 0 0.6em color-mix(in srgb, var(--hud-ally, #c4f23a) 30%, transparent); }
 @keyframes hud-card-in {
   0% { opacity: 0; transform: translateX(-1.8em) scale(0.96); }
   60% { opacity: 1; transform: translateX(0.3em) scale(1); }
