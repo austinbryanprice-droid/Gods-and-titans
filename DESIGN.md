@@ -2058,7 +2058,10 @@ per-frame budget, so a revealed army appears over a few frames.
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
-  above it, never over it), join screen (name + code), how-to-play (the rules in eight steps, then tips: Learn to
+  above it, never over it), join screen (name + code), a notice pinned to the title and join screens
+  (`menu.setNotice`, set by `boot` in main.js: no WebGL 2, and on a phone or tablet, `isTouchOnly` in menu-model.js:
+  `(pointer: coarse)` matches and `(any-pointer: fine)` does not, `TOUCH_NOTICE` "This game needs a mouse and
+  keyboard: it has no touch controls yet."; both join into one line), how-to-play (the rules in eight steps, then tips: Learn to
   Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
   (name, volume, graphics quality, time of day, intro film: Every launch / First launch only / Never, with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby

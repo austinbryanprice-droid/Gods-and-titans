@@ -470,3 +470,19 @@ export function friendlyJoinError(err, code) {
   if (/timeout|timed out/i.test(msg)) return 'The connection timed out. Check the code and your internet connection, then try again.';
   return msg;
 }
+
+/** The title (and Join) screen's notice on a phone or tablet: there is no touch control. */
+export const TOUCH_NOTICE = 'This game needs a mouse and keyboard: it has no touch controls yet. Play it on a computer.';
+
+/**
+ * True on a device whose only pointer is coarse (a phone or tablet with no mouse or trackpad attached):
+ * `(pointer: coarse)` matches and `(any-pointer: fine)` does not. False when matchMedia is missing.
+ */
+export function isTouchOnly(mm = globalThis.matchMedia) {
+  if (typeof mm !== 'function') return false;
+  try {
+    return mm('(pointer: coarse)').matches === true && mm('(any-pointer: fine)').matches !== true;
+  } catch {
+    return false;
+  }
+}

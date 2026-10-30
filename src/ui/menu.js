@@ -124,7 +124,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
 
   let current = null; // { name, cleanup, onEscape }
   let launchedLobby = null; // lobby of the running match; closed when the menu returns
-  let titleNotice = null; // persistent warning shown on the title screen (menu.setNotice)
+  let titleNotice = null; // persistent warning shown on the title and Join screens (menu.setNotice)
 
   // Button clicks get a soft click sound (delegated).
   root.addEventListener('click', (e) => {
@@ -190,7 +190,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     root.querySelectorAll('.mw-overlay, .mw-popover').forEach((el) => el.remove());
     const build = SCREENS[name] || SCREENS.title;
     const screen = build(opts);
-    current = { name, ...screen };
+    current = { name, opts, ...screen };
     // Each screen sits in its own scroller so tall content scrolls on small windows.
     setChildren(screenLayer, h('div.mw-screen', screen.el));
     root.dataset.screen = name;
@@ -1198,6 +1198,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
       h('section.mw-panel.mw-form-panel.mw-join',
         h('h2.mw-h2', 'Join Online Game'),
         h('p.mw-panel-sub', 'Ask the host for the 5-character room code shown in their lobby. Codes use the letters A-Z (no I or O) and the digits 2-9.'),
+        titleNotice ? h('p.mw-notice', { role: 'alert' }, titleNotice) : null, // an invite link opened on a phone lands here
         h('label.mw-field', h('span.mw-label', 'Your name'), nameInput),
         h('label.mw-field', h('span.mw-label', 'Room code'), codeInput),
         status,
@@ -1589,10 +1590,13 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
     root,
     go,
     toast,
-    /** Pin a warning to the title screen (null clears it), e.g. when the browser lacks WebGL 2. */
+    /**
+     * Pin a warning to the title and Join screens (null clears it), e.g. when the browser lacks WebGL 2 or the
+     * device has only a touch screen (main.js).
+     */
     setNotice(text) {
       titleNotice = text || null;
-      if (current && current.name === 'title') go('title');
+      if (current && (current.name === 'title' || current.name === 'join')) go(current.name, current.opts);
     },
     /** Show a screen. Closes the last match's lobby unless opts.keepLobby. */
     show(screen = 'title', opts = {}) {
