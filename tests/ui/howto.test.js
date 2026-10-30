@@ -47,6 +47,15 @@ test('controls that were undocumented are listed', () => {
   ]) assert.ok(text.includes(part), part);
 });
 
+test('the army keys and Patrol are listed', () => {
+  for (const part of [
+    'Patrol: walk to a spot and back again',
+    'Next idle soldier, god or creature',
+    'Select your whole army',
+    'Select the army on screen',
+  ]) assert.ok(text.includes(part), part);
+});
+
 test('soldier ranks are explained with the numbers from the config', () => {
   assert.match(text, /rise from Recruit to Veteran, Elite and Champion/);
   assert.match(text, /Each rank adds 5% damage, 10% health and 0\.5 armor/);

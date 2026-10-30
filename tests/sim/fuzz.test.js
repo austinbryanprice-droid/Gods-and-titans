@@ -19,7 +19,7 @@ function rng(seed) {
   };
 }
 
-const TYPES = ['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender'];
+const TYPES = ['move', 'attackMove', 'patrol', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender'];
 const FIELDS = ['units', 'target', 'x', 'y', 'tx', 'ty', 'building', 'unit', 'ability', 'index', 'queue', 'player', 'type'];
 const NASTY_STRINGS = ['', 'x', '__proto__', 'constructor', 'prototype', 'toString', 'hasOwnProperty', 'valueOf', 'length', '0', 'NaN', 'x'.repeat(5000)];
 const NASTY_NUMBERS = [0, -0, 1, -1, 0.5, 2.5, 1e308, -1e308, Number.MAX_SAFE_INTEGER, 2 ** 53 + 2, 2 ** 31, -(2 ** 31), NaN, Infinity, -Infinity, 1e-320];
@@ -88,7 +88,7 @@ function generator(world, seed) {
     const near = () => (p === 0 ? 6 : 34) + r() * 14;
     const type = pick(TYPES);
     switch (type) {
-      case 'move': case 'attackMove': case 'stop': case 'hold': return { type, units: some(us), x: r() * W, y: r() * W, queue: r() < 0.3 };
+      case 'move': case 'attackMove': case 'patrol': case 'stop': case 'hold': return { type, units: some(us), x: r() * W, y: r() * W, queue: r() < 0.3 };
       case 'attack': return { type, units: some(us), target: enemies.length ? pick(enemies).id : 0 };
       case 'smart': return { type, units: some(us), target: r() < 0.5 && ids().length ? pick(ids()) : 0, x: r() * W, y: r() * W, tx: Math.floor(r() * W), ty: Math.floor(r() * W), queue: r() < 0.3 };
       case 'gather': return r() < 0.5 ? { type, units: some(ws), target: world.mineList.length ? pick(world.mineList).id : 0 } : { type, units: some(ws), tx: 4 + Math.floor(r() * 6), ty: 16 + Math.floor(r() * 3) };
