@@ -306,7 +306,6 @@
 .hud-msg.is-system { --msg-accent: #a4a8c4; --msg-ink: #dcd9e8; font-style: italic; font-weight: 500; font-family: var(--mw-font-body); }
 .hud-msg.is-chat { --msg-accent: #f1e8d4; }
 .hud-msg.is-fading { opacity: 0; transform: translateX(-0.7em); }
-.hud-msgs.is-chatting .hud-msg { opacity: 1 !important; transform: none !important; }
 .hud-chat-from { font-weight: 700; }
 /* Team chat (DESIGN 7): "[Allies]" in the allies colour (relationColor, set as --hud-ally by hud.js) before the name, and the chat box takes it while it talks to them. */
 .hud-chat-team { font-weight: 700; color: var(--hud-ally, #c4f23a); }
@@ -526,7 +525,45 @@
 .hud-chat-input:focus { border-color: var(--mw-gold); box-shadow: 0 0 0.6em rgba(227, 184, 79, 0.3); }
 /* An online game's end panel (DESIGN 7): the feed and the chat box stand over the overlay layer (.hud-overlays, 10),
    so the players can read and say gg and agree on a rematch without Keep Watching. The feed still ignores the pointer. */
-.hud.is-panel-chat .hud-msgs, .hud.is-panel-chat .hud-chat { z-index: 11; }
+.hud.is-panel-chat .hud-msgs, .hud.is-panel-chat .hud-chat, .hud.is-panel-chat .hud-chatlog { z-index: 11; }
+
+/* The chat history (DESIGN 9, "The message feed"): while the chat box is open, the last 50 chat and system lines
+   stand in a scrolling stone panel right above it, newest at the bottom, in the feed's place (the feed's cards
+   step aside until the box closes, so the two never overlap). Each line: game time, "[Allies]", the sender in
+   their colour, the words. It takes the pointer so it can be scrolled; the wheel never reaches the map. */
+.hud-chatlog {
+  position: absolute;
+  left: 0.8em;
+  bottom: calc(var(--hb) + 3.5em);
+  width: min(40em, 46vw);
+  max-height: min(17em, 40vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.45em 0.7em;
+  border-radius: 5px;
+  font: 500 1.02em/1.35 var(--mw-font-ui);
+  color: #f6edd8;
+  text-shadow: 0 1px 0 #000;
+  background:
+    linear-gradient(180deg, rgba(255, 220, 150, 0.06), transparent 35%),
+    var(--orn-stone);
+  box-shadow:
+    inset 0 0 0 1px rgba(233, 196, 106, 0.32),
+    inset 0 0 0 3px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(122, 90, 44, 0.75),
+    0 0.35em 1em rgba(0, 0, 0, 0.7);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(233, 196, 106, 0.5) transparent;
+  overflow-wrap: anywhere;
+  z-index: 2;
+}
+.hud-chatlog[hidden] { display: none; }
+.hud-chatlog-line { padding: 0.12em 0; }
+.hud-chatlog-line + .hud-chatlog-line { border-top: 1px solid rgba(233, 196, 106, 0.1); }
+.hud-chatlog-line.is-system { color: #dcd9e8; font-style: italic; font-family: var(--mw-font-body); }
+.hud-chatlog-time { font-size: max(0.8em, var(--mw-min-text)); font-variant-numeric: tabular-nums; color: rgba(246, 237, 216, 0.55); font-style: normal; }
+.hud-chatlog-empty { color: rgba(246, 237, 216, 0.6); font-style: italic; }
+.hud-msgs.is-chatting { visibility: hidden; }
 
 /* ------------------------------------------------------------ getting-started tips */
 
