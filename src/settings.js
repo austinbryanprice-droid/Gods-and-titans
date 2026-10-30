@@ -39,7 +39,8 @@ function cleanName(name) {
 
 /**
  * Defaults; the name gets 3 random digits once and is then saved. `tipsDismissed`
- * becomes true once the player closes (or finishes) the in-game "getting started" tips.
+ * becomes true once the player closes (or finishes) the in-game "getting started" tips, and
+ * `rosterOpen` is whether the in-match player list (src/ui/hud-roster.js) is unfolded.
  * `timeOfDay` is 'cycle' (day and night follow the match clock, opening on the golden morning)
  * or one fixed time of day. `alerts` is how much the game speaks up ('all', 'important', 'off'),
  * `hints` whether a gameplay tip appears now and then, `tabAlerts` what a background tab does
@@ -53,7 +54,7 @@ function cleanName(name) {
  * the keys changed from their defaults (src/ui/key-bindings.js), kept per device like the rest.
  */
 export function defaultSettings() {
-  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: 'first', introSeen: false, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: Object.freeze({}) };
+  return { name: randomName(), volume: 0.7, quality: 'medium', timeOfDay: 'cycle', edgeScroll: true, showAllBars: false, tipsDismissed: false, rosterOpen: true, alerts: 'all', hints: true, tabAlerts: 'title', intro: 'first', introSeen: false, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: Object.freeze({}) };
 }
 
 /** Merge a raw object onto base, keeping only valid values. */
@@ -67,6 +68,7 @@ function sanitize(raw, base) {
   if (typeof raw.edgeScroll === 'boolean') out.edgeScroll = raw.edgeScroll;
   if (typeof raw.showAllBars === 'boolean') out.showAllBars = raw.showAllBars;
   if (typeof raw.tipsDismissed === 'boolean') out.tipsDismissed = raw.tipsDismissed;
+  if (typeof raw.rosterOpen === 'boolean') out.rosterOpen = raw.rosterOpen;
   if (ALERT_LEVELS.includes(raw.alerts)) out.alerts = raw.alerts;
   if (typeof raw.hints === 'boolean') out.hints = raw.hints;
   if (TAB_ALERTS.includes(raw.tabAlerts)) out.tabAlerts = raw.tabAlerts;
@@ -130,7 +132,7 @@ function load() {
 
 /**
  * Current settings (a frozen object; use saveSettings to change it).
- * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: 'always'|'first'|'never', introSeen: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger', teamColors: 'standard'|'colorblind', cardKeys: 'classic'|'grid', keyBindings: Object<string, string> }}
+ * @returns {{ name: string, volume: number, quality: 'low'|'medium'|'high'|'ultra', timeOfDay: 'cycle'|'golden'|'day'|'dusk'|'night'|'dawn', edgeScroll: boolean, showAllBars: boolean, tipsDismissed: boolean, rosterOpen: boolean, alerts: 'all'|'important'|'off', hints: boolean, tabAlerts: 'off'|'title'|'notify', intro: 'always'|'first'|'never', introSeen: boolean, narration: boolean, aiChat: boolean, musicVolume: number, musicMuted: boolean, gameSpeed: 'slow'|'normal'|'fast'|'faster', uiScale: 'small'|'normal'|'large'|'larger', teamColors: 'standard'|'colorblind', cardKeys: 'classic'|'grid', keyBindings: Object<string, string> }}
  */
 export function getSettings() {
   return load();

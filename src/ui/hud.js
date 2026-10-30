@@ -1,9 +1,10 @@
 // In-game HUD (DESIGN 9): a Warcraft III–style HTML overlay in #hud-root.
 //   top bar      gold, wood, faith (+rate), population, tier, clock, peace countdown, sacred sites, ping, menu, market
 //   market       team trade panel under the top bar (only with a living teammate)
-//   top-left     god portraits (F1–F3)
+//   top-left     god portraits (F1–F3), and beside them the player list (hud-roster.js)
 //   bottom-left  idle worshipper button and the worshipper task counts
 //   bottom       god power buttons + minimap + team marker buttons | selection panel | 4×3 command card (+ tooltip)
+//   groups       the control groups' chips over the selection panel (hud-groups.js)
 //   team marks   pins over the battlefield (and arrows at its edge) for the pings and markers of my team
 //   messages     errors (centre), alerts / info / chat (left), banners (top)
 //   tips         the getting-started checklist and now-and-then gameplay tips (top-right); in the guided
@@ -31,6 +32,8 @@ import { hintParts } from './hint-data.js';
 import { MarketView, marketPartners } from './hud-market.js';
 import { MarksLayer, MarkPalette, teammateCount, aiAllyCount } from './hud-marks.js';
 import { PowerBar } from './hud-powers.js';
+import { RosterView } from './hud-roster.js';
+import { GroupBar } from './hud-groups.js';
 import { TeamMarks } from '../game/team-marks.js';
 import { getSettings, saveSettings, onSettingsChange } from '../settings.js';
 import { sfx } from '../audio/sfx.js';
@@ -264,13 +267,29 @@ export class Hud {
       el('div', 'hud-bottom-info', this.infoRoot),
       el('div', 'hud-bottom-card', this.cardGrid));
 
+    // Control groups: a chip per saved group, over the selection panel (lined up with it in update).
+    this.groupBar = new GroupBar({
+      selection: game.selection,
+      viewState: this.vs,
+      onPick: (n) => game.input && !game.replay && game.input.recallGroup(n),
+    });
+    this.bottom.appendChild(this.groupBar.root);
+    this.bottomInfo = this.infoRoot.parentNode;
+    // Every player of the match with their pantheon, tier and score; folds to its header. Not in the
+    // guided first match, which keeps the screen to its objectives.
+    this.roster = game.tutorial ? null : new RosterView({
+      viewState: this.vs,
+      open: getSettings().rosterOpen,
+      onToggle: (open) => saveSettings({ rosterOpen: open }),
+    });
+
     this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, this.market.root, this.mismatch, this.stall, this.pauseBar, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, ...(this.roster ? [this.roster.root] : []), this.market.root, this.mismatch, this.stall, this.pauseBar, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
-    for (const p of [this.top, this.bottom, this.gods, this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root, this.pauseBar]) {
+    for (const p of [this.top, this.bottom, this.gods, ...(this.roster ? [this.roster.root] : []), this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root, this.pauseBar]) {
       p.addEventListener('mousedown', (e) => {
         if (e.target !== this.chatInput) e.preventDefault();
       });
@@ -313,7 +332,10 @@ export class Hud {
     if (!getSettings().tipsDismissed && !guided()) this.showTips();
     // Team chat's "[Allies]" tag and allies chat box take the allies colour of the selection rings,
     // so they follow the colour-blind palette (DESIGN 9).
-    const allyColor = () => root.style.setProperty('--hud-ally', relationColor('ally'));
+    const allyColor = () => {
+      root.style.setProperty('--hud-ally', relationColor('ally'));
+      if (this.roster) this.roster.invalidate(); // its colour swatches too
+    };
     allyColor();
     this.offs.push(onTeamPaletteChange(allyColor));
     this.offs.push(onSettingsChange((st, changed) => {
@@ -422,6 +444,9 @@ export class Hud {
     }
 
     this.infoView.update();
+    if (this.roster) this.roster.update(now);
+    this.groupBar.update(now);
+    if (!this.groupBar.root.hidden) setStyle(this.groupBar.root, 'left', `${this.groupBarLeft()}px`);
     const input = game.input;
     const mode = input ? input.cardMode() : 'root';
     const sig = `${game.selection.version}|${mode}`;
@@ -446,6 +471,13 @@ export class Hud {
     if (this.tips) this.tips.update(now);
     if (!this.tutorial && !this.missionView && !game.replay) this.hintTimer.update();
     this.hints.update();
+  }
+
+  /** Where the group bar starts: over the selection panel, or just past the task counts on the same row. */
+  groupBarLeft() {
+    const w = this.workers;
+    const left = this.bottomInfo.offsetLeft || 0;
+    return w.offsetWidth ? Math.max(left, w.offsetLeft + w.offsetWidth + 8) : left;
   }
 
   /** The top-bar pantheon chip: emblem and name, with the blessings and elite soldier in its tooltip. */

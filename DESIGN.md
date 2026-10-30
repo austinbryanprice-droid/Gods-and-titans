@@ -2243,6 +2243,20 @@ per-frame budget, so a revealed army appears over a few frames.
 - Worshipper tasks: a bar bottom-left, next to the idle button, counts own Worshippers per task
   (snapshot `tk`: gold, wood, pray, build, repair, idle, other); clicking a count selects them
   (Shift adds). A multi-selection with Worshippers shows the same counts for the selection.
+- Player list (`src/ui/hud-roster.js`, `RosterView`): a small panel under the top bar, beside the god
+  portraits, with every player of the match: colour swatch (in the colour-blind palette when that is on),
+  pantheon emblem, name, settlement tier and live score (the game-over screen's `scoreOf`). Players are grouped
+  by team with mine first ("Your team", "Team 2"); a free-for-all (or a 1v1) is one list with me on top. A player
+  who is out says "Defeated" or "Surrendered" where the tier would be and is struck through; one played by a
+  stand-in AI while away says "Away". The header ("Players 3/4": still in, of all) folds the list to one line,
+  kept in the `rosterOpen` setting. Hidden in a match of one player and in the guided first match. Nothing new
+  on the wire: it reads the snapshot's player records.
+- Control-group bar (`src/ui/hud-groups.js`, `GroupBar`): a chip per saved control group (Ctrl+1..9) in digit
+  order on the row just over the selection panel (past the Worshipper task counts when those reach further):
+  the digit, the icon of the group's leading type (the first subgroup: gods first) and how many are left. A
+  chip is red while the group fights (a member attacks or casts, or lost health in the last 3 s) and gold while
+  the group is the selection. Clicking a chip is pressing its digit (`input.recallGroup`): a second click within
+  the double-tap time also brings the camera there. An emptied group's chip goes; hidden in replays.
 - God power bar (`src/ui/hud-powers.js`, `PowerBar`): three round buttons on the left of the minimap, one per power
   of my pantheon (4.11), Village at the top. Locked (grey) until my settlement reaches the tier, ready (a slow
   golden glow) once it has, dark once spent; the tooltip names the power, its tier, what it does, its area and why

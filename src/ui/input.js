@@ -489,6 +489,20 @@ export class InputController {
     return true;
   }
 
+  /**
+   * Select control group n (its digit, or its chip on the HUD's group bar); a second tap within
+   * DOUBLE_MS also brings the camera to it. Returns false when the group is empty.
+   */
+  recallGroup(n) {
+    const now = performance.now();
+    const dbl = this.lastGroup.n === n && now - this.lastGroup.t < DOUBLE_MS;
+    this.lastGroup = { n, t: now };
+    if (!this.sel.recallGroup(n)) return false;
+    this.afterSelect();
+    if (dbl) this.centerOnSelection();
+    return true;
+  }
+
   centerOnSelection() {
     const prim = this.sel.primary();
     if (prim && prim.k !== 'u') return this.centerOnIds([prim.id]);
@@ -1467,15 +1481,7 @@ export class InputController {
         if (this.sel.saveGroup(n)) hud.message(`Group ${n} assigned.`, 'info', { icon: '👥' });
       } else if (e.shiftKey) {
         this.sel.addToGroup(n);
-      } else {
-        const now = performance.now();
-        const dbl = this.lastGroup.n === n && now - this.lastGroup.t < DOUBLE_MS;
-        this.lastGroup = { n, t: now };
-        if (this.sel.recallGroup(n)) {
-          this.afterSelect();
-          if (dbl) this.centerOnSelection();
-        }
-      }
+      } else this.recallGroup(n);
       return;
     }
     // Ctrl+A (Cmd+A): the whole army; Ctrl+Alt+A: the army on screen. (Not Ctrl+Shift+A: browsers keep it.)

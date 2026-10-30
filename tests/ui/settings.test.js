@@ -68,7 +68,7 @@ test('clamps volume and limits the name to 20 characters', () => {
 test('loads stored settings and ignores corrupt or hostile values', () => {
   globalThis.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ name: 'Athena', volume: 0.3, quality: 'high', edgeScroll: false, showAllBars: true, extra: 1 }));
   _resetSettingsForTests();
-  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, alerts: 'all', hints: true, tabAlerts: 'title', intro: 'first', introSeen: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: {} });
+  assert.deepEqual({ ...getSettings() }, { name: 'Athena', volume: 0.3, quality: 'high', timeOfDay: 'cycle', edgeScroll: false, showAllBars: true, tipsDismissed: false, rosterOpen: true, alerts: 'all', hints: true, tabAlerts: 'title', intro: 'first', introSeen: true, narration: true, aiChat: true, musicVolume: 0.5, musicMuted: false, gameSpeed: 'normal', uiScale: 'normal', teamColors: 'standard', cardKeys: 'classic', keyBindings: {} });
   globalThis.localStorage.setItem(SETTINGS_KEY, '{not json');
   _resetSettingsForTests();
   assert.equal(getSettings().volume, 0.7);
@@ -266,4 +266,12 @@ test('team colours, command keys and key bindings: saved, cleaned, unknown value
   assert.deepEqual(heard, []);
   saveSettings({ keyBindings: {} });
   assert.deepEqual(heard, ['keyBindings']);
+});
+
+test('rosterOpen: true by default, only booleans accepted', () => {
+  _resetSettingsForTests();
+  assert.equal(saveSettings({ rosterOpen: 'no' }).rosterOpen, getSettings().rosterOpen);
+  assert.equal(saveSettings({ rosterOpen: false }).rosterOpen, false);
+  _resetSettingsForTests();
+  assert.equal(getSettings().rosterOpen, false, 'remembered across reloads');
 });
