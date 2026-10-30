@@ -975,21 +975,32 @@ export class OrderPaths {
 
   /**
    * One unit's path: from where it stands (leaving its radius) through each point of wp, then the
-   * patrol's run back to pe. Points that are not finite numbers (a bad snapshot) end the path.
+   * patrol's run back to pe. Points that are not finite numbers (a bad snapshot) end the path, and so
+   * does a point on a unit (its id in p[3]) that `unitAt(id)` cannot place: one out of sight.
+   * @param {(id:number)=>({x:number, y:number}|null)} [unitAt] where a unit is seen, or null
    */
-  add(x, y, radius, wp, pe, time) {
+  add(x, y, radius, wp, pe, time, unitAt = null) {
     if (!Array.isArray(wp)) return;
     let px = x;
     let py = y;
     let skip = radius + 0.2;
     let col = this.colors[0];
     for (const p of wp) {
-      if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+      if (!Array.isArray(p)) return;
+      let qx = p[0];
+      let qy = p[1];
+      if (p[3] !== undefined) {
+        const seen = unitAt ? unitAt(p[3]) : null;
+        if (!seen) return;
+        qx = seen.x;
+        qy = seen.y;
+      }
+      if (!Number.isFinite(qx) || !Number.isFinite(qy)) return;
       col = this.colors[p[2]] || this.colors[0];
-      this.segment(px, py, p[0], p[1], skip, col, time);
-      this.dot(p[0], p[1], 2, col);
-      px = p[0];
-      py = p[1];
+      this.segment(px, py, qx, qy, skip, col, time);
+      this.dot(qx, qy, 2, col);
+      px = qx;
+      py = qy;
       skip = 0.3;
     }
     if (Array.isArray(pe) && Number.isFinite(pe[0]) && Number.isFinite(pe[1])) {

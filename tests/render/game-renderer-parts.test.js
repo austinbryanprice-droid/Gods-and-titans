@@ -883,6 +883,20 @@ test('order paths: dots through each queued point and back along a patrol, pips 
   paths.end();
   assert.ok(paths.mesh.count > 0 && paths.mesh.count < 12, 'stops at the bad point');
 
+  // a point on a unit: drawn where the unit is seen, and the path stops there when it is not
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 1, 7]], null, 0, (id) => (id === 7 ? { x: 0, y: 6 } : null));
+  paths.end();
+  const seen = paths.mesh.count;
+  const m2 = new THREE.Matrix4();
+  paths.mesh.getMatrixAt(seen - 1, m2);
+  assert.ok(close(m2.elements[12], 0) && close(m2.elements[14], 6), 'the pip follows the seen unit, not the sent point');
+  paths.begin();
+  paths.add(0, 0, 0.4, [[6, 0, 1, 8], [9, 9, 0]], null, 0, () => null);
+  paths.add(0, 0, 0.4, [[6, 0, 1, 8]], null, 0);
+  paths.end();
+  assert.equal(paths.mesh.count, 0, 'nothing toward a unit out of sight, nor past it');
+
   paths.begin();
   for (let i = 0; i < 50; i++) paths.add(0, i, 0.4, [[40, i, 0]], null, 0);
   paths.end();

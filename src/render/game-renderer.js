@@ -1996,12 +1996,17 @@ export class GameRenderer {
     flags.end();
 
     // where selected own units are going: their queued order points and patrol routes (snapshot wp, pe)
+    // (a point on a unit is drawn where that unit is seen, and a path stops at one in the fog)
     const paths = this.paths;
+    const unitAt = this.pathUnitAt || (this.pathUnitAt = (uid) => {
+      const u = this.units.get(uid);
+      return u && u.visible ? u : null;
+    });
     paths.begin();
     for (const id of sel) {
       const v = this.units.get(id);
       if (!v || v.relation !== 'own' || !v.visible || !v.e.wp) continue;
-      paths.add(v.x, v.y, v.radius, v.e.wp, v.e.pe, this.time);
+      paths.add(v.x, v.y, v.radius, v.e.wp, v.e.pe, this.time, unitAt);
     }
     paths.end();
 

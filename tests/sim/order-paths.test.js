@@ -79,3 +79,17 @@ test('AI seats send no paths', () => {
   assert.equal(e.orders.length, 1);
   assert.equal(view(w, e.id).wp, undefined);
 });
+
+test('a queued attack on a unit names it, so the view can place it where it is seen', () => {
+  const w = arena();
+  const a = spawn(w, 0, 'warrior', 10, 20);
+  const e = spawn(w, 1, 'warrior', 20, 20);
+  w.issueCommand(0, { type: 'move', units: [a.id], x: 12, y: 24 });
+  w.issueCommand(0, { type: 'attack', units: [a.id], target: e.id, queue: true });
+  w.tick();
+  const v = view(w, a.id);
+  assert.equal(v.wp.length, 2);
+  assert.equal(v.wp[1][2], 1);
+  assert.equal(v.wp[1][3], e.id);
+  assert.equal(v.wp[0].length, 3, 'a plain point carries no id');
+});

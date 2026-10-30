@@ -606,3 +606,25 @@ test('GameRenderer: a selected own unit shows its queued orders as a dotted path
   assert.equal(r.paths.mesh.count, 0, 'a stopped unit has no path');
   r.dispose();
 });
+
+test('GameRenderer: a queued attack on an enemy in the fog does not draw a path to it', () => {
+  const { world, vs, r, step } = makeMatch({ myIndex: 0 });
+  step(0.2);
+  const tc = tcOf(vs, 0);
+  const a = world.spawnUnit(0, 'warrior', tc.x + 3, tc.y + 5, { silent: true });
+  const tc1 = tcOf(vs, 1);
+  const e = world.spawnUnit(1, 'warrior', tc1.x + 3, tc1.y + 5, { silent: true });
+  world.issueCommand(0, { type: 'move', units: [a.id], x: tc.x + 3, y: tc.y + 9 });
+  world.issueCommand(0, { type: 'attack', units: [a.id], target: e.id, queue: true });
+  r.setSelection([a.id]);
+  step(0.2);
+  assert.ok(!r.units.get(e.id) || !r.units.get(e.id).visible, 'the enemy is out of sight');
+  const n = r.paths.mesh.count;
+  assert.ok(n > 3, `the move leg is drawn (${n} dots)`);
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < n; i++) {
+    r.paths.mesh.getMatrixAt(i, m);
+    assert.ok(Math.hypot(m.elements[12] - tc.x - 3, m.elements[14] - tc.y - 7) < 3, 'no dot heads off toward the hidden enemy');
+  }
+  r.dispose();
+});

@@ -65,7 +65,8 @@ function orderPoint(world, o) {
 }
 
 /**
- * A unit's path for its owner's view: wp = [[x, y, kind], …] (kind 0 move, 1 attack, 2 work) for its
+ * A unit's path for its owner's view: wp = [[x, y, kind, id?], …] (kind 0 move, 1 attack, 2 work; id = the
+ * unit the order goes for, when it is one) for its
  * current order and the next queued ones, up to WAYPOINTS_MAX; pe = the patrol's other end when the
  * path ends in a patrol (always last: an order queued after one replaces it). Null for a unit with nothing worth drawing: no
  * queue and a standing order that is not a move (gathering, praying, guarding).
@@ -81,8 +82,10 @@ export function unitPath(world, u) {
     const pt = orderPoint(world, o);
     if (!pt) continue;
     const kind = ATTACK_ORDERS.has(o.type) ? 1 : o.type === 'move' || o.type === 'follow' ? 0 : 2;
-    const onEntity = o.target && !Number.isFinite(o.x); // an entity's place moves with it: tenths are enough
-    wp.push(onEntity ? [r1(pt[0]), r1(pt[1]), kind] : [r2(pt[0]), r2(pt[1]), kind]);
+    // a unit it goes for moves: tenths are enough, and its id lets the view draw it where it is seen (or not at all
+    // in the fog, so a queued attack never tracks a hidden enemy)
+    const t = o.target && !Number.isFinite(o.x) ? world.entities.get(o.target) : null;
+    wp.push(t && t.kind === 'unit' ? [r1(pt[0]), r1(pt[1]), kind, t.id] : [r2(pt[0]), r2(pt[1]), kind]);
     if (o.type === 'patrol') {
       pe = [r2(o.ax), r2(o.ay)];
       break;

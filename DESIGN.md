@@ -1072,8 +1072,9 @@ EntityView = {
   bo,             // pending build order for workers: { b: typeId, tx, ty } (omitted otherwise)
   mw,             // 1 while a worker waits its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
   ho, pa,         // 1 while the unit's order is Hold Position (ho) or a patrol (pa); omitted otherwise ("," skips them)
-  wp, pe,         // human players' units only: where the current order and the next queued ones go, [[x, y, kind], …]
-                  // (kind 0 move, 1 attack or patrol, 2 work), up to WAYPOINTS_MAX (5), and pe = [x, y] the far end of a
+  wp, pe,         // human players' units only: where the current order and the next queued ones go, [[x, y, kind, id?], …]
+                  // (kind 0 move, 1 attack or patrol, 2 work; id = the unit an order goes for: the HUD draws that point
+                  // where the unit is seen and stops the path at one in the fog), up to WAYPOINTS_MAX (5), and pe = [x, y] the far end of a
                   // patrol that ends the path; omitted when idle or on a standing order with nothing queued (gathering,
                   // praying, guarding). The HUD draws them as a faint dotted path under selected own units (8)
   tk,             // workers: task 'gold'|'wood'|'pray'|'build'|'repair'|'idle'|'other' (HUD task counts)
