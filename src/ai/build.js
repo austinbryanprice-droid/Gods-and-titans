@@ -5,6 +5,9 @@ import { BUILDINGS } from '../data/index.js';
 import { POP_MAX } from '../config.js';
 import { haveOf, doneOf } from './scan.js';
 import { findSpot } from './placement.js';
+import { onLongHaul } from './economy.js';
+
+const HAUL_BUILD = 20; // tiles: how much farther a builder may be than a worker on a long haul (pickBuilder)
 
 function sub(a, b) {
   return { x: a.x - b.x, y: a.y - b.y };
@@ -23,6 +26,9 @@ export function pickBuilder(ai, s, x, y, exclude) {
     if (j === 'pray') d += 25;
     if (j === 'idle') d -= 4;
     if (u.carry && u.carryAmount > 0) d += 3;
+    // A worker just sent on a long haul to a far mine is passed over: taken for a build as it left
+    // the base, it never got there, and the next worker sent after it walked the same way.
+    if (onLongHaul(ai, u)) d += HAUL_BUILD;
     if (d < bestD) {
       bestD = d;
       best = u;

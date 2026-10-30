@@ -207,10 +207,93 @@ test('a rival foundation by a worked mine does not send its gold workers across 
   }
   assert.equal(dropped, 0, 'the home mine stays owned under a rival foundation');
   assert.equal(bounces, 0, `${bounces} gold workers turned round between mines across the map`);
-  // A finished rival building by the mine still makes it contested.
+  // A finished rival Storehouse by it does not take a worked mine either (both sides mine there:
+  // in a free-for-all three rivals' drop-offs stood by the contested mines and the AI's workers
+  // walked away each time one was finished, and back when it fell); a finished Tower does.
   const b = world.createBuilding(1, 'storehouse', spot.tx, spot.ty, true, true);
   g.step(2);
-  assert.ok(!ai.ai.pairs.some((p) => p.mine === homeMine), 'a finished rival building contests the mine');
+  assert.ok(ai.ai.pairs.some((p) => p.mine === homeMine), 'a finished rival Storehouse leaves the worked mine owned');
   world.killEntity(b, null);
+  const t = world.createBuilding(1, 'tower', spot.tx, spot.ty, true, true);
+  g.step(2);
+  assert.ok(!ai.ai.pairs.some((p) => p.mine === homeMine), 'a finished rival Tower contests the mine');
+  world.killEntity(t, null);
+  assert.equal(ai.ai.errors, 0);
+});
+
+test('an unworked mine by a finished rival Storehouse is not taken as an owned mine', () => {
+  const g = soloGame(3, 'greek', 'normal');
+  const { world, ai } = g;
+  ai.ai.prof = { ...ai.ai.prof, firstAttack: 1e9, raids: null };
+  g.step(10);
+  const home = world.buildingsOf(0).find((b) => b.type === 'town_center');
+  const far = world.mineList
+    .filter((m) => Math.hypot(m.x - home.x, m.y - home.y) > 30)
+    .sort((a, b) => Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y))[0];
+  for (const c of world.camps) if (Math.hypot(c.x - far.x, c.y - far.y) < 10) for (const u of c.members) if (!u.dead) world.killEntity(u, null);
+  // Both a Storehouse of the AI's and a rival's finished one stand by it in the same tick.
+  const mine = world.findPlacement(0, 'storehouse', far.x, far.y, 8);
+  world.createBuilding(0, 'storehouse', mine.tx, mine.ty, true, true);
+  const theirs = world.findPlacement(1, 'storehouse', far.x, far.y, 9);
+  world.createBuilding(1, 'storehouse', theirs.tx, theirs.ty, true, true);
+  g.step(2);
+  assert.ok(!ai.ai.pairs.some((p) => p.mine === far), 'a mine a rival already holds is not taken up');
+  assert.equal(ai.ai.errors, 0);
+});
+
+test('faith hovering at its cap does not walk worshippers on and off prayer', () => {
+  // Found in Brutal free-for-alls (seeds 41 to 48): faith rose past the cap by prayer and fell
+  // under it as a creature was bought, and each time half the worshippers left prayer for a mine
+  // (often the far one) and came back seconds later.
+  const g = soloGame(5, 'greek', 'hard');
+  const { world, ai } = g;
+  ai.ai.prof = { ...ai.ai.prof, firstAttack: 1e9, raids: null };
+  g.step(20);
+  const home = world.buildingsOf(0).find((b) => b.type === 'town_center');
+  const sp = world.findPlacement(0, 'temple', home.x + 8, home.y, 10);
+  world.createBuilding(0, 'temple', sp.tx, sp.ty, true, true);
+  for (let i = 0; i < 16; i++) world.spawnUnit(0, 'worshipper', home.x + 4, home.y + 4, { silent: true });
+  const p = world.players[0];
+  p.popCap = 200;
+  g.step(30);
+  let orders = 0;
+  const issue = ai.ai.issue.bind(ai.ai);
+  ai.ai.issue = (cmd) => {
+    if (cmd.type === 'pray') orders += cmd.units.length;
+    return issue(cmd);
+  };
+  // Faith just above and just below the Temple-era cap (700), every 3 s for a minute and a half.
+  for (let k = 0; k < 30; k++) {
+    p.faith = k % 2 ? 690 : 720;
+    g.step(3);
+  }
+  assert.ok(orders <= 4, `${orders} worshippers sent back to prayer while faith hovered at its cap`);
+  assert.equal(ai.ai.errors, 0);
+});
+
+test('a wood bank hovering at its full mark does not walk spare hands between the trees and a mine', () => {
+  // Spare worshippers chop until the wood bank holds 1200, then queue at a mine: as the bank
+  // crossed that mark and back (a building bought, a load delivered) all of them changed job at once.
+  const g = soloGame(5, 'greek', 'hard');
+  const { world, ai } = g;
+  ai.ai.prof = { ...ai.ai.prof, firstAttack: 1e9, raids: null };
+  g.step(20);
+  const home = world.buildingsOf(0).find((b) => b.type === 'town_center');
+  for (let i = 0; i < 20; i++) world.spawnUnit(0, 'worshipper', home.x + 4, home.y + 4, { silent: true });
+  const p = world.players[0];
+  p.popCap = 200;
+  p.wood = 1300;
+  g.step(30);
+  let orders = 0;
+  const issue = ai.ai.issue.bind(ai.ai);
+  ai.ai.issue = (cmd) => {
+    if (cmd.type === 'gather') orders += cmd.units.length;
+    return issue(cmd);
+  };
+  for (let k = 0; k < 30; k++) {
+    p.wood = k % 2 ? 1150 : 1250;
+    g.step(3);
+  }
+  assert.ok(orders <= 20, `${orders} gather orders while the wood bank hovered at its full mark`);
   assert.equal(ai.ai.errors, 0);
 });

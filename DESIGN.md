@@ -2778,8 +2778,8 @@ Every difficulty steers its army by where the bulk of it stands: the median posi
 tiles back, so a siege kept restarting its march and a winning army stood idle by its first waypoint.
 
 Workers are not walked across the map and back (`src/ai/economy.js`). A mine the AI already works stays one of its
-owned mines while an enemy only has a foundation by it (a finished enemy building or a creep camp still takes it
-off): rivals kept placing Storehouse sites by a contested mine and losing them, and each one sent the mine's
+owned mines while an enemy only has a foundation by it (a creep camp still takes it off, and so does a finished
+enemy Tower or Town Center, below): rivals kept placing Storehouse sites by a contested mine and losing them, and each one sent the mine's
 workers to an expansion 110 tiles off and back (Brutal 2v2 seed 33: two Worshippers walked for three minutes,
 mining nothing). Picking a mine weighs the walk past `FAR_TRIP` (40 tiles), and when every mine is full a worker
 queues at the nearest one. A worker sent farther than `FAR_TRIP` is left alone by the gold / wood / prayer
@@ -2790,6 +2790,33 @@ mine. A lone enemy Worshipper building by the base no longer calls back an attac
 a mine 40+ tiles off): Hard 1v1 seeds 11 to 16, Hard and Brutal 2v2 seeds 21 to 24 and 31 to 33, bounces per game
 minute 0.21 / 0.57 / 0.71 before and 0.05 / 0.24 / 0.15 after, long walks 23 / 63 / 69 s a minute before and
 15 / 36 / 47 after, gold workers idle for 90 s 7 before and 0 after, game lengths alike and no AI errors.
+
+In a free-for-all the same walks came back (Brutal FFA seeds 41 to 44: 12 / 17 / 5 / 11 bounces a game against
+0 / 0 / 3 / 0 in 2v2), and the cause was not a mine flipping between safe and contested (a pair was dropped that
+way about once a game) but the worker jobs swinging: every AI there works a home mine and an expansion 42 tiles
+apart, and each swing between gold, wood and prayer sent a worker to whichever of the two had a slot more. Now:
+- A worker going to gold takes the nearest owned mine with an open slot (`bestPair`: any slot is worth about
+  the same, the walk costs 0.15 a tile), not the one with the most room.
+- The rebalance moves the worker nearest the new job (the prayer building, the wood line, a mine with room),
+  and leaves a worker it just gave a job at it for 15 s (90 s after a long haul): `settle` in
+  `src/ai/economy.js`.
+- The levels that swing the jobs have hysteresis (`latch`): faith past the cap halves the prayers until it
+  falls under 75 % of the cap (it hovered at the cap, prayer adding faith and a creature spending it, and half
+  the worshippers left prayer and came back every few seconds), and spare hands go to a mine rather than the
+  trees from a 1200 wood bank until it falls under 900.
+- Across the map a worker moves between mines only to one two slots short, and a build or a relic does not
+  take a worker just sent on a long haul (it never arrived and the next one walked the same way).
+- A mine the AI already works stays owned under a finished rival Storehouse: only a finished Tower or Town
+  Center (or a creep camp) takes it off. A mine it does not work yet is still left to a rival with any
+  building by it.
+
+Measured with `tools/sim-audit.mjs` (bounces per game minute / long walks in worker-seconds a minute): Brutal FFA
+seeds 41 to 48 0.58 / 22.4 before and 0.24 / 20.0 after (seeds 41 to 44: 6 / 7 / 7 / 5 bounces a game), Brutal
+2v2 seeds 21 to 24, 31 to 33 and 41 to 44 0.11 / 35.7 before and 0.07 / 24.0 after, Hard 1v1 seeds 11 to 16
+0.05 / 15.2 before and 0.03 / 10.5 after, no AI errors and no idle gold workers. Most bounces left in a
+free-for-all are a worker sent to the other base for a build or a relic, finishing there and taking the
+nearest mine. Strength is unchanged: the new AI against the one before (headless, sides swapped) won 65 of 128
+Hard 1v1 games and 9 of 18 Brutal ones, and led or won 12 of 24 Brutal FFA games with two seats each.
 
 **Brutal** is Hard's play thinking every 3 ticks and raiding more often, and it plays fair like the rest (a 20 %
 gather bonus was tried and taken out: the AIs never cheat). Earlier tiers, more workers, earlier and bolder waves

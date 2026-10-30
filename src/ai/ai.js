@@ -55,7 +55,8 @@ export class AIPlayer {
     this.militia = new Set();
     this.pilgrims = new Map(); // worker id -> { site, since }: Worshippers sent to capture a sacred site
     this.pairs = [];
-    this.hauls = new Map(); // worker id -> tick it was sent more than FAR_TRIP away (economy.js)
+    this.hauls = new Map(); // worker id -> { until, far }: the rebalance leaves a worker at a new job until then (economy.js settle)
+    this.latches = {}; // levels with hysteresis, by name (economy.js latch)
     this.drops = [];
     this.woodSpot = null;
     this.expansion = null;
@@ -284,9 +285,10 @@ export class AIPlayer {
 
   /**
    * Is a mine contested (a creep camp or an enemy building by it)? For a mine it already works
-   * (`held`), an enemy foundation does not count: rivals keep placing drop-off sites by a
-   * contested mine and losing them, and dropping the mine each time sent its workers across the
-   * map and back.
+   * (`held`), only a finished enemy Tower or Town Center counts: rivals keep placing drop-off
+   * sites by a contested mine and losing them, and in a free-for-all a rival's finished Storehouse
+   * often stands by a mine this AI works too; dropping the mine for either sent its workers across
+   * the map and back (a Storehouse shoots nobody, and both sides can mine there).
    */
   mineThreatened(m, s, held = false) {
     for (const camp of s.camps) {
@@ -294,7 +296,10 @@ export class AIPlayer {
     }
     for (const e of s.enemies) {
       if (e.defeated) continue;
-      for (const b of e.buildings) if (!b.dead && (b.constructed || !held) && Math.hypot(b.x - m.x, b.y - m.y) < 10) return true;
+      for (const b of e.buildings) {
+        if (b.dead || Math.hypot(b.x - m.x, b.y - m.y) >= 10) continue;
+        if (!held || (b.constructed && (b.def.attack || b.type === 'town_center'))) return true;
+      }
     }
     return false;
   }
