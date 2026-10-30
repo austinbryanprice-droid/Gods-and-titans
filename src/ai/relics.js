@@ -4,6 +4,7 @@
 // alone by the economy (scan.js workerJob: 'relic').
 import { canCarry, relicOf, nearestTemple } from '../sim/relics.js';
 import { doneOf } from './scan.js';
+import { onLongHaul } from './economy.js';
 
 const FETCH_RANGE = 70; // tiles from home a relic may lie and still be fetched (as far as the army creeps)
 const ENEMY_NEAR = 10; // tiles: an enemy this close to a relic keeps the Worshippers home
@@ -35,7 +36,7 @@ export function runRelics(ai, s) {
       }
       const j = s.job.get(u.id);
       if ((j !== 'gold' && j !== 'wood' && j !== 'idle') || u.carryAmount > 0 || (ai.militia && ai.militia.has(u.id)) || !canCarry(world, u)) continue;
-      const d = Math.hypot(u.x - r.x, u.y - r.y);
+      const d = Math.hypot(u.x - r.x, u.y - r.y) + (onLongHaul(ai, u) ? 20 : 0); // not one just sent to a far mine
       if (d < bestD) {
         bestD = d;
         best = u;
