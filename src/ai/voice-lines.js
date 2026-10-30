@@ -2,10 +2,11 @@
 // `{unit}` is the god or Titan the line is about, `{enemy}` the other player's name; a line
 // whose blanks cannot be filled is skipped. `greetAlly` is the greeting of a match with no enemy
 // player (the Trial of the Titans: everyone together against the monsters). `ackAttack` and `ackDefend`
-// answer a teammate's Attack marker and Defend / Help marker (said to the team only). Keep each line short (one card in the message feed).
+// answer a teammate's Attack marker and Defend / Help marker (said to the team only). `callAttack` and
+// `callHelp` go with an AI's own Attack or Help marker when a wave sets out or its base is attacked (team only too). Keep each line short (one card in the message feed).
 
 /** The moments an AI speaks, in the order DESIGN 10.1 lists them. */
-export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory', 'ackAttack', 'ackDefend'];
+export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory', 'ackAttack', 'ackDefend', 'callAttack', 'callHelp'];
 
 export const VOICE_LINES = {
   greek: {
@@ -22,6 +23,8 @@ export const VOICE_LINES = {
     victory: ['Glory to Olympus! Your names will be forgotten.', 'As the Fates foretold: victory is ours.'],
     ackAttack: ['Our spears go where you point.', 'As you command. The phalanx marches!'],
     ackDefend: ['Hold fast, friend. Our shields are coming.', 'Olympus heard you. We march to your side.'],
+    callAttack: ['Our phalanx marches! Join us at the marker.', 'The spears go forth. Strike with us here!'],
+    callHelp: ['To me, friend! They are at our walls.', 'Olympus calls for aid. Our home is attacked!'],
   },
   norse: {
     greet: ['Skål! May your mead be strong and your walls weak.', 'The ravens are flying. Odin wants a good show.'],
@@ -37,6 +40,8 @@ export const VOICE_LINES = {
     victory: ['To Hel with you all! The North stands.', 'Skål! Another saga for the halls.'],
     ackAttack: ['Point the way and the axes follow!', 'Ha! A fight. We\'re coming, shield-sibling.'],
     ackDefend: ['Hold the line! The longships are coming.', 'Stand fast, friend. The North rides to you.'],
+    callAttack: ['The axes march! Fight beside us there.', 'We sail for blood. Join the raid at the marker!'],
+    callHelp: ['To arms, shield-sibling! Raiders at our hall.', 'Help us! The enemy is in our village.'],
   },
   egyptian: {
     greet: ['Ra sees all from his sun boat. Build well, for he judges.', 'Greetings. My pyramids will outlast your whole people.'],
@@ -52,6 +57,8 @@ export const VOICE_LINES = {
     victory: ['Your names are struck from every monument. Ra is victorious.', 'Eternity belongs to Egypt.'],
     ackAttack: ['As you will it. The chariots ride.', 'Ra lights the way. We strike where you point.'],
     ackDefend: ['Hold on, friend. The armies of the Nile are coming.', 'We come to you, as the flood comes every year.'],
+    callAttack: ['The chariots ride out. Strike with us there!', 'We march on the enemy. Join us at the marker.'],
+    callHelp: ['Aid us, friend! The enemy is at our temples.', 'Our home is under attack. Send help!'],
   },
   hindu: {
     greet: ['Namaste. May dharma guide this battle.', 'The wheel turns. Let us see where it stops for you.'],
@@ -67,6 +74,8 @@ export const VOICE_LINES = {
     victory: ['Dharma prevails. Your cycle ends here.', 'As it was written in the stars. Victory!'],
     ackAttack: ['Your will is our dharma. We march.', 'The war elephants turn where you point.'],
     ackDefend: ['Hold firm, friend. We come to your side.', 'The wheel turns your way. We are coming.'],
+    callAttack: ['The war elephants advance. Join us there!', 'We march to battle. Fight with us at the marker.'],
+    callHelp: ['Help us, friend! The enemy is at our gates.', 'Our city is attacked. Come to our side!'],
   },
   japanese: {
     greet: ['Honour to you, rivals. May the kami favour the worthy.', 'The cherry blossoms fall. So will your walls.'],
@@ -82,6 +91,8 @@ export const VOICE_LINES = {
     victory: ['The way of the kami prevails. Bow.', 'Victory, as the sun goddess willed.'],
     ackAttack: ['Hai! Our blades go where you point.', 'As you command. The samurai advance.'],
     ackDefend: ['Hold, friend. We come with honour.', 'Stand firm. Our banners ride to you.'],
+    callAttack: ['The samurai advance! Strike with us there.', 'We attack now. Join us at the marker, ally.'],
+    callHelp: ['Ally, help! They are inside our walls.', 'Our home is attacked. Bring your blades!'],
   },
   chinese: {
     greet: ['Greetings. Heaven granted its mandate to me, not you.', 'May your rice bowl stay full. Mine will be fuller.'],
@@ -97,6 +108,8 @@ export const VOICE_LINES = {
     victory: ['The Mandate of Heaven is mine. Ten thousand years!', 'All under Heaven bows to us.'],
     ackAttack: ['The order is given. The legions march.', 'Heaven wills it: we strike where you point.'],
     ackDefend: ['Hold the wall, ally. Our troops are coming.', 'Stand firm. The Mandate sends you aid.'],
+    callAttack: ['The legions march. Join our attack there!', 'We strike now. Bring your troops to the marker.'],
+    callHelp: ['Send aid, ally! Our walls are under attack.', 'The enemy is at our gates. Help us!'],
   },
   aztec: {
     greet: ['The Fifth Sun shines on us. It must be fed.', 'Welcome, friends. The sun is hungry today.'],
@@ -112,6 +125,8 @@ export const VOICE_LINES = {
     victory: ['The sun drinks deeply today. Victory!', 'Huitzilopochtli is pleased.'],
     ackAttack: ['The sun is hungry. We go where you point.', 'Yes! The jaguars hunt where you show them.'],
     ackDefend: ['Hold on, friend. The eagles fly to you.', 'We come to your side. The sun will not set on you.'],
+    callAttack: ['The jaguars hunt! Join us at the marker.', 'We march for captives. Strike with us there!'],
+    callHelp: ['Help, friend! The enemy is in our city.', 'Our temple is attacked. Send your warriors!'],
   },
   celtic: {
     greet: ['Well met, strangers. The druids say this ends badly for you.', 'May the wild lands welcome you... briefly.'],
@@ -127,6 +142,8 @@ export const VOICE_LINES = {
     victory: ['The wild prevails! Raise a cup to the Dagda.', 'Back to your boats, all of you.'],
     ackAttack: ['To the charge! We go where you point.', 'Ha! A raid. The clans are with you.'],
     ackDefend: ['Hold fast, friend. The clans are coming.', 'The woods march to you. Hold on!'],
+    callAttack: ['The clans charge! Join us at the marker.', 'We raid now. Fight beside us there!'],
+    callHelp: ['To us, friend! Raiders in our steading.', 'Our home is attacked. Bring the clans!'],
   },
   mesopotamian: {
     greet: ['Greetings from the first city. We invented all this, you know.', 'The gods of Sumer are watching. They keep careful records.'],
@@ -142,6 +159,8 @@ export const VOICE_LINES = {
     victory: ['Carve it in stone: we are victorious!', 'All the lands between the rivers are ours.'],
     ackAttack: ['It is written: we march where you point.', 'The scribes record the order. Forward!'],
     ackDefend: ['Hold the walls, friend. We are coming.', 'Help comes from the first city. Hold on.'],
+    callAttack: ['Our army marches. Join the attack there!', 'We march on the foe. Meet us at the marker.'],
+    callHelp: ['Help, friend! The enemy is at our walls.', 'Our city is attacked. Send aid!'],
   },
   west_african: {
     greet: ['Welcome, friends. Anansi has already told me your plans.', 'May the ancestors give us a good contest.'],
@@ -157,6 +176,8 @@ export const VOICE_LINES = {
     victory: ['The drums beat for victory! Àṣẹ!', 'The ancestors smile on us today.'],
     ackAttack: ['The drums answer! We strike where you point.', 'Àṣẹ! The warriors go where you show them.'],
     ackDefend: ['Hold on, friend. The drums call us to you.', 'We are coming. The ancestors walk with us.'],
+    callAttack: ['The drums of war sound! Join us there.', 'We strike now. Fight beside us at the marker!'],
+    callHelp: ['Help us, friend! The enemy is in our village.', 'The drums call for aid. Our home is attacked!'],
   },
 };
 

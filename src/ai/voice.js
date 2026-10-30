@@ -26,6 +26,10 @@ export const VOICE = {
   beatenMin: 5, // ...once it had at least this many
   ackGap: 20, // game seconds between two answers of one AI to its teammates' markers
   maxAcks: 30, // answers one AI gives in a whole match (apart from maxLines)
+  callAttackGap: 60, // game seconds between two of one AI's own Attack callouts (a wave setting out)
+  callHelpGap: 45, // ...and between two of its Help callouts (its base attacked by a player)
+  maxCalls: 24, // callouts one AI makes in a whole match (apart from maxLines and maxAcks)
+  callThreat: 1.5, // a threat at home this strong (forcePower, src/ai/military.js) is worth a Help callout
 };
 
 const URGENT = new Set(['titan', 'beaten']);
@@ -35,10 +39,12 @@ const FINAL = new Set(['defeat', 'victory']); // the last word goes out whatever
  * The voices of a match's computer players.
  * @param {object} world authoritative World
  * @param {number[]} players indices of the AI players that speak
+ * @param {Map<number, object>} [ais] the host's AI players by index (src/ai/ai.js), read for their callouts
  */
 export class AIVoices {
-  constructor(world, players) {
+  constructor(world, players, ais = null) {
     this.world = world;
+    this.ais = ais;
     const seed = world.setup ? world.setup.seed : 1;
     this.rng = new RNG(hashSeed(`${seed}:voices`));
     this.voices = new Map();
@@ -66,6 +72,10 @@ export class AIVoices {
         ackId: 0, // the newest teammate's marker (sim/team-orders.js) it has seen
         lastAck: -Infinity,
         acks: 0,
+        wave: 0, // the AI's wave count (ai.mil.waves) already called out
+        defendSince: -Infinity, // the start of the home defence already called out
+        lastCall: { attack: -Infinity, help: -Infinity },
+        calls: 0,
       });
     }
     this.lastAny = -Infinity;
@@ -98,7 +108,8 @@ export class AIVoices {
   /**
    * Look at the events since the last call and at the World; returns the lines to send.
    * @param {object[]} [events] the snapshot's events
-   * @returns {{ from: number, text: string, team?: boolean }[]} (`team`: to the speaker's team only)
+   * @returns {{ from: number, text?: string, team?: boolean, mark?: { kind: string, x: number, y: number } }[]}
+   *   (`team`: to the speaker's team only; `mark`: a team marker the AI places, with or without a line)
    */
   step(events) {
     const out = [];
@@ -115,6 +126,7 @@ export class AIVoices {
       }
     }
     this.answerMarks(now, out);
+    this.callOut(now, out);
     if (now >= this.nextScan) {
       this.nextScan = now + VOICE.contactEvery;
       this.scanContact(now, out);
@@ -212,6 +224,64 @@ export class AIVoices {
       said.add(m.id);
       out.push({ from: v.index, text, team: true });
     }
+  }
+
+  /**
+   * Callouts (DESIGN 10.1): an AI with a human teammate tells the team what its army does, as a
+   * player would. When one of its attack waves sets out from the rally point it places an Attack
+   * marker on the wave's goal; when it turns its army round to defend its own base from a player's
+   * army it places a Help marker there. Each goes with a short line, both to the team only (the
+   * enemy must never learn where a wave is going). The marker is a signal for the humans, not a
+   * team order (src/sim/team-orders.js): other computer allies do not answer it, so nothing changes
+   * in the World. Kept apart by VOICE.callAttackGap and callHelpGap per AI, VOICE.maxCalls a match;
+   * the line keeps to the answer budget (ackGap), so a burst brings markers but few words.
+   */
+  callOut(now, out) {
+    if (!this.ais) return;
+    const world = this.world;
+    for (const v of this.voices.values()) {
+      const seat = this.ais.get(v.index);
+      const ai = seat && (seat.ai || seat); // (createAI's handle wraps the AIPlayer)
+      const mil = ai && ai.mil;
+      if (!mil || v.done || world.players[v.index].defeated) continue;
+      let kind = null;
+      let spot = null;
+      if (mil.mode === 'attack' && mil.waves > v.wave && mil.phase && mil.phase !== 'assemble' && mil.route && mil.route.length) {
+        v.wave = mil.waves; // each wave once, said or not
+        spot = mil.route[mil.route.length - 1];
+        kind = 'attack';
+      } else if (mil.mode === 'defend' && !mil.ally && mil.since !== v.defendSince && ai.threat) {
+        const th = ai.threat;
+        // (Looked at again until it qualifies: a scout's probe can grow into an army, creatures give way to a player.)
+        if (th.power >= VOICE.callThreat && this.attackerNear(v.index, th.x, th.y) >= 0) {
+          v.defendSince = mil.since; // each defence once
+          spot = th;
+          kind = 'help';
+        }
+      }
+      if (!kind || v.calls >= VOICE.maxCalls || !this.hasHumanTeammate(v.index)) continue;
+      const gap = kind === 'attack' ? VOICE.callAttackGap : VOICE.callHelpGap;
+      if (now - v.lastCall[kind] < gap || !Number.isFinite(spot.x) || !Number.isFinite(spot.y)) continue;
+      v.lastCall[kind] = now;
+      v.calls++;
+      const call = { from: v.index, team: true, mark: { kind, x: spot.x, y: spot.y } };
+      if (now - v.lastAck >= VOICE.ackGap) {
+        const text = this.pick(v, kind === 'attack' ? 'callAttack' : 'callHelp', {});
+        if (text) {
+          call.text = text;
+          v.lastAck = now;
+        }
+      }
+      out.push(call);
+    }
+  }
+
+  /** Whether a human player (not a computer seat) shares this AI's team: only a human sees a marker. */
+  hasHumanTeammate(me) {
+    const world = this.world;
+    const seats = world.setup && Array.isArray(world.setup.players) ? world.setup.players : [];
+    const team = world.players[me].team;
+    return seats.some((s) => s && s.index !== me && s.kind !== 'ai' && world.players[s.index] && world.players[s.index].team === team);
   }
 
   /** Whether any other player is this AI's enemy (none in the Trial of the Titans, where the monsters belong to no one). */
@@ -335,9 +405,10 @@ export class AIVoices {
  * The host's factory (HostSession `createVoices`).
  * @param {object} world
  * @param {number[]} players the AI players that speak
+ * @param {Map<number, object>} [ais] the host's AI players, for their callouts
  */
-export function createVoices(world, players) {
+export function createVoices(world, players, ais = null) {
   // A campaign mission's enemies stay in character: no skirmish banter, its narrator tells the story (DESIGN 5.16).
   if (world.setup && typeof world.setup.campaign === 'string') return null;
-  return new AIVoices(world, players);
+  return new AIVoices(world, players, ais);
 }
