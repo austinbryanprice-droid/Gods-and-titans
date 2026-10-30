@@ -302,6 +302,14 @@ function enemyStrength(s, player) {
   return addTypeToForce(Object.assign(newForce(), rec.force), rec.titanSoon.type);
 }
 
+/**
+ * True while the AI's army defends its own base: a teammate's marker waits until the base is safe (the check
+ * in runMilitary below), and the AI's voice says so instead of promising help (voice.js answerMarks).
+ */
+export function defendingHome(mil) {
+  return !!mil && mil.mode === 'defend' && !mil.ally;
+}
+
 function setMode(ai, mode, extra = {}) {
   const mil = ai.mil;
   if (ai.log) {
@@ -388,7 +396,7 @@ export function runMilitary(ai, s) {
 
   // ---- A teammate's Attack / Defend / Help marker (marks.js) comes before anything but the base's own defence.
   const order = markToAnswer(ai, s);
-  if (order && !(mil.mode === 'defend' && !mil.ally) && !(mil.mode === 'mark' && mil.mark.id === order.id)) {
+  if (order && !defendingHome(mil) && !(mil.mode === 'mark' && mil.mark.id === order.id)) {
     setMode(ai, 'mark', { mark: order });
   }
 

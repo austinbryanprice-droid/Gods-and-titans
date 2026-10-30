@@ -138,7 +138,7 @@ export const TUTORIAL_STEPS = [
   },
   {
     id: 'attack', icon: '🔥', title: 'Destroy the raiders',
-    text: () => 'Drag a box around your soldiers, Shift+click your god to add it (or click its portrait, top left), then right-click the raiders\' Town Center where the arrow points. Destroy every building they have to win.',
+    text: () => 'Press Ctrl+A to select your whole army, god and all (or drag a box around your soldiers and Shift+click your god), then right-click the raiders\' Town Center where the arrow points. Destroy every building they have to win.',
     done: (c) => c.won,
     progress: (c) => (c.enemyTown && c.enemyTown.mhp ? `Their Town Center: ${Math.max(0, Math.ceil((100 * c.enemyTown.hp) / c.enemyTown.mhp))}%` : ''),
     target: (c) => c.enemyCamp,
