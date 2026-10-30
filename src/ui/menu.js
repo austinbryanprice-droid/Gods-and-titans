@@ -1,7 +1,7 @@
 // Main menu, lobby, join, how-to-play and settings screens (DESIGN 9), drawn
 // as an HTML overlay in #menu-root over an animated night-sky backdrop.
 //
-//   const menu = createMenu({ root, onStart, onIntro, onLoad, onReplay })   // onStart(launch) when a lobby starts; onIntro() replays the intro film;
+//   const menu = createMenu({ root, onStart, onIntro, onLoad, onReplay })   // onStart(launch) when a lobby starts; onIntro(screen) replays the intro film and lands on that screen;
 //                                                                           // onLoad(slot) carries on a saved game (DESIGN 9.4); onReplay(id | record) watches a replay (9.5)
 //   showMenu(screen = 'title')  /  hideMenu()
 //
@@ -105,7 +105,7 @@ function closeLobby(lobby) {
 
 /**
  * Build the menu inside `root`.
- * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: () => void, onLoad?: (slot: string) => Promise<void> }} opts
+ * @param {{ root: HTMLElement, onStart: (launch: object) => void, onIntro?: (screen: 'title'|'settings') => void, onLoad?: (slot: string) => Promise<void> }} opts
  */
 export function createMenu({ root, onStart, onIntro = null, onLoad = null, onReplay = null }) {
   const params = urlParams();
@@ -415,6 +415,8 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
         h('div.mw-nav-row',
           saves.length ? h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('load') }, 'Load Game') : null,
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('howto') }, 'How to Play'),
+          // The intro film again, whatever the Intro film setting says (it plays only on a first launch by default).
+          onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-title', { type: 'button', title: 'Watch the intro film again, with its narration', onclick: () => onIntro('title') }, '▶ Intro Film') : null,
           h('button.mw-btn.mw-btn--small.mw-career-btn', { type: 'button', onclick: () => go('career') }, 'Career',
             newCount ? h('span.mw-new-badge', { title: `${newCount} new achievement${newCount === 1 ? '' : 's'}` }, String(newCount)) : null),
           h('button.mw-btn.mw-btn--small', { type: 'button', onclick: () => go('settings') }, 'Settings'),
@@ -1568,7 +1570,7 @@ export function createMenu({ root, onStart, onIntro = null, onLoad = null, onRep
           ...segField('intro', INTRO_OPTIONS),
           h('span.mw-field-note', 'A short film of the game before the title screen, with a score that follows the Music setting. Browsers keep sound off until a key press or a click, so it waits for one; allow sound for this site in your browser\'s site settings and it starts by itself. Esc skips it.'),
           toggle('narration', 'Narration', browserSpeech() || sfx.supported ? 'A narrator reads the film\'s captions aloud. It follows the Volume above.' : 'This browser cannot play the narration, so the film plays with its captions only.'),
-          onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-watch', { type: 'button', onclick: () => onIntro() }, '▶ Watch it now') : null),
+          onIntro ? h('button.mw-btn.mw-btn--small.mw-silent.mw-intro-watch', { type: 'button', onclick: () => onIntro('settings') }, '▶ Watch it now') : null),
         h('div.mw-field', h('span.mw-label', 'Gameplay'),
           toggle('edgeScroll', 'Edge scrolling', 'Move the camera when the mouse touches the screen edge.'),
           toggle('showAllBars', 'Always show health bars', 'Otherwise hold Alt to see them all.'),

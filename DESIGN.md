@@ -2909,7 +2909,7 @@ the default, or Never `'never'`) decides; `'first'` plays it until `introSeen`, 
 the start-up film has played, watched to the end or skipped (not when it failed to start). A first visit therefore
 still gets the film (and its sound card, below); a save from before the choice (the old on / off toggle, when the
 film played on every launch) counts as a returning player who has seen it: on becomes First launch only, off Never.
-Settings has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings. The address overrides
+Settings has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings, and the title screen has "▶ Intro Film", which does the same and comes back to the title. The address overrides
 the setting: `?intro=0` never, `?intro=1` always. Without `?intro=1`, an invite link (`?join=`), an automated
 browser (`navigator.webdriver`: the e2e tests) and `prefers-reduced-motion` skip it; a browser without WebGL 2
 never plays it. A film that cannot start, or whose frame throws, is dropped (`'failed'`); on a machine that averages worse than
