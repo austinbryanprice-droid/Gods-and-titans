@@ -1334,8 +1334,12 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   and `validateSetup` drop anything else on the clients).
   Can start when ≥ 2 teams have players and every human slot is connected. `state.preset`
   stays lit through pantheon / color / name edits and players joining or leaving, and clears
-  when a slot's kind, team or AI difficulty changes. In the GameSetup, repeated names get a
-  number (`AI (Normal)`, `AI (Normal) 2`); lobby slots keep theirs. `LobbyClient.join` and
+  when a slot's kind, team or AI difficulty changes. In the GameSetup, a computer player whose slot
+  has no name of its own (empty or its level's `AI (Normal)`, `hasDefaultAiName`) plays under a figure of its
+  resolved pantheon with its level, "Thor (Easy AI)" (`aiFigureName`: the gods then the Titan, drawn from the
+  seat (player index) so the same lobby always names alike, skipping names taken and any over the 20-character
+  limit, then "Thor (Easy)", then `AI (Easy)`), so an ally and two foes on one level are told apart; other
+  repeated names get a number (`Bo`, `Bo 2`); lobby slots keep theirs (`AI (Normal)`). `LobbyClient.join` and
   `joinRoom` take an optional `signal` (AbortSignal): aborting rejects with `abortError()` and
   closes the half-open link. Closing the lobby after the start also closes any game connection
   still open one second later (a game that failed to load must not leave players hanging).
@@ -2119,7 +2123,8 @@ per-frame budget, so a revealed army appears over a few frames.
   Online games are not remembered; their game-over screen offers Rematch instead, back to the same room's lobby (7).
   A won game whose computer players were all on Easy (not a trial: `stepUpSkirmish`, main.js `onStepUp`) says
   "Ready for Normal?" on its game-over screen, and **Play on Normal** leads the buttons (`Game.stepUp`): the same
-  lobby with those players on Normal (an "AI (Easy)" name becomes "AI (Normal)"), remembered for Quick Match in
+  lobby with those players on Normal (an AI's default name follows its `difficulty` field: "AI (Easy)" or none becomes "AI (Normal)", and so a
+  "(Normal AI)" figure in the game; a name of its own is kept), remembered for Quick Match in
   its turn; Play Again (on Easy) comes second.
   **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
   choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
@@ -2170,7 +2175,8 @@ per-frame budget, so a revealed army appears over a few frames.
   (no extra line, sound or ping; the game's own battle warnings still sound). Warnings: **enemies near**
   (a hostile unit in sight within 18 tiles of one of my buildings: line with a Space key cap, war drums, an amber
   ping and the Space jump; not within 8 s of an under-attack alert, at most once per 45 s, and a new sighting
-  needs 10 s without enemies), **ally under attack** (softer drums, a ping in the ally's colour, once per 20 s
+  needs 10 s without enemies), **ally under attack** ("Your ally Thor (Easy AI) is under attack!": alerts naming a teammate say
+  "Your ally" first (`whoName`, also its sacred sites and relics); softer drums, a ping in the ally's colour, once per 20 s
   per ally; Space only if my own alert is older than 15 s), and the **Decade of Peace marks** (a gong, louder
   at each of 5:00 / 1:00 / 0:10; the HUD writes the line). Reminders (`'all'` only): **idle Worshippers**
   (standing idle for 20 s, then every 60 s), **population cap** (at the cap below `POP_MAX` for 10 s
