@@ -192,7 +192,7 @@ export class HostSession extends SessionBase {
    * @param {Map<number, object>} [o.conns] player index → connection (from LobbyHost.start)
    * @param {(setup: object) => object} o.createWorld e.g. createWorld from src/sim/world.js
    * @param {(world: object, index: number, difficulty: string, opts?: { standIn?: boolean }) => { tick(): void }} [o.createAI]
-   * @param {(world: object, players: number[]) => { step(events: object[]): { from: number, text: string }[] }} [o.createVoices]
+   * @param {(world: object, players: number[], ais: Map<number, object>) => { step(events: object[]): { from: number, text?: string, team?: boolean, mark?: object }[] }} [o.createVoices]
    *   the AI players' chat lines (src/ai/voice.js); only the setup's own AI slots speak
    * @param {boolean} [o.autoTick] run the ticker on start() (tests step manually with step())
    * @param {boolean} [o.useWorker] allow the background-proof worker metronome
@@ -225,7 +225,7 @@ export class HostSession extends SessionBase {
     const voiced = [...this.ais.keys()];
     if (createVoices && voiced.length) {
       try {
-        this.voices = createVoices(this.world, voiced);
+        this.voices = createVoices(this.world, voiced, this.ais);
         if (resumed && this.voices && typeof this.voices.resume === 'function') this.voices.resume();
       } catch (err) {
         this.reportError('voice-create', err);
@@ -713,8 +713,12 @@ export class HostSession extends SessionBase {
       return;
     }
     for (const l of lines || []) {
+      if (!l || !this.ais.has(l.from)) continue;
+      // An AI's own callout (an attack wave setting out, its base attacked): a marker for its team only, never a team order.
+      const mark = l.mark && sanitizeMark(l.mark, this.bounds);
+      if (mark) this.relayMark(l.from, mark, { order: false });
       const text = sanitizeChat(l.text);
-      if (!text || !this.ais.has(l.from)) continue;
+      if (!text) continue;
       const line = { from: l.from, name: this.playerName(l.from), text, system: false, voice: true };
       // An answer to a team mark is for the team only: the enemy must not learn that an order was given.
       if (l.team) this.relayTeamChat(line);
@@ -751,10 +755,11 @@ export class HostSession extends SessionBase {
    * connections never see it, so it cannot tell an enemy where an attack is called. The host's own
    * screen shows it when the host is on the team; the sender has shown it to itself already.
    * An Attack, Defend or Help marker is also a sim command (`teamMark`, src/sim/team-orders.js) from
-   * the sender, recorded like every command, so that the sender's computer allies answer it.
+   * the sender, recorded like every command, so that the sender's computer allies answer it
+   * (`order: false` for an AI's own callout, src/ai/voice.js: a signal for the humans only).
    */
-  relayMark(from, mark) {
-    if (isTeamOrderKind(mark.kind) && this.world && typeof this.world.issueCommand === 'function') {
+  relayMark(from, mark, { order = true } = {}) {
+    if (order && isTeamOrderKind(mark.kind) && this.world && typeof this.world.issueCommand === 'function') {
       try {
         this.world.issueCommand(from, { type: 'teamMark', kind: mark.kind, x: mark.x, y: mark.y });
       } catch (err) {
