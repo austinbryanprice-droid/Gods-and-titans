@@ -2047,3 +2047,117 @@
 @media (max-width: 900px) {
   .hud-rp-title { display: none; }
 }
+
+/* ------------------------------------------------------------ player list (hud-roster.js)
+   Under the top bar, beside the god portraits: every player by team with a colour swatch, the
+   pantheon's emblem, name, tier and live score. The header folds it to one line. */
+
+.hud-roster {
+  position: absolute;
+  top: 3.1em;
+  left: 4.9em;
+  width: 19em;
+  max-width: 36vw;
+  padding: 0.25em 0.45em 0.35em;
+  border-radius: 4px;
+  border-color: var(--mw-bronze);
+}
+.hud-roster[hidden] { display: none; }
+.hud-roster:not(.is-open) { width: auto; padding-bottom: 0.25em; }
+.hud-roster-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  width: 100%;
+  padding: 0.1em 0.1em;
+  border: 0;
+  background: transparent;
+  color: var(--mw-ink-dim);
+  cursor: pointer;
+}
+.hud-roster-head:hover { color: #fff; }
+.hud-roster-title { flex: 1; text-align: left; font: 600 max(0.78em, var(--mw-min-text))/1.2 var(--mw-font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mw-gold-hi); }
+.hud-roster-count { font: 700 max(0.76em, var(--mw-min-text))/1 var(--mw-font-ui); color: var(--mw-ink-mute); font-variant-numeric: tabular-nums; }
+.hud-roster-chev { font-size: max(0.8em, var(--mw-min-text)); line-height: 1; }
+.hud-roster-list { display: flex; flex-direction: column; gap: 0.12em; margin-top: 0.2em; }
+.hud-roster-list[hidden] { display: none; }
+.hud-roster-team {
+  margin-top: 0.2em;
+  padding-bottom: 0.1em;
+  border-bottom: 1px solid rgba(196, 146, 72, 0.25);
+  font: 700 max(0.68em, var(--mw-min-text))/1.2 var(--mw-font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mw-ink-mute);
+}
+.hud-roster-team.is-mine { color: var(--hud-ally, #c4f23a); }
+.hud-roster-row {
+  display: grid;
+  grid-template-columns: 0.7em 1.3em minmax(0, 1fr) auto 2.8em;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.12em 0.15em;
+  border-radius: 2px;
+  font-size: max(0.82em, var(--mw-min-text));
+  line-height: 1.25;
+  color: var(--mw-ink);
+}
+.hud-roster-row.is-me { background: rgba(255, 220, 140, 0.08); }
+.hud-roster-swatch { width: 0.7em; height: 0.7em; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+.hud-roster-emblem { font-family: var(--mw-emoji); text-align: center; }
+.hud-roster-who { display: flex; align-items: baseline; gap: 0.35em; min-width: 0; }
+.hud-roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.hud-roster-you { flex: none; font: 700 max(0.72em, var(--mw-min-text))/1 var(--mw-font-ui); color: var(--mw-gold); text-transform: uppercase; letter-spacing: 0.06em; }
+.hud-roster-tier.hud-roster-state { color: #ff9a88; font-weight: 700; }
+.hud-roster-row.is-away .hud-roster-state { color: var(--mw-ink-mute); }
+.hud-roster-tier { color: var(--mw-ink-mute); font-size: max(0.9em, var(--mw-min-text)); }
+.hud-roster-score { text-align: right; font: 700 1em/1 var(--mw-font-ui); color: var(--mw-gold-hi); font-variant-numeric: tabular-nums; }
+.hud-roster-row.is-out { color: var(--mw-ink-mute); }
+.hud-roster-row.is-out .hud-roster-name { text-decoration: line-through; text-decoration-color: rgba(255, 154, 136, 0.7); }
+.hud-roster-row.is-out .hud-roster-swatch, .hud-roster-row.is-out .hud-roster-emblem { opacity: 0.45; }
+.hud-roster-row.is-out .hud-roster-score { color: var(--mw-ink-mute); }
+
+/* ------------------------------------------------------------ control groups (hud-groups.js)
+   A row of chips just over the selection panel (hud.js lines its left edge up with the panel, or
+   past the worshipper task counts when those reach further):
+   digit, the leading unit's icon and the count. Red while the group fights, gold while selected. */
+
+.hud-bottom > .hud-groups {
+  position: absolute;
+  bottom: calc(100% + 0.55em);
+  display: flex;
+  gap: 0.3em;
+  pointer-events: none;
+}
+.hud-groups[hidden] { display: none; }
+.hud-group {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  height: 2em;
+  padding: 0 0.45em 0 0.3em;
+  border: 1px solid var(--mw-bronze);
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(30, 36, 52, 0.95), rgba(13, 16, 25, 0.95));
+  box-shadow: 0 0 0 1px #000, 0 0.2em 0.6em rgba(0, 0, 0, 0.5);
+  color: var(--mw-ink);
+  cursor: pointer;
+}
+.hud-group:hover { border-color: var(--mw-gold); }
+.hud-group-key { font-size: max(0.7em, var(--mw-min-text)) !important; padding: 0 0.25em !important; min-width: 1.1em !important; color: var(--mw-gold); }
+.hud-group-icon { font-family: var(--mw-emoji); font-size: 1.15em; line-height: 1; }
+.hud-group-n { font: 800 max(0.85em, var(--mw-min-text))/1 var(--mw-font-ui); color: var(--mw-gold-hi); font-variant-numeric: tabular-nums; }
+.hud-group.is-active { border-color: var(--mw-gold-hi); box-shadow: 0 0 0 1px var(--mw-gold), 0 0 0.8em rgba(255, 210, 110, 0.5); }
+.hud-group.is-fighting { border-color: #e0614c; background: linear-gradient(180deg, rgba(110, 30, 22, 0.95), rgba(45, 12, 10, 0.95)); }
+.hud-group.is-fighting::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 3px;
+  box-shadow: 0 0 0.7em rgba(255, 90, 60, 0.7);
+  animation: hud-pulse 0.9s ease-in-out infinite;
+  pointer-events: none;
+}
+.hud.is-replay .hud-groups { display: none; }
