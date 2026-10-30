@@ -425,3 +425,32 @@ export function chatTarget(raw, { allies = false, canAllies = false } = {}) {
   if (asked && !canAllies) return { text, team: false, refused: true };
   return { text, team: team && !!canAllies };
 }
+
+/** How many chat and system lines the chat history keeps (DESIGN 9, "The message feed"). */
+export const CHAT_HISTORY_MAX = 50;
+
+/**
+ * Add one line to the chat history, a ring of the last `max` lines (the oldest dropped). Returns the history.
+ * A line is { kind: 'chat' | 'system', name, color, team, text, time } (`time` in game seconds).
+ */
+export function pushHistory(history, line, max = CHAT_HISTORY_MAX) {
+  history.push(line);
+  if (history.length > max) history.splice(0, history.length - max);
+  return history;
+}
+
+/**
+ * Which card a full feed drops (its index in `cards`): the oldest that is not a player's chat line (`_chat`),
+ * so a burst of alerts in a fight never pushes a friend's words out; only when every card is chat, the oldest.
+ * `except` (the card just added) is not dropped while another can go. -1 for an empty feed.
+ */
+export function evictIndex(cards, except = null) {
+  let oldest = -1;
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i];
+    if (c === except) continue;
+    if (oldest < 0) oldest = i;
+    if (!c._chat) return i;
+  }
+  return oldest;
+}

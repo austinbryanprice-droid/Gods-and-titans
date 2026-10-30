@@ -17,7 +17,7 @@ import { getCommandCard, withCardKeys } from './command-card.js';
 import { cardKeysOf } from './key-bindings.js';
 import { sanitizeName, sanitizeChat } from '../net/protocol.js';
 import { el, setText, setStyle, setClass, setHidden, fmt, pct, hpColor, safeColor } from './hud-dom.js';
-import { formatClock, tierName, nameOf, leadText, stallText, pauseText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip, chatTarget, hasAllies } from './hud-data.js';
+import { formatClock, tierName, nameOf, leadText, stallText, pauseText, workerTasks, WORKER_TASKS, PEACE_WARNINGS, peaceStartText, peaceWarning, messageIcon, messageDwell, tauntDwell, relicChip, chatTarget, hasAllies, pushHistory, evictIndex } from './hud-data.js';
 import { peaceClock } from '../sim/peace.js';
 import { SITE_ICON, siteChip, siteChipTitle, sacredStartText } from './hud-sites.js';
 import { CardView } from './hud-card.js';
@@ -72,7 +72,8 @@ export class Hud {
     this.godSig = '';
     this.godEls = [];
     this.chatOpen = false;
-    this.card = new Array(12).fill(null);
+    this.chatHistory = []; // the last chat and system lines, shown above the chat box while it is open (pushHistory)
+    this.card =new Array(12).fill(null);
     this.offs = [];
     this.build();
   }
@@ -213,6 +214,12 @@ export class Hud {
     this.chatTo.addEventListener('click', () => this.setChatAllies(!this.chatAllies));
     this.chatBox = el('div', 'hud-chat hud-panel', this.chatTo, this.chatInput);
     this.chatBox.hidden = true;
+    // The chat history (DESIGN 9, "The message feed"): the last lines, newest at the bottom, above the box
+    // while it is open, so a line the alerts pushed out of the feed can still be read.
+    this.chatLog = el('div', 'hud-chatlog hud-panel');
+    this.chatLog.setAttribute('role', 'log');
+    this.chatLog.setAttribute('aria-label', 'Chat history');
+    this.chatLog.hidden = true;
     this.chatInput.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter') {
@@ -286,10 +293,10 @@ export class Hud {
     this.market = new MarketView({ viewState: this.vs, onSend: (cmd) => game.command(cmd) });
 
     this.overlayRoot = el('div', 'hud-overlays');
-    root.append(this.top, this.gods, ...(this.roster ? [this.roster.root] : []), this.market.root, this.mismatch, this.stall, this.pauseBar, this.banner, this.taunt, this.msgs, this.errorEl, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
+    root.append(this.top, this.gods, ...(this.roster ? [this.roster.root] : []), this.market.root, this.mismatch, this.stall, this.pauseBar, this.banner, this.taunt, this.msgs, this.errorEl, this.chatLog, this.chatBox, this.workers, this.bottom, this.tip, this.overlayRoot);
 
     // Keep the canvas from seeing clicks on panels.
-    for (const p of [this.top, this.bottom, this.gods, ...(this.roster ? [this.roster.root] : []), this.idleBtn, this.tasks, this.chatBox, this.tip, this.market.root, this.pauseBar]) {
+    for (const p of [this.top, this.bottom, this.gods, ...(this.roster ? [this.roster.root] : []), this.idleBtn, this.tasks, this.chatLog, this.chatBox, this.tip, this.market.root, this.pauseBar]) {
       p.addEventListener('mousedown', (e) => {
         if (e.target !== this.chatInput) e.preventDefault();
       });
@@ -746,10 +753,12 @@ export class Hud {
     return line;
   }
 
+  /** Add a card to the feed; a full feed drops its oldest card that is not a player's chat line (evictIndex). */
   pushLine(line, ms) {
     this.msgs.appendChild(line);
     while (this.msgs.children.length > MAX_MESSAGES) {
-      const old = this.msgs.children[0];
+      const cards = this.msgs.children;
+      const old = cards[evictIndex(cards, line)];
       clearTimeout(old._timer);
       old.remove();
     }
@@ -773,23 +782,63 @@ export class Hud {
     const text = sanitizeChat(line.text);
     if (!text) return;
     this.syncPanelChat(); // a line that comes while the end panel is up shows over it
+    const time = this.vs.time || 0;
     if (line.system) {
+      this.remember({ kind: 'system', name: '', color: null, team: false, text, time });
       this.pushLine(this.feedCard('system', null, text), CHAT_MS);
       return;
     }
     const from = Number.isInteger(line.from) && line.from >= 0 ? line.from : -1;
     const p = from >= 0 ? this.vs.players[from] || (this.vs.setup && this.vs.setup.players[from]) : null;
-    const who = el('b', 'hud-chat-from', `${sanitizeName(line.name || (p && p.name), 'Player')}:`);
+    const name = sanitizeName(line.name || (p && p.name), 'Player');
+    this.remember({ kind: 'chat', name, color: p ? displayColor(safeColor(p.color, '#f1e8d4')) : null, team: !!line.team, text, time });
+    const who = el('b', 'hud-chat-from', `${name}:`);
     // A line to the allies only (DESIGN 7, "Team chat") says so before the name, in the allies' green.
     const parts = line.team ? [el('b', 'hud-chat-team', '[Allies]'), ' ', who] : [who];
     const card = this.feedCard('chat', null, [...parts, ' ', el('span', null, text)]);
     if (line.team) card.classList.add('is-team');
+    card._chat = true; // a full feed drops alerts before a player's words (pushLine)
     if (p) {
       const color = displayColor(safeColor(p.color, '#f1e8d4'));
       who.style.color = color;
       card.style.setProperty('--msg-accent', color); // the card's edge and emblem take the player's colour
     }
     this.pushLine(card, CHAT_MS);
+  }
+
+  /** Keep a chat or system line in the history, and show it there at once when the chat box is open. */
+  remember(entry) {
+    pushHistory(this.chatHistory, entry);
+    if (!this.chatOpen) return;
+    // a reader scrolled up to an older line keeps their place; at the bottom, the new line comes into view
+    const log = this.chatLog;
+    const atBottom = !(log.scrollHeight > 0) || log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+    const top = log.scrollTop;
+    this.renderChatLog();
+    if (!atBottom) log.scrollTop = top;
+  }
+
+  /** One row of the chat history: the game time, "[Allies]" for a team line, the sender in their colour, the words. */
+  chatLogRow(h) {
+    const parts = [el('span', 'hud-chatlog-time', formatClock(h.time))];
+    if (h.kind === 'chat') {
+      if (h.team) parts.push(' ', el('b', 'hud-chat-team', '[Allies]'));
+      const who = el('b', 'hud-chat-from', `${h.name}:`);
+      if (h.color) who.style.color = h.color;
+      parts.push(' ', who);
+    }
+    parts.push(' ', el('span', 'hud-chatlog-text', h.text));
+    const row = el('div', `hud-chatlog-line is-${h.kind}`, parts);
+    if (h.team) row.classList.add('is-team');
+    return row;
+  }
+
+  /** Draw the whole history into its panel, newest at the bottom, scrolled to the newest line. */
+  renderChatLog() {
+    const log = this.chatLog;
+    if (this.chatHistory.length) log.replaceChildren(...this.chatHistory.map((h) => this.chatLogRow(h)));
+    else log.replaceChildren(el('div', 'hud-chatlog-empty', 'No messages yet.'));
+    log.scrollTop = log.scrollHeight;
   }
 
   /**
@@ -882,6 +931,8 @@ export class Hud {
     this.syncPanelChat();
     this.chatOpen = true;
     this.chatBox.hidden = false;
+    this.chatLog.hidden = false;
+    this.renderChatLog();
     this.msgs.classList.add('is-chatting');
     this.chatInput.value = '';
     this.setChatAllies(allies);
@@ -920,6 +971,7 @@ export class Hud {
     if (!this.chatOpen) return;
     this.chatOpen = false;
     this.chatBox.hidden = true;
+    this.chatLog.hidden = true;
     this.msgs.classList.remove('is-chatting');
     this.chatInput.blur();
   }

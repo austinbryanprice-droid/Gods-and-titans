@@ -1291,7 +1291,7 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
 - **Chat over the end panel**: in an online game (`Game.online`, the session still up) the game-over panel and the
   "defeated" panel keep the chat: Enter (Shift+Enter: the allies) opens the chat box, so the players can say gg and
   agree on a rematch without Keep Watching (`Hud.canChatOverPanel`; a focused panel button keeps Enter). While it
-  can, the HUD root carries `is-panel-chat`, which lifts the message feed and the chat box over the overlay layer
+  can, the HUD root carries `is-panel-chat`, which lifts the message feed, the chat box and its history over the overlay layer
   (z-index 11 over `.hud-overlays`' 10), so lines that arrive show over the panel. Esc in the box closes the box
   only (its keys never reach the game); the next Esc puts the panel away. Once the host closes the game the box
   closes and Enter does nothing (the panel says so, `Overlays.noteEnded`). A game against the computer is unchanged.
@@ -2215,7 +2215,20 @@ per-frame budget, so a revealed army appears over a few frames.
   1.18 em. A card slides in with a flash of its colour (a warning pulses three times), stays 10 to 16 s by length
   (`messageDwell`: 8.5 s plus 45 ms a letter, 2.5 s more for a warning; chat 14 s) and fades. A line that comes
   again while its card is still up (enemies still near, a second "Temple completed.") counts up a ×N badge and
-  slides in again instead of stacking another card. At most 6 cards stand, the oldest going first. A `[[Key]]`
+  slides in again instead of stacking another card. At most 6 cards stand; a full feed drops its oldest card that is
+  not a player's chat line (alerts, news, system lines go first; `evictIndex`), and only a feed of nothing but chat
+  drops its oldest chat card, so a burst of alerts in a fight never pushes a friend's words out within seconds.
+  **Chat history**: the HUD also keeps the last 50 chat and system lines (`Hud.chatHistory`, a ring through
+  `pushHistory`, `CHAT_HISTORY_MAX`): sender, their colour, the "[Allies]" tag of a team line and the game time
+  (`vs.time`). Alerts are not kept. While the chat box is open (Enter) the history stands in a scrolling stone panel
+  right above it (`.hud-chatlog`, `role="log"`, at most 17 em or 40 % of the screen high), newest at the bottom,
+  each line "m:ss [Allies] Name: words" (a system line in grey italics, no sender) as text nodes only; it starts
+  scrolled to the newest line and a line that arrives shows at once (a reader scrolled up keeps their place).
+  "No messages yet." when empty. The feed's cards step aside (`is-chatting`, hidden) while it is up, so the two
+  never overlap; closing the box (Esc, Enter, a blur) hides the panel and brings the feed back. It takes the pointer
+  to scroll (its clicks never reach the map) and is lifted over the end panel with the box (7, "Chat over the end
+  panel"). Every line that reaches `Hud.chat` is kept: all-chat, team chat, a computer ally's reply and a
+  teammate's marker words, in single-player and online games alike. A `[[Key]]`
   marker in a line is a key cap, as in a tip (the base-attack card ends in a Space cap, the idle-Worshipper card
   in a . cap), and the cards are text nodes only, never markup. The feed is `role="log"`, `aria-live="polite"`, ignores the pointer (clicks go
   through to the map) and keeps clear of the console, the minimap, the tips and the god portraits (measured from
