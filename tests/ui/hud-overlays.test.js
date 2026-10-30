@@ -140,3 +140,27 @@ test('a win against Easy computer players: "Ready for Normal?" and Play on Norma
     assert.ok(s.root.button('Play Again').className.includes('mw-btn--primary'));
   }
 });
+
+test('the game-over buttons stay in sight: a sticky row on the panel\'s own background at the foot of a scrolling panel', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { ov, root } = setup({ host: true, clients: 0 });
+  ov.statsTable = () => null;
+  ov.showGameOver({ result: 'victory', winningTeam: 1, unlocked: [{ id: 'warlord', name: 'Warlord', icon: '⚔️', desc: 'Win 10 games.' }] });
+  const panel = root.querySelector('.hud-gameover');
+  const row = root.querySelector('.hud-go-btns');
+  assert.ok(row, 'the button row has its own class');
+  assert.equal(row, ov.goBtns);
+  assert.equal(panel.children[panel.children.length - 1], row, 'the row is the panel\'s last child, so sticking to the bottom keeps it at the foot');
+  const css = (await readFile(new URL('../../src/ui/hud.css', import.meta.url), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = (sel) => {
+    const m = css.match(new RegExp(`(^|\\n)${sel.replace(/[.]/g, '\\.')}\\s*\\{([^}]*)\\}`));
+    return m ? m[2] : '';
+  };
+  const btns = rule('.hud-go-btns');
+  assert.match(btns, /position:\s*sticky/);
+  assert.match(btns, /bottom:\s*0/);
+  assert.match(btns, /background:/, 'the row covers what scrolls under it');
+  const go = rule('.hud-gameover');
+  assert.match(go, /max-height:\s*\d+vh/, 'every game-over panel fits the screen and scrolls inside');
+  assert.match(go, /overflow-y:\s*auto/);
+});

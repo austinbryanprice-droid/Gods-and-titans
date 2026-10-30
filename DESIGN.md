@@ -2100,7 +2100,10 @@ per-frame budget, so a revealed army appears over a few frames.
   text a refused click and the sim give).
   God portraits top-left (click selects, double-click centers). Messages (alerts, "Kronos is being summoned!",
   the game's other events, chat on Enter, to the allies on Shift+Enter or "/t ": 7 "Team chat") are the stone cards at the bottom left ("The message feed" below);
-  an error is the red line over the console. Game-over overlay with the after-game chronicle (below), menu (surrender, quit).
+  an error is the red line over the console. Game-over overlay with the after-game chronicle (below), menu (surrender, quit). The game-over panel is at most
+  94vh tall and scrolls inside; its button row (`.hud-go-btns`) is sticky at the panel's foot on an opaque copy of the
+  panel's stone, so Play on Normal / Play Again / Watch Replay / Return to Menu stay in sight at 1280x720 after a win
+  with awards and achievements.
   **After-game chronicle** (`src/game/chronicle.js`, `src/ui/hud-chronicle.js`): the victory / defeat / draw screen and
   the "game ended" screen have four tabs, after the Age of Empires score screens. Summary: pantheon, score (its tooltip
   splits it into economy, military and civilization, 5.11), kills, losses and gathered, then the awards: Warlord (most
