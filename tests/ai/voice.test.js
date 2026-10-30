@@ -395,6 +395,14 @@ test('callouts: no Help for wild creatures, a small threat or an ally\'s defence
   assert.deepEqual(defend(), [], 'a lone scout: no call');
   ai.threat = { x: 10, y: 10, power: 5 };
   assert.deepEqual(defend({ ally: true }), [], 'helping an ally is not a call for help');
+  // The same defence: a scout's probe grows into an army, and then it is called (once).
+  const v3 = new AIVoices(world, [0], new Map([[0, { ai }]]));
+  Object.assign(ai.mil, { mode: 'defend', since: world.time, ally: false });
+  ai.threat = { x: 10, y: 10, power: 1 };
+  assert.deepEqual(run(v3, world, 2), []);
+  ai.threat = { x: 10, y: 10, power: 5 };
+  assert.equal(run(v3, world, 2).length, 1, 'the grown threat of the same defence');
+  assert.deepEqual(run(v3, world, 2), []);
   assert.equal(defend().length, 1);
   world.time += 5;
   assert.deepEqual(defend(), [], 'a second Help waits callHelpGap');

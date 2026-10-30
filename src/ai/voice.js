@@ -251,9 +251,10 @@ export class AIVoices {
         spot = mil.route[mil.route.length - 1];
         kind = 'attack';
       } else if (mil.mode === 'defend' && !mil.ally && mil.since !== v.defendSince && ai.threat) {
-        v.defendSince = mil.since;
         const th = ai.threat;
+        // (Looked at again until it qualifies: a scout's probe can grow into an army, creatures give way to a player.)
         if (th.power >= VOICE.callThreat && this.attackerNear(v.index, th.x, th.y) >= 0) {
+          v.defendSince = mil.since; // each defence once
           spot = th;
           kind = 'help';
         }
