@@ -1251,6 +1251,7 @@
 .hi-grid-label { font-size: max(0.9em, var(--mw-min-text)); color: var(--mw-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hi-grid-label b { font: 600 1.05em/1 var(--mw-font-display); letter-spacing: 0.05em; color: var(--mw-gold-hi); }
 .hi-grid-hint { color: var(--mw-ink-mute); font-size: max(0.9em, var(--mw-min-text)); }
+.hi-more { display: inline-block; margin-right: 0.5em; padding: 0.1em 0.45em; border: 1px solid var(--mw-gold); border-radius: 0.8em; font: 800 max(0.85em, var(--mw-min-text))/1.1 var(--mw-font-ui); color: var(--mw-gold-hi); background: rgba(0, 0, 0, 0.35); cursor: help; }
 .hi-grid { display: grid; grid-template-columns: repeat(auto-fill, 2.85em); grid-auto-rows: 2.85em; gap: 0.25em; align-content: start; }
 .hi-cell {
   --team: #888;

@@ -1,12 +1,15 @@
 // Selection state for the local player: the selected entity ids (WC3 rules:
 // up to 24 own units / buildings, or a single foreign entity for info), the
 // active subgroup (Tab), and control groups 1–9. A selection of nothing but
-// wall segments may be longer (a wall is dozens of one-tile pieces). Pure
-// logic over a ViewState.
+// wall segments may be longer (a wall is dozens of one-tile pieces), and so
+// may a whole-army selection (Ctrl+A, Shift+,): `army`. Pure logic over a ViewState.
 import { MAX_WALL_SELECTION } from '../config.js';
+import { MAX_COMMAND_UNITS } from '../sim/commands.js';
 import { subgroups, subgroupRank, isWallEntity } from './hud-data.js';
 
 export const MAX_SELECTION = 24;
+/** A whole-army selection holds every soldier: as many as one order carries (the sim keeps MAX_COMMAND_UNITS ids). */
+export const MAX_ARMY_SELECTION = MAX_COMMAND_UNITS;
 
 /** How many of these (own) entities one selection may hold. */
 export function selectionLimit(entities) {
@@ -19,6 +22,7 @@ export class Selection {
     this.vs = vs;
     this.ids = [];
     this.activeType = null;
+    this.army = false; // a whole-army selection (Ctrl+A, Shift+,), not held to MAX_SELECTION
     this.groups = new Map(); // digit → ids
     this.version = 0;
     this.listeners = new Set();
@@ -129,9 +133,11 @@ export class Selection {
 
   /**
    * Replace the selection. Foreign entities (enemy, ally, neutral, mines) can
-   * only be selected alone; own entities are capped at MAX_SELECTION.
+   * only be selected alone; own entities are capped at MAX_SELECTION, or at
+   * MAX_ARMY_SELECTION for a whole-army selection (`army`: Ctrl+A, Shift+,, a
+   * control group saved from one, and changes made within one).
    */
-  set(ids, { activeType = null } = {}) {
+  set(ids, { activeType = null, army = false } = {}) {
     const vs = this.vs;
     const list = [];
     const seen = new Set();
@@ -143,8 +149,9 @@ export class Selection {
     }
     let next;
     const own = list.filter((e) => this.selectableOwn(e));
-    if (own.length) next = this.sortIds(own.map((e) => e.id)).slice(0, selectionLimit(own));
+    if (own.length) next = this.sortIds(own.map((e) => e.id)).slice(0, army ? Math.max(MAX_ARMY_SELECTION, selectionLimit(own)) : selectionLimit(own));
     else next = list.length ? [list[0].id] : [];
+    this.army = !!army && own.length > 0;
     const same = next.length === this.ids.length && next.every((id, i) => id === this.ids[i]);
     const prevActive = this.activeType;
     this.ids = next;
@@ -155,6 +162,7 @@ export class Selection {
   }
 
   clear() {
+    this.army = false;
     if (!this.ids.length) return;
     this.ids = [];
     this.activeType = null;
@@ -164,14 +172,22 @@ export class Selection {
   /** Add own entities (shift-click / shift-drag). */
   add(ids) {
     if (!this.isOwn() && this.ids.length) return this.set(ids);
-    this.set([...this.ids, ...ids], { activeType: this.activeType });
+    this.set([...this.ids, ...ids], { activeType: this.activeType, army: this.army });
   }
 
   remove(ids) {
     const drop = new Set(ids);
     const next = this.ids.filter((id) => !drop.has(id));
     if (next.length === this.ids.length) return;
-    this.set(next, { activeType: this.activeType });
+    this.set(next, { activeType: this.activeType, army: this.army });
+  }
+
+  /** Ctrl+click on a portrait: only the selected entities of this type (all of them, within a whole-army selection). */
+  selectType(type) {
+    this.set(this.ids.filter((id) => {
+      const e = this.vs.entities.get(id);
+      return e && e.t === type;
+    }), { army: this.army });
   }
 
   /** Shift-click: add if missing, remove if present. */
@@ -239,7 +255,9 @@ export class Selection {
       return e && e.o === this.vs.myIndex;
     });
     const all = this.sortIds([...new Set([...prev, ...own])]);
-    const merged = all.slice(0, selectionLimit(all.map((id) => this.vs.entities.get(id))));
+    const army = this.army || prev.length > MAX_SELECTION;
+    const limit = selectionLimit(all.map((id) => this.vs.entities.get(id)));
+    const merged = all.slice(0, army ? Math.max(MAX_ARMY_SELECTION, limit) : limit);
     if (!merged.length) return false;
     this.groups.set(n, merged);
     return true;
@@ -263,7 +281,7 @@ export class Selection {
   recallGroup(n) {
     const ids = this.groupIds(n);
     if (!ids.length) return false;
-    this.set(ids);
+    this.set(ids, { army: ids.length > MAX_SELECTION }); // a group saved from a whole-army selection comes back whole
     return true;
   }
 }

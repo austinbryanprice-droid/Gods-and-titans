@@ -2305,7 +2305,14 @@ per-frame budget, so a revealed army appears over a few frames.
   pings the team instead), minimap click/drag, Space centers on selection or last alert, F1–F3 select gods,
   Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
   **Army keys**: Ctrl+A (Cmd+A) selects the whole army, every own unit but the Worshippers, gods and Titans
-  first so the 24-unit cap keeps them (`armyIds` in hud-data.js); a second tap within 350 ms centers on it.
+  first (`armyIds` in hud-data.js); a second tap within 350 ms centers on it. A whole-army selection (Ctrl+A,
+  Ctrl+Alt+A, Shift+,: `Selection.set(ids, { army: true })`, `sel.army`) is not held to the 24 of `MAX_SELECTION`
+  but to `MAX_ARMY_SELECTION` (the sim's `MAX_COMMAND_UNITS`, 512), so every order goes to every soldier; changes
+  made within it (Shift-click / Shift-box add or remove, Ctrl+click on a portrait: `selectType`) keep the allowance,
+  a control group saved from it holds and recalls all of it (a group over 24 comes back whole; Shift+digit adds
+  past 24 to such a group), and any other selection is still held to 24. The info panel shows the first 24
+  portraits and a "+N" chip on its label line (`.hi-more`, its tooltip "N more selected than shown (M in all)");
+  the command card is the selection's card as ever. The lesson's attack step names Ctrl+A.
   Ctrl+Alt+A takes only the army on screen (not Ctrl+Shift+A: browsers keep that one). `,` selects the next
   idle soldier, god or creature and centers on it (Shift or Ctrl: all of them), like `.` for Worshippers; idle
   means state `idle` without a Hold Position or patrol order (view keys `ho`, `pa`). With nobody to select,
@@ -2333,7 +2340,7 @@ per-frame budget, so a revealed army appears over a few frames.
   (`checkWallLine(..., workers)`, the sim's `Too far from your Worshippers.`).
   Right-click, Esc or losing the window drops the drag first and leaves placement on the second
   press; letting go where no ground shows (past the map's edge) orders nothing. A wall-only selection holds up to `MAX_WALL_SELECTION` (160) segments (any other selection
-  `MAX_SELECTION`); a selection of more than 24 shows a crowd panel (a stack per type with its count,
+  `MAX_SELECTION`, or a whole army, above); a wall-only selection of more than 24 shows a crowd panel (a stack per type with its count,
   the total health, how many are hurt, being built or upgrading) in place of the icon grid (rebuilt when walls of the selection turn to stone); a drag box prefers other buildings
   over wall segments, so the walls are not picked by accident. `game.js` folds a run of
   destroyed segments into one "Your wall was breached!" message per 6 s.

@@ -111,3 +111,56 @@ test('the army keys tell you when there is no one to select', () => {
   assert.deepEqual(messages, ['No idle soldiers.']);
   input.dispose();
 });
+
+test('Ctrl+A and Shift+, take the whole army past the 24 of a box selection: orders, control groups and the card carry them all', () => {
+  const { world, sel, input, sent, key, push } = setup();
+  for (let i = 0; i < 40; i++) spawn(world, 0, 'warrior', 4 + (i % 10), 20 + Math.floor(i / 10));
+  push();
+  const army = armyIds(input.vs);
+  assert.equal(army.length, 43);
+  key('a', { ctrlKey: true });
+  assert.equal(sel.size, 43, 'Ctrl+A does not stop at 24');
+  assert.equal(sel.army, true);
+  key('a');
+  input.confirmTarget(22, 30, null, false);
+  assert.equal(sent.at(-1).type, 'attackMove');
+  assert.equal(sent.at(-1).units.length, 43, 'an order goes to every selected unit');
+  assert.equal(getCommandCard(sel.forCard(), input.vs, 'root')[7].id, 'patrol', 'the card is the soldiers\' card');
+  // A control group keeps them all and calls them all back.
+  key('1', { ctrlKey: true, code: 'Digit1' });
+  sel.set([army[0]]);
+  key('1', { code: 'Digit1' });
+  assert.equal(sel.size, 43, 'control group 1 brings back the whole army');
+  // Within the army: Ctrl+click on a type, and Shift-removing one, keep the rest.
+  sel.selectType('warrior');
+  assert.equal(sel.size, 41);
+  sel.remove([army[5]]);
+  assert.equal(sel.size, 40);
+  // Shift+, : every idle soldier.
+  sel.clear();
+  key('<', { shiftKey: true, code: 'Comma' });
+  assert.equal(sel.size, 43);
+  // A box selection still stops at 24.
+  sel.set(army);
+  assert.equal(sel.size, 24);
+  assert.equal(sel.army, false);
+  input.dispose();
+});
+
+test('the selection panel shows 24 portraits and a "+N" chip for a bigger army', async () => {
+  const { InfoView } = await import('../../src/ui/hud-info.js');
+  const { world, vs, sel, input, key, push } = setup();
+  for (let i = 0; i < 40; i++) spawn(world, 0, 'warrior', 4 + (i % 10), 20 + Math.floor(i / 10));
+  push();
+  key('a', { ctrlKey: true });
+  const root = document.createElement('div');
+  const view = new InfoView(root, { selection: sel, viewState: vs, onSelectOnly() {}, onRemove() {}, onSelectType() {}, onCancelQueue() {}, onPortrait() {} });
+  view.update();
+  const grid = root.querySelector('.hi-grid');
+  assert.equal(grid.children.length, 24, '24 portraits');
+  const more = root.querySelector('.hi-more');
+  assert.ok(more, 'a "+N" chip');
+  assert.equal(more.textContent, '+19');
+  assert.match(more.title, /43 in all/);
+  input.dispose();
+});
