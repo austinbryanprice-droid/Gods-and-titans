@@ -2604,7 +2604,9 @@ its ticks, and checksums.
 - The bar (above the bottom panel; the command card and the marker and power buttons are hidden): ⏮, play /
   pause (↻ at the end), +30 s, the speeds, the timeline (click: go there), the eyes, turn ⟲ ⟳, tilt ⤒ ⤓,
   the normal view ⌖, Leave. Keys: Space play / pause, [ and ] speed, J +30 s, V next eyes, Q / E turn,
-  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free).
+  R / F tilt. F10 opens the Replay Menu (it holds the replay; the camera stays free). A camera action the player
+  rebound (9, *Keys*) to one of these keys keeps it in a replay too: the bar yields to a rebound camera key
+  (`InputController.onKeyDown`), while the default camera keys keep their places (Space stays play / pause).
 - Where: the game-over screen's Watch Replay (this match from its start), and the Career screen's Replays:
   each kept game with its sides, result, date, mode and length, Watch, Save (a `.mwreplay` file, the packed
   record) and Delete, and Open a replay file.
