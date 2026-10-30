@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LobbyHost, LobbyClient, buildSetup, resolvePantheons, sanitizeLobbyState } from '../../src/net/lobby.js';
+import { LobbyHost, LobbyClient, buildSetup, resolvePantheons, sanitizeLobbyState, aiName, aiFigureName } from '../../src/net/lobby.js';
 import { PROTOCOL_VERSION } from '../../src/net/wire-version.js';
 import { joinRoom, abortError } from '../../src/net/transport.js';
 import { PANTHEONS } from '../../src/data/index.js';
@@ -338,15 +338,21 @@ test('the game gives every player a distinct name; lobby slots keep theirs', asy
   assert.deepEqual(host.state.slots.map((s) => s.name), ['Hosty', 'AI (Normal)', 'AI (Normal)', 'AI (Normal)']);
   host.setSlot(3, { difficulty: 'hard' });
   const { setup } = host.start();
-  assert.deepEqual(setup.players.map((p) => p.name), ['Hosty', 'AI (Normal)', 'AI (Normal) 2', 'AI (Hard)']);
-  assert.deepEqual(host.state.slots.map((s) => s.name), ['Hosty', 'AI (Normal)', 'AI (Normal)', 'AI (Hard)']);
+  const aiNames = setup.players.slice(1).map((p) => p.name);
+  assert.equal(new Set(aiNames).size, 3, `each computer player has its own name: ${aiNames}`);
+  setup.players.slice(1).forEach((p) => {
+    const figures = [...PANTHEONS[p.pantheon].gods.map((g) => g.name), PANTHEONS[p.pantheon].titan.name];
+    const level = p.difficulty === 'hard' ? 'Hard' : 'Normal';
+    assert.ok(figures.some((f) => p.name === `${f} (${level} AI)` || p.name === `${f} (${level})`), `${p.name} is a figure of the ${p.pantheon} with its level`);
+  });
+  assert.deepEqual(host.state.slots.map((s) => s.name), ['Hosty', 'AI (Normal)', 'AI (Normal)', 'AI (Hard)'], 'lobby slots keep theirs');
 
   const names = (slots) => buildSetup({ mapSize: 'small', slots }, 7).setup.players.map((p) => p.name);
   const slot = (kind, name, team) => ({ kind, name, pantheon: 'random', team, color: team - 1, difficulty: 'normal' });
-  assert.deepEqual(names([slot('host', 'AI (Normal) 2', 1), slot('ai', 'AI (Normal)', 2), slot('ai', 'AI (Normal)', 3), slot('ai', 'AI (Normal)', 4)]),
-    ['AI (Normal) 2', 'AI (Normal)', 'AI (Normal) 3', 'AI (Normal) 4'], 'a suffix never collides with an existing name');
+  assert.deepEqual(names([slot('host', 'Bo', 1), slot('human', 'Bo', 2), slot('human', 'Bo 2', 3)]),
+    ['Bo', 'Bo 3', 'Bo 2'], 'a suffix never collides with an existing name');
   const long = 'x'.repeat(20);
-  const out = names([slot('host', long, 1), slot('ai', long, 2)]);
+  const out = names([slot('host', long, 1), slot('human', long, 2)]);
   assert.equal(out[1], `${'x'.repeat(18)} 2`);
   assert.ok(out.every((n) => n.length <= 20));
 });
@@ -427,4 +433,20 @@ test('a cancelled join leaves nothing behind', async () => {
   await waitFor(() => [...host.members].every((m) => !m.conn.open), 2000, 'link closed');
   assert.equal(host.state.slots[1].kind, 'open');
   host.close();
+});
+
+test('computer players play under a figure of their pantheon with their level, drawn from the seat (2v2: ally and foes told apart)', () => {
+  const ai = (team, pantheon, difficulty = 'easy') => ({ kind: 'ai', name: aiName(difficulty), pantheon, team, color: team, difficulty });
+  const st = { mapSize: 'small', slots: [{ kind: 'host', name: 'Me', pantheon: 'greek', team: 1, color: 0 }, ai(1, 'norse'), ai(2, 'norse'), ai(2, 'aztec', 'brutal')] };
+  const a = buildSetup(st, 11).setup.players.map((p) => p.name);
+  assert.deepEqual(a, buildSetup(st, 99).setup.players.map((p) => p.name), 'the same seats give the same names, whatever the seed');
+  assert.deepEqual(a, ['Me', 'Thor (Easy AI)', 'Freyja (Easy AI)', 'Tlaloc (Brutal AI)'], 'two Norse AIs take two figures');
+  assert.equal(aiFigureName('aztec', 'brutal', 0), 'Tlaloc (Brutal AI)', 'figures too long for a name are skipped');
+  assert.ok(a.every((n) => [...n].length <= 20));
+  assert.equal(aiFigureName('nope', 'hard', 0), 'AI (Hard)', 'no pantheon: the lobby name');
+  assert.equal(aiFigureName('norse', 'easy', 0, new Set(['odin (easy ai)'])), 'Thor (Easy AI)', 'a taken name is skipped');
+  // A name of its own (a daily's or a campaign's) is kept; an empty one gets a figure.
+  const own = buildSetup({ mapSize: 'small', slots: [st.slots[0], { ...ai(2, 'egyptian'), name: 'Pharaoh' }, { ...ai(2, 'egyptian'), name: '' }] }, 3).setup.players;
+  assert.equal(own[1].name, 'Pharaoh');
+  assert.match(own[2].name, /^(Ra|Anubis|Isis|Set|Apep) \(Easy AI\)$/);
 });

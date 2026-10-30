@@ -508,11 +508,13 @@ export class InfoView {
   // ---------------------------------------------------------------- multi
 
   buildMulti(ents, active) {
-    if (ents.length > MAX_SELECTION) return this.buildCrowd(ents, active);
+    if (ents.length > MAX_SELECTION && ents.every(isWallEntity)) return this.buildCrowd(ents, active);
     const vs = this.o.viewState;
     const grid = el('div', 'hi-grid');
     const cells = [];
-    for (const e of ents) {
+    // A whole-army selection (Ctrl+A) may hold more than the grid's 24: the first 24 portraits and a "+N" chip;
+    // every order still goes to all of them.
+    for (const e of ents.slice(0, MAX_SELECTION)) {
       const c = el('button', 'hi-cell');
       c.type = 'button';
       c.tabIndex = -1;
@@ -534,6 +536,12 @@ export class InfoView {
       cells.push({ id: e.id, fill: bar.children[0], rankBadge });
     }
     const label = el('div', 'hi-grid-label');
+    if (ents.length > MAX_SELECTION) {
+      // on the label line, which always shows (a 25th cell would fall below the grid's two rows)
+      const more = el('span', 'hi-more', `+${ents.length - MAX_SELECTION}`);
+      more.title = `${ents.length - MAX_SELECTION} more selected than shown (${ents.length} in all): every order goes to all of them`;
+      label.appendChild(more);
+    }
     let tasks = null;
     if (active) {
       const def = UNITS[active.type] || BUILDINGS[active.type] || GOLD_MINE;

@@ -561,7 +561,7 @@ export class InputController {
     const now = performance.now();
     const again = now - this.lastArmy < DOUBLE_MS;
     this.lastArmy = now;
-    this.sel.set(ids);
+    this.sel.set(ids, { army: true }); // the whole army, past the 24 of a box selection (DESIGN 9)
     this.afterSelect();
     if (again && !onScreen) this.centerOnSelection();
   }
@@ -574,7 +574,7 @@ export class InputController {
       return;
     }
     if (all) {
-      this.sel.set(ids);
+      this.sel.set(ids, { army: true }); // every idle soldier, past the 24 of a box selection
       this.afterSelect();
       return;
     }

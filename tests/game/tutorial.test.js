@@ -260,3 +260,8 @@ test('a learner who skipped ahead to a god and an army is not held at "Chop wood
   assert.equal(director.current.id, 'attack', 'a god on the field implies the mining, chopping and praying');
   assert.deepEqual(steps, TUTORIAL_STEPS.slice(0, -1).map((s) => s.id), 'each step still reports in order');
 });
+
+test('the attack step teaches Ctrl+A, which takes the whole army (god included) at once', () => {
+  const step = TUTORIAL_STEPS.find((s) => s.id === 'attack');
+  assert.match(step.text({}), /Ctrl\+A/);
+});

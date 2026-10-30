@@ -49,7 +49,30 @@ function intIn(v, lo, hi) {
   const n = Number(v);
   return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
 }
-const aiName = (difficulty) => `AI (${difficulty[0].toUpperCase()}${difficulty.slice(1)})`;
+const difficultyLabel = (d) => `${d[0].toUpperCase()}${d.slice(1)}`;
+/** A computer player's lobby slot name: 'AI (Easy)'. In the game it plays under a figure's name (aiFigureName). */
+export const aiName = (difficulty) => `AI (${difficultyLabel(difficulty)})`;
+/** True when an AI slot carries no name of its own: empty, or the lobby's 'AI (Difficulty)' for its level. */
+export const hasDefaultAiName = (slot) => !!slot && slot.kind === 'ai' && (!slot.name || slot.name === aiName(slot.difficulty || 'normal'));
+
+/**
+ * A computer player's name in the game: a figure of its pantheon with its level, 'Thor (Easy AI)', so an
+ * ally and two foes on the same level are told apart in the alerts, chat and scores (DESIGN 6.1). The figure
+ * is drawn deterministically from the seat (the player index), skipping names already `taken` (lower case)
+ * and figures too long for a player name; 'Thor (Easy)' and then 'AI (Easy)' are the fallbacks.
+ */
+export function aiFigureName(pantheonId, difficulty, seat, taken = new Set()) {
+  const p = PANTHEONS[pantheonId];
+  const figures = p ? [...p.gods.map((g) => g.name), p.titan && p.titan.name].filter(Boolean) : [];
+  const level = difficultyLabel(difficulty || 'normal');
+  for (const tag of [`${level} AI`, level]) {
+    for (let k = 0; k < figures.length; k++) {
+      const cand = `${figures[(seat + k) % figures.length]} (${tag})`;
+      if ([...cand].length <= MAX_NAME_LENGTH && !taken.has(cand.toLowerCase())) return cand;
+    }
+  }
+  return aiName(difficulty || 'normal');
+}
 
 /**
  * Make player names distinct in a game: the second 'AI (Normal)' becomes 'AI (Normal) 2',
@@ -162,7 +185,16 @@ export function buildSetup(state, seed, version = PROTOCOL_VERSION) {
   });
   const pantheons = resolvePantheons(active.map((a) => a.slot), seed);
   const slotToPlayer = new Map();
-  const names = distinctNames(active.map(({ slot }, index) => slot.name || (slot.kind === 'ai' ? aiName(slot.difficulty) : `Player ${index + 1}`)));
+  // Computer players with no name of their own play under a figure of their pantheon (aiFigureName).
+  const taken = new Set(active.filter(({ slot }) => !hasDefaultAiName(slot) && slot.name).map(({ slot }) => slot.name.toLowerCase()));
+  const names = distinctNames(active.map(({ slot }, index) => {
+    if (hasDefaultAiName(slot)) {
+      const name = aiFigureName(pantheons[index], slot.difficulty, index, taken);
+      taken.add(name.toLowerCase());
+      return name;
+    }
+    return slot.name || `Player ${index + 1}`;
+  }));
   const survival = state.survival === true && !PEACE_LENGTHS.includes(state.peace);
   const players = active.map(({ slot, slotIndex }, index) => {
     slotToPlayer.set(slotIndex, index);
