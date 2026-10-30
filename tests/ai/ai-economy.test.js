@@ -94,6 +94,21 @@ test('over the pop cap after a raid, the AI still rebuilds its Town Center and h
   assert.equal(ai.ai.errors, 0);
 });
 
+test('with every drop-off lost and the Town Center out of reach, the AI puts up a storehouse and its carriers deliver again', () => {
+  const g = soloGame(5, 'norse', 'normal');
+  const { world, ai } = g;
+  ai.ai.prof = { ...ai.ai.prof, firstAttack: 1e9 };
+  g.step(240);
+  const p = world.players[0];
+  for (const b of world.buildingsOf(0).filter((x) => x.def.dropOff)) world.killEntity(b, null);
+  Object.assign(p, { gold: 200, wood: 60 }); // a storehouse's worth, not a Town Center's
+  const before = p.stats.gathered;
+  g.step(90);
+  assert.ok(world.buildingsOf(0).some((b) => b.type === 'storehouse' && b.constructed), 'a storehouse stands');
+  assert.ok(p.stats.gathered > before, 'the carriers deliver again');
+  assert.equal(ai.ai.errors, 0);
+});
+
 test('a worker moves between gold and wood only when that closes a real gap', () => {
   // (need of the job it would join, need of the job it would leave; negative = a surplus)
   assert.equal(shiftHelps(2, 0), true); // the other job is full

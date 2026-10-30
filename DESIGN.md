@@ -2660,7 +2660,9 @@ population cap and easy stays well below it. In the Trial of the Titans (5.14) t
 units near the base, so the AI defends against them (and helps allies) and never attacks. In a Decade of Peace (5.10) no wave leaves
 home until the peace ends: the army keeps growing and masses at the rally point. The ground an
 enemy Town Center keeps clear is closed to its building too: every site it tries goes through
-`canPlaceBuilding`, so it simply takes another spot. It sends Worshippers to capture sacred sites and its army to
+`canPlaceBuilding`, so it simply takes another spot. A lost Town Center is rebuilt first (`planBuildings`); when no
+drop-off is left at all and the Town Center is out of reach, a Storehouse by the trees its workers chop goes up before
+it, so the carriers can deliver again (they stood idle with full loads: Hard 2v2 seed 21). It sends Worshippers to capture sacred sites and its army to
 break a rival's Sacred Victory countdown (5.11).
 God powers (4.11, `src/ai/powers.js`, every third think): a harvest blessing once 12 of its worshippers gather
 (easy: more), a festival once 5 pray, a caravan from 1:30, a healing rain where its hurt army is missing 1,200
