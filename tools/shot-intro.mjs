@@ -205,7 +205,7 @@ async function flow(browser, errors) {
     await ctx.close();
   }
 
-  // Settings: the intro choice is saved, and "Watch it now" plays the film and comes back to Settings (not the title)
+  // Settings: "Watch it now" plays the film and comes back to Settings (not the title)
   {
     const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
     const page = await ctx.newPage();
@@ -214,14 +214,7 @@ async function flow(browser, errors) {
     await page.waitForSelector('.mw-title-screen');
     await page.getByRole('button', { name: 'Settings' }).click();
     await page.waitForSelector('.mw-intro-watch');
-    const choice = (label) => page.locator('.mw-seg', { hasText: label });
-    ok('settings: the intro choice starts on "First launch only"', await choice('First launch only').evaluate((b) => b.classList.contains('is-active')));
     await page.screenshot({ path: join(out, 'flow-settings.png') });
-    await choice('Never').click();
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mythicwar-settings')).intro);
-    ok('settings: "Never" is saved', saved === 'never');
-    await choice('Every launch').click();
-    ok('settings: and "Every launch"', await choice('Every launch').evaluate((b) => b.classList.contains('is-active')));
     await page.click('.mw-intro-watch');
     await page.waitForSelector('.mw-intro.is-playing', { timeout: 120000 });
     ok('settings: "Watch it now" plays the film', true);

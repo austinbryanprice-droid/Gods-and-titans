@@ -29,13 +29,6 @@ export const CARD_KEY_OPTIONS = [
   ['grid', 'Grid', 'The keys follow the card\'s 4 × 3 layout (Q W E R, A S D F, Z X C V by default), whatever is selected. Tips and How to Play still name the Classic letters.'],
 ];
 
-// The "Intro film" choices (setting `intro`, src/ui/intro.js introWanted).
-export const INTRO_OPTIONS = [
-  ['always', 'Every launch', 'The film plays each time the game opens. Esc skips it.'],
-  ['first', 'First launch only', 'The film plays the first time the game opens, then the game goes straight to the title. "Watch it now" plays it any time.'],
-  ['never', 'Never', 'The game opens on the title. "Watch it now" plays the film any time.'],
-];
-
 /** The explanation of one option id ('' for an unknown one). */
 export function optionNote(options, id) {
   const o = options.find((x) => x[0] === id);

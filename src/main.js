@@ -2,7 +2,7 @@
 // lobby to the Game (DESIGN 11). Returning to the menu tears the game down
 // completely, so matches can be played one after another without a reload. Replays
 // (DESIGN 9.4) play in a Game of their own, from the Career screen or the game-over screen.
-import { getSettings, saveSettings, onSettingsChange } from './settings.js';
+import { getSettings, onSettingsChange } from './settings.js';
 import { initAudio, syncAudio, quietMusic, playTitleMusic } from './audio/audio.js';
 import { createMenu, showMenu, hideMenu } from './ui/menu.js';
 import { isTouchOnly, TOUCH_NOTICE } from './ui/menu-model.js';
@@ -277,14 +277,6 @@ function watchIntro(screen, guard = true) {
   }
 }
 
-function prefersReducedMotion() {
-  try {
-    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  } catch {
-    return false;
-  }
-}
-
 function boot() {
   const settings = getSettings();
   initAudio(settings); // the sound effects and the music: one audio context, started now where the browser allows it and otherwise at the first key press or click
@@ -307,15 +299,9 @@ function boot() {
   }
   if (isTouchOnly()) notices.push(TOUCH_NOTICE); // a phone or tablet: no touch controls (DESIGN 9)
   if (notices.length) menu.setNotice(notices.join(' '));
-  const intro = introWanted({ mode: settings.intro, seen: settings.introSeen, search: location.search, webdriver: navigator.webdriver === true, reducedMotion: prefersReducedMotion(), webgl2 });
-  // the film has the machine to itself; the game's code is fetched once it is over. Once it has played (watched or
-  // skipped), "First launch only" leaves it out from the next launch on.
-  if (intro) {
-    watchIntro('title').then((outcome) => {
-      if (outcome !== 'failed' && !getSettings().introSeen) saveSettings({ introSeen: true });
-      warmUp();
-    });
-  }
+  const intro = introWanted({ search: location.search, webdriver: navigator.webdriver === true, webgl2 });
+  // the film has the machine to itself; the game's code is fetched once it is over
+  if (intro) watchIntro('title').then(warmUp);
   else warmUp();
 }
 

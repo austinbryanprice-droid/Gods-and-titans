@@ -26,7 +26,7 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.addInitScript((q) => {
   try {
     const s = JSON.parse(localStorage.getItem('mythicwar-settings') || '{}');
-    s.quality = q; s.tipsDismissed = true; s.intro = false; localStorage.setItem('mythicwar-settings', JSON.stringify(s));
+    s.quality = q; s.tipsDismissed = true; localStorage.setItem('mythicwar-settings', JSON.stringify(s));
   } catch {}
 }, quality);
 const shot = async (name) => { const f = join(out, `chronicle-${name}.png`); await page.screenshot({ path: f }); console.log(f); };
