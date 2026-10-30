@@ -140,7 +140,7 @@ export class FakeWorld {
     const rng = this.rng;
     for (const q of this.queue) {
       this.commands.push({ tick: this.tickCount, player: q.player, cmd: q.cmd });
-      if ((q.cmd.type === 'move' || q.cmd.type === 'attackMove') && Array.isArray(q.cmd.units)) {
+      if ((q.cmd.type === 'move' || q.cmd.type === 'attackMove' || q.cmd.type === 'patrol') && Array.isArray(q.cmd.units)) {
         for (const id of q.cmd.units) {
           const e = this.entities.get(id);
           if (e && e.k === 'u' && e.o === q.player) e.goal = { x: q.cmd.x, y: q.cmd.y };

@@ -30,11 +30,11 @@ const ACTION = Object.fromEntries(KEY_ACTIONS.map((a) => [a.id, a]));
 /** The camera's panning actions and the direction each moves the view. */
 export const PAN_ACTIONS = { cam_left: [-1, 0], cam_right: [1, 0], cam_up: [0, -1], cam_down: [0, 1] };
 
-// Keys that keep their fixed jobs and cannot be bound: menus, chat, selection, groups, gods, delete,
+// Keys that keep their fixed jobs and cannot be bound: menus, chat, selection (idle '.' and ','), groups, gods, delete,
 // modifiers, and the browser's own (F5, F11, F12).
 const RESERVED = new Set([
   'Escape', 'F10', 'Enter', 'Tab', 'Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'ContextMenu', 'OS',
-  'Delete', 'Backspace', 'Pause', '.', '`', 'Dead', 'Unidentified', 'Process',
+  'Delete', 'Backspace', 'Pause', '.', ',', '`', 'Dead', 'Unidentified', 'Process',
   ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
   ...'0123456789',
 ]);

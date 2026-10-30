@@ -1,5 +1,5 @@
-// The objectives of the guided first match (DESIGN 9.2): one step at a time, each ticked off by
-// what the player actually does (read from the ViewState and the selection, so nothing goes over
+// The objectives of the guided first match (DESIGN 9.2): one step at a time, each ticked off (and
+// latched) by what the player has done (read from the ViewState and the selection, so nothing goes over
 // the wire), with a spot on the battlefield to point at and the command-card buttons to light up.
 // The medal at the end goes by the game time of the victory.
 //
@@ -75,9 +75,13 @@ function buildStep(id, type, icon, title, why) {
   };
 }
 
+// A step is met the first time its done(c) holds, in or out of turn, and stays met (the gather steps
+// read what Worshippers are doing right now, and a learner moves them on). A step with `impliedFrom`
+// also counts as met once that step or any after it is: a learner holding a god has gathered and prayed.
 export const TUTORIAL_STEPS = [
   {
     id: 'select', icon: '👆', title: 'Choose your Worshippers',
+    impliedFrom: 'mine', // whoever sends Worshippers anywhere has chosen them
     text: () => 'These robed figures are your Worshippers: they gather, build and pray. Hold the left mouse button and drag a box around them to select them.',
     done: (c) => c.selectedWorkers > 0,
     target: (c) => {
@@ -92,14 +96,14 @@ export const TUTORIAL_STEPS = [
     },
   },
   {
-    id: 'mine', icon: '⛏️', title: 'Mine gold',
+    id: 'mine', impliedFrom: 'god', icon: '⛏️', title: 'Mine gold',
     text: () => 'With your Worshippers selected, right-click the gold mine to send them all to work there. Gold pays for nearly everything: keep at least three on it.',
     done: (c) => c.tasks.gold >= 3,
     progress: (c) => count(c.tasks.gold, 3),
     target: (c) => c.mine,
   },
   {
-    id: 'wood', icon: '🌲', title: 'Chop wood',
+    id: 'wood', impliedFrom: 'god', icon: '🌲', title: 'Chop wood',
     text: () => 'Wood builds your city. Click one Worshipper (a miner will do), Shift+click a second, then right-click a tree at the forest edge. Get two of them chopping.',
     done: (c) => c.tasks.wood >= 2,
     progress: (c) => count(c.tasks.wood, 2),
@@ -108,7 +112,7 @@ export const TUTORIAL_STEPS = [
   buildStep('house', 'house', '🏠', 'Build a House', 'Every House raises your population limit, so you can have more people.'),
   buildStep('shrine', 'shrine', BUILDINGS.shrine.icon || '🛕', 'Raise a Shrine', 'At a Shrine your Worshippers pray for Faith, the price of gods.'),
   {
-    id: 'pray', icon: '🙏', title: 'Pray for Faith',
+    id: 'pray', impliedFrom: 'god', icon: '🙏', title: 'Pray for Faith',
     text: () => 'Select two Worshippers and right-click the Shrine. They kneel, and Faith (top right) starts to rise.',
     done: (c) => c.tasks.pray >= 2,
     progress: (c) => count(c.tasks.pray, 2),
@@ -178,6 +182,7 @@ export class TutorialDirector {
     this.forestAt = -Infinity;
     this.forest = null;
     this.finishedAt = null; // game seconds of the victory
+    this.met = new Set(); // ids of the steps whose condition has held at some look (latched)
   }
 
   get current() {
@@ -214,24 +219,40 @@ export class TutorialDirector {
     c.forest = this.forest;
   }
 
-  /** Look at the match and move on past every finished step (several at once when the player ran ahead). */
+  /** Look at the match and move on past every met step (several at once when the player ran ahead). */
   update() {
     if (this.finished || !this.vs.me) return;
     const c = tutorialContext(this.vs, this.getSelection());
     this.places(c);
     this.ctx = c;
+    this.latch(c);
     while (!this.finished) {
       const step = this.current;
+      if (!this.met.has(step.id)) break;
+      this.index++;
+      if (this.finished) this.finishedAt = this.vs.time || 0;
+      if (this.onStep) this.onStep(this.current, this.index, step);
+    }
+  }
+
+  /** Mark every step from the current one on whose condition holds now, then the ones a later met step implies. */
+  latch(c) {
+    for (let i = this.index; i < TUTORIAL_STEPS.length; i++) {
+      const step = TUTORIAL_STEPS[i];
+      if (this.met.has(step.id)) continue;
       let ok = false;
       try {
         ok = !!step.done(c);
       } catch {
         ok = false;
       }
-      if (!ok) break;
-      this.index++;
-      if (this.finished) this.finishedAt = this.vs.time || 0;
-      if (this.onStep) this.onStep(this.current, this.index, step);
+      if (ok) this.met.add(step.id);
+    }
+    for (let i = TUTORIAL_STEPS.length - 1; i >= this.index; i--) {
+      const step = TUTORIAL_STEPS[i];
+      if (this.met.has(step.id) || !step.impliedFrom) continue;
+      const from = TUTORIAL_STEPS.findIndex((s) => s.id === step.impliedFrom);
+      if (from > i && TUTORIAL_STEPS.slice(from).some((s) => this.met.has(s.id))) this.met.add(step.id);
     }
   }
 

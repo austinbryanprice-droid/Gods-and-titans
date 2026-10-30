@@ -200,7 +200,7 @@ test('sanitizeCommand: whitelisted types and typed fields only', () => {
   assert.equal(sanitizeCommand('stop', b), null);
   // Every whitelisted type accepts a well-formed command.
   const good = {
-    move: { units: [1], x: 1, y: 1 }, attackMove: { units: [1], x: 1, y: 1 }, attack: { units: [1], target: 2 },
+    move: { units: [1], x: 1, y: 1 }, attackMove: { units: [1], x: 1, y: 1 }, patrol: { units: [1], x: 1, y: 1, queue: true }, attack: { units: [1], target: 2 },
     smart: { units: [1], x: 1, y: 1 }, gather: { units: [1], target: 3 }, pray: { units: [1], target: 4 },
     returnCargo: { units: [1] }, build: { units: [1], building: 'barracks', tx: 3, ty: 3 }, train: { building: 2, unit: 'warrior' },
     cancelTrain: { building: 2, index: 0 }, upgradeTier: { building: 2 }, cancelBuild: { building: 2 }, rally: { building: 2, x: 3, y: 3 },

@@ -15,7 +15,7 @@ import { sfx } from '../audio/sfx.js';
 import { checkPlacement, checkWallLine, footprintAt, peaceAnchors } from '../game/placement.js';
 import { getCommandCard, withCardKeys, buttonForKey, buildCheck, trainCheck, affordReason } from './command-card.js';
 import { normKey, bindingsOf, actionOf, cardKeysOf, PAN_ACTIONS } from './key-bindings.js';
-import { isComplete, isWallEntity, isMergingEntity } from './hud-data.js';
+import { isComplete, isWallEntity, isMergingEntity, armyIds } from './hud-data.js';
 import { MAX_SELECTION } from './hud-selection.js';
 import { deletePlan, DELETE_CONFIRM_MS } from './delete-key.js';
 import { peaceNotice } from '../sim/peace.js';
@@ -72,6 +72,8 @@ export class InputController {
     this.lastGod = { i: -1, t: 0 };
     this.lastAlert = null;
     this.idleIndex = -1;
+    this.idleArmyIndex = -1;
+    this.lastArmy = -Infinity; // when Ctrl+A last selected the army (a second tap jumps to it)
     this.hoverId = null;
     this.hoverRelic = null; // a relic on the ground under the cursor (vs.relicNear)
     this.hoverAt = 0;
@@ -393,15 +395,11 @@ export class InputController {
 
   /** Own entities of a type currently on screen. */
   ownOfTypeOnScreen(type) {
-    const r = this.renderer;
     const vs = this.vs;
-    if (!r) return [];
-    const { w, h } = this.canvasPoint(0, 0);
     const out = [];
     for (const e of vs.entities.values()) {
       if (e.o !== vs.myIndex || e.t !== type || (e.k !== 'u' && e.k !== 'b')) continue;
-      const p = r.worldToScreen(e.ix ?? e.x, e.iy ?? e.y, 0);
-      if (p && p.sx >= 0 && p.sy >= 0 && p.sx <= w && p.sy <= h) out.push(e.id);
+      if (this.onScreen(e)) out.push(e.id);
     }
     return out;
   }
@@ -544,6 +542,51 @@ export class InputController {
     this.centerOnIds([ids[i]]);
   }
 
+  /** Is a view entity on screen? */
+  onScreen(e) {
+    const r = this.renderer;
+    if (!r) return false;
+    const { w, h } = this.canvasPoint(0, 0);
+    const p = r.worldToScreen(e.ix ?? e.x, e.iy ?? e.y, 0);
+    return !!p && p.sx >= 0 && p.sy >= 0 && p.sx <= w && p.sy <= h;
+  }
+
+  /** Ctrl+A: every fighting unit (Ctrl+Alt+A: only the ones on screen); tap twice to jump to them. */
+  selectArmy(onScreen = false) {
+    const ids = armyIds(this.vs, onScreen ? { keep: (e) => this.onScreen(e) } : {});
+    if (!ids.length) {
+      this.hud.message(onScreen ? 'No soldiers on screen.' : 'You have no soldiers.', 'info', { icon: '⚔️' });
+      return;
+    }
+    const now = performance.now();
+    const again = now - this.lastArmy < DOUBLE_MS;
+    this.lastArmy = now;
+    this.sel.set(ids);
+    this.afterSelect();
+    if (again && !onScreen) this.centerOnSelection();
+  }
+
+  /** ",": next idle soldier, god or creature (all of them with shift / ctrl). */
+  cycleIdleArmy(all = false) {
+    const ids = armyIds(this.vs, { idle: true });
+    if (!ids.length) {
+      this.hud.message('No idle soldiers.', 'info', { icon: '⚔️' });
+      return;
+    }
+    if (all) {
+      this.sel.set(ids);
+      this.afterSelect();
+      return;
+    }
+    const cur = this.sel.size === 1 ? this.sel.ids[0] : null;
+    let i = cur !== null ? ids.indexOf(cur) : -1;
+    i = i >= 0 ? (i + 1) % ids.length : (this.idleArmyIndex + 1) % ids.length;
+    this.idleArmyIndex = i;
+    this.sel.set([ids[i]]);
+    this.afterSelect();
+    this.centerOnIds([ids[i]]);
+  }
+
   // ---------------------------------------------------------------- orders
 
   /** Right click: smart order for units, rally for production buildings. */
@@ -667,6 +710,12 @@ export class InputController {
           this.command({ type: 'attackMove', units, x: p.x, y: p.y, queue: !!shift });
           this.marker(p.x, p.y, 'attack');
         }
+        sfx.play('move');
+        break;
+      }
+      case 'patrol': {
+        this.command({ type: 'patrol', units, x: p.x, y: p.y, queue: !!shift });
+        this.marker(p.x, p.y, 'attack');
         sfx.play('move');
         break;
       }
@@ -1424,6 +1473,17 @@ export class InputController {
           if (dbl) this.centerOnSelection();
         }
       }
+      return;
+    }
+    // Ctrl+A (Cmd+A): the whole army; Ctrl+Alt+A: the army on screen. (Not Ctrl+Shift+A: browsers keep it.)
+    if ((e.ctrlKey || e.metaKey) && (name === 'A' || (e.altKey && e.code === 'KeyA'))) {
+      e.preventDefault();
+      if (!rep) this.selectArmy(e.altKey);
+      return;
+    }
+    if (key === ',' || (e.code === 'Comma' && !e.altKey)) {
+      e.preventDefault();
+      if (!rep) this.cycleIdleArmy(e.shiftKey || e.ctrlKey);
       return;
     }
     if (key === '.' || e.code === 'NumpadDecimal' || e.code === 'Period') {

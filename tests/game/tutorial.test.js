@@ -193,3 +193,70 @@ test('the raiders send their Worshippers to the mine and otherwise sleep', () =>
   assert.equal(w.buildingList.filter((b) => b.owner === 1).length, 1, 'they build nothing');
   assert.equal(w.unitList.filter((u) => u.owner === 1 && !u.dead).length, 5 + 4, 'they train nothing');
 });
+
+/** A hand-made ViewState for the director: my units and buildings as plain view entities. */
+function fakeView() {
+  const entities = new Map();
+  let next = 1;
+  return {
+    me: { pantheon: 'greek', gods: [], faith: 100 },
+    myIndex: 0,
+    myTeam: 1,
+    entities,
+    map: {},
+    time: 0,
+    setup: { players: [] },
+    relation: () => 'enemy',
+    add(e) {
+      const id = next++;
+      entities.set(id, { id, o: 0, x: 10, y: 10, ...e });
+      return id;
+    },
+  };
+}
+
+test('a met gather step stays met when its Worshippers move on (latched)', () => {
+  const vs = fakeView();
+  const ids = [1, 2, 3, 4, 5].map(() => vs.add({ k: 'u', t: 'worshipper', tk: 'gold' }));
+  const director = new TutorialDirector({ viewState: vs, getSelection: () => ids });
+  director.update();
+  assert.equal(director.current.id, 'wood', 'chose them and three are mining');
+  // Two chop for a moment, then go off to build.
+  vs.entities.get(ids[3]).tk = 'wood';
+  vs.entities.get(ids[4]).tk = 'wood';
+  director.update();
+  assert.equal(director.current.id, 'house');
+  vs.entities.get(ids[3]).tk = 'build';
+  vs.entities.get(ids[4]).tk = 'build';
+  director.update();
+  assert.equal(director.current.id, 'house', 'the wood step does not come back');
+  // A step met out of turn is remembered too: they prayed before the House and Shrine were up.
+  vs.entities.get(ids[3]).tk = 'pray';
+  vs.entities.get(ids[4]).tk = 'pray';
+  director.update();
+  vs.entities.get(ids[3]).tk = 'gold';
+  vs.entities.get(ids[4]).tk = 'gold';
+  vs.add({ k: 'b', t: 'house', bp: 1 });
+  vs.add({ k: 'b', t: 'shrine', bp: 1 });
+  director.update();
+  assert.equal(director.current.id, 'temple', 'praying earlier counts');
+});
+
+test('a learner who skipped ahead to a god and an army is not held at "Chop wood"', () => {
+  const vs = fakeView();
+  const ids = [1, 2, 3].map(() => vs.add({ k: 'u', t: 'worshipper', tk: 'build' }));
+  const steps = [];
+  const director = new TutorialDirector({ viewState: vs, getSelection: () => ids, onStep: (next, i, prev) => steps.push(prev.id) });
+  director.update();
+  assert.equal(director.current.id, 'mine', 'nobody mines, nothing later is met');
+  // A House alone does not skip the gathering lessons.
+  vs.add({ k: 'b', t: 'house', bp: 1 });
+  director.update();
+  assert.equal(director.current.id, 'mine');
+  for (const t of ['shrine', 'temple', 'barracks']) vs.add({ k: 'b', t, bp: 1 });
+  vs.me.gods = ['greek_zeus'];
+  for (let i = 0; i < 4; i++) vs.add({ k: 'u', t: 'warrior', tk: null });
+  director.update();
+  assert.equal(director.current.id, 'attack', 'a god on the field implies the mining, chopping and praying');
+  assert.deepEqual(steps, TUTORIAL_STEPS.slice(0, -1).map((s) => s.id), 'each step still reports in order');
+});

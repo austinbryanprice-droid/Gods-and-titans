@@ -16,6 +16,7 @@ const AUTOCAST_EVERY = 6;
 const RETARGET_TICKS = 20; // ~1 s approaching / blocked before attack-move and auto-acquire look for a closer target
 const SKIP_TICKS = 40; // an unreachable target is not re-acquired for this long
 const SPOT_OPTS = { spots: true };
+const PATROL_MIN = 0.5; // tiles: a patrol between two closer points has nowhere to go
 const AUTO_REPAIR_EVERY = 20; // ticks between an idle worshipper's looks for something to repair
 
 /** Undo side effects of an order that will never run (refund builds, free prayer slots). */
@@ -29,10 +30,10 @@ export function discardOrder(world, u, o) {
   }
 }
 
-/** Orders that never finish by themselves (gather and pray loop, hold and follow last). */
+/** Orders that never finish by themselves (gather, pray and patrol loop, hold and follow last). */
 function openEnded(o) {
   const t = o.type;
-  return t === 'gather' || t === 'pray' || t === 'hold' || t === 'follow' || (t === 'return' && !!o.resume);
+  return t === 'gather' || t === 'pray' || t === 'hold' || t === 'follow' || t === 'patrol' || (t === 'return' && !!o.resume);
 }
 
 /**
@@ -256,6 +257,27 @@ function runAttack(world, u, o) {
   return r === 'lost' || r === 'unreachable';
 }
 
+/**
+ * Patrol: attack-move to (x, y), then back to (ax, ay), and so on until another order. The first leg
+ * keeps the group's formation; the return legs walk alone. A patrol to where the unit stands is over.
+ */
+function runPatrol(world, u, o) {
+  if (hyp(o.x - o.ax, o.y - o.ay) < PATROL_MIN) {
+    u.state = 'idle';
+    return true;
+  }
+  if (!runAttackMove(world, u, o)) return false;
+  const { x, y } = o;
+  o.x = o.ax;
+  o.y = o.ay;
+  o.ax = x;
+  o.ay = y;
+  o.group = null;
+  o.target = 0;
+  u.mv = null;
+  return false;
+}
+
 function runHold(world, u, o) {
   if (u.mv) stopMove(u);
   if (!u.def.attack) {
@@ -299,6 +321,7 @@ function runOrder(world, u, o) {
       return moveToPoint(world, u, o.x, o.y, o.group).arrived;
     }
     case 'attackMove': return runAttackMove(world, u, o);
+    case 'patrol': return runPatrol(world, u, o);
     case 'attack': return runAttack(world, u, o);
     case 'hold': return runHold(world, u, o);
     case 'follow': return runFollow(world, u, o);
@@ -325,7 +348,7 @@ function runOrder(world, u, o) {
 function autocastAllowed(u) {
   const o = u.order;
   if (!o) return true;
-  return o.type === 'attack' || o.type === 'attackMove' || o.type === 'hold' || o.type === 'follow';
+  return o.type === 'attack' || o.type === 'attackMove' || o.type === 'patrol' || o.type === 'hold' || o.type === 'follow';
 }
 
 /** Per-tick update for one unit. */

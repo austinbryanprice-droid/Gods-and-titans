@@ -55,6 +55,7 @@ const TGT = ['id', false];
 const COMMANDS = {
   move: { units: U, x: ['x', true], y: ['y', true], queue: Q },
   attackMove: { units: U, x: ['x', true], y: ['y', true], queue: Q },
+  patrol: { units: U, x: ['x', true], y: ['y', true], queue: Q },
   attack: { units: U, target: ['id', true], queue: Q },
   smart: { units: U, x: XO, y: YO, target: TGT, tx: ['tx', false], ty: ['ty', false], relic: ['index', false], queue: Q },
   gather: { units: U, target: TGT, tx: ['tx', false], ty: ['ty', false], x: XO, y: YO, queue: Q },
