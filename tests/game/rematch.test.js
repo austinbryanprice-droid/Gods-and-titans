@@ -96,6 +96,11 @@ test('Ready for Normal?: a game against Easy computer players only steps up to t
   assert.equal(st.slots[1].difficulty, 'easy', 'the remembered lobby is not changed');
   const launch = launchFrom(lobbyMod, up, 'Austin', 7);
   assert.deepEqual(launch.setup.players.filter((p) => p.kind === 'ai').map((p) => p.difficulty), ['normal', 'normal']);
+  const unnamed = stepUpSkirmish(soloState({ slots: [host, easy(''), { kind: 'closed', team: 4, color: 3 }] }));
+  assert.equal(unnamed.slots[1].name, 'AI (Normal)', 'the default name follows the difficulty field, not a fixed string');
+  const names = launchFrom(lobbyMod, up, 'Austin', 7).setup.players.filter((p) => p.kind === 'ai').map((p) => p.name);
+  assert.match(names[0], / \(Normal AI\)$/, 'in the game the stepped-up AI plays under a figure on Normal');
+  assert.equal(names[1], 'Hera');
   assert.equal(stepUpSkirmish(soloState()), null, 'a Hard AI: no step up');
   assert.equal(stepUpSkirmish(soloState({ slots: [host, easy(), { ...easy(), team: 3, difficulty: 'normal' }] })), null, 'not Easy only');
   assert.equal(stepUpSkirmish(soloState({ survival: true, slots: [host, easy()] })), null, 'not a Trial of the Titans');

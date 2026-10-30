@@ -182,13 +182,13 @@ test('an ally under attack: a softer drum, a ping in the ally\'s colour, Space u
   s.at(10, { events: [hit] });
   const [a] = s.take();
   assert.equal(a.id, 'ally_attacked');
-  assert.equal(a.text, 'P1 is under attack!');
+  assert.equal(a.text, 'Your ally P1 is under attack!', 'an ally is named as one');
   assert.equal(a.icon, '🛡️');
   assert.equal(a.sound, 'drums');
   assert.equal(a.volume, 0.6);
   assert.deepEqual(a.ping, { x: 40, y: 40, color: '#d63a3a' });
   assert.deepEqual(a.jump, { x: 40, y: 40 });
-  assert.equal(a.attention, 'P1 is under attack!');
+  assert.equal(a.attention, 'Your ally P1 is under attack!');
   s.at(20, { events: [hit] });
   assert.deepEqual(s.take(), [], 'again too soon');
   s.at(31, { events: [{ ...hit, x: 41 }] });

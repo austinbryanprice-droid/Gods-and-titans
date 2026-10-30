@@ -313,10 +313,7 @@ export class Hud {
       viewState: this.vs,
       onSelectOnly: (id) => sel.set([id]),
       onRemove: (id) => sel.remove([id]),
-      onSelectType: (type) => sel.set(sel.ids.filter((id) => {
-        const e = this.vs.entities.get(id);
-        return e && e.t === type;
-      })),
+      onSelectType: (type) => sel.selectType(type),
       onCancelQueue: (building, index, count = 1) => game.command(count > 1 ? { type: 'cancelTrain', building, index, count } : { type: 'cancelTrain', building, index }),
       onPortrait: () => game.input && game.input.centerOnSelection(),
     });

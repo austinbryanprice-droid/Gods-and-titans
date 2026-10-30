@@ -105,7 +105,7 @@ export const HOTKEYS = [
     [kbd('Middle-click'), 'The same with the middle button; hold it and drag to move the camera instead'],
     [label('Marker buttons'), 'Beside the minimap: Ping, Attack, Defend, Help and Gather. Press one, then click the map or the minimap'],
     [label('Who sees them'), 'Only your teammates. A mark fades after a few seconds; click the arrow at the edge of the screen to jump to one out of view'],
-    [label('Computer allies'), 'They answer Attack (most of their army goes there, a guard stays home), Defend and Help (their army comes to the spot) for a minute or so; a newer marker replaces the last'],
+    [label('Computer allies'), 'They answer Attack (most of their army goes there, a guard stays home), Defend and Help (their army comes to the spot) for a minute or so; a newer marker replaces the last. They also mark where their own attacks go and where their base needs help'],
   ]],
 ];
 

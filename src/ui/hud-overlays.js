@@ -544,7 +544,8 @@ export class Overlays {
       this.unlockCards(unlocked),
       this.stepUpLine(result, mission),
       this.careerLine(),
-      this.goBtns = el('div', 'hud-obtns', ...this.gameOverButtons(mission, tutorial)));
+      // The buttons stay in sight at the foot of the panel while the chronicle scrolls under them (hud.css .hud-go-btns).
+      this.goBtns = el('div', 'hud-obtns hud-go-btns', ...this.gameOverButtons(mission, tutorial)));
     this.show('gameover', node, () => this.hide());
   }
 

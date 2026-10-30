@@ -172,6 +172,13 @@ export class AlertEngine {
     return sanitizeName(p && p.name, `Player ${Number.isInteger(i) ? i + 1 : '?'}`);
   }
 
+  /** A player's name for an alert, "Your ally Thor (Easy AI)" for a teammate, so an ally is never taken for a foe. */
+  whoName(i) {
+    const vs = this.vs;
+    const name = this.playerName(i);
+    return i !== vs.myIndex && vs.isAlly(i) ? `Your ally ${name}` : name;
+  }
+
   /**
    * Hand an alert on, as far as the settings let it through.
    * @param {object} a { id, level: 'important'|'all', kind, text, icon, sound, volume, ping, jump, attention }
@@ -308,7 +315,7 @@ export class AlertEngine {
         this.emit({ id: 'relic_housed', level: 'important', kind: 'good', icon: r.icon, text: `The ${r.name} rests in your Temple: ${lower}`, sound: 'research', attention: `The ${r.name} is yours!` });
       } else if (Number.isInteger(ev.player) && ev.player >= 0) {
         const ally = vs.isAlly(ev.player);
-        this.emit({ id: 'relic_rival', level: 'all', kind: ally ? 'good' : 'info', icon: r.icon, text: `${this.playerName(ev.player)} has brought the ${r.name} to their Temple.` });
+        this.emit({ id: 'relic_rival', level: 'all', kind: ally ? 'good' : 'info', icon: r.icon, text: `${this.whoName(ev.player)} has brought the ${r.name} to their Temple.` });
       }
     } else if (ev.ev === 'lose' && ev.player === me) {
       this.emit({
@@ -333,7 +340,7 @@ export class AlertEngine {
     const where = site ? { x: site.x, y: site.y } : null;
     const p = vs.players[ev.player];
     const color = displayColor(safeColor(p && p.color, '#ffe9b0'));
-    const name = this.playerName(ev.player);
+    const name = this.whoName(ev.player);
     const mine = ev.player === vs.myIndex;
     const friend = mine || vs.isAlly(ev.player);
     if (ev.type === 'siteCaptured') {
@@ -397,7 +404,7 @@ export class AlertEngine {
     if (t - (this.allyAlert.get(ev.player) ?? -Infinity) < ALLY_REPEAT) return;
     this.allyAlert.set(ev.player, t);
     const p = vs.players[ev.player];
-    const name = this.playerName(ev.player);
+    const name = this.whoName(ev.player);
     const where = Number.isFinite(ev.x) && Number.isFinite(ev.y) ? { x: ev.x, y: ev.y } : null;
     this.emit({
       id: 'ally_attacked',
