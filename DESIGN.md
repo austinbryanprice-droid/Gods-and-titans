@@ -2776,6 +2776,20 @@ given). These skip the ordinary gaps but one AI answers at most every `ackGap` (
 match; an Attack marker in a Decade of Peace is not answered until the peace ends. A loaded game does not
 answer the markers from before the save. A campaign mission has no voices, so no answers either.
 
+**Callouts** (`callOut`): an AI with a human teammate also tells the team what its own army does, as a
+player would. When one of its attack waves leaves the rally point (`mil.waves` grew and the wave is past
+`assemble`) it places an Attack marker on the wave's goal (the end of `mil.route`) with a `callAttack` line
+("Our phalanx marches! Join us at the marker."); when it turns its army round to defend its own base from
+a player's army (mode `defend`, not an ally's, threat power at least `callThreat` 1.5, a player's unit
+near it: wild creatures are no call) it places a Help marker on the threat with a `callHelp` line. Both
+go to the team only: `speak` relays the marker with `relayMark(from, mark, { order: false })`, so it is a
+signal for the humans and not a `teamMark` order (other computer allies do not answer it; the World is
+untouched), and the line as a team line. Apart by `callAttackGap` 60 s and `callHelpGap` 45 s per AI, at
+most `maxCalls` 24 a match; the line shares the answers' `ackGap`, so a burst brings markers but fewer
+words. An AI with no human on its team calls nothing. With AI chatter off the marker still shows (with
+its "Attack here!" / "Need help here!" card); only the line is hidden. A 2v2 Normal game (one human seat)
+measured two Attack and two Help callouts from the ally in 18 minutes.
+
 Rate limits (`VOICE`, game seconds, so a paused game stays quiet): an ordinary line waits 45 s after
 the same AI's last line and 15 s after any AI's, and 150 s after that AI's last line of the same
 kind; a Titan and "nearly beaten" skip those but stay 2 s apart; defeat and victory always go out.

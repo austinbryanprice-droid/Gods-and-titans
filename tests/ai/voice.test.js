@@ -333,3 +333,81 @@ test('a campaign mission has no skirmish banter: its enemies stay in character a
   });
   assert.ok(createVoices(skirmish, [0, 1]) instanceof AIVoices);
 });
+
+/** An AI stand-in with just what the callouts read (src/ai/military.js `mil`, `threat`). */
+const fakeAI = () => ({ mil: { mode: 'home', since: 0, waves: 0, phase: null, route: null, ally: false }, threat: null });
+
+test('callouts: a wave setting out and the base attacked put a marker and a line before the human teammates', () => {
+  const world = fakeWorld(['greek', 'norse', 'egyptian'], { teams: [1, 1, 2] });
+  world.setup.players = [{ index: 0, kind: 'ai' }, { index: 1, kind: 'human' }, { index: 2, kind: 'ai' }];
+  world.time = 300;
+  const ai = fakeAI();
+  const foe = fakeAI();
+  const v = new AIVoices(world, [0, 2], new Map([[0, ai], [2, foe]]));
+  for (const x of v.voices.values()) x.greeted = x.met = x.struck = true;
+  // Assembling at the rally point: not yet.
+  Object.assign(ai.mil, { mode: 'attack', since: 300, waves: 1, phase: 'assemble' });
+  assert.deepEqual(run(v, world, 1), []);
+  Object.assign(ai.mil, { phase: 'march', route: [{ x: 30, y: 30 }, { x: 60, y: 61 }] });
+  const out = run(v, world, 1);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].mark, { kind: 'attack', x: 60, y: 61 }, 'the marker stands on the wave\'s goal');
+  assert.equal(out[0].team, true);
+  assert.ok(VOICE_LINES.greek.callAttack.includes(out[0].text), out[0].text);
+  assert.deepEqual(run(v, world, 10), [], 'each wave once');
+  // The enemy AI has no human teammate: its waves go out silently.
+  Object.assign(foe.mil, { mode: 'attack', since: world.time, waves: 1, phase: 'march', route: [{ x: 5, y: 5 }] });
+  assert.deepEqual(run(v, world, 1), []);
+  // Its base is attacked by a player's army: a Help marker where the threat is.
+  world.unitList.push(unit(2, 12, 12));
+  Object.assign(ai.mil, { mode: 'defend', since: world.time, ally: false, phase: null, route: null });
+  ai.threat = { x: 12, y: 13, power: 4 };
+  const help = run(v, world, 1);
+  assert.equal(help.length, 1);
+  assert.deepEqual(help[0].mark, { kind: 'help', x: 12, y: 13 });
+  assert.equal(help[0].text, undefined, 'the words keep to the answer gap; the marker still goes');
+  assert.deepEqual(run(v, world, 5), []);
+  // A second wave a minute later is called again, words and all.
+  world.time += VOICE.callAttackGap;
+  Object.assign(ai.mil, { mode: 'attack', since: world.time, waves: 2, phase: 'march', route: [{ x: 70, y: 20 }] });
+  const again = run(v, world, 1);
+  assert.equal(again.length, 1);
+  assert.deepEqual(again[0].mark, { kind: 'attack', x: 70, y: 20 });
+  assert.ok(VOICE_LINES.greek.callAttack.includes(again[0].text));
+});
+
+test('callouts: no Help for wild creatures, a small threat or an ally\'s defence; gaps and the match budget hold', () => {
+  const world = fakeWorld(['greek', 'norse'], { teams: [1, 2] });
+  world.players.push({ index: 2, name: 'P2', pantheon: 'celtic', team: 1, defeated: false });
+  world.setup.players = [{ index: 0, kind: 'ai' }, { index: 1, kind: 'ai' }, { index: 2, kind: 'human' }];
+  world.time = 400;
+  const ai = fakeAI();
+  const v = new AIVoices(world, [0], new Map([[0, ai]]));
+  const defend = (extra) => {
+    Object.assign(ai.mil, { mode: 'defend', since: world.time, ally: false }, extra);
+    return run(v, world, 1);
+  };
+  world.unitList.push(unit(-1, 10, 10));
+  ai.threat = { x: 10, y: 10, power: 5 };
+  assert.deepEqual(defend(), [], 'wild creatures: no call');
+  world.unitList.push(unit(1, 11, 10));
+  ai.threat = { x: 10, y: 10, power: 1 };
+  assert.deepEqual(defend(), [], 'a lone scout: no call');
+  ai.threat = { x: 10, y: 10, power: 5 };
+  assert.deepEqual(defend({ ally: true }), [], 'helping an ally is not a call for help');
+  assert.equal(defend().length, 1);
+  world.time += 5;
+  assert.deepEqual(defend(), [], 'a second Help waits callHelpGap');
+  let calls = 1;
+  for (let i = 0; i < VOICE.maxCalls + 5; i++) {
+    world.time += VOICE.callHelpGap;
+    calls += defend().length;
+  }
+  assert.equal(calls, VOICE.maxCalls, 'the match budget');
+  // Defeated, it calls no more.
+  const v2 = new AIVoices(world, [0], new Map([[0, ai]]));
+  world.players[0].defeated = true;
+  world.time += VOICE.callHelpGap;
+  Object.assign(ai.mil, { since: world.time });
+  assert.deepEqual(run(v2, world, 1).filter((l) => l.mark), []);
+});

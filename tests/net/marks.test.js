@@ -259,3 +259,27 @@ test('a computer ally\'s answer to a marker goes to its team only', async () => 
   assert.deepEqual(heard.ben, [], 'the enemy hears nothing');
   stopAll(g);
 });
+
+test('a computer ally\'s own callout: a marker and a line for its team only, never a team order', async () => {
+  const g = makeGame([1, 1, 2, 1]);
+  await startAll(g);
+  const [ann, ben, cy] = g.clients;
+  g.host.ais.set(3, { tick() {} }); // (Cy's seat played by the computer for this test)
+  g.host.voices = { step: () => [{ from: 3, team: true, mark: { kind: 'attack', x: 20, y: 21 }, text: 'The spears go forth. Strike with us here!' }, { from: 3, team: true, mark: { kind: 'nope', x: 1, y: 1 } }, { from: 2, team: true, mark: { kind: 'help', x: 4, y: 4 } }] };
+  const marks = { host: collect(g.host), ann: collect(ann), ben: collect(ben), cy: collect(cy) };
+  const heard = { ann: [], ben: [] };
+  ann.onChat((l) => heard.ann.push(l));
+  ben.onChat((l) => heard.ben.push(l));
+  g.host.speak([]);
+  await waitFor(() => marks.ann.length === 1 && heard.ann.length === 1);
+  await sleep(30);
+  assert.deepEqual(marks.host, [{ from: 3, name: 'Cy', kind: 'attack', x: 20, y: 21 }]);
+  assert.deepEqual(marks.ann, [{ from: 3, name: 'Cy', kind: 'attack', x: 20, y: 21 }], 'a bad kind and a human\'s seat are refused');
+  assert.equal(heard.ann[0].team, true);
+  assert.deepEqual(marks.ben, [], 'the enemy sees no marker');
+  assert.deepEqual(heard.ben, [], 'and hears nothing');
+  assert.deepEqual(marks.cy, [], 'the sender is not sent its own');
+  g.host.step(1);
+  assert.ok(!g.host.world.commands.some((c) => c.cmd.type === 'teamMark'), 'the World is untouched: other computer allies do not answer it');
+  stopAll(g);
+});
