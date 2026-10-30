@@ -192,7 +192,7 @@ export class HostSession extends SessionBase {
    * @param {Map<number, object>} [o.conns] player index → connection (from LobbyHost.start)
    * @param {(setup: object) => object} o.createWorld e.g. createWorld from src/sim/world.js
    * @param {(world: object, index: number, difficulty: string, opts?: { standIn?: boolean }) => { tick(): void }} [o.createAI]
-   * @param {(world: object, players: number[]) => { step(events: object[]): { from: number, text: string }[] }} [o.createVoices]
+   * @param {(world: object, players: number[], ais: Map<number, object>) => { step(events: object[]): { from: number, text: string }[] }} [o.createVoices]
    *   the AI players' chat lines (src/ai/voice.js); only the setup's own AI slots speak
    * @param {boolean} [o.autoTick] run the ticker on start() (tests step manually with step())
    * @param {boolean} [o.useWorker] allow the background-proof worker metronome
@@ -225,7 +225,7 @@ export class HostSession extends SessionBase {
     const voiced = [...this.ais.keys()];
     if (createVoices && voiced.length) {
       try {
-        this.voices = createVoices(this.world, voiced);
+        this.voices = createVoices(this.world, voiced, this.ais); // (the AIs read only: is one defending its base?)
         if (resumed && this.voices && typeof this.voices.resume === 'function') this.voices.resume();
       } catch (err) {
         this.reportError('voice-create', err);

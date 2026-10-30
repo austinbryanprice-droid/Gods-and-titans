@@ -35,10 +35,13 @@ const FINAL = new Set(['defeat', 'victory']); // the last word goes out whatever
  * The voices of a match's computer players.
  * @param {object} world authoritative World
  * @param {number[]} players indices of the AI players that speak
+ * @param {Map<number, object>} [ais] the host's AIs by player (createAI's controllers): read only, to tell an AI
+ *   defending its own base (AIPlayer.defendingHome), which answers a teammate's marker with `ackBusy`
  */
 export class AIVoices {
-  constructor(world, players) {
+  constructor(world, players, ais = null) {
     this.world = world;
+    this.ais = ais instanceof Map ? ais : null;
     const seed = world.setup ? world.setup.seed : 1;
     this.rng = new RNG(hashSeed(`${seed}:voices`));
     this.voices = new Map();
@@ -64,6 +67,7 @@ export class AIVoices {
         lastOf: {}, // trigger -> game time of its last line
         gods: new Set(), // gods that have arrived once
         ackId: 0, // the newest teammate's marker (sim/team-orders.js) it has seen
+        peaceAckId: 0, // the newest Attack marker it has seen in a Decade of Peace (answered with `ackPeace`)
         lastAck: -Infinity,
         acks: 0,
       });
@@ -86,7 +90,7 @@ export class AIVoices {
       v.greeted = true;
       v.met = true;
     }
-    for (const v of this.voices.values()) v.ackId = world.markSeq || 0; // (the markers of the time before are not answered again)
+    for (const v of this.voices.values()) v.ackId = v.peaceAckId = world.markSeq || 0; // (the markers of the time before are not answered again)
     for (const u of world.unitList || []) {
       const v = !u.dead && this.voices.get(u.owner);
       const def = v && getUnitType(u.type);
@@ -193,25 +197,49 @@ export class AIVoices {
    * A teammate's Attack, Defend or Help marker (sim/team-orders.js, which the AI answers, src/ai/marks.js):
    * one AI of that team says so, to the team only (`team: true`: the enemy must not learn an order was
    * given). Not counted against the ordinary gaps, which would hold most answers back, but at most one
-   * every VOICE.ackGap per AI. An Attack marker in a Decade of Peace waits, unanswered, as the AI does.
+   * every VOICE.ackGap per AI. The answer is honest: an AI whose army defends its own base (which the marker
+   * waits for, military.js defendingHome) says it comes after (`ackBusy`), and only when no free teammate AI
+   * answers; an Attack marker in a Decade of Peace waits, as the AI does, and says so once (`ackPeace`); the
+   * usual answer follows when the peace ends and the AI marches.
    */
   answerMarks(now, out) {
     const world = this.world;
     const said = new Set();
+    const busy = [];
     for (const v of this.voices.values()) {
       const m = teamOrderFor(world, v.index);
       if (!m || m.id <= v.ackId) continue;
-      if (m.kind === 'attack' && world.peace) continue;
+      if (m.kind === 'attack' && world.peace) {
+        if (m.id <= v.peaceAckId) continue;
+        v.peaceAckId = m.id;
+        this.ack(v, m, 'ackPeace', now, out, said);
+        continue;
+      }
       v.ackId = m.id;
-      if (said.has(m.id) || v.done || world.players[v.index].defeated) continue;
-      if (v.acks >= VOICE.maxAcks || now - v.lastAck < VOICE.ackGap) continue;
-      const text = this.pick(v, m.kind === 'attack' ? 'ackAttack' : 'ackDefend', {});
-      if (!text) continue;
-      v.lastAck = now;
-      v.acks++;
-      said.add(m.id);
-      out.push({ from: v.index, text, team: true });
+      if (this.defendingHome(v.index)) busy.push([v, m]);
+      else this.ack(v, m, m.kind === 'attack' ? 'ackAttack' : 'ackDefend', now, out, said);
     }
+    for (const [v, m] of busy) this.ack(v, m, 'ackBusy', now, out, said);
+  }
+
+  /** One answer to marker `m`, within the limits of answerMarks; true when said. */
+  ack(v, m, trigger, now, out, said) {
+    if (said.has(m.id) || v.done || this.world.players[v.index].defeated) return false;
+    if (v.acks >= VOICE.maxAcks || now - v.lastAck < VOICE.ackGap) return false;
+    const text = this.pick(v, trigger, {});
+    if (!text) return false;
+    v.lastAck = now;
+    v.acks++;
+    said.add(m.id);
+    out.push({ from: v.index, text, team: true });
+    return true;
+  }
+
+  /** Is this AI's army defending its own base right now (a marker waits for that)? Read from the host's AI. */
+  defendingHome(index) {
+    const c = this.ais && this.ais.get(index);
+    const ai = c && (c.ai || c);
+    return !!(ai && typeof ai.defendingHome === 'function' && ai.defendingHome());
   }
 
   /** Whether any other player is this AI's enemy (none in the Trial of the Titans, where the monsters belong to no one). */
@@ -335,9 +363,10 @@ export class AIVoices {
  * The host's factory (HostSession `createVoices`).
  * @param {object} world
  * @param {number[]} players the AI players that speak
+ * @param {Map<number, object>} [ais] the host's AI controllers by player (read only: AIVoices)
  */
-export function createVoices(world, players) {
+export function createVoices(world, players, ais = null) {
   // A campaign mission's enemies stay in character: no skirmish banter, its narrator tells the story (DESIGN 5.16).
   if (world.setup && typeof world.setup.campaign === 'string') return null;
-  return new AIVoices(world, players);
+  return new AIVoices(world, players, ais);
 }

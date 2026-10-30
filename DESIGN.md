@@ -2720,7 +2720,7 @@ marker reaches the World as a `teamMark` order (6.2, `src/sim/team-orders.js`), 
 answers the newest standing one (`teamOrderFor`: a newer marker of any kind replaces the older; it runs out after
 90 / 75 / 60 s; an enemy's AI never sees it). Every difficulty does, and so does a stand-in seat (it plays for a
 teammate who dropped out, so it takes their team's calls; it only stays quiet, 10.1). The military enters mode
-`mark` from any mode but defending its own base (a base under attack comes first; while out, like a wave, only a
+`mark` from any mode but defending its own base (`defendingHome`: a base under attack comes first; while out, like a wave, only a
 big threat calls the army back); an Attack marker waits out a Decade of Peace. The army splits by population:
 `MARK_SHARE` goes (Attack 70 %, Defend 80 %, Help 85 %; gods, the Titan and summoned creatures always go, rams
 only to an Attack) and the rest, the soldiers nearest the rally point, stays as a home guard (sticky across thinks)
@@ -2792,7 +2792,11 @@ An AI also answers a teammate's Attack marker (`ackAttack`, "Our spears go where
 marker (`ackDefend`) when it takes the order (`answerMarks`, reading `teamOrderFor`): one AI of the team per
 marker, as a team line (`team: true`, sent with `relayTeamChat`, so the enemy never learns that an order was
 given). These skip the ordinary gaps but one AI answers at most every `ackGap` (20 s) and `maxAcks` (30) times a
-match; an Attack marker in a Decade of Peace is not answered until the peace ends. A loaded game does not
+match. The answer says what the AI will do: an AI whose army defends its own base (`defendingHome` in military.js,
+the same test that keeps the marker waiting there; HostSession hands `createVoices` its AIs, read only) says it comes
+once its base is safe (`ackBusy`, "Our own walls are under attack. We come once they hold."), and only when no free AI
+of the team answers; an Attack marker in a Decade of Peace gets one `ackPeace` line ("The truce binds us still. When it
+ends, the phalanx marches there."), then the usual `ackAttack` once the peace has ended and the army marches. A loaded game does not
 answer the markers from before the save. A campaign mission has no voices, so no answers either.
 
 Rate limits (`VOICE`, game seconds, so a paused game stays quiet): an ordinary line waits 45 s after

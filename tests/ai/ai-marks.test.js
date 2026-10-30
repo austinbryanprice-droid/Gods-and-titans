@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { createWorld } from '../../src/sim/world.js';
 import { createAI } from '../../src/ai/ai.js';
 import { AIVoices, createVoices } from '../../src/ai/voice.js';
+import { VOICE_LINES } from '../../src/ai/voice-lines.js';
 import { MARK_SHARE } from '../../src/ai/marks.js';
 import { TEAM_ORDER_LIFE, teamOrderFor } from '../../src/sim/team-orders.js';
 import { normalizeCommand } from '../../src/sim/commands.js';
@@ -235,6 +236,61 @@ test('the ally answers a marker in chat, to the team only, at most every ackGap;
   assert.equal(lines.filter((l) => l.team).length, 2);
   assert.ok(lines.filter((l) => l.team).every((l) => l.from === 1));
   assert.equal(createVoices({ ...g.world, setup: { ...g.world.setup, campaign: 'ch1-m1' } }, [1]), null);
+});
+
+/** A 2v2 with voices for the AIs (the host's AIs passed in, as HostSession does); `lines` collects the team lines. */
+function voicedGame(opts) {
+  const g = teamGame(opts);
+  const voices = createVoices(g.world, [...g.ais.keys()], g.ais);
+  const lines = [];
+  const run = (s) => {
+    for (let k = 0; k < s * TICK_RATE; k++) {
+      for (const a of g.ais.values()) a.tick();
+      g.world.tick();
+      lines.push(...voices.step(g.world.events).filter((l) => l.team));
+      g.world.events.length = 0;
+    }
+  };
+  return { ...g, voices, lines, run };
+}
+
+test('an ally defending its own base does not promise to go where you point: it says it comes after', () => {
+  const g = voicedGame();
+  g.run(5);
+  const ai = g.ais.get(1).ai;
+  const home = g.tc(1);
+  for (let k = 0; k < 10; k++) g.world.spawnUnit(2, 'warrior', home.x - 4 - (k % 3), home.y - 4 - Math.floor(k / 3), { silent: true });
+  for (let k = 0; k < 40 && ai.mil.mode !== 'defend'; k++) g.run(0.5);
+  assert.equal(ai.mil.mode, 'defend');
+  assert.equal(ai.mil.ally, false, 'its own base');
+  assert.equal(ai.defendingHome(), true);
+  g.lines.length = 0;
+  g.mark(0, 'attack', g.tc(2).x, g.tc(2).y);
+  g.run(1);
+  assert.equal(g.lines.length, 1);
+  assert.equal(g.lines[0].from, 1);
+  assert.ok(VOICE_LINES.norse.ackBusy.includes(g.lines[0].text), `"${g.lines[0].text}" says it is busy at home`);
+  assert.ok(!VOICE_LINES.norse.ackAttack.includes(g.lines[0].text));
+  assert.notEqual(ai.mil.mode, 'mark', 'and indeed it stays home');
+});
+
+test('an Attack marker during a Decade of Peace: the ally says it waits for the truce, then answers when it marches', () => {
+  const g = voicedGame();
+  g.world.peace = true;
+  g.world.peaceEnd = 30;
+  g.run(5);
+  g.lines.length = 0;
+  g.mark(0, 'attack', g.tc(2).x, g.tc(2).y);
+  g.run(1);
+  assert.equal(g.lines.length, 1, 'answered at once, to the team');
+  assert.ok(VOICE_LINES.norse.ackPeace.includes(g.lines[0].text), `"${g.lines[0].text}" waits for the truce`);
+  g.run(10);
+  assert.equal(g.lines.length, 1, 'said once');
+  g.run(20); // the peace ends at 30 s
+  assert.equal(g.world.peace, false);
+  assert.equal(g.lines.length, 2);
+  assert.ok(VOICE_LINES.norse.ackAttack.includes(g.lines[1].text), 'the usual answer once it marches');
+  assert.equal(g.ais.get(1).ai.mil.mode, 'mark');
 });
 
 test('a hosted game with markers is recorded, and its replay plays back to the same world', () => {

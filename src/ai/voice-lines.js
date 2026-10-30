@@ -2,10 +2,12 @@
 // `{unit}` is the god or Titan the line is about, `{enemy}` the other player's name; a line
 // whose blanks cannot be filled is skipped. `greetAlly` is the greeting of a match with no enemy
 // player (the Trial of the Titans: everyone together against the monsters). `ackAttack` and `ackDefend`
-// answer a teammate's Attack marker and Defend / Help marker (said to the team only). Keep each line short (one card in the message feed).
+// answer a teammate's Attack marker and Defend / Help marker (said to the team only); `ackBusy` answers any marker while
+// the AI's army defends its own base (it comes once the base is safe), `ackPeace` an Attack marker during a Decade of
+// Peace (it waits for the truce to end). Keep each line short (one card in the message feed).
 
 /** The moments an AI speaks, in the order DESIGN 10.1 lists them. */
-export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory', 'ackAttack', 'ackDefend'];
+export const VOICE_TRIGGERS = ['greet', 'greetAlly', 'contact', 'struck', 'peaceEnd', 'god', 'titan', 'godLost', 'beaten', 'defeat', 'victory', 'ackAttack', 'ackDefend', 'ackBusy', 'ackPeace'];
 
 export const VOICE_LINES = {
   greek: {
@@ -22,6 +24,8 @@ export const VOICE_LINES = {
     victory: ['Glory to Olympus! Your names will be forgotten.', 'As the Fates foretold: victory is ours.'],
     ackAttack: ['Our spears go where you point.', 'As you command. The phalanx marches!'],
     ackDefend: ['Hold fast, friend. Our shields are coming.', 'Olympus heard you. We march to your side.'],
+    ackBusy: ['Our own walls are under attack. We come once they hold.', 'First we save our city, friend. Then we are yours.'],
+    ackPeace: ['The truce binds us still. When it ends, the phalanx marches there.', 'Patience, friend. Once the peace is over, we strike there.'],
   },
   norse: {
     greet: ['Skål! May your mead be strong and your walls weak.', 'The ravens are flying. Odin wants a good show.'],
@@ -37,6 +41,8 @@ export const VOICE_LINES = {
     victory: ['To Hel with you all! The North stands.', 'Skål! Another saga for the halls.'],
     ackAttack: ['Point the way and the axes follow!', 'Ha! A fight. We\'re coming, shield-sibling.'],
     ackDefend: ['Hold the line! The longships are coming.', 'Stand fast, friend. The North rides to you.'],
+    ackBusy: ['Busy at our own hall! We come when it is clear.', 'Raiders at our gate. Hold on, we come after.'],
+    ackPeace: ['The truce holds for now. When it breaks, the axes go there.', 'Not yet, friend. When the peace ends, we sail there.'],
   },
   egyptian: {
     greet: ['Ra sees all from his sun boat. Build well, for he judges.', 'Greetings. My pyramids will outlast your whole people.'],
@@ -52,6 +58,8 @@ export const VOICE_LINES = {
     victory: ['Your names are struck from every monument. Ra is victorious.', 'Eternity belongs to Egypt.'],
     ackAttack: ['As you will it. The chariots ride.', 'Ra lights the way. We strike where you point.'],
     ackDefend: ['Hold on, friend. The armies of the Nile are coming.', 'We come to you, as the flood comes every year.'],
+    ackBusy: ['Our own temples are attacked. We come when they are safe.', 'First the enemy at our gates, friend. Then we come.'],
+    ackPeace: ['The truce of the gods holds. When it ends, the chariots ride there.', 'We wait for the peace to end. Then we strike there.'],
   },
   hindu: {
     greet: ['Namaste. May dharma guide this battle.', 'The wheel turns. Let us see where it stops for you.'],
@@ -67,6 +75,8 @@ export const VOICE_LINES = {
     victory: ['Dharma prevails. Your cycle ends here.', 'As it was written in the stars. Victory!'],
     ackAttack: ['Your will is our dharma. We march.', 'The war elephants turn where you point.'],
     ackDefend: ['Hold firm, friend. We come to your side.', 'The wheel turns your way. We are coming.'],
+    ackBusy: ['Our own city is attacked. We come when it is safe.', 'First we defend our home, friend. Then we come.'],
+    ackPeace: ['The truce is dharma for now. When it ends, we march there.', 'Patience. Once the peace ends, the elephants go there.'],
   },
   japanese: {
     greet: ['Honour to you, rivals. May the kami favour the worthy.', 'The cherry blossoms fall. So will your walls.'],
@@ -82,6 +92,8 @@ export const VOICE_LINES = {
     victory: ['The way of the kami prevails. Bow.', 'Victory, as the sun goddess willed.'],
     ackAttack: ['Hai! Our blades go where you point.', 'As you command. The samurai advance.'],
     ackDefend: ['Hold, friend. We come with honour.', 'Stand firm. Our banners ride to you.'],
+    ackBusy: ['Our own castle is attacked. We come when it is safe.', 'Forgive us, friend. First our gates, then your call.'],
+    ackPeace: ['The truce holds with honour. When it ends, we strike there.', 'Not yet. When the peace is over, the samurai go there.'],
   },
   chinese: {
     greet: ['Greetings. Heaven granted its mandate to me, not you.', 'May your rice bowl stay full. Mine will be fuller.'],
@@ -97,6 +109,8 @@ export const VOICE_LINES = {
     victory: ['The Mandate of Heaven is mine. Ten thousand years!', 'All under Heaven bows to us.'],
     ackAttack: ['The order is given. The legions march.', 'Heaven wills it: we strike where you point.'],
     ackDefend: ['Hold the wall, ally. Our troops are coming.', 'Stand firm. The Mandate sends you aid.'],
+    ackBusy: ['Our own walls are attacked. We come when they hold.', 'First we secure our city, ally. Then we come.'],
+    ackPeace: ['The truce holds. When it ends, the legions march there.', 'Heaven asks patience. After the peace, we strike there.'],
   },
   aztec: {
     greet: ['The Fifth Sun shines on us. It must be fed.', 'Welcome, friends. The sun is hungry today.'],
@@ -112,6 +126,8 @@ export const VOICE_LINES = {
     victory: ['The sun drinks deeply today. Victory!', 'Huitzilopochtli is pleased.'],
     ackAttack: ['The sun is hungry. We go where you point.', 'Yes! The jaguars hunt where you show them.'],
     ackDefend: ['Hold on, friend. The eagles fly to you.', 'We come to your side. The sun will not set on you.'],
+    ackBusy: ['Our own city is attacked. We come when it is safe.', 'Enemies at our pyramid! We come after them.'],
+    ackPeace: ['The truce holds for now. When it ends, the jaguars hunt there.', 'Patience, friend. After the peace, we go there.'],
   },
   celtic: {
     greet: ['Well met, strangers. The druids say this ends badly for you.', 'May the wild lands welcome you... briefly.'],
@@ -127,6 +143,8 @@ export const VOICE_LINES = {
     victory: ['The wild prevails! Raise a cup to the Dagda.', 'Back to your boats, all of you.'],
     ackAttack: ['To the charge! We go where you point.', 'Ha! A raid. The clans are with you.'],
     ackDefend: ['Hold fast, friend. The clans are coming.', 'The woods march to you. Hold on!'],
+    ackBusy: ['Our own hillfort is attacked. We come when it is safe.', 'First we drive them from our home, friend. Then we come.'],
+    ackPeace: ['The truce still holds. When it ends, the clans charge there.', 'Not yet, friend. When the peace breaks, we go there.'],
   },
   mesopotamian: {
     greet: ['Greetings from the first city. We invented all this, you know.', 'The gods of Sumer are watching. They keep careful records.'],
@@ -142,6 +160,8 @@ export const VOICE_LINES = {
     victory: ['Carve it in stone: we are victorious!', 'All the lands between the rivers are ours.'],
     ackAttack: ['It is written: we march where you point.', 'The scribes record the order. Forward!'],
     ackDefend: ['Hold the walls, friend. We are coming.', 'Help comes from the first city. Hold on.'],
+    ackBusy: ['Our own walls are attacked. We come when they hold.', 'First we save our city, friend. Then we march.'],
+    ackPeace: ['The truce is sealed for now. When it ends, we march there.', 'It is written: after the peace, we strike there.'],
   },
   west_african: {
     greet: ['Welcome, friends. Anansi has already told me your plans.', 'May the ancestors give us a good contest.'],
@@ -157,6 +177,8 @@ export const VOICE_LINES = {
     victory: ['The drums beat for victory! Àṣẹ!', 'The ancestors smile on us today.'],
     ackAttack: ['The drums answer! We strike where you point.', 'Àṣẹ! The warriors go where you show them.'],
     ackDefend: ['Hold on, friend. The drums call us to you.', 'We are coming. The ancestors walk with us.'],
+    ackBusy: ['Our own village is attacked. We come when it is safe.', 'First we guard our home, friend. Then the drums call us.'],
+    ackPeace: ['The truce holds for now. When it ends, the warriors go there.', 'Patience, friend. After the peace, we strike there.'],
   },
 };
 
