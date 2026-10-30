@@ -96,6 +96,8 @@ export function unitStateText(e, def, myIndex) {
   // `mw` (requested from the sim, see notes/interface-requests.md): waiting for one of the mining spots.
   if (e.st === 'gather' && def && def.class === 'worker') st = e.tg ? (e.mw ? 'Waiting its turn at the gold mine' : 'Gathering gold') : 'Chopping wood';
   if (e.tk === 'repair') st = e.st === 'build' ? 'Repairing' : 'On the way to repair';
+  if (e.pa && e.st === 'move') st = 'Patrolling';
+  if (e.ho && e.st === 'idle') st = 'Holding position';
   if (e.c) st += `${st ? ' · ' : ''}Carrying ${e.c === 'g' ? 'gold' : 'wood'}`;
   if (e.bo && BUILDINGS[e.bo.b]) st = `On the way to build a ${BUILDINGS[e.bo.b].name}`;
   if (e.ex) st += `${st ? ' · ' : ''}Vanishes in ${Math.ceil(e.ex)}s`;

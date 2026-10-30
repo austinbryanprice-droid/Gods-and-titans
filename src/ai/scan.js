@@ -13,7 +13,8 @@ export function workerJob(u) {
     case 'build':
     case 'repair': return 'build';
     case 'attack':
-    case 'attackMove': return 'fight';
+    case 'attackMove':
+    case 'patrol': return 'fight';
     case 'relic':
     case 'deliver': return 'relic'; // carrying a relic to a Temple (ai/relics.js)
     default: return 'busy';

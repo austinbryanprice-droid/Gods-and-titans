@@ -74,6 +74,9 @@ function unitView(u) {
   // waiting its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
   const o = u.order;
   if (o && o.type === 'gather' && o.phase === 'wait') v.mw = 1;
+  // a standing order, so the HUD can tell a guard or a patrol from an idle soldier; omitted otherwise
+  if (o && o.type === 'hold') v.ho = 1;
+  else if (o && o.type === 'patrol') v.pa = 1;
   return v;
 }
 

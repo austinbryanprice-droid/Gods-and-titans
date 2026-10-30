@@ -466,6 +466,14 @@ function unitCard(card, vs, group, ownIds, mode) {
     return card;
   }
 
+  if (anyAttack) {
+    card[7] = button(7, { // the last slot of the middle row: the passives fill it from the left
+      id: 'patrol', key: 'P', icon: '🔁', title: 'Patrol',
+      description: 'Click a spot: walk there and back, again and again, fighting every enemy met on the way, until given another order. With Shift, the patrol starts where the queued orders end.',
+      action: { kind: 'target', order: 'patrol', target: 'point' },
+    });
+  }
+
   // Abilities of the active subgroup (bottom row), passives in the middle row.
   if (def) {
     for (const ab of def.abilities || []) {

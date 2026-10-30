@@ -543,7 +543,7 @@ Pop used = pop of living units + pop of everything queued in production.
 - Damage after armor (WC3): armor ≥ 0 → `× (1 − 0.06·a / (1 + 0.06·a))`; armor < 0 → `× (2 − 0.94^(−a))`.
 - Ranged attacks fire a projectile (`PROJECTILE_SPEED`); damage lands on arrival (homing,
   never misses unless the target died). Melee lands at the swing.
-- Auto-acquire: idle and attack-moving non-worker units attack enemies within acquisition
+- Auto-acquire: idle, attack-moving and patrolling non-worker units attack enemies within acquisition
   range `max(sight × 0.75, range + 1)`. Priority: closest enemy unit that can attack, then
   other units, then buildings. Hold position: attack only what is in range, never move.
 - **Melee surround** (`src/sim/surround.js`): a ground melee attacker within `SURROUND_DIST`
@@ -938,7 +938,7 @@ const snap = world.getSnapshot();         // ViewSnapshot (6.3); includes and cl
 ### 6.2 Commands (`world.issueCommand(playerIndex, cmd)`)
 All unit ids must belong to `playerIndex`; invalid ids are dropped. `queue: true` appends
 (shift-click) instead of replacing the current order, except that an open-ended order at the
-end of the queue (gather, pray, hold, follow) is replaced by the queued one, as with a WC3/SC2
+end of the queue (gather, pray, hold, follow, patrol) is replaced by the queued one, as with a WC3/SC2
 harvest order, and a Return Cargo there deposits and then runs it instead of resuming
 gathering. `issueCommand` copies each command
 through `normalizeCommand` (src/sim/commands.js): unknown types and malformed objects are
@@ -948,6 +948,7 @@ counted in `world.perf.commandErrors`.
 ```js
 { type: 'move',       units: [ids], x, y, queue }
 { type: 'attackMove', units, x, y, queue }
+{ type: 'patrol',     units, x, y, queue }   // attack-move to x, y and back, again and again (below)
 { type: 'attack',     units, target: id, queue }
 { type: 'smart',      units, x, y, target?: id, tx?, ty?, relic?: index, queue } // right-click; sim decides (below)
 { type: 'gather',     units, target?: mineId, tx?, ty? }          // mine or tree tile
@@ -979,6 +980,15 @@ tree tile (tx,ty given or the clicked tile is forest) → gather wood; worker ca
 own drop-off → return cargo; worker + own unfinished building → help build; worker + own
 damaged completed building → repair; worker + own completed Shrine/Temple → pray; otherwise ally target → follow (move to it); else move.
 Units that cannot do the resolved action just move.
+
+**patrol** gives each unit the order `{ type: 'patrol', x, y, ax, ay, group, target }`: its formation slot
+around x, y (as for a move) is one end, and the other is where it stands, or with `queue` where its queued orders
+end (the last queued point). It attack-moves to (x, y) (`runAttackMove`: fights what it meets, then carries on),
+then swaps the two ends and walks back, alone (the group is dropped after the first leg), and so on: it never
+finishes by itself, so a later queued order takes its place, and Stop, Hold or any new order ends it. A patrol
+between two points closer than `PATROL_MIN` (0.5 tiles) is over at once. Abilities autocast while patrolling, and a
+cast resumes the patrol. It is a plain order of plain numbers, so replays, saves (9.4) and online games
+(the command whitelist of `src/net/sanitize.js`) carry it like any other.
 
 **kill** destroys the issuing player's own living units among `units` (another player's unit, a building and a
 mine in the list are skipped) with `World.killEntity(unit, null)`: a normal death that has no killer. The `death`
@@ -1050,6 +1060,7 @@ EntityView = {
   mc,             // player units: abilities set to manual, bit i = def.abilities[i] (omitted when all autocast)
   bo,             // pending build order for workers: { b: typeId, tx, ty } (omitted otherwise)
   mw,             // 1 while a worker waits its turn at a gold mine (all MINE_SLOTS taken); omitted otherwise
+  ho, pa,         // 1 while the unit's order is Hold Position (ho) or a patrol (pa); omitted otherwise ("," skips them)
   tk,             // workers: task 'gold'|'wood'|'pray'|'build'|'repair'|'idle'|'other' (HUD task counts)
   // buildings:
   tx, ty,         // footprint top-left tile
@@ -2117,7 +2128,8 @@ per-frame budget, so a revealed army appears over a few frames.
   Home) can be rebound, and the command card has two layouts: Classic, each command's own letter, or Grid, the keys
   by position (Q W E R / A S D F / Z X C V, each rebindable; a Cancel button still answers Esc). Binding a key another
   action had swaps the two, so no action is left without a key; Esc, Pause, F1-F12, Enter, Tab, the digits, Delete,
-  Backspace, `.`, `` ` `` and the modifiers keep their jobs. The camera is checked first, so a letter bound to it stops
+  Backspace, `.`, `,`, `` ` `` and the modifiers keep their jobs (the army keys below are fixed too: Ctrl
+  combinations do not fit a one-key binding, and `,` pairs with `.`). The camera is checked first, so a letter bound to it stops
   reaching the Classic card (the panel says so). Tips and How to Play name the default keys. The F10 menu's
   *Controls* (beside Change keys…) shows How to Play's mouse and hotkey tables read only (`renderControls` in
   `menu-howto.js`, whose tables are data shared by both), with the player's own camera keys in the rebindable rows,
@@ -2265,6 +2277,13 @@ per-frame budget, so a revealed army appears over a few frames.
   tiles to 170, where a whole medium map is in view), middle-drag pan (a middle click that does not move
   pings the team instead), minimap click/drag, Space centers on selection or last alert, F1–F3 select gods,
   Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
+  **Army keys**: Ctrl+A (Cmd+A) selects the whole army, every own unit but the Worshippers, gods and Titans
+  first so the 24-unit cap keeps them (`armyIds` in hud-data.js); a second tap within 350 ms centers on it.
+  Ctrl+Alt+A takes only the army on screen (not Ctrl+Shift+A: browsers keep that one). `,` selects the next
+  idle soldier, god or creature and centers on it (Shift or Ctrl: all of them), like `.` for Worshippers; idle
+  means state `idle` without a Hold Position or patrol order (view keys `ho`, `pa`). With nobody to select,
+  a line says so. **Patrol** (P on the card, then a click; Shift queues) sends `patrol` (6.2); the info panel
+  reads "Patrolling", and "Holding position" for a unit on Hold.
   Key auto-repeat acts once per press, except arrows and Train hotkeys (hold W to queue).
   **Delete** destroys the selected own units (`kill`, 6.2; the whole selection, not only the active subgroup).
   **Backspace** does the same: it is the key a Mac keyboard labels "delete" (fn + delete sends Delete), and a
@@ -2292,7 +2311,8 @@ per-frame budget, so a revealed army appears over a few frames.
   over wall segments, so the walls are not picked by accident. `game.js` folds a run of
   destroyed segments into one "Your wall was breached!" message per 6 s.
 - `command-card.js`: pure function `getCommandCard(selection, viewState, mode) → buttons[12]`.
-  Hotkeys: units M move, S stop, H hold, A attack; workers + G gather, B build (submenu: House H,
+  Hotkeys: units M move, S stop, H hold, A attack, P patrol (units that can attack, the last slot of the middle
+  row, after the passives); workers + G gather, B build (submenu: House H,
   Barracks B, Shrine S, Storehouse O, Tower T, Temple E, Titan Gate G, Town Center C, Wooden Wall W), P pray,
   C return cargo, R repair (targets an own building), T Auto-Repair on/off (lit while on);
   abilities Q W E R in the bottom row. Buildings: train buttons (Town Center:

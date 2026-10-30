@@ -21,7 +21,7 @@ const MAX_UNITS_SCAN = 4096; // array elements looked at per command
 export const MAX_COMMANDS_PER_TICK = 256; // per player; the rest are dropped
 const MAX_NAME = 64;
 
-const COMMAND_TYPES = new Set(['move', 'attackMove', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses', 'godPower']);
+const COMMAND_TYPES = new Set(['move', 'attackMove', 'patrol', 'attack', 'smart', 'gather', 'pray', 'returnCargo', 'build', 'train', 'cancelTrain', 'upgradeTier', 'cancelBuild', 'rally', 'stop', 'hold', 'cast', 'surrender', 'repair', 'research', 'autoRepair', 'trade', 'autocast', 'upgradeWall', 'kill', 'upgradeHouses', 'godPower']);
 
 const idOf = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -105,7 +105,22 @@ function ownBuilding(world, player, id) {
   return b && !b.dead && b.kind === 'building' && b.owner === player ? b : null;
 }
 
-/** Issue a move-like order to a group, spreading destinations into a formation. */
+/** Where a unit will stand when its queue is done: the last queued point, or where it is now. */
+function queueEnd(u) {
+  for (let i = u.orders.length - 1; i >= -1; i--) {
+    const o = i >= 0 ? u.orders[i] : u.order;
+    if (o && Number.isFinite(o.x) && Number.isFinite(o.y)) return { x: o.x, y: o.y };
+  }
+  return { x: u.x, y: u.y };
+}
+
+/** A unit's patrol: back and forth between where it starts (now, or the end of its queue) and its slot, attack-moving both ways. */
+function patrolOrder(u, slot, group, queue) {
+  const from = queue ? queueEnd(u) : { x: u.x, y: u.y };
+  return { type: 'patrol', x: slot.x, y: slot.y, ax: from.x, ay: from.y, group, target: 0 };
+}
+
+/** Issue a move-like order ('move', 'attackMove' or 'patrol') to a group, spreading destinations into a formation. */
 export function groupOrder(world, units, x, y, type, queue) {
   if (!units.length || !Number.isFinite(x) || !Number.isFinite(y)) return;
   const slots = formationSlots(world, units, x, y);
@@ -131,7 +146,8 @@ export function groupOrder(world, units, x, y, type, queue) {
     group = { n: units.length, sx: lead.x, sy: lead.y, cx: x, cy: y };
   }
   units.forEach((u, i) => {
-    const o = type === 'attackMove' ? { type, x: slots[i].x, y: slots[i].y, group, target: 0 } : { type: 'move', x: slots[i].x, y: slots[i].y, group };
+    const o = type === 'patrol' ? patrolOrder(u, slots[i], group, queue)
+      : type === 'attackMove' ? { type, x: slots[i].x, y: slots[i].y, group, target: 0 } : { type: 'move', x: slots[i].x, y: slots[i].y, group };
     world.setOrder(u, o, queue);
   });
 }
@@ -305,7 +321,7 @@ function castCommand(world, player, cmd) {
     return;
   }
   const cur = u.order;
-  if (cur && (cur.type === 'attack' || cur.type === 'attackMove' || cur.type === 'hold')) {
+  if (cur && (cur.type === 'attack' || cur.type === 'attackMove' || cur.type === 'patrol' || cur.type === 'hold')) {
     // Resume fighting after the cast.
     u.order = o;
     u.orders.unshift(cur);
@@ -324,6 +340,7 @@ export function applyCommand(world, player, cmd) {
   switch (cmd.type) {
     case 'move':
     case 'attackMove':
+    case 'patrol':
       groupOrder(world, ownUnits(world, player, cmd.units), cmd.x, cmd.y, cmd.type, queue);
       break;
     case 'attack': {

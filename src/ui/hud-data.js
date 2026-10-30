@@ -263,6 +263,26 @@ export function workerTasks(vs, only = null) {
   return { counts, ids, total };
 }
 
+/**
+ * My fighting units (every unit but the Worshippers), gods and Titans first, then by id, so a capped
+ * selection keeps the heroes. `idle`: only the ones standing about with no order (not holding a
+ * position, not patrolling). `keep(e)`: a further filter (on screen, say).
+ */
+export function armyIds(vs, { idle = false, keep = null } = {}) {
+  const out = [];
+  for (const e of vs.entities.values()) {
+    if (e.k !== 'u' || e.o !== vs.myIndex) continue;
+    const d = UNITS[e.t];
+    if (!d || d.class === 'worker') continue;
+    if (idle && (e.st !== 'idle' || e.ho || e.pa)) continue;
+    if (keep && !keep(e)) continue;
+    out.push(e);
+  }
+  const rank = (e) => CLASS_ORDER[UNITS[e.t].class] <= 1 ? 0 : 1;
+  out.sort((a, b) => rank(a) - rank(b) || a.id - b.id);
+  return out.map((e) => e.id);
+}
+
 /** Own worshippers working at a building: { build, repair, pray } counts. */
 export function workersAt(vs, buildingId) {
   const out = { build: 0, repair: 0, pray: 0 };

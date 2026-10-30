@@ -465,7 +465,7 @@ test('god card: abilities Q W R in the bottom row with level locks and cooldowns
   rich(world);
   const zeus = spawn(world, 0, 'greek_zeus', 12, 16);
   let card = getCommandCard([zeus.id], viewOf(world));
-  assert.deepEqual(slotsOf(card), ['0:move', '1:stop', '2:hold', '3:attack',
+  assert.deepEqual(slotsOf(card), ['0:move', '1:stop', '2:hold', '3:attack', '7:patrol',
     '8:ability:greek_zeus_thunderbolt', '9:ability:greek_zeus_chain_lightning', '11:ability:greek_zeus_wrath_of_olympus']);
   const [q, w, r] = [card[8], card[9], card[11]];
   assert.equal(q.key, 'Q');
@@ -526,7 +526,7 @@ test('mixed selection: gods first, Tab-style activeType switches the card', () =
   card = getCommandCard({ ids: all, activeType: 'worshipper' }, vs);
   assert.ok(byId(card, 'gather') && byId(card, 'build'));
   card = getCommandCard({ ids: all, activeType: 'warrior' }, vs);
-  assert.deepEqual(slotsOf(card), ['0:move', '1:stop', '2:hold', '3:attack']);
+  assert.deepEqual(slotsOf(card), ['0:move', '1:stop', '2:hold', '3:attack', '7:patrol']);
   card = getCommandCard({ ids: all, activeType: 'nonexistent' }, vs);
   assert.ok(card[8] && card[8].id.startsWith('ability:greek_zeus'));
 });
