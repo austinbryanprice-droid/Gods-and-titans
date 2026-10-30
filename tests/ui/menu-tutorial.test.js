@@ -126,3 +126,16 @@ test('the Random preview names every pantheon under its emblem, and a click choo
   assert.equal(lobby.state.slots.find((s) => s.kind === 'host').pantheon, 'norse');
   menu.showMenu('title');
 });
+
+test('the title screen replays the intro film and lands back on the title; without onIntro there is no button', () => {
+  resetCareer({});
+  const root = document.createElement('div');
+  const asked = [];
+  menu.createMenu({ root, onStart: () => {}, onIntro: (screen) => asked.push(screen) });
+  menu.showMenu('title');
+  const intro = root.all('button').find((b) => b.textContent.includes('Intro Film'));
+  assert.ok(intro, 'the button is on the title screen');
+  intro.click();
+  assert.deepEqual(asked, ['title']);
+  assert.ok(!titleWith({}).root.all('button').some((b) => b.textContent.includes('Intro Film')));
+});

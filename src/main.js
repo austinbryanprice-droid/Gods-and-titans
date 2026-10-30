@@ -297,7 +297,7 @@ function boot() {
     document.documentElement.classList.toggle('cb-teams', s.teamColors === 'colorblind');
     setTeamPalette(s.teamColors);
   });
-  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onLoad: loadGame, onIntro: () => watchIntro('settings', false), onReplay: (what) => startReplay(what) });
+  menu = createMenu({ root: document.getElementById('menu-root'), onStart: startGame, onLoad: loadGame, onIntro: (screen = 'settings') => watchIntro(screen, false), onReplay: (what) => startReplay(what) });
   const msg = document.getElementById('boot-message');
   if (msg) msg.remove();
   const webgl2 = hasWebGL2();
