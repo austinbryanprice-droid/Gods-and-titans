@@ -2072,7 +2072,7 @@ per-frame budget, so a revealed army appears over a few frames.
   `(pointer: coarse)` matches and `(any-pointer: fine)` does not, `TOUCH_NOTICE` "This game needs a mouse and
   keyboard: it has no touch controls yet."; both join into one line), how-to-play (the rules in eight steps, then tips: Learn to
   Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
-  (name, volume, graphics quality, time of day, intro film: Every launch / First launch only / Never, with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
+  (name, volume, graphics quality, time of day, intro film: a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
   preview shows the same rows.
   Play vs AI opens the lobby with one AI on a small map. Its AI players (the presets' too: `LobbyHost` option
@@ -2903,15 +2903,12 @@ end it at any moment, even while it loads (a quick dip to black, then the title)
 sees those keys, so a second Enter cannot press Play. (On the card that waits for a key, below, Enter and Space begin
 the film like any other key, and Esc and the Skip button skip it.)
 
-**When it plays** (`introWanted`, `src/ui/intro.js`): once per page load, only at the start (never after a match).
-The `intro` setting (`src/settings.js`; Settings, "Intro film": Every launch `'always'`, First launch only `'first'`,
-the default, or Never `'never'`) decides; `'first'` plays it until `introSeen`, which `boot` (`src/main.js`) sets once
-the start-up film has played, watched to the end or skipped (not when it failed to start). A first visit therefore
-still gets the film (and its sound card, below); a save from before the choice (the old on / off toggle, when the
-film played on every launch) counts as a returning player who has seen it: on becomes First launch only, off Never.
+**When it plays** (`introWanted`, `src/ui/intro.js`): on every launch, once per page load, only at the start (never
+after a match). There is no setting to turn it off (Austin, 2026-10-30: "play every time, no matter what"); Esc skips
+it. An old save's `intro` / `introSeen` keys are dropped when read.
 Settings has "▶ Watch it now", which plays it with the speed guard off and comes back to Settings, and the title screen has "▶ Intro Film", which does the same and comes back to the title. The address overrides
-the setting: `?intro=0` never, `?intro=1` always. Without `?intro=1`, an invite link (`?join=`), an automated
-browser (`navigator.webdriver`: the e2e tests) and `prefers-reduced-motion` skip it; a browser without WebGL 2
+this: `?intro=0` never (the developer tools), `?intro=1` always. Without `?intro=1`, an invite link (`?join=`, straight to
+the lobby) and an automated browser (`navigator.webdriver`: the e2e tests) skip it; a browser without WebGL 2
 never plays it. A film that cannot start, or whose frame throws, is dropped (`'failed'`); on a machine that averages worse than
 5 fps over 24 frames (after the first 3.5 film seconds, where shaders compile) the film is skipped (`'skipped'`).
 The menu is hidden while it plays and shown again behind the black when it ends; the game's own code is fetched
@@ -2957,8 +2954,7 @@ default for English is its best and a list can open on a novelty voice). The ove
 follows the picture, and a caption that came and went between two frames is not read late. Every way out of the film
 (`finish`: Esc, Enter, Space, the Skip button, the end, a failure, the speed guard) stops the voice first (after telling the
 score, below), with `speechSynthesis.cancel()`, before the dip to black. The `narration` setting (default true; Settings, "Narration",
-under the intro choice) turns it off for good; it is independent of `intro`, so "Watch it now" is read even when the
-film is off at start-up. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
+in the Intro film field) turns it off for good. A browser without `speechSynthesis` is silent (the Settings note says so), and a voice that
 throws is ignored. Chrome will not speak until the page has had a key press, a click or a tap, unless the site is set
 to Sound: Allow (the rule behind the card above, which is why the film normally begins with the voice allowed): a refused `speak`
 fires an `error` event (`not-allowed`), which puts up a "Click for sound" hint at the top left (class `needs-click` on
@@ -3002,7 +2998,7 @@ the dip to black, the stage is reset to 1 at 0.36 s (behind the fading piece, be
 fades its own piece in from the hand-over (it comes in 0.9 s after the cut began, the delay any new piece waits after one leaving). `finish` tells the score first and stops the voice second, so a cut-off line cannot
 swell it again.
 It obeys the settings: the Music slider and mute are the engine's own, so the film plays on without a score (and with no hint)
-while music is muted or at 0; "Intro film" and "Narration" decide whether there is a film and a voice (with no narration the
+while music is muted or at 0; "Narration" decides whether there is a voice (with no narration the
 score simply stays at its lift). Every call is guarded: a failing engine costs a warning and a silent film. On a first visit
 the card (above) holds the film until the browser allows audio, so the score begins with the film's first frame. Should the audio
 still be off once the film is playing (a film begun some other way, or a context the browser suspended again), the film is silent

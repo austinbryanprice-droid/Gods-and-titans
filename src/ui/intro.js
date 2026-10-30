@@ -11,7 +11,7 @@
 // its first frame behind a card, "Press any key or click to begin", and starts with that input, so the score, the voice
 // and the effects are there from the first second instead of coming in late at some click.
 //
-//   if (introWanted({ mode: settings.intro, seen: settings.introSeen, search: location.search, ... })) {
+//   if (introWanted({ search: location.search, ... })) {
 //     const intro = playIntro({ root, quality, narrate: settings.narration, volume: settings.volume, gate: true, onHandover: () => showMenu('title') });
 //     await intro.done;                                  // 'finished' | 'skipped' | 'failed'
 //   }
@@ -37,13 +37,13 @@ const SLOW_AFTER = 3.5; // film seconds before the speed check starts (the first
 const SLOW_WINDOW = 24; // frames averaged by the check
 
 /**
- * Whether the film plays on this page load: the player's setting (`mode` 'always', 'first' until it has been
- * `seen`, or 'never'), unless the address says otherwise. `?intro=0` never; `?intro=1` always (screenshots,
- * looking at it on purpose); an invite link (`?join=`), an automated browser and a reduced-motion preference skip it.
+ * Whether the film plays on this page load: on every launch (there is no setting to turn it off; Esc skips it),
+ * unless the address says otherwise. `?intro=0` never (the developer tools); `?intro=1` always; an invite link
+ * (`?join=`) goes straight to the lobby and an automated browser (the e2e tests) never waits for it.
  * Without WebGL 2 there is nothing to draw it with.
- * @param {{ mode?: 'always'|'first'|'never', seen?: boolean, search?: string, webdriver?: boolean, reducedMotion?: boolean, webgl2?: boolean }} o
+ * @param {{ search?: string, webdriver?: boolean, webgl2?: boolean }} o
  */
-export function introWanted({ mode = 'first', seen = false, search = '', webdriver = false, reducedMotion = false, webgl2 = true } = {}) {
+export function introWanted({ search = '', webdriver = false, webgl2 = true } = {}) {
   let q;
   try {
     q = new URLSearchParams(search);
@@ -53,9 +53,7 @@ export function introWanted({ mode = 'first', seen = false, search = '', webdriv
   const forced = q.get('intro');
   if (forced === '0' || !webgl2) return false;
   if (forced === '1') return true;
-  if (q.has('join') || webdriver || reducedMotion) return false;
-  if (mode === 'never') return false;
-  return mode === 'always' || !seen;
+  return !q.has('join') && !webdriver;
 }
 
 /** The renderer and the film: fetched only when the film plays. */

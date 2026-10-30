@@ -175,20 +175,16 @@ function fakeFrames() {
 
 // ---------------------------------------------------------------- whether it plays
 
-test('introWanted: the player\'s setting decides, the address and the machine can say otherwise', () => {
-  assert.equal(introWanted(), true, 'a first launch plays it');
-  assert.equal(introWanted({ mode: 'first', seen: true }), false, 'first launch only: not once it has been seen');
-  assert.equal(introWanted({ mode: 'always', seen: true }), true, 'every launch');
-  assert.equal(introWanted({ mode: 'never' }), false, 'never, not even the first time');
-  assert.equal(introWanted({ mode: 'always', search: '?intro=0' }), false, '?intro=0 never');
-  assert.equal(introWanted({ mode: 'never', search: '?intro=1' }), true, '?intro=1 always (screenshots, looking at it on purpose)');
-  assert.equal(introWanted({ mode: 'first', seen: true, search: '?intro=1' }), true);
-  assert.equal(introWanted({ mode: 'always', search: '?x=1&intro=0&y=2' }), false);
+test('introWanted: every launch, unless the address or the machine says otherwise', () => {
+  assert.equal(introWanted(), true, 'a launch plays it');
+  assert.equal(introWanted({ search: '?intro=0' }), false, '?intro=0 never');
+  assert.equal(introWanted({ search: '?intro=1' }), true, '?intro=1 always');
+  assert.equal(introWanted({ search: '?x=1&intro=0&y=2' }), false);
   assert.equal(introWanted({ search: '?join=ABCDE' }), false, 'an invite link goes straight to the lobby');
   assert.equal(introWanted({ search: '?join=ABCDE&intro=1' }), true, 'unless asked');
   assert.equal(introWanted({ webdriver: true }), false, 'an automated browser (the e2e tests) never waits for it');
   assert.equal(introWanted({ webdriver: true, search: '?intro=1' }), true);
-  assert.equal(introWanted({ reducedMotion: true }), false, 'a reduced-motion preference skips a film of camera moves');
+  assert.equal(introWanted({ reducedMotion: true, mode: 'never', seen: true }), true, 'no setting, no reduced-motion skip: every launch');
   assert.equal(introWanted({ webgl2: false }), false, 'nothing to draw it with');
   assert.equal(introWanted({ webgl2: false, search: '?intro=1' }), false);
   assert.equal(introWanted({ search: 'garbage%' }), true);
