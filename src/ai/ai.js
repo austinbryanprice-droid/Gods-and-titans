@@ -10,7 +10,7 @@ import { scanWorld } from './scan.js';
 import { refreshEconomy, manageWorkers, minersFor } from './economy.js';
 import { planBuildings, resumeSites } from './build.js';
 import { planProduction, planResearch } from './production.js';
-import { runMilitary, newMilitary } from './military.js';
+import { runMilitary, newMilitary, defendingHome } from './military.js';
 import { runMicro } from './micro.js';
 import { pantheonRoster } from './unit-info.js';
 import { runAid } from './team.js';
@@ -215,6 +215,11 @@ export class AIPlayer {
       const u = s.workers[0];
       this.homeAnchor = b ? { x: b.x, y: b.y } : u ? { x: u.x, y: u.y } : { x: this.world.map.width / 2, y: this.world.map.height / 2 };
     }
+  }
+
+  /** Busy defending its own base: a teammate's marker waits until it is safe (military.js defendingHome). */
+  defendingHome() {
+    return defendingHome(this.mil);
   }
 
   /** Center of the main base. */

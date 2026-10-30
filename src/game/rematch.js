@@ -7,6 +7,9 @@
 import { SURVIVAL_NAME } from '../config.js';
 import { landscapeInfo } from '../data/landscapes.js';
 
+/** The lobby's name for a computer player of a level, as src/net/lobby.js aiName gives it. */
+const defaultAiName = (d) => `AI (${d[0].toUpperCase()}${d.slice(1)})`;
+
 export const LAST_SKIRMISH_KEY = 'mythicwar-last-skirmish';
 
 function storage() {
@@ -84,7 +87,8 @@ export function stepUpSkirmish(state) {
   if (!ais.length || ais.some((s) => s.difficulty !== 'easy')) return null;
   return {
     ...state,
-    slots: state.slots.map((s) => (s && s.kind === 'ai' ? { ...s, difficulty: 'normal', name: s.name === 'AI (Easy)' ? 'AI (Normal)' : s.name } : s)),
+    // A computer player with its level's default name ('AI (Easy)', or none) takes Normal's; one with a name of its own keeps it.
+    slots: state.slots.map((s) => (s && s.kind === 'ai' ? { ...s, difficulty: 'normal', name: !s.name || s.name === defaultAiName(s.difficulty) ? defaultAiName('normal') : s.name } : s)),
   };
 }
 

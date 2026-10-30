@@ -1339,8 +1339,12 @@ in player order (top-left, top-right, bottom-right, bottom-left); spare bases be
   and `validateSetup` drop anything else on the clients).
   Can start when ≥ 2 teams have players and every human slot is connected. `state.preset`
   stays lit through pantheon / color / name edits and players joining or leaving, and clears
-  when a slot's kind, team or AI difficulty changes. In the GameSetup, repeated names get a
-  number (`AI (Normal)`, `AI (Normal) 2`); lobby slots keep theirs. `LobbyClient.join` and
+  when a slot's kind, team or AI difficulty changes. In the GameSetup, a computer player whose slot
+  has no name of its own (empty or its level's `AI (Normal)`, `hasDefaultAiName`) plays under a figure of its
+  resolved pantheon with its level, "Thor (Easy AI)" (`aiFigureName`: the gods then the Titan, drawn from the
+  seat (player index) so the same lobby always names alike, skipping names taken and any over the 20-character
+  limit, then "Thor (Easy)", then `AI (Easy)`), so an ally and two foes on one level are told apart; other
+  repeated names get a number (`Bo`, `Bo 2`); lobby slots keep theirs (`AI (Normal)`). `LobbyClient.join` and
   `joinRoom` take an optional `signal` (AbortSignal): aborting rejects with `abortError()` and
   closes the half-open link. Closing the lobby after the start also closes any game connection
   still open one second later (a game that failed to load must not leave players hanging).
@@ -2063,7 +2067,10 @@ per-frame budget, so a revealed army appears over a few frames.
   clients see it as text), victory (a Sacred Victory toggle, 5.11, hidden in a trial;
   clients see it as text); room code with Copy and Copy Invite Link
   `?join=CODE`; chat; Start for host, in a footer under the lobby that stays on screen while the lobby scrolls
-  above it, never over it), join screen (name + code), how-to-play (the rules in eight steps, then tips: Learn to
+  above it, never over it), join screen (name + code), a notice pinned to the title and join screens
+  (`menu.setNotice`, set by `boot` in main.js: no WebGL 2, and on a phone or tablet, `isTouchOnly` in menu-model.js:
+  `(pointer: coarse)` matches and `(any-pointer: fine)` does not, `TOUCH_NOTICE` "This game needs a mouse and
+  keyboard: it has no touch controls yet."; both join into one line), how-to-play (the rules in eight steps, then tips: Learn to
   Play, the Campaign, the Daily Challenge, saving and loading, replays), settings
   (name, volume, graphics quality, time of day, intro film: Every launch / First launch only / Never, with a narration toggle and a "Watch it now" button, edge scrolling). Pantheon picker shows each pantheon's gods,
   titan and creatures (from data) so choosing is fun, plus its two blessings and its elite soldier; the lobby
@@ -2105,7 +2112,10 @@ per-frame budget, so a revealed army appears over a few frames.
   text a refused click and the sim give).
   God portraits top-left (click selects, double-click centers). Messages (alerts, "Kronos is being summoned!",
   the game's other events, chat on Enter, to the allies on Shift+Enter or "/t ": 7 "Team chat") are the stone cards at the bottom left ("The message feed" below);
-  an error is the red line over the console. Game-over overlay with the after-game chronicle (below), menu (surrender, quit).
+  an error is the red line over the console. Game-over overlay with the after-game chronicle (below), menu (surrender, quit). The game-over panel is at most
+  94vh tall and scrolls inside; its button row (`.hud-go-btns`) is sticky at the panel's foot on an opaque copy of the
+  panel's stone, so Play on Normal / Play Again / Watch Replay / Return to Menu stay in sight at 1280x720 after a win
+  with awards and achievements.
   **After-game chronicle** (`src/game/chronicle.js`, `src/ui/hud-chronicle.js`): the victory / defeat / draw screen and
   the "game ended" screen have four tabs, after the Age of Empires score screens. Summary: pantheon, score (its tooltip
   splits it into economy, military and civilization, 5.11), kills, losses and gathered, then the awards: Warlord (most
@@ -2128,7 +2138,8 @@ per-frame budget, so a revealed army appears over a few frames.
   Online games are not remembered; their game-over screen offers Rematch instead, back to the same room's lobby (7).
   A won game whose computer players were all on Easy (not a trial: `stepUpSkirmish`, main.js `onStepUp`) says
   "Ready for Normal?" on its game-over screen, and **Play on Normal** leads the buttons (`Game.stepUp`): the same
-  lobby with those players on Normal (an "AI (Easy)" name becomes "AI (Normal)"), remembered for Quick Match in
+  lobby with those players on Normal (an AI's default name follows its `difficulty` field: "AI (Easy)" or none becomes "AI (Normal)", and so a
+  "(Normal AI)" figure in the game; a name of its own is kept), remembered for Quick Match in
   its turn; Play Again (on Easy) comes second.
   **Game speed and interface size** (settings `gameSpeed`, `uiScale`; factors `GAME_SPEEDS`, `UI_SCALES` in config.js;
   choices in `src/ui/speed-options.js`, shown in Settings and the F10 menu). A match with no other people in it
@@ -2179,7 +2190,8 @@ per-frame budget, so a revealed army appears over a few frames.
   (no extra line, sound or ping; the game's own battle warnings still sound). Warnings: **enemies near**
   (a hostile unit in sight within 18 tiles of one of my buildings: line with a Space key cap, war drums, an amber
   ping and the Space jump; not within 8 s of an under-attack alert, at most once per 45 s, and a new sighting
-  needs 10 s without enemies), **ally under attack** (softer drums, a ping in the ally's colour, once per 20 s
+  needs 10 s without enemies), **ally under attack** ("Your ally Thor (Easy AI) is under attack!": alerts naming a teammate say
+  "Your ally" first (`whoName`, also its sacred sites and relics); softer drums, a ping in the ally's colour, once per 20 s
   per ally; Space only if my own alert is older than 15 s), and the **Decade of Peace marks** (a gong, louder
   at each of 5:00 / 1:00 / 0:10; the HUD writes the line). Reminders (`'all'` only): **idle Worshippers**
   (standing idle for 20 s, then every 60 s), **population cap** (at the cap below `POP_MAX` for 10 s
@@ -2318,7 +2330,14 @@ per-frame budget, so a revealed army appears over a few frames.
   pings the team instead), minimap click/drag, Space centers on selection or last alert, F1–F3 select gods,
   Alt shows all health bars (Alt+click pings the team, see Team pings and markers above).
   **Army keys**: Ctrl+A (Cmd+A) selects the whole army, every own unit but the Worshippers, gods and Titans
-  first so the 24-unit cap keeps them (`armyIds` in hud-data.js); a second tap within 350 ms centers on it.
+  first (`armyIds` in hud-data.js); a second tap within 350 ms centers on it. A whole-army selection (Ctrl+A,
+  Ctrl+Alt+A, Shift+,: `Selection.set(ids, { army: true })`, `sel.army`) is not held to the 24 of `MAX_SELECTION`
+  but to `MAX_ARMY_SELECTION` (the sim's `MAX_COMMAND_UNITS`, 512), so every order goes to every soldier; changes
+  made within it (Shift-click / Shift-box add or remove, Ctrl+click on a portrait: `selectType`) keep the allowance,
+  a control group saved from it holds and recalls all of it (a group over 24 comes back whole; Shift+digit adds
+  past 24 to such a group), and any other selection is still held to 24. The info panel shows the first 24
+  portraits and a "+N" chip on its label line (`.hi-more`, its tooltip "N more selected than shown (M in all)");
+  the command card is the selection's card as ever. The lesson's attack step names Ctrl+A.
   Ctrl+Alt+A takes only the army on screen (not Ctrl+Shift+A: browsers keep that one). `,` selects the next
   idle soldier, god or creature and centers on it (Shift or Ctrl: all of them), like `.` for Worshippers; idle
   means state `idle` without a Hold Position or patrol order (view keys `ho`, `pa`). With nobody to select,
@@ -2346,7 +2365,7 @@ per-frame budget, so a revealed army appears over a few frames.
   (`checkWallLine(..., workers)`, the sim's `Too far from your Worshippers.`).
   Right-click, Esc or losing the window drops the drag first and leaves placement on the second
   press; letting go where no ground shows (past the map's edge) orders nothing. A wall-only selection holds up to `MAX_WALL_SELECTION` (160) segments (any other selection
-  `MAX_SELECTION`); a selection of more than 24 shows a crowd panel (a stack per type with its count,
+  `MAX_SELECTION`, or a whole army, above); a wall-only selection of more than 24 shows a crowd panel (a stack per type with its count,
   the total health, how many are hurt, being built or upgrading) in place of the icon grid (rebuilt when walls of the selection turn to stone); a drag box prefers other buildings
   over wall segments, so the walls are not picked by accident. `game.js` folds a run of
   destroyed segments into one "Your wall was breached!" message per 6 s.
@@ -2723,7 +2742,7 @@ marker reaches the World as a `teamMark` order (6.2, `src/sim/team-orders.js`), 
 answers the newest standing one (`teamOrderFor`: a newer marker of any kind replaces the older; it runs out after
 90 / 75 / 60 s; an enemy's AI never sees it). Every difficulty does, and so does a stand-in seat (it plays for a
 teammate who dropped out, so it takes their team's calls; it only stays quiet, 10.1). The military enters mode
-`mark` from any mode but defending its own base (a base under attack comes first; while out, like a wave, only a
+`mark` from any mode but defending its own base (`defendingHome`: a base under attack comes first; while out, like a wave, only a
 big threat calls the army back); an Attack marker waits out a Decade of Peace. The army splits by population:
 `MARK_SHARE` goes (Attack 70 %, Defend 80 %, Help 85 %; gods, the Titan and summoned creatures always go, rams
 only to an Attack) and the rest, the soldiers nearest the rally point, stays as a home guard (sticky across thinks)
@@ -2795,7 +2814,11 @@ An AI also answers a teammate's Attack marker (`ackAttack`, "Our spears go where
 marker (`ackDefend`) when it takes the order (`answerMarks`, reading `teamOrderFor`): one AI of the team per
 marker, as a team line (`team: true`, sent with `relayTeamChat`, so the enemy never learns that an order was
 given). These skip the ordinary gaps but one AI answers at most every `ackGap` (20 s) and `maxAcks` (30) times a
-match; an Attack marker in a Decade of Peace is not answered until the peace ends. A loaded game does not
+match. The answer says what the AI will do: an AI whose army defends its own base (`defendingHome` in military.js,
+the same test that keeps the marker waiting there; HostSession hands `createVoices` its AIs, read only) says it comes
+once its base is safe (`ackBusy`, "Our own walls are under attack. We come once they hold."), and only when no free AI
+of the team answers; an Attack marker in a Decade of Peace gets one `ackPeace` line ("The truce binds us still. When it
+ends, the phalanx marches there."), then the usual `ackAttack` once the peace has ended and the army marches. A loaded game does not
 answer the markers from before the save. A campaign mission has no voices, so no answers either.
 
 **Callouts** (`callOut`): an AI with a human teammate also tells the team what its own army does, as a
